@@ -12,12 +12,15 @@ use jamjam::telemetry::{
     snapshot, Component, EndReason, ErrorCode, EventBody, HttpTransport, NoTransport, SessionMode,
     Transport, UsageReporter,
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 use crate::streaming::StreamingState;
 
 /// How often the open session's link is read for the totals.
+#[cfg(not(test))]
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(20);
 
 /// The longest the app waits to send the last events when it is closed.
 const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -88,7 +91,12 @@ impl UsageState {
     }
 
     /// The user made or joined a room. `participants` counts them too.
-    pub fn session_started(&self, app: &AppHandle, mode: SessionMode, participants: u32) {
+    pub fn session_started<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        mode: SessionMode,
+        participants: u32,
+    ) {
         let Some(session_id) = self.reporter.begin_session(mode) else {
             return;
         };
@@ -157,7 +165,7 @@ fn read_link(streaming: &StreamingState, reporter: &UsageReporter) {
     });
 }
 
-fn spawn_sampler(app: AppHandle, session_id: String) {
+fn spawn_sampler<R: Runtime>(app: AppHandle<R>, session_id: String) {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(SAMPLE_INTERVAL).await;
@@ -235,6 +243,73 @@ fn classify_streaming_error(message: &str) -> Option<(Component, ErrorCode)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole path a room takes through the app: the session opens, the
+    /// sampler reads the link on its own timer, a peer joins, and leaving
+    /// closes the session and stops the sampler. Runs on a mock app, so the
+    /// state lookups and the spawned tasks are the ones the real app uses.
+    ///
+    /// Verifies: REQ-TEL-010
+    #[tokio::test]
+    async fn when_a_room_is_joined_and_left_the_session_is_recorded_and_the_sampler_stops() {
+        let dir = tempfile::tempdir().unwrap();
+        let reporter = UsageReporter::new(
+            Some(dir.path().to_path_buf()),
+            "test",
+            Arc::new(NoTransport),
+            true,
+        );
+        let app = tauri::test::mock_app();
+        app.manage(UsageState::with_reporter(reporter.clone()));
+        app.manage(StreamingState::new());
+        let usage = app.state::<UsageState>();
+
+        usage.session_started(app.handle(), SessionMode::Join, 3);
+        let session_id = reporter.session_id().expect("the session is open");
+        // Long enough for the sampler to have read the link several times.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(reporter.session_id().as_deref(), Some(session_id.as_str()));
+        usage.participant_joined();
+        usage.session_ended(&app.state::<StreamingState>(), EndReason::Left);
+
+        assert_eq!(reporter.session_id(), None);
+        let lines: Vec<serde_json::Value> = reporter
+            .preview_ndjson()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[0]["event"], "session_start");
+        assert_eq!(lines[0]["mode"], "join");
+        assert_eq!(lines[1]["event"], "session_end");
+        assert_eq!(lines[1]["session_id"], lines[0]["session_id"]);
+        assert_eq!(lines[1]["end_reason"], "left");
+        assert_eq!(lines[1]["peers_max"], 4);
+        assert_eq!(lines[1]["xrun_count"], 0);
+    }
+
+    /// Verifies: REQ-TEL-001
+    #[tokio::test]
+    async fn when_reporting_is_off_a_room_records_nothing_and_starts_no_sampler() {
+        let dir = tempfile::tempdir().unwrap();
+        let reporter = UsageReporter::new(
+            Some(dir.path().to_path_buf()),
+            "test",
+            Arc::new(NoTransport),
+            false,
+        );
+        let app = tauri::test::mock_app();
+        app.manage(UsageState::with_reporter(reporter.clone()));
+        app.manage(StreamingState::new());
+        let usage = app.state::<UsageState>();
+
+        usage.session_started(app.handle(), SessionMode::Create, 1);
+        usage.session_ended(&app.state::<StreamingState>(), EndReason::Left);
+
+        assert_eq!(reporter.session_id(), None);
+        assert_eq!(reporter.pending_count(), 0);
+        assert_eq!(reporter.preview_ndjson(), "");
+    }
 
     #[test]
     fn when_the_webview_version_has_a_major_number_only_the_major_is_kept() {
