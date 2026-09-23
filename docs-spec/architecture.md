@@ -63,6 +63,7 @@ jamjamの技術構成を定義する。本ドキュメントは実装の正と�
 | GUI（モバイル） | Flutter + flutter_rust_bridge | 予定 |
 | 端末アイデンティティ署名（ADR-024） | ed25519-dalek | 実装済 |
 | base32 / base64（識別子・鍵のエンコード） | data-encoding | 実装済 |
+| OS バージョン・搭載メモリの取得 | sysinfo | 実装済 |
 
 ### 3.3 実装済みモジュール構成
 
@@ -89,6 +90,7 @@ src/
 │   ├── signaling.rs    # シグナリング
 │   ├── stun.rs         # STUN クライアント
 │   └── transport.rs    # UDPトランスポート
+├── environment.rs      # 端末の環境取得（OS バージョン・搭載メモリ・音声ホスト名・デバイスの最小バッファ）
 ├── protocol/
 │   ├── mod.rs          # プロトコル定義
 │   └── packet.rs       # パケット構造

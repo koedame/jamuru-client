@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod config;
 pub mod diagnostics;
+pub mod environment;
 pub mod identity_store;
 pub mod network;
 pub mod protocol;

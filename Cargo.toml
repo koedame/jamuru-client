@@ -97,6 +97,9 @@ parking_lot = "0.12"
 # Local network interface discovery
 local-ip-address = "0.6"
 
+# OS version and installed memory for the environment probe
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+
 [dev-dependencies]
 # Testing
 tokio-test = "0.4"
