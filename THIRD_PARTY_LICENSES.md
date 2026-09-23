@@ -72,6 +72,7 @@ This file lists the third-party components used in jamjam and their respective l
 | uuid | MIT OR Apache-2.0 | https://github.com/uuid-rs/uuid |
 | rand | MIT OR Apache-2.0 | https://github.com/rust-random/rand |
 | libloading | ISC | https://github.com/nagisa/rust_libloading |
+| sysinfo | MIT | https://github.com/GuillaumeGomez/sysinfo |
 | tempfile (dev-dependency, CLI tests) | MIT OR Apache-2.0 | https://github.com/Stebalien/tempfile |
 
 ### Logging
