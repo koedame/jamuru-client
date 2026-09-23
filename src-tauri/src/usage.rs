@@ -56,7 +56,11 @@ impl UsageState {
         let reporter = self.reporter.clone();
         tauri::async_runtime::spawn(async move {
             reporter.report_previous_crash();
-            reporter.record(EventBody::AppStart(snapshot::app_start(&config)));
+            let mut app_start = snapshot::app_start(&config);
+            app_start.webview_version = tauri::webview_version()
+                .ok()
+                .and_then(|version| major_of(&version));
+            reporter.record(EventBody::AppStart(app_start));
             reporter.record(EventBody::AudioEnv(snapshot::audio_env()));
             reporter.flush().await;
         });
@@ -166,6 +170,14 @@ fn spawn_sampler(app: AppHandle, session_id: String) {
     });
 }
 
+/// The major number of a version (`128.0.6613.84` -> `128`), or `None` when it
+/// does not start with a short number.
+fn major_of(version: &str) -> Option<String> {
+    let major = version.split('.').next()?;
+    (!major.is_empty() && major.len() <= 4 && major.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| major.to_string())
+}
+
 /// Records why streaming failed, from the message the failing call returned.
 /// Only the kind of failure is kept, and only for messages the app knows.
 pub fn record_streaming_failure(reporter: &UsageReporter, message: &str) {
@@ -223,6 +235,20 @@ fn classify_streaming_error(message: &str) -> Option<(Component, ErrorCode)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn when_the_webview_version_has_a_major_number_only_the_major_is_kept() {
+        assert_eq!(major_of("128.0.6613.84").as_deref(), Some("128"));
+        assert_eq!(major_of("2.44.0").as_deref(), Some("2"));
+        assert_eq!(major_of("17").as_deref(), Some("17"));
+    }
+
+    #[test]
+    fn when_the_webview_version_is_not_a_number_nothing_is_kept() {
+        assert_eq!(major_of("Edge/128"), None);
+        assert_eq!(major_of(""), None);
+        assert_eq!(major_of("123456.1"), None);
+    }
 
     #[test]
     fn when_capture_fails_to_start_the_error_is_an_input_device_error() {
