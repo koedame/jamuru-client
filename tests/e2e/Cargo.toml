@@ -33,7 +33,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 
 # Process management for multi-node tests
-which = "6"
+which = "8"
 
 # GUI E2E page object model (ADR-025): HTTP client for the app's control
 # channel, plus an isolated $HOME per app launch. Test-only crate, so these
