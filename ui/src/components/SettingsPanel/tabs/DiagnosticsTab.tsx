@@ -53,6 +53,16 @@ export interface DiagnosticsTabProps {
   logFolder?: string | null;
   /** Why the folder could not be opened */
   logFolderError?: string | null;
+  /** Whether usage reporting is on (off by default) */
+  usageReporting?: boolean;
+  /** Turn usage reporting on or off (renders the usage reporting section) */
+  onUsageReportingChange?: (enabled: boolean) => void;
+  /** The lines the next report will contain; null/undefined = not shown yet */
+  usagePreview?: string | null;
+  /** Show (or refresh) what would be sent */
+  onShowUsagePreview?: () => void;
+  /** Why what would be sent could not be read */
+  usagePreviewError?: string | null;
 }
 
 type StepStatus = "done" | "active" | "pending";
@@ -283,6 +293,107 @@ function LogFileSection({
   );
 }
 
+function UsageReportingSection({
+  usageReporting = false,
+  onUsageReportingChange,
+  usagePreview,
+  onShowUsagePreview,
+  usagePreviewError,
+}: Pick<
+  DiagnosticsTabProps,
+  | "usageReporting"
+  | "onUsageReportingChange"
+  | "usagePreview"
+  | "onShowUsagePreview"
+  | "usagePreviewError"
+>) {
+  const { t } = useTranslation();
+
+  if (!onUsageReportingChange) return null;
+
+  const previewShown = usagePreview !== null && usagePreview !== undefined;
+
+  return (
+    <div className="diagnostics-tab__usage" data-testid="diagnostics-usage">
+      <span className="diagnostics-tab__problems-title">
+        {t("settings.diagnostics.usageTitle", "Usage data")}
+      </span>
+      <label className="diagnostics-tab__switch">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={usageReporting}
+          onChange={(e) => onUsageReportingChange(e.target.checked)}
+          data-testid="diagnostics-usage-toggle"
+          data-checked={usageReporting}
+        />
+        <span>{t("settings.diagnostics.usageToggle", "Send usage data")}</span>
+      </label>
+      <p className="diagnostics-tab__description">
+        {t(
+          "settings.diagnostics.usageDescription",
+          "Off by default. When you turn it on, jamjam sends how it runs on your machine to the jamjam server, so that problems on particular machines and connections can be found and fixed."
+        )}
+      </p>
+      <p className="diagnostics-tab__description">
+        {t(
+          "settings.diagnostics.usageSent",
+          "Sent: app version, OS, CPU and memory, audio device names and what they support, your settings, totals for each session (length, latency, packet loss), the kind of each error, and where a crash happened."
+        )}
+      </p>
+      <p className="diagnostics-tab__description">
+        {t(
+          "settings.diagnostics.usageNotSent",
+          "Never sent: display name, room history, custom server URL, device IDs, machine identifier, audio, chat."
+        )}
+      </p>
+      <p className="diagnostics-tab__description">
+        {t(
+          "settings.diagnostics.usageDeviceNames",
+          "Device names are sent as your system reports them. If a name contains your own name, such as \"Taro's AirPods\", it is sent too. Check the exact text with \"Show what is sent\"."
+        )}
+      </p>
+      <p className="diagnostics-tab__description">
+        {t(
+          "settings.diagnostics.usageIdNote",
+          "Turning it on creates a random install ID that ties your reports together. Turning it off discards the ID and anything not yet sent."
+        )}
+      </p>
+      <div>
+        <button
+          className="diagnostics-tab__rerun-btn"
+          onClick={onShowUsagePreview}
+          type="button"
+          data-testid="diagnostics-usage-show"
+        >
+          {t("settings.diagnostics.usageShow", "Show what is sent")}
+        </button>
+      </div>
+      {previewShown && (
+        <div data-testid="diagnostics-usage-preview">
+          {usagePreview.trim() === "" ? (
+            <p className="diagnostics-tab__description">
+              {usageReporting
+                ? t("settings.diagnostics.usagePreviewEmpty", "Nothing is waiting to be sent yet.")
+                : t(
+                    "settings.diagnostics.usagePreviewOff",
+                    "Off: nothing is collected or sent, and there is no install ID."
+                  )}
+            </p>
+          ) : (
+            <pre className="diagnostics-tab__usage-lines">{usagePreview}</pre>
+          )}
+        </div>
+      )}
+      {usagePreviewError && (
+        <p className="diagnostics-tab__log-error" role="alert">
+          {usagePreviewError}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function DiagnosticsTab({
   state = "idle",
   progress = 0,
@@ -294,14 +405,28 @@ export function DiagnosticsTab({
   onOpenLogFolder,
   logFolder,
   logFolderError,
+  usageReporting,
+  onUsageReportingChange,
+  usagePreview,
+  onShowUsagePreview,
+  usagePreviewError,
 }: DiagnosticsTabProps) {
   const { t } = useTranslation();
   const logFile = (
-    <LogFileSection
-      onOpenLogFolder={onOpenLogFolder}
-      logFolder={logFolder}
-      logFolderError={logFolderError}
-    />
+    <>
+      <UsageReportingSection
+        usageReporting={usageReporting}
+        onUsageReportingChange={onUsageReportingChange}
+        usagePreview={usagePreview}
+        onShowUsagePreview={onShowUsagePreview}
+        usagePreviewError={usagePreviewError}
+      />
+      <LogFileSection
+        onOpenLogFolder={onOpenLogFolder}
+        logFolder={logFolder}
+        logFolderError={logFolderError}
+      />
+    </>
   );
 
   // Idle state

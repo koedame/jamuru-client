@@ -114,6 +114,11 @@ interface SettingsPanelProps {
   onOpenLogFolder?: () => void;             // 指定時のみ診断タブにログファイルの節を表示
   logFolder?: string | null;                // 開いたフォルダ（ボタンの下に表示）
   logFolderError?: string | null;           // 開けなかった理由（フォルダの場所を含む）
+  usageReporting?: boolean;                 // 利用状況を送る設定（既定オフ）
+  onUsageReportingChange?: (enabled: boolean) => void; // 指定時のみ診断タブに利用状況の節を表示
+  usagePreview?: string | null;             // 次に送る NDJSON（null = まだ見ていない）
+  onShowUsagePreview?: () => void;          // 「送る内容を見る」
+  usagePreviewError?: string | null;        // 保存や読み出しに失敗した理由
 }
 
 type Language = "ja" | "en";
@@ -250,6 +255,14 @@ stateDiagram-v2
 - **complete**: スコア（`score/100`, Inter）＋ 再診断ボタン（refresh アイコン）＋ 結果カード（ネットワーク／オーディオ／CPU／推奨設定）＋ 問題点
   - 各カード: 見出しアイコン＋タイトル＋グレードバッジ（A=success / B=warning / C=danger / Unknown=非表示）、行は `label`＋`value`（mono）。RTT・ジッタ・パケットロスは良好時 `--color-success`
   - 問題点: 件数バッジ＋カード（カテゴリ／重大度バッジ。Warning=warning、Error=danger、Info=中立）
+- **利用状況の節**（idle / complete の、ログファイルの節の上。`onUsageReportingChange` 指定時のみ）: 見出し「利用状況の送信」＋ スイッチ「利用状況を送る」（`role="switch"`。**既定オフ**）＋ 説明文 ＋ 「送る内容を見る」ボタン。説明文は次の 5 段で、英語・日本語の両方がある
+  1. 既定はオフ。オンにすると動作の様子をサーバーに送る。何のために送るか（特定の機材や回線の不具合を見つけて直す）
+  2. 送るもの: アプリの版・OS・CPU とメモリ・音声デバイスの名前と対応・設定・セッションごとの集計・エラーの種別・クラッシュの位置
+  3. 送らないもの: 表示名・部屋の履歴・自前サーバーの URL・デバイス ID・端末識別子・音声・チャット
+  4. デバイスの名前は OS が返すとおりに送る。利用者自身の名前が入っていればそれも送られる。「送る内容を見る」で確かめられる
+  5. オンにすると乱数のインストール ID を作る。オフにすると、この ID と未送信の内容を捨てる
+
+  「送る内容を見る」を押すと、次に送る NDJSON をそのまま（`install_id` を含めて）等幅で表示する。押すたびに読み直す。内容が空のとき、オフなら「オフです。何も集めず、何も送らず、インストール ID もありません」、オンなら「送る予定の内容はまだありません」を表示する。表示中にスイッチをオフにすると、表示を読み直して空にする。保存できなかったときはスイッチを戻し、理由を `role="alert"` で表示する。初回起動でも、この節以外の場所にも、ダイアログは出さない（[ADR-037](../../adr/ADR-037-usage-reporting-opt-in.md)）
 - **ログファイルの節**（idle / complete の末尾。`onOpenLogFolder` 指定時のみ）: 見出し「ログファイル」＋ 説明（不具合の報告に `jamjam.log` を添える）＋ 「ログのフォルダを開く」ボタン。押すと OS のファイルマネージャで `jamjam.log` のあるフォルダを開き、そのパスをボタンの下に表示する。開けなかったときは理由（パスを含む）を `role="alert"` で表示する（[ADR-036](../../adr/ADR-036-diagnostic-log-file.md)）
 
 ---

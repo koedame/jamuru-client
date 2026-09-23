@@ -319,6 +319,31 @@ describe('components without hard-coded text', () => {
     expect(screen.getByLabelText(fill(bundle.mixer.channel.volumeLabel, { name: 'Alice' }))).toBeInTheDocument();
   });
 
+  // Given a diagnostics result is shown
+  // When the language is English or Japanese
+  // Then the usage reporting switch below it, with its description, reads in that language
+  //
+  // Verifies: REQ-TEL-011
+  it.each(languages)('shows the usage reporting section under a diagnostics result in %s', async (language, bundle: Bundle) => {
+    await i18n.changeLanguage(language);
+    const { container } = render(
+      <DiagnosticsTab
+        state="complete"
+        result={diagnosticsResult}
+        onUsageReportingChange={() => {}}
+        usagePreview=""
+      />
+    );
+
+    expect(screen.getByRole('switch', { name: bundle.settings.diagnostics.usageToggle })).not.toBeChecked();
+    expect(screen.getByText(bundle.settings.diagnostics.usageDescription)).toBeInTheDocument();
+    expect(screen.getByText(bundle.settings.diagnostics.usagePreviewOff)).toBeInTheDocument();
+    if (language === 'ja') {
+      const section = container.querySelector<HTMLElement>('[data-testid="diagnostics-usage"]')!;
+      expect(latinWords(section, ['OS', 'CPU', 'ID', 'URL', 'AirPods', 'jamjam'])).toEqual([]);
+    }
+  });
+
   // Given the diagnostics result recommends a preset and reports a NAT type
   // When the language is English or Japanese
   // Then the preset, the NAT type and the missing values read in that language

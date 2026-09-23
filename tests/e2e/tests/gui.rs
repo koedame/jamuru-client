@@ -537,6 +537,118 @@ fn the_diagnostics_tab_offers_to_open_the_log_folder() {
     assert!(button.is_enabled().unwrap());
 }
 
+/// Nobody is asked about usage reporting: it is off, nothing pops up on the
+/// first launch, and the install ID does not exist until the user turns it on.
+///
+/// Verifies: REQ-TEL-001
+/// Verifies: REQ-TEL-011
+#[test]
+fn on_the_first_launch_usage_reporting_is_off_and_nothing_asks_about_it() {
+    let (_guard, app) = launch();
+
+    let main = app.main_window_html().unwrap();
+    assert!(
+        !main.contains("role=\"dialog\"") && !main.contains("role=\"alertdialog\""),
+        "the first launch should not show a dialog:\n{}",
+        main
+    );
+
+    app.connection_screen().settings_button().click().unwrap();
+    let settings = app.settings_screen();
+    settings.wait_until_open(UI_TIMEOUT).unwrap();
+    settings.select_tab(SettingsTab::Diagnostics).unwrap();
+    let diagnostics = settings.diagnostics_tab();
+    diagnostics
+        .usage_reporting_switch()
+        .wait_until_visible(UI_TIMEOUT)
+        .expect("the diagnostics tab should offer the usage reporting switch");
+
+    assert!(!diagnostics.is_usage_reporting_on().unwrap());
+    assert!(!settings.window_html().unwrap().contains("role=\"dialog\""));
+    assert!(
+        !app.usage_state_dir().join("install_id").exists(),
+        "no install ID should exist while usage reporting is off"
+    );
+}
+
+/// The user turns it on, reads exactly what would be sent (with the install ID),
+/// and turns it off again: the lines are gone, so is the ID.
+///
+/// Verifies: REQ-TEL-002
+/// Verifies: REQ-TEL-013
+#[test]
+fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it() {
+    let (_guard, app) = launch();
+
+    app.connection_screen().settings_button().click().unwrap();
+    let settings = app.settings_screen();
+    settings.wait_until_open(UI_TIMEOUT).unwrap();
+    settings.select_tab(SettingsTab::Diagnostics).unwrap();
+    let diagnostics = settings.diagnostics_tab();
+    diagnostics
+        .usage_reporting_switch()
+        .wait_until_visible(UI_TIMEOUT)
+        .unwrap();
+
+    diagnostics.usage_reporting_switch().click().unwrap();
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        diagnostics.is_usage_reporting_on().unwrap_or(false)
+    })
+    .expect("the switch should turn on");
+    let install_id_file = app.usage_state_dir().join("install_id");
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || install_id_file.exists())
+        .expect("turning it on should create the install ID");
+    let install_id = std::fs::read_to_string(&install_id_file).unwrap();
+
+    // The launch report is recorded in the background, so read until it is there.
+    let mut shown = String::new();
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        diagnostics.show_usage_button().click().unwrap();
+        shown = diagnostics.usage_preview().text().unwrap_or_default();
+        shown.contains("\"event\":\"app_start\"")
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "what is sent never showed the launch report. It shows: {}",
+            shown
+        )
+    });
+    assert!(
+        shown.contains(install_id.trim()),
+        "the lines should carry the install ID:\n{}",
+        shown
+    );
+    for left_out in [
+        "peer_name",
+        "connection_history",
+        "server_url",
+        "input_device_id",
+    ] {
+        assert!(
+            !shown.contains(left_out),
+            "{} must not be in what is sent:\n{}",
+            left_out,
+            shown
+        );
+    }
+
+    diagnostics.usage_reporting_switch().click().unwrap();
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        !diagnostics.is_usage_reporting_on().unwrap_or(true)
+    })
+    .expect("the switch should turn off");
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        diagnostics.show_usage_button().click().unwrap();
+        let text = diagnostics.usage_preview().text().unwrap_or_default();
+        !text.contains("install_id") && !text.trim().is_empty()
+    })
+    .expect("after turning it off, nothing is left to show");
+    assert!(
+        !install_id_file.exists(),
+        "turning it off should discard the install ID"
+    );
+}
+
 /// The settings window is a second webview of the same app. It once mounted
 /// the connection screen for a frame before switching to the settings, and
 /// that screen connects to the signaling server as soon as it mounts, so every

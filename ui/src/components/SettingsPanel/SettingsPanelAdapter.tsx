@@ -42,6 +42,7 @@ import {
   type CompleteDiagnosticsResult,
   type RecommendedPreset,
   logOpenDir,
+  usagePreview as readUsagePreview,
 } from "../../lib/tauri";
 import { SettingsPanel, type SettingsTabId, type SelectOption, type DeviceInfo, type Language } from "./index";
 
@@ -112,6 +113,11 @@ export function SettingsPanelAdapter({
   const diagnosticsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [logFolder, setLogFolder] = useState<string | null>(null);
   const [logFolderError, setLogFolderError] = useState<string | null>(null);
+
+  // Usage reporting (off unless the user turns it on)
+  const [usageReporting, setUsageReporting] = useState(false);
+  const [usagePreview, setUsagePreview] = useState<string | null>(null);
+  const [usagePreviewError, setUsagePreviewError] = useState<string | null>(null);
 
   // If the panel unmounts mid-run (e.g. the settings window closes while
   // diagnostics are running), stop the progress-simulation interval and
@@ -259,6 +265,12 @@ export function SettingsPanelAdapter({
     };
 
     loadSettings();
+  }, []);
+
+  useEffect(() => {
+    configLoad()
+      .then((config) => setUsageReporting(config?.usage_reporting === true))
+      .catch((err) => console.error("Failed to read the usage reporting setting:", err));
   }, []);
 
   // Save config helper
@@ -609,6 +621,34 @@ export function SettingsPanelAdapter({
     }
   }, []);
 
+  const handleShowUsagePreview = useCallback(async () => {
+    try {
+      setUsagePreview(await readUsagePreview());
+      setUsagePreviewError(null);
+    } catch (err) {
+      console.error("Could not read what would be sent:", err);
+      setUsagePreviewError(String(err));
+    }
+  }, []);
+
+  const handleUsageReportingChange = useCallback(
+    async (enabled: boolean) => {
+      setUsageReporting(enabled);
+      try {
+        const config = await configLoad();
+        await configSave({ ...config, usage_reporting: enabled });
+        setUsagePreviewError(null);
+        // What is shown follows the setting: turning it off empties it.
+        if (usagePreview !== null) await handleShowUsagePreview();
+      } catch (err) {
+        console.error("Failed to save the usage reporting setting:", err);
+        setUsageReporting(!enabled);
+        setUsagePreviewError(String(err));
+      }
+    },
+    [usagePreview, handleShowUsagePreview]
+  );
+
   // Cancel diagnostics: drop the pending result and return to idle.
   const handleCancelDiagnostics = useCallback(() => {
     diagnosticsCancelledRef.current = true;
@@ -692,6 +732,11 @@ export function SettingsPanelAdapter({
       onOpenLogFolder={handleOpenLogFolder}
       logFolder={logFolder}
       logFolderError={logFolderError}
+      usageReporting={usageReporting}
+      onUsageReportingChange={handleUsageReportingChange}
+      usagePreview={usagePreview}
+      onShowUsagePreview={handleShowUsagePreview}
+      usagePreviewError={usagePreviewError}
     />
   );
 }
