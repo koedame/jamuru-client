@@ -711,6 +711,8 @@ export interface AppConfig {
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
   language: string | null;
+  /** Whether the app may tell the jamjam server how it runs (off unless the user turns it on) */
+  usage_reporting: boolean;
 }
 
 /**
@@ -1440,4 +1442,18 @@ export async function windowResizeMain(
  */
 export async function logOpenDir(): Promise<string> {
   return invoke("log_open_dir");
+}
+
+// =============================================================================
+// Usage reporting (REQ-TEL)
+// =============================================================================
+
+/**
+ * The lines the next usage report will contain, exactly as they would be sent
+ * (one JSON object per line, the install ID included).
+ *
+ * @returns An empty string while usage reporting is off
+ */
+export async function usagePreview(): Promise<string> {
+  return invoke("usage_preview");
 }

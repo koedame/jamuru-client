@@ -112,6 +112,16 @@ export interface SettingsPanelProps {
   logFolder?: string | null;
   /** Why the folder could not be opened */
   logFolderError?: string | null;
+  /** Whether usage reporting is on */
+  usageReporting?: boolean;
+  /** Turn usage reporting on or off */
+  onUsageReportingChange?: (enabled: boolean) => void;
+  /** The lines the next report will contain (null = not shown) */
+  usagePreview?: string | null;
+  /** Show (or refresh) what would be sent */
+  onShowUsagePreview?: () => void;
+  /** Why what would be sent could not be read */
+  usagePreviewError?: string | null;
 }
 
 const DEFAULT_CHANNEL_OPTIONS: SelectOption[] = [
@@ -179,6 +189,11 @@ export function SettingsPanel({
   onOpenLogFolder,
   logFolder,
   logFolderError,
+  usageReporting,
+  onUsageReportingChange,
+  usagePreview,
+  onShowUsagePreview,
+  usagePreviewError,
 }: SettingsPanelProps) {
   const { t } = useTranslation();
   const [selectedTab, setSelectedTab] = useState<SettingsTabId>(initialTab);
@@ -258,6 +273,11 @@ export function SettingsPanel({
             onOpenLogFolder={onOpenLogFolder}
             logFolder={logFolder}
             logFolderError={logFolderError}
+            usageReporting={usageReporting}
+            onUsageReportingChange={onUsageReportingChange}
+            usagePreview={usagePreview}
+            onShowUsagePreview={onShowUsagePreview}
+            usagePreviewError={usagePreviewError}
           />
         );
       default:

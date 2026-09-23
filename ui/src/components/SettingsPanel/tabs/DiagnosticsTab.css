@@ -204,6 +204,57 @@
   word-break: break-all;
 }
 
+/* ===== Usage reporting section ===== */
+.diagnostics-tab__usage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.diagnostics-tab__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.diagnostics-tab__switch input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.diagnostics-tab__switch input:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.diagnostics-tab__usage-lines {
+  align-self: stretch;
+  max-height: 240px;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  overflow: auto;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
 /* Result card */
 .diagnostics-tab__card {
   display: flex;

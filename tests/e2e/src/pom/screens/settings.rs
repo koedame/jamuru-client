@@ -155,6 +155,35 @@ impl<'a> DiagnosticsTab<'a> {
         )
     }
 
+    /// The usage reporting switch. `data-checked` says whether it is on.
+    pub fn usage_reporting_switch(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='diagnostics-usage-toggle']",
+            "usage reporting switch",
+        )
+    }
+
+    pub fn is_usage_reporting_on(&self) -> DriverResult<bool> {
+        Ok(self
+            .usage_reporting_switch()
+            .attribute("data-checked")?
+            .as_deref()
+            == Some("true"))
+    }
+
+    /// The button that reads what would be sent.
+    pub fn show_usage_button(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='diagnostics-usage-show']",
+            "show what is sent button",
+        )
+    }
+
+    /// What the button revealed: the lines, or the note that there are none.
+    pub fn usage_preview(&self) -> Element<'a> {
+        self.element("[data-testid='diagnostics-usage-preview']", "what is sent")
+    }
+
     /// The button, the folder that was opened and the error if it could not be.
     pub fn log_file_section(&self) -> Element<'a> {
         self.element("[data-testid='diagnostics-log-file']", "log file section")

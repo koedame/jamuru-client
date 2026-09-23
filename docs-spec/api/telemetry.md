@@ -53,7 +53,7 @@ sidebar_position: 8
 | `server_url` | 自前サーバーの URL（認証情報が入りうる） |
 | `input_device_id` / `output_device_id` | 音声機器の構成が分かる |
 
-設定に名前・URL・ID・パスの類を足すときは、外す側（`src/telemetry/settings.rs` の `LEFT_OUT`）に入れる。値が文字列で 128 文字を超えるもの、リストや表になっているものは、行を不適合にしないために送らない。
+設定に名前・URL・ID・パスの類を足すときは、外す側（`src/telemetry/settings.rs` の `LEFT_OUT`）に入れる（[ADR-037](../adr/ADR-037-usage-reporting-opt-in.md)）。値が文字列で 128 文字を超えるもの、リストや表になっているものは、行を不適合にしないために送らない。
 
 ## いつ・どう送るか
 
@@ -92,6 +92,36 @@ sequenceDiagram
 ## 送る内容を見る
 
 `UsageReporter::preview_ndjson()`（アプリでは Tauri コマンド `usage_preview`）が、次の送信の本文をそのまま返す（REQ-TEL-009）。待っているイベントが無いときは、最後に送った本文を返す。オフのときは空文字。
+
+## 設定画面（Diagnostics タブ）
+
+設定の Diagnostics タブに「利用状況の送信」の節がある（REQ-TEL-011〜013。部品の仕様は [settings-panel.md](../ui/components/settings-panel.md)）。
+
+```mermaid
+sequenceDiagram
+    actor U as 利用者
+    participant UI as 設定画面
+    participant App as アプリ（config_save）
+    participant Rep as UsageReporter
+
+    U->>UI: スイッチをオンにする
+    UI->>App: usage_reporting = true を保存
+    App->>Rep: オンにする（インストール ID を作る）
+    App-->>Rep: 起動の内容を記録して送る（背景）
+    U->>UI: 「送る内容を見る」
+    UI->>App: usage_preview
+    App-->>UI: 次に送る NDJSON（インストール ID を含む）
+    U->>UI: スイッチをオフにする
+    UI->>App: usage_reporting = false を保存
+    App->>Rep: オフにする（ID と未送信の内容を捨てる）
+    UI->>App: usage_preview（開いていたとき）
+    App-->>UI: 空（何も送らず、ID も無い）
+```
+
+- **既定はオフ。初回起動でも、既存の利用者にも、ダイアログは出さない**。オンにする経路はこのスイッチだけ
+- 説明文に、何のために送るか・送るもの・送らないもの・デバイス名に利用者自身の名前が入りうること・オフにすると ID と未送信の内容を捨てることを書く（英語・日本語）。オンにする動機は、この説明文にしか無い
+- 「送る内容を見る」は `usage_preview` の返す文字列をそのまま表示する。オフの間は空なので、「何も集めず、何も送らず、インストール ID も無い」と表示する。オンにしたまま内容を開いていて、スイッチをオフにすると、表示は読み直されて空になる
+- 保存に失敗したときはスイッチを元に戻し、理由を表示する
 
 ## 診断ログとの関係
 

@@ -216,6 +216,19 @@ impl App {
         }
     }
 
+    /// Where the app keeps the install ID and the record of a crash, inside the
+    /// throwaway `$HOME` (`ProjectDirs` of `jamjam`, then `usage`).
+    pub fn usage_state_dir(&self) -> PathBuf {
+        let home = self._home.path();
+        if cfg!(target_os = "macos") {
+            home.join("Library/Application Support/jamjam/usage")
+        } else if cfg!(target_os = "windows") {
+            home.join("AppData/Local/jamjam/data/usage")
+        } else {
+            home.join(".local/share/jamjam/usage")
+        }
+    }
+
     /// What the app has written to its log file so far; empty if there is none yet.
     pub fn log_text(&self) -> String {
         std::fs::read_to_string(self.log_file_path()).unwrap_or_default()
