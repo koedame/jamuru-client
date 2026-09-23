@@ -12,6 +12,7 @@ mod e2e_control;
 mod logging;
 mod signaling;
 mod streaming;
+mod usage;
 mod windows;
 
 use audio::AudioState;
@@ -20,6 +21,7 @@ use device_identity::DeviceIdentityState;
 use signaling::SignalingState;
 use streaming::StreamingState;
 use tauri::Manager;
+use usage::UsageState;
 
 /// Config used to seed startup state.
 ///
@@ -158,6 +160,7 @@ pub fn run() {
             windows::window_resize_main,
             logging::log_frontend,
             logging::log_open_dir,
+            usage::usage_preview,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -170,14 +173,30 @@ pub fn run() {
     // Device selection and buffer size come from config.toml, so the
     // interface the user chose is in effect from the first frame rather
     // than only after they open settings (ADR-026).
-    app.manage(AudioState::from_config(&load_startup_config()));
+    let startup_config = load_startup_config();
+    app.manage(AudioState::from_config(&startup_config));
     app.manage(StreamingState::new());
     app.manage(ConfigState::new());
     // Loads (or generates on first launch) this installation's device
     // identity once at startup - ADR-024, replaces account sign-in.
     app.manage(DeviceIdentityState::load());
 
+    // Usage reporting is off unless the user turned it on (`usage_reporting`).
+    // The panic hook goes in after the logger's, so both run on a panic.
+    let usage = UsageState::new(&startup_config, &app.package_info().version.to_string());
+    usage.reporter().install_panic_hook();
+    if usage.reporter().is_enabled() {
+        usage.report_launch(startup_config);
+    }
+    app.manage(usage);
+
     logging::log_startup(app.handle(), &log_spec);
 
-    app.run(|_, _| {});
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            handle
+                .state::<UsageState>()
+                .app_exiting(&handle.state::<StreamingState>());
+        }
+    });
 }

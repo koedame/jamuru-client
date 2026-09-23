@@ -216,6 +216,8 @@ pub struct StreamingState {
     underrun_count: Arc<AtomicU64>,
     /// How many times adaptation has moved the play-out delay this session
     delay_adjustments: Arc<AtomicU64>,
+    /// How many times the connection dropped and began to reconnect
+    reconnect_count: Arc<AtomicU64>,
     /// Peer (received) audio volume (0-200, 100 = unity gain)
     peer_volume: Arc<AtomicU32>,
     /// Master output volume (0-200, 100 = unity gain)
@@ -260,6 +262,7 @@ impl StreamingState {
             buffer_size: Mutex::new(64), // Default: 64 samples
             underrun_count: Arc::new(AtomicU64::new(0)),
             delay_adjustments: Arc::new(AtomicU64::new(0)),
+            reconnect_count: Arc::new(AtomicU64::new(0)),
             peer_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             master_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             peer_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
@@ -369,6 +372,24 @@ enum StreamingCommand {
 }
 
 impl StreamingState {
+    /// The link's latest reading for the usage totals: the round-trip time
+    /// (`None` before the first sample) and the packet loss rate (0.0 to
+    /// 1.0). `None` while there is no connection.
+    pub(crate) fn link_reading(&self) -> Option<(Option<f32>, f32)> {
+        let stats = self.stats.read().ok()?;
+        stats.as_ref().map(|s| (s.rtt_ms, s.packet_loss_rate))
+    }
+
+    /// Buffer underruns since streaming last started.
+    pub(crate) fn underruns(&self) -> u64 {
+        self.underrun_count.load(Ordering::Relaxed)
+    }
+
+    /// Times the connection began to reconnect since streaming last started.
+    pub(crate) fn reconnects(&self) -> u64 {
+        self.reconnect_count.load(Ordering::Relaxed)
+    }
+
     /// Apply a new jitter buffer depth to a session that is already running
     ///
     /// Called when the preset changes mid-session (REQ-LAT-106). Only the depth
@@ -574,6 +595,7 @@ pub async fn streaming_start(
     sample_rate: Option<u32>,
     state: tauri::State<'_, StreamingState>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
+    usage: tauri::State<'_, crate::usage::UsageState>,
 ) -> Result<(), String> {
     // Check if already streaming
     if state.is_active.load(Ordering::SeqCst) {
@@ -663,12 +685,14 @@ pub async fn streaming_start(
     let shared_connection_state = state.connection_state.clone();
     let underrun_count = state.underrun_count.clone();
     let delay_adjustments = state.delay_adjustments.clone();
+    let reconnect_count = state.reconnect_count.clone();
     let peer_volume = state.peer_volume.clone();
     let master_volume = state.master_volume.clone();
     let peer_pan = state.peer_pan.clone();
     let local_volume = state.local_volume.clone();
     let local_pan = state.local_pan.clone();
     let shared_peer_latency_info = state.peer_latency_info.clone();
+    let usage_reporter = usage.reporter().clone();
     // Hand the pre-bound socket (if any) to the audio thread, which registers
     // it with its own runtime. Taking it means a later prepare rebinds rather
     // than handing out a socket already in use.
@@ -683,6 +707,7 @@ pub async fn streaming_start(
     state.output_level.store(0, Ordering::SeqCst);
     state.underrun_count.store(0, Ordering::SeqCst);
     state.delay_adjustments.store(0, Ordering::SeqCst);
+    state.reconnect_count.store(0, Ordering::SeqCst);
     // Reset volumes to unity gain and pan to center
     state.peer_volume.store(100, Ordering::SeqCst);
     state.master_volume.store(100, Ordering::SeqCst);
@@ -730,6 +755,7 @@ pub async fn streaming_start(
                 &shared_connection_state,
                 &underrun_count,
                 &delay_adjustments,
+                &reconnect_count,
                 &peer_volume,
                 &master_volume,
                 &peer_pan,
@@ -740,6 +766,7 @@ pub async fn streaming_start(
             .await
             {
                 tracing::error!("Audio streaming failed: {}", e);
+                crate::usage::record_streaming_failure(&usage_reporter, &e);
             } else {
                 tracing::info!("Audio streaming ended");
             }
@@ -1325,6 +1352,7 @@ async fn run_audio_streaming(
     shared_connection_state: &Arc<RwLock<ConnectionStateSnapshot>>,
     underrun_count: &Arc<AtomicU64>,
     delay_adjustments: &AtomicU64,
+    reconnect_count: &Arc<AtomicU64>,
     peer_volume: &Arc<AtomicU32>,
     master_volume: &Arc<AtomicU32>,
     peer_pan: &Arc<std::sync::atomic::AtomicI32>,
@@ -1487,10 +1515,14 @@ async fn run_audio_streaming(
     // (ADR-022).
     let receive_for_state = receive.clone();
     let shared_connection_state_for_cb = shared_connection_state.clone();
+    let reconnect_count_for_cb = reconnect_count.clone();
     connection.set_state_change_callback(move |state| {
         tracing::info!("Audio connection state: {:?}", state);
         if state == ConnectionState::Connected {
             receive_for_state.reset();
+        }
+        if state == ConnectionState::Reconnecting {
+            reconnect_count_for_cb.fetch_add(1, Ordering::Relaxed);
         }
 
         // Publish the transition so the UI can show reconnection progress and

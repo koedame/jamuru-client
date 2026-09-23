@@ -74,6 +74,7 @@ sidebar_position: 1
 | [i18n.md](./api/i18n.md) | 国際化API |
 | [device-identity.md](./api/device-identity.md) | 端末アイデンティティ（`X-Device-*` ハンドシェイクヘッダー） |
 | [e2e-control.md](./api/e2e-control.md) | GUI E2E 制御チャネル（テスト専用・既定で無効） |
+| [telemetry.md](./api/telemetry.md) | 利用状況の送信（既定オフ。送る項目・送り方・止め方） |
 
 ---
 

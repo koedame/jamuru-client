@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/koedame/jamjam-client/src/telemetry/schema.json",
+  "title": "jamjam usage log line",
+  "description": "One line of the usage log the app sends when the user turns 'usage reporting' on. Every line is one JSON object: the envelope below plus the fields of its event. Values not listed here are rejected.",
+  "type": "object",
+  "$ref": "#/$defs/envelope",
+  "oneOf": [
+    { "$ref": "#/$defs/app_start" },
+    { "$ref": "#/$defs/audio_env" },
+    { "$ref": "#/$defs/session_start" },
+    { "$ref": "#/$defs/session_end" },
+    { "$ref": "#/$defs/error" },
+    { "$ref": "#/$defs/crash" }
+  ],
+  "unevaluatedProperties": false,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "envelope": {
+      "type": "object",
+      "required": ["v", "ts", "seq", "event", "install_id", "launch_id", "session_id", "app_version", "os", "arch"],
+      "properties": {
+        "v": { "const": 1, "description": "Schema version." },
+        "ts": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "description": "UTC, ISO 8601, whole seconds."
+        },
+        "seq": { "type": "integer", "minimum": 0, "description": "Counter within one launch." },
+        "event": { "enum": ["app_start", "audio_env", "session_start", "session_end", "error", "crash"] },
+        "install_id": { "$ref": "#/$defs/id", "description": "16 random bytes made when the user turns usage reporting on; discarded when they turn it off." },
+        "launch_id": { "$ref": "#/$defs/id", "description": "16 random bytes made at every launch." },
+        "session_id": {
+          "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }],
+          "description": "16 random bytes made for every session; null outside one."
+        },
+        "app_version": { "type": "string", "pattern": "^[0-9A-Za-z.+-]{1,32}$" },
+        "os": { "type": "string", "pattern": "^[a-z0-9_]{1,16}$" },
+        "arch": { "type": "string", "pattern": "^[a-z0-9_]{1,16}$" }
+      }
+    },
+    "app_start": {
+      "properties": {
+        "event": { "const": "app_start" },
+        "os_version": { "type": "string", "pattern": "^[0-9]{1,5}(\\.[0-9]{1,5})?$", "description": "major.minor only." },
+        "cpu_cores": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "ram_gb": { "type": "integer", "minimum": 1, "maximum": 65536, "description": "Rounded to a power of two." },
+        "webview_version": { "type": "string", "pattern": "^[0-9]{1,4}$", "description": "Major only." },
+        "language": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Za-z]{2,4})?$" },
+        "audio_host": { "enum": ["coreaudio", "wasapi", "asio", "alsa", "jack", "other"] },
+        "settings": { "$ref": "#/$defs/settings" }
+      },
+      "required": ["settings"]
+    },
+    "settings": {
+      "type": "object",
+      "description": "The settings file's own items, flat. Only a fixed list of items that could identify the user or their setup is left out; everything else is sent.",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "maxLength": 128 },
+          { "type": "number" },
+          { "type": "boolean" },
+          { "type": "null" }
+        ]
+      },
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+      "maxProperties": 64
+    },
+    "device": {
+      "type": "object",
+      "description": "The name is exactly what the OS reports for the device.",
+      "required": ["name", "kind", "channels", "sample_rates", "min_buffer_frames", "is_default"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "kind": { "enum": ["usb", "builtin", "bluetooth", "virtual", "unknown"] },
+        "channels": { "type": "integer", "minimum": 1, "maximum": 1024 },
+        "sample_rates": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "integer", "minimum": 1000, "maximum": 1000000 }
+        },
+        "min_buffer_frames": {
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "type": "null" }]
+        },
+        "is_default": { "type": "boolean" }
+      }
+    },
+    "audio_env": {
+      "properties": {
+        "event": { "const": "audio_env" },
+        "input": { "oneOf": [{ "$ref": "#/$defs/device" }, { "type": "null" }] },
+        "output": { "oneOf": [{ "$ref": "#/$defs/device" }, { "type": "null" }] }
+      },
+      "required": ["input", "output"]
+    },
+    "session_start": {
+      "properties": {
+        "event": { "const": "session_start" },
+        "mode": { "enum": ["create", "join"] }
+      },
+      "required": ["mode"]
+    },
+    "session_end": {
+      "properties": {
+        "event": { "const": "session_end" },
+        "duration_s": { "type": "integer", "minimum": 0, "maximum": 8640000 },
+        "end_reason": { "enum": ["left", "disconnected", "error", "app_quit"] },
+        "reconnect_count": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "peers_max": { "type": "integer", "minimum": 0, "maximum": 1024 },
+        "rtt_ms_p50": { "type": "number", "minimum": 0 },
+        "rtt_ms_p95": { "type": "number", "minimum": 0 },
+        "loss_pct_mean": { "type": "number", "minimum": 0, "maximum": 100 },
+        "loss_pct_max": { "type": "number", "minimum": 0, "maximum": 100 },
+        "fec_active_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "xrun_count": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["duration_s", "end_reason", "reconnect_count", "peers_max", "xrun_count"]
+    },
+    "error": {
+      "properties": {
+        "event": { "const": "error" },
+        "component": { "enum": ["signaling", "ice", "audio_input", "audio_output", "codec", "config"] },
+        "code": {
+          "enum": [
+            "connect_failed",
+            "timeout",
+            "disconnected",
+            "handshake_failed",
+            "device_not_found",
+            "device_open_failed",
+            "unsupported_config",
+            "stream_failed",
+            "encode_failed",
+            "decode_failed",
+            "invalid_value",
+            "other"
+          ]
+        },
+        "count": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+      },
+      "required": ["component", "code", "count"]
+    },
+    "crash": {
+      "description": "Where a panic happened, sent by the next launch. Carries the launch_id and app_version of the launch that crashed. The panic message is never sent.",
+      "properties": {
+        "event": { "const": "crash" },
+        "file": { "type": "string", "pattern": "^[A-Za-z0-9_./-]{1,120}$" },
+        "line": { "type": "integer", "minimum": 0 },
+        "function": { "type": "string", "pattern": "^[A-Za-z0-9_:<>]{1,200}$" }
+      },
+      "required": ["file", "line"]
+    }
+  }
+}

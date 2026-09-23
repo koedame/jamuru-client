@@ -92,6 +92,16 @@ src/
 ├── protocol/
 │   ├── mod.rs          # プロトコル定義
 │   └── packet.rs       # パケット構造
+├── telemetry/          # 利用状況の送信（既定オフ。api/telemetry.md）
+│   ├── schema.json     # 送る行の定義（JSON Schema）
+│   ├── collector.rs    # 収集・まとめ送信・送る内容の取り出し
+│   ├── event.rs        # 6 つのイベントと外枠
+│   ├── settings.rs     # 設定から外す 5 項目
+│   ├── snapshot.rs     # 環境と音声デバイスの取得
+│   ├── session.rs      # セッションの集計
+│   ├── crash.rs        # パニックの発生位置の保存
+│   ├── install.rs      # インストール ID
+│   └── transport.rs    # 匿名の POST
 ├── lib.rs
 └── main.rs
 

@@ -107,6 +107,9 @@ hound = "3.5"  # WAV file handling for audio quality tests
 # Isolated $HOME for the CLI tests, so they never touch the real config.toml
 tempfile = "3"
 
+# Checks the usage log lines against schema.json in tests
+jsonschema = { version = "0.56", default-features = false }
+
 
 [profile.release]
 lto = true

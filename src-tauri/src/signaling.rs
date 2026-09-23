@@ -21,6 +21,8 @@ use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
 use crate::streaming::StreamingState;
+use crate::usage::UsageState;
+use jamjam::telemetry::{Component, EndReason, ErrorCode, SessionMode};
 
 /// Connection ID counter
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(1);
@@ -118,6 +120,7 @@ pub async fn signaling_connect(
     state: tauri::State<'_, SignalingState>,
     identity_state: tauri::State<'_, DeviceIdentityState>,
     config_state: tauri::State<'_, ConfigState>,
+    usage: tauri::State<'_, UsageState>,
 ) -> Result<u32, String> {
     let url = config_state.server_url();
     let shown_url = strip_userinfo(&url);
@@ -134,6 +137,9 @@ pub async fn signaling_connect(
                 started.elapsed().as_millis(),
                 e
             );
+            usage
+                .reporter()
+                .record_error(Component::Signaling, ErrorCode::ConnectFailed);
             e.to_string()
         })?;
 
@@ -176,9 +182,12 @@ fn spawn_keepalive(app: AppHandle, conn_id: u32) {
 pub async fn signaling_disconnect(
     conn_id: u32,
     state: tauri::State<'_, SignalingState>,
+    usage: tauri::State<'_, UsageState>,
+    streaming: tauri::State<'_, StreamingState>,
 ) -> Result<(), String> {
     let mut connections = state.connections.lock().await;
     if let Some(conn) = connections.remove(&conn_id) {
+        usage.session_ended(&streaming, EndReason::Left);
         tracing::info!("Signaling disconnect requested (conn_id={})", conn_id);
         conn.close().await.map_err(|e| e.to_string())?;
     }
@@ -213,7 +222,9 @@ pub async fn signaling_join_room(
     conn_id: u32,
     room_id: String,
     peer_name: String,
+    app: AppHandle,
     state: tauri::State<'_, SignalingState>,
+    usage: tauri::State<'_, UsageState>,
 ) -> Result<JoinResult, String> {
     let mut connections = state.connections.lock().await;
     let conn = connections
@@ -254,6 +265,7 @@ pub async fn signaling_join_room(
                 peer_id_str,
                 peers.len()
             );
+            usage.session_started(&app, SessionMode::Join, peers.len() as u32 + 1);
             Ok(JoinResult {
                 room_id,
                 peer_id: peer_id_str,
@@ -378,6 +390,8 @@ async fn local_candidates(streaming: &StreamingState, local_port: u16) -> Vec<Ad
 pub async fn signaling_leave_room(
     conn_id: u32,
     state: tauri::State<'_, SignalingState>,
+    usage: tauri::State<'_, UsageState>,
+    streaming: tauri::State<'_, StreamingState>,
 ) -> Result<(), String> {
     let mut connections = state.connections.lock().await;
     let conn = connections
@@ -385,6 +399,7 @@ pub async fn signaling_leave_room(
         .ok_or("Connection not found")?;
 
     tracing::info!("Leaving the room (conn_id={})", conn_id);
+    usage.session_ended(&streaming, EndReason::Left);
     conn.send(SignalingMessage::LeaveRoom)
         .await
         .map_err(|e| e.to_string())?;
@@ -398,7 +413,9 @@ pub async fn signaling_create_room(
     conn_id: u32,
     room_name: String,
     peer_name: String,
+    app: AppHandle,
     state: tauri::State<'_, SignalingState>,
+    usage: tauri::State<'_, UsageState>,
 ) -> Result<JoinResult, String> {
     let mut connections = state.connections.lock().await;
     let conn = connections
@@ -431,6 +448,7 @@ pub async fn signaling_create_room(
             });
 
             tracing::info!("Created room {} as peer {}", room_id, peer_id_str);
+            usage.session_started(&app, SessionMode::Create, 1);
             Ok(JoinResult {
                 room_id,
                 peer_id: peer_id_str,
@@ -697,6 +715,8 @@ pub enum SignalingEvent {
 pub async fn signaling_poll_events(
     conn_id: u32,
     state: tauri::State<'_, SignalingState>,
+    usage: tauri::State<'_, UsageState>,
+    streaming: tauri::State<'_, StreamingState>,
 ) -> Result<Vec<SignalingEvent>, String> {
     use tokio::time::{timeout, Duration};
 
@@ -731,6 +751,7 @@ pub async fn signaling_poll_events(
                         }
                         drop(room_state);
 
+                        usage.participant_joined();
                         tracing::info!("Peer {} joined the room", peer.id);
                         events.push(SignalingEvent::PeerJoined { peer });
                     }
@@ -751,6 +772,7 @@ pub async fn signaling_poll_events(
                         }
                         drop(room_state);
 
+                        usage.participant_left();
                         tracing::info!("Peer {} left the room", peer_id);
                         events.push(SignalingEvent::PeerLeft {
                             peer_id: peer_id.to_string(),
@@ -804,6 +826,7 @@ pub async fn signaling_poll_events(
                         *room_state = None;
                         drop(room_state);
 
+                        usage.session_ended(&streaming, EndReason::Disconnected);
                         tracing::warn!("Room closed by the server: {}", reason);
                         events.push(SignalingEvent::RoomClosed { reason });
                     }
@@ -816,6 +839,7 @@ pub async fn signaling_poll_events(
                             .unwrap_or(false);
                         if is_self {
                             *room_state = None;
+                            usage.session_ended(&streaming, EndReason::Disconnected);
                         }
                         drop(room_state);
 
@@ -847,6 +871,10 @@ pub async fn signaling_poll_events(
                     .unwrap_or(false);
                 if first_time {
                     tracing::warn!("Signaling connection {} was lost: {}", conn_id, e);
+                    usage
+                        .reporter()
+                        .record_error(Component::Signaling, ErrorCode::Disconnected);
+                    usage.session_ended(&streaming, EndReason::Disconnected);
                     let mut room_state = state.room_state.lock().await;
                     *room_state = None;
                     drop(room_state);
@@ -927,6 +955,15 @@ mod tests {
 
         let app = tauri::test::mock_app();
         app.manage(SignalingState::new());
+        app.manage(UsageState::with_reporter(
+            jamjam::telemetry::UsageReporter::new(
+                None,
+                "test",
+                std::sync::Arc::new(jamjam::telemetry::NoTransport),
+                false,
+            ),
+        ));
+        app.manage(StreamingState::new());
         let state = app.state::<SignalingState>();
         state.connections.lock().await.insert(1, conn);
 
@@ -934,9 +971,14 @@ mod tests {
         // poll - recv() only reports the loss once the reset has happened.
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let events = signaling_poll_events(1, state.clone())
-            .await
-            .expect("signaling_poll_events should not itself error");
+        let events = signaling_poll_events(
+            1,
+            state.clone(),
+            app.state::<UsageState>(),
+            app.state::<StreamingState>(),
+        )
+        .await
+        .expect("signaling_poll_events should not itself error");
 
         assert!(
             matches!(events.as_slice(), [SignalingEvent::ConnectionLost { .. }]),
@@ -946,7 +988,14 @@ mod tests {
 
         // Polling again must not repeat the event (lost_logged gate) or
         // panic on the now-dead connection.
-        let events_again = signaling_poll_events(1, state).await.unwrap();
+        let events_again = signaling_poll_events(
+            1,
+            state,
+            app.state::<UsageState>(),
+            app.state::<StreamingState>(),
+        )
+        .await
+        .unwrap();
         assert!(events_again.is_empty());
     }
 }
