@@ -170,6 +170,11 @@ pub struct AppConfig {
     /// not just the one that changed it, shows the same language.
     #[serde(default)]
     pub language: Option<String>,
+
+    /// Whether the app may tell the jamjam server how it runs (`telemetry`).
+    /// Off unless the user turns it on.
+    #[serde(default)]
+    pub usage_reporting: bool,
 }
 
 fn default_peer_name() -> String {
@@ -197,6 +202,7 @@ impl Default for AppConfig {
             output_channel_r: Some(2),
             transmit_channels: 2,
             language: None,
+            usage_reporting: false,
         }
     }
 }

@@ -26,7 +26,7 @@ flowchart LR
 | `REQ-<領域>-001` 〜 `-099` | 本ファイル | 製品要求・設計要求（振る舞いシナリオにならないもの） |
 | `REQ-<領域>-101` 〜 | `behavior/*.feature` の `@REQ-...` タグ | 振る舞い要求（1 Scenario = 1 ID） |
 
-領域コード: `CORE`（製品全体） / `LAT`（遅延） / `AUD`（音声品質） / `CON`（接続） / `IDT`（端末識別） / `GUI`（GUI の操作と状態） / `DIST`（配布設定） / `I18N`（国際化）
+領域コード: `CORE`（製品全体） / `LAT`（遅延） / `AUD`（音声品質） / `CON`（接続） / `IDT`（端末識別） / `GUI`（GUI の操作と状態） / `DIST`（配布設定） / `I18N`（国際化） / `TEL`（利用状況の送信）
 
 ## criticality
 
@@ -151,6 +151,25 @@ REQ-CON-027 は [ADR-035](./adr/ADR-035-stun-through-the-audio-socket.md) の欠
 | REQ-IDT-008 | 端末の証明を付けない接続は拒否される（匿名の接続は無い）。アプリも CLI も必ず証明を付けて繋ぐ | must |
 
 REQ-IDT-006 を `should` とするのは、Windows に 0600 相当のモードビットがなく、NTFS ACL による保護に委ねるためである。
+
+## REQ-TEL: 利用状況の送信設計要求
+
+アプリが動いた様子（環境・設定・エラー・セッションの集計）を、利用者が設定でオンにしたときだけ jamjam サーバーへ送る仕組みに対する要求。何を・いつ・どう止めるかの仕様は [api/telemetry.md](./api/telemetry.md)、送る項目の定義は `src/telemetry/schema.json`。実装は `src/telemetry/`（収集・送信）と `src-tauri/src/usage.rs`（アプリへの接続）。`jamjam.log`（ADR-036）は端末の中に留まる別経路で、ここでは使わない。
+
+| ID | 要求 | criticality |
+|----|------|------------|
+| REQ-TEL-001 | 設定 `usage_reporting` の既定はオフである。オフの間は何も収集せず、何も送らず、インストール ID も作らない | must |
+| REQ-TEL-002 | オンにすると 16 バイトの乱数のインストール ID を作り、設定ファイルとは別の場所に保存する。オフにすると未送信のイベントとインストール ID を捨て、オンにし直すと別の ID になる | must |
+| REQ-TEL-003 | 送る行はすべて `schema.json` に適合する。`event` / `code` / `end_reason` / `kind` は列挙で閉じ、定義に無い項目や値の行は適合しない。全行が同じ外枠（`v` `ts` `seq` `event` `install_id` `launch_id` `session_id` `app_version` `os` `arch`）を持つ | must |
+| REQ-TEL-004 | 設定は設定ファイルの項目を丸ごと送り、外すのは `peer_name` / `connection_history` / `server_url` / `input_device_id` / `output_device_id` の 5 項目だけである。5 項目の名前も値も行に現れない | must |
+| REQ-TEL-005 | 音声デバイスの名前は OS が返す名前のまま送る。デバイス ID は送らない | must |
+| REQ-TEL-006 | 1 回の送信は 64 KB・200 行までである。届かなかった分と収まらなかった分は捨て、溜めて再送しない。エラーは溜めて次の送信に相乗りし、同じセッション内の同じエラーは 1 行にまとめて数える | must |
+| REQ-TEL-007 | 送信は `POST /api/v1/usage-logs`（`Content-Type: application/x-ndjson`）で、端末の署名ヘッダを付けない匿名の要求である。204 だけを成功とみなし、リダイレクトは辿らない | must |
+| REQ-TEL-008 | パニックは発生位置（ファイル名・行・関数名）だけを保存し、次の起動で送る。メッセージ本文は保存も送信もしない。オフの間は保存しない | must |
+| REQ-TEL-009 | 送る予定の NDJSON を、実際に送る本文と同じ文字列で取り出せる | must |
+| REQ-TEL-010 | セッションの終わりに集計値（継続時間・終了理由・再接続回数・最大人数・RTT の p50 / p95・パケットロス率の平均と最大・xrun 回数）を 1 行で送る。測っていない値は 0 にせず行から外す | must |
+
+REQ-TEL-010 の FEC 作動率（`fec_active_pct`）は、接続が FEC で復元したパケット数を数えていないため、今は行に出ない（スキーマには定義済み）。
 
 ## REQ-GUI: GUI 振る舞い要求
 

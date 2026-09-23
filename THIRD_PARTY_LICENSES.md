@@ -74,6 +74,7 @@ This file lists the third-party components used in jamjam and their respective l
 | libloading | ISC | https://github.com/nagisa/rust_libloading |
 | sysinfo | MIT | https://github.com/GuillaumeGomez/sysinfo |
 | tempfile (dev-dependency, CLI tests) | MIT OR Apache-2.0 | https://github.com/Stebalien/tempfile |
+| jsonschema (dev-dependency, usage log tests) | MIT | https://github.com/Stranger6667/jsonschema |
 
 ### Logging
 

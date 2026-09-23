@@ -10,6 +10,7 @@ pub mod environment;
 pub mod identity_store;
 pub mod network;
 pub mod protocol;
+pub mod telemetry;
 
 pub use audio::{AudioConfig, AudioEngine, AudioPreset};
 pub use diagnostics::{

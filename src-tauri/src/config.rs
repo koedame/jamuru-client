@@ -85,8 +85,14 @@ pub fn config_load(state: tauri::State<'_, ConfigState>) -> Result<AppConfig, St
 ///
 /// Validates and saves the provided configuration.
 #[tauri::command]
-pub fn config_save(config: AppConfig, state: tauri::State<'_, ConfigState>) -> Result<(), String> {
-    state.update(config)
+pub fn config_save(
+    config: AppConfig,
+    state: tauri::State<'_, ConfigState>,
+    usage: tauri::State<'_, crate::usage::UsageState>,
+) -> Result<(), String> {
+    state.update(config.clone())?;
+    usage.apply_setting(&config);
+    Ok(())
 }
 
 /// Get the jamjam server URL from configuration
