@@ -83,7 +83,9 @@ Storybook・UI 単体テスト・シグナリングの結合テスト・2 ピア
 ### 1. 参加時に音声ソケットをバインドし、候補を publish する
 
 - `streaming_prepare()`（`src-tauri/src/streaming.rs`）で `0.0.0.0:0` にバインドし、
-  `local_addr()` を返す。冪等（再入室・二重呼び出しでポートが動かない）
+  `local_addr()` を返す。音声を始めるまでは冪等（再入室・二重呼び出しでポートが動かない）。
+  `streaming_start` がソケットを取り出すと記憶したアドレスも捨てるので、次の `streaming_prepare` は
+  新しいソケットをバインドして新しいポートを返す
 - `signaling_publish_local_candidates(conn_id, local_port)`（`src-tauri/src/signaling.rs`）が
   `gather_candidates()` の結果を `UpdatePeerInfo` で送る
 - UI は作成・参加の直後に上記を呼び、`PeerUpdated` イベントでアドレスを知った時点で
@@ -119,6 +121,12 @@ sequenceDiagram
 
 多人数は本 ADR の対象外である。従来どおり「アドレスを持つ最初のピア」に接続する
 （メッシュ化は REQ-LAT-102 の範囲）。
+
+音声の相手が退室したとき（`PeerLeft`）、UI は音声を止め（`streaming_stop`）、自分のアドレスを
+公開し直し（`streaming_prepare` → `signaling_publish_local_candidates`。取り出されたソケットは
+もう使えないため新しいポートになる）、残っている参加者にアドレスを持つ人がいればその人へ
+`streaming_start` する。いなければ、次の `PeerUpdated` で始める。音声の相手でない人の退室では
+何もしない。
 
 ### 2. 受信ループは再生バッファの空き容量でペーシングする
 

@@ -460,10 +460,22 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     return () => clearInterval(interval);
   }, [sessionState.status]);
 
-  // True once streamingStart has been called for this session, so the peer
-  // watcher below does not start a second audio thread when further
-  // PeerUpdated events arrive.
-  const streamingStartedRef = useRef(false);
+  // The peer streamingStart was called for, or null while not streaming. Set
+  // so the peer watcher below does not start a second audio thread when
+  // further PeerUpdated events arrive, and so a PeerLeft can tell whether the
+  // audio session is with the peer that left.
+  const streamingPeerIdRef = useRef<string | null>(null);
+  // The room's participants, kept in step with `sessionState` for the event
+  // poller, which outlives the render it was created in and handles several
+  // events per poll before React re-renders.
+  const participantsRef = useRef<PeerInfo[]>([]);
+  participantsRef.current = sessionState.status === "connected" ? sessionState.participants : [];
+  const updateParticipants = (update: (peers: PeerInfo[]) => PeerInfo[]) => {
+    participantsRef.current = update(participantsRef.current);
+    setSessionState((prev) =>
+      prev.status === "connected" ? { ...prev, participants: update(prev.participants) } : prev
+    );
+  };
 
   /// Advertise our audio address to the room.
   ///
@@ -491,7 +503,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   /// from the PeerUpdated handler (a peer publishing later), because whichever
   /// side joins first will only learn the other's address afterwards.
   const startStreamingToPeer = async (peers: PeerInfo[]) => {
-    if (streamingStartedRef.current) return;
+    if (streamingPeerIdRef.current !== null) return;
 
     const peerWithAddr = peers.find((p) => p.public_addr || p.local_addr || p.candidates.length > 0);
     if (!peerWithAddr) return;
@@ -499,7 +511,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     const addr = candidates[0];
     if (!addr) return;
 
-    streamingStartedRef.current = true;
+    streamingPeerIdRef.current = peerWithAddr.id;
     try {
       const [devices, bufferSize] = await Promise.all([
         audioGetCurrentDevices(),
@@ -516,7 +528,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     } catch (streamErr) {
       // Allow a later PeerUpdated to retry rather than leaving the session
       // permanently silent.
-      streamingStartedRef.current = false;
+      streamingPeerIdRef.current = null;
       console.error("Failed to start streaming:", streamErr);
     }
   };
@@ -560,7 +572,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
               roomCode: result.room_id,
               participants: result.peers,
             });
-            streamingStartedRef.current = false;
+            streamingPeerIdRef.current = null;
             await publishOwnAddress(newConnId);
             await startStreamingToPeer(result.peers);
             setSignalingReconnectState("idle");
@@ -608,37 +620,34 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
         const events = await signalingPollEvents(connectionId);
         for (const event of events) {
           if (event.type === "PeerJoined") {
-            setSessionState((prev) => {
-              if (prev.status !== "connected") return prev;
-              // Avoid duplicate
-              if (prev.participants.some((p) => p.id === event.peer.id)) return prev;
-              return {
-                ...prev,
-                participants: [...prev.participants, event.peer],
-              };
-            });
+            // Avoid duplicate
+            updateParticipants((peers) =>
+              peers.some((p) => p.id === event.peer.id) ? peers : [...peers, event.peer]
+            );
           } else if (event.type === "PeerUpdated") {
             // A peer published (or changed) its audio address. This is what
             // lets whichever side joined first start streaming - at join time
             // the other peer had no address yet (ADR-026).
-            setSessionState((prev) => {
-              if (prev.status !== "connected") return prev;
-              return {
-                ...prev,
-                participants: prev.participants.map((p) =>
-                  p.id === event.peer.id ? event.peer : p
-                ),
-              };
-            });
+            updateParticipants((peers) =>
+              peers.map((p) => (p.id === event.peer.id ? event.peer : p))
+            );
             await startStreamingToPeer([event.peer]);
           } else if (event.type === "PeerLeft") {
-            setSessionState((prev) => {
-              if (prev.status !== "connected") return prev;
-              return {
-                ...prev,
-                participants: prev.participants.filter((p) => p.id !== event.peer_id),
-              };
-            });
+            updateParticipants((peers) => peers.filter((p) => p.id !== event.peer_id));
+            if (streamingPeerIdRef.current === event.peer_id) {
+              // The audio session was with the peer that left: end it rather
+              // than let it report a lost connection, and free the slot for
+              // whoever is still here or joins next. Starting audio used up the
+              // advertised socket, so advertise a fresh one first.
+              try {
+                await streamingStop();
+              } catch (streamErr) {
+                console.error("Failed to stop streaming after the peer left:", streamErr);
+              }
+              streamingPeerIdRef.current = null;
+              await publishOwnAddress(connectionId);
+              await startStreamingToPeer(participantsRef.current);
+            }
           } else if (event.type === "RoomClosed" || (event.type === "Kicked" && event.peer_id === myPeerId)) {
             // The signaling server closes this connection right after
             // sending either message, so `connectionId` is now dead - reusing it for
@@ -707,7 +716,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
         roomCode: result.room_id,
         participants: result.peers,
       });
-      streamingStartedRef.current = false;
+      streamingPeerIdRef.current = null;
       await publishOwnAddress(connectionId);
       await startStreamingToPeer(result.peers);
     } catch (e) {
@@ -755,7 +764,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
       // Advertise where we can be reached, then start streaming if a peer has
       // already advertised theirs. A peer that publishes later is picked up by
       // the PeerUpdated handler (ADR-026).
-      streamingStartedRef.current = false;
+      streamingPeerIdRef.current = null;
       await publishOwnAddress(connectionId);
       await startStreamingToPeer(result.peers);
     } catch (e) {

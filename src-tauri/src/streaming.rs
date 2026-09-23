@@ -272,6 +272,39 @@ impl StreamingState {
         }
     }
 
+    /// Bind the audio socket, or report the address of the one already bound.
+    async fn prepare_socket(&self) -> Result<SocketAddr, String> {
+        let mut addr_lock = self.prepared_addr.lock().await;
+        if let Some(addr) = *addr_lock {
+            return Ok(addr);
+        }
+
+        // Port 0 lets the OS choose; the bound address is what we advertise.
+        let socket = jamjam::network::bind_std("0.0.0.0:0")
+            .map_err(|e| format!("Failed to bind the audio socket: {}", e))?;
+        let addr = socket
+            .local_addr()
+            .map_err(|e| format!("Failed to read the audio socket address: {}", e))?;
+
+        *self.prepared_socket.lock().await = Some(socket);
+        *addr_lock = Some(addr);
+
+        tracing::info!("Audio socket prepared on {}", addr);
+        Ok(addr)
+    }
+
+    /// Hand the prepared socket to the audio thread.
+    ///
+    /// The address is forgotten with it: the socket now belongs to the audio
+    /// session, so the next prepare (a new peer after this session ended) has
+    /// to bind a fresh one rather than report a port nothing listens on.
+    async fn take_prepared_socket(&self) -> Option<std::net::UdpSocket> {
+        let mut addr_lock = self.prepared_addr.lock().await;
+        let socket = self.prepared_socket.lock().await.take();
+        *addr_lock = None;
+        socket
+    }
+
     /// Address candidates for the prepared audio socket, with the public
     /// address STUN reports for that socket itself.
     ///
@@ -505,23 +538,7 @@ pub struct StreamingStatus {
 /// learned it.
 #[tauri::command]
 pub async fn streaming_prepare(state: tauri::State<'_, StreamingState>) -> Result<String, String> {
-    let mut addr_lock = state.prepared_addr.lock().await;
-    if let Some(addr) = *addr_lock {
-        return Ok(addr.to_string());
-    }
-
-    // Port 0 lets the OS choose; the bound address is what we advertise.
-    let socket = jamjam::network::bind_std("0.0.0.0:0")
-        .map_err(|e| format!("Failed to bind the audio socket: {}", e))?;
-    let addr = socket
-        .local_addr()
-        .map_err(|e| format!("Failed to read the audio socket address: {}", e))?;
-
-    *state.prepared_socket.lock().await = Some(socket);
-    *addr_lock = Some(addr);
-
-    tracing::info!("Audio socket prepared on {}", addr);
-    Ok(addr.to_string())
+    state.prepare_socket().await.map(|addr| addr.to_string())
 }
 
 /// Address candidates to race for `addr` (REQ-CON-113): `others`, in the
@@ -655,7 +672,7 @@ pub async fn streaming_start(
     // Hand the pre-bound socket (if any) to the audio thread, which registers
     // it with its own runtime. Taking it means a later prepare rebinds rather
     // than handing out a socket already in use.
-    let prepared_socket = state.prepared_socket.lock().await.take();
+    let prepared_socket = state.take_prepared_socket().await;
 
     // Reset state on new connection
     state.is_muted.store(false, Ordering::SeqCst);
@@ -1926,6 +1943,38 @@ async fn run_audio_streaming(
 mod tests {
     use super::*;
     use jamjam::audio::PlayoutConfig;
+
+    /// After audio starts the socket belongs to the audio session, so the
+    /// next prepare must bind a new one. Reporting the old address would
+    /// advertise a port nothing listens on: the audio session that follows a
+    /// peer leaving would then bind an unadvertised port and hear nobody.
+    #[tokio::test]
+    async fn prepare_socket_after_the_socket_was_taken_binds_a_new_one() {
+        let state = StreamingState::new();
+        let first = state.prepare_socket().await.unwrap();
+        let socket = state
+            .take_prepared_socket()
+            .await
+            .expect("a prepared socket");
+        assert_eq!(socket.local_addr().unwrap(), first);
+
+        let second = state.prepare_socket().await.unwrap();
+
+        assert_ne!(second, first, "the taken socket still holds the first port");
+        assert!(state.take_prepared_socket().await.is_some());
+    }
+
+    /// A repeated prepare (re-entering a room, a double invoke) must not move
+    /// the port out from under a peer that already learned it.
+    #[tokio::test]
+    async fn prepare_socket_when_already_prepared_reports_the_same_address() {
+        let state = StreamingState::new();
+
+        let first = state.prepare_socket().await.unwrap();
+        let second = state.prepare_socket().await.unwrap();
+
+        assert_eq!(first, second);
+    }
 
     /// Verifies: REQ-CON-113
     #[test]
