@@ -5,12 +5,18 @@
 # committed to `koedame/homebrew-tap` by that job. Edit the template,
 # not the generated file.
 #
+# A plain `vX.Y.Z` tag becomes the `jamjam` cask. A prerelease tag
+# (`v0.2.0-beta.1`) becomes the separate `jamjam@beta` cask, so that
+# `brew install --cask jamjam` and `brew upgrade` never hand a
+# prerelease to someone who did not ask for it. The two casks install
+# the same `jamjam.app`, hence `conflicts_with`.
+#
 # The DMG file names carry the version from `src-tauri/tauri.conf.json`,
 # which is not the tag on a prerelease (`v0.1.0-rc.1` ships
 # `jamjam_0.1.0_aarch64.dmg`), so the job substitutes the whole file
 # name rather than building it from the cask version.
 
-cask "jamjam" do
+cask "{{CASK_TOKEN}}" do
   version "{{VERSION}}"
 
   on_arm do
@@ -30,6 +36,8 @@ cask "jamjam" do
 
   # Matches the baseline the installation guide states (macOS 11+).
   depends_on macos: :big_sur
+
+  conflicts_with cask: "{{CONFLICTS_WITH}}"
 
   app "jamjam.app"
 

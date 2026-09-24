@@ -41,6 +41,16 @@ brew install --cask koedame/tap/jamjam
 Homebrew はダウンロードしたものに Gatekeeper の隔離属性を付けます。付いたままだと公証なしのアプリは 「"jamjam.app" is damaged and can't be opened.」で開けないため、cask 側でインストール後に属性を外しています。そのため brew で入れた場合は下の「署名なしアプリの警告」の手順は要りません。
 cask が指すのは [GitHub Releases](https://github.com/koedame/jamjam-client/releases) に公開済みのタグで、リリースのたびに自動更新されます。
 
+#### ベータ版を試す
+
+正式版より先に動作を確かめたい人向けに、プレリリース（`v0.2.0-beta.1` のようなタグ）を `jamjam@beta` として配っています。`brew install --cask koedame/tap/jamjam` や `brew upgrade` でベータ版が入ることはなく、正式版を使う人は何もしなくて構いません。
+
+```bash
+brew install --cask koedame/tap/jamjam@beta
+```
+
+正式版とベータ版は同じ `jamjam.app` を入れるため同時には入れられません。正式版に戻すときは `brew uninstall --cask jamjam@beta` のあとで `brew install --cask koedame/tap/jamjam` を実行してください。ベータ版の更新は `brew upgrade --cask jamjam@beta` です。
+
 ### リリースビルドからのインストール
 
 1. [GitHub Releases](https://github.com/koedame/jamjam-client/releases) から最新版をダウンロード
