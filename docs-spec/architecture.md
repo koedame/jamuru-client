@@ -516,7 +516,6 @@ jamjam preset list                      # プリセットと遅延バジェッ�
 jamjam preset use <NAME>                # 設定に保存
 jamjam create-room --server <URL>       # ルーム作成、招待コードを表示
 jamjam join-room --server <URL> --room <CODE>       # ルーム参加
-jamjam rooms --server <URL>             # ルーム一覧
 jamjam host [--port PORT]               # シグナリング無しで待ち受け（最初に届いた相手に接続し返す）
 jamjam join <IP:PORT>                   # シグナリング無しで接続
 ```
