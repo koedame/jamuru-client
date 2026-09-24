@@ -2,6 +2,7 @@
 //!
 //! Handles audio capture, playback, and local monitoring.
 
+mod channels;
 pub(crate) mod codec;
 mod device;
 mod engine;
@@ -14,6 +15,7 @@ mod probe;
 mod resampler;
 mod stream;
 
+pub use channels::{capture_attempts, OutputRoute};
 pub use codec::{
     create_codec, AudioCodec, CodecConfig, CodecError, CodecType, OpusCodec, PcmCodec,
 };
