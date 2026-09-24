@@ -20,7 +20,7 @@ use tokio::sync::Mutex;
 
 use jamjam::audio::{
     capture_to_wire, AudioConfig, AudioEngine, AudioPreset, DeviceId, LocalMonitor, PeerRateChange,
-    PlayoutResult, ReceivePath, WIRE_CHANNELS,
+    PlayoutResult, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
@@ -44,11 +44,6 @@ const POP_IDLE: tokio::time::Duration = tokio::time::Duration::from_micros(250);
 /// How often connection stats and the meter levels are refreshed for the UI,
 /// which polls at the same interval.
 const STATS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
-
-/// How often the play-out delay follows the link (ADR-031). One second is the
-/// window each decision judges, and ten of them in a row are needed to give
-/// a frame back.
-const ADAPT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Real-time thread priority for Linux (1-99, higher = more priority)
 /// 99 = maximum, but risks system freeze if thread hangs
