@@ -100,6 +100,7 @@ pub fn run() {
             streaming::streaming_status,
             streaming::streaming_reconnect,
             streaming::streaming_set_input_device,
+            streaming::streaming_set_transmit_channels,
             streaming::streaming_set_output_device,
             streaming::streaming_set_mute,
             streaming::streaming_get_mute,

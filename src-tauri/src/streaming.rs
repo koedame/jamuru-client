@@ -14,12 +14,12 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-use rtrb::RingBuffer;
+use rtrb::{Consumer, RingBuffer};
 use serde::Serialize;
 use tokio::sync::Mutex;
 
 use jamjam::audio::{
-    mono_to_wire, AudioConfig, AudioEngine, AudioPreset, DeviceId, LocalMonitor, PeerRateChange,
+    capture_to_wire, AudioConfig, AudioEngine, AudioPreset, DeviceId, LocalMonitor, PeerRateChange,
     PlayoutResult, ReceivePath, WIRE_CHANNELS,
 };
 use jamjam::network::{
@@ -357,6 +357,8 @@ impl Default for StreamingState {
 enum StreamingCommand {
     Stop,
     SetInputDevice(Option<String>),
+    /// Capture 1 (mono) or 2 (stereo) channels from now on
+    SetTransmitChannels(u32),
     SetOutputDevice(Option<String>),
     SetMute(bool),
     SetMonitoring(bool),
@@ -998,6 +1000,29 @@ pub async fn streaming_set_input_device(
     Ok(())
 }
 
+/// Set the transmit channel count (1 = mono, 2 = stereo) during streaming
+#[tauri::command]
+pub async fn streaming_set_transmit_channels(
+    count: u32,
+    state: tauri::State<'_, StreamingState>,
+) -> Result<(), String> {
+    if count != 1 && count != 2 {
+        return Err("Transmit channels must be 1 (mono) or 2 (stereo)".to_string());
+    }
+    if !state.is_active.load(Ordering::SeqCst) {
+        return Err("Streaming is not active".to_string());
+    }
+
+    let tx = state.cmd_tx.lock().await;
+    if let Some(ref sender) = *tx {
+        sender
+            .send(StreamingCommand::SetTransmitChannels(count))
+            .map_err(|e| format!("Failed to send command: {}", e))?;
+    }
+
+    Ok(())
+}
+
 /// Set output device during streaming
 #[tauri::command]
 pub async fn streaming_set_output_device(
@@ -1302,6 +1327,84 @@ fn mix_peers(
     read.samples
 }
 
+/// Captured audio waiting to be sent, and how many interleaved channels each
+/// frame of it has.
+struct CaptureRing {
+    consumer: Consumer<f32>,
+    channels: usize,
+}
+
+/// Starts capture on `device_id` with `wanted` channels (1 or 2) and returns
+/// the ring the captured audio lands in.
+///
+/// A device that will not open with two channels - a mono microphone - is
+/// opened with one instead, so a stereo setting never leaves a session
+/// without input. The ring reports how many channels it actually has.
+fn start_capture_ring(
+    engine: &mut AudioEngine,
+    device_id: Option<&DeviceId>,
+    wanted: u16,
+    frame_size: usize,
+    input_level: &Arc<AtomicU32>,
+    monitor: &LocalMonitor,
+) -> Result<CaptureRing, String> {
+    let attempts: &[u16] = if wanted >= 2 { &[2, 1] } else { &[1] };
+    let mut failure = String::new();
+    for &channels in attempts {
+        let (mut producer, consumer) = RingBuffer::<f32>::new(32 * frame_size * channels as usize);
+        let mut monitor_tap = monitor.tap();
+        let level = input_level.clone();
+
+        engine.stop_capture();
+        engine.set_capture_channels(channels);
+        // Zero-allocation: write directly to the rtrb producer (FnMut, no Sync needed)
+        let started = engine.start_capture(device_id, move |samples, _timestamp| {
+            monitor_tap.push_interleaved(samples, channels as usize);
+            // Calculate RMS level (0-100)
+            if !samples.is_empty() {
+                level.store(rms_level(samples), Ordering::SeqCst);
+            }
+            if let Ok(mut chunk) = producer.write_chunk_uninit(samples.len()) {
+                let slices = chunk.as_mut_slices();
+                // Copy samples directly to ring buffer slices
+                let first_len = slices.0.len().min(samples.len());
+                for (i, &sample) in samples[..first_len].iter().enumerate() {
+                    slices.0[i].write(sample);
+                }
+                if first_len < samples.len() {
+                    for (i, &sample) in samples[first_len..].iter().enumerate() {
+                        slices.1[i].write(sample);
+                    }
+                }
+                // SAFETY: we just initialized all elements
+                unsafe {
+                    chunk.commit_all();
+                }
+            }
+            // If buffer full, samples are dropped (backpressure)
+        });
+        match started {
+            Ok(()) => {
+                tracing::info!("Capture started on {:?} with {} channel(s)", device_id, channels);
+                return Ok(CaptureRing {
+                    consumer,
+                    channels: channels as usize,
+                });
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Capture on {:?} with {} channel(s) failed: {}",
+                    device_id,
+                    channels,
+                    e
+                );
+                failure = e.to_string();
+            }
+        }
+    }
+    Err(failure)
+}
+
 /// Converts a frame of samples to the 0-100 level the meters display.
 ///
 /// RMS, not peak: a full-scale sine reads 71, not 100. That is deliberate -
@@ -1399,11 +1502,6 @@ async fn run_audio_streaming(
     // - Playback: rtrb ring buffer (wait-free network callback)
     // - Send thread: dedicated std::thread (no tokio overhead)
 
-    // Capture path: rtrb for zero-allocation capture
-    let capture_rb_size = 32 * buffer_size as usize;
-    let (mut capture_producer, capture_consumer) = RingBuffer::<f32>::new(capture_rb_size);
-    let capture_consumer = Arc::new(std::sync::Mutex::new(capture_consumer));
-
     // Receive path: jitter buffer keyed by sequence number (ADR-020).
     //
     // This replaces a plain ring buffer, which played packets in arrival order
@@ -1447,47 +1545,27 @@ async fn run_audio_streaming(
     let mut bandwidth_verdict = BandwidthVerdict::default();
     let mut last_bandwidth_status: Option<BandwidthStatus> = None;
 
-    // Clone atomics for capture callback
     let input_level_for_capture = Arc::new(AtomicU32::new(0));
-    let input_level_capture_ref = input_level_for_capture.clone();
 
     // Local monitoring: what the capture callback hears goes straight to the
     // output callback, never through the network (ADR-033).
     let monitor = LocalMonitor::new(buffer_size);
     monitor.set_enabled(is_monitoring.load(Ordering::SeqCst));
-    let mut monitor_tap = monitor.tap();
 
-    // Start audio capture with level metering (mono)
-    // Zero-allocation: write directly to rtrb producer (FnMut, no Sync needed)
-    capture_engine
-        .start_capture(input_id.as_ref(), move |samples, _timestamp| {
-            monitor_tap.push(samples);
-            // Calculate RMS level (0-100)
-            if !samples.is_empty() {
-                input_level_capture_ref.store(rms_level(samples), Ordering::SeqCst);
-            }
-            // Write directly to rtrb - zero allocation
-            if let Ok(mut chunk) = capture_producer.write_chunk_uninit(samples.len()) {
-                let slices = chunk.as_mut_slices();
-                // Copy samples directly to ring buffer slices
-                let first_len = slices.0.len().min(samples.len());
-                for (i, &sample) in samples[..first_len].iter().enumerate() {
-                    slices.0[i].write(sample);
-                }
-                if first_len < samples.len() {
-                    for (i, &sample) in samples[first_len..].iter().enumerate() {
-                        slices.1[i].write(sample);
-                    }
-                }
-                // SAFETY: we just initialized all elements
-                unsafe {
-                    chunk.commit_all();
-                }
-            }
-            // If buffer full, samples are dropped (backpressure)
-        })
-        .map_err(|e| format!("Failed to start capture: {}", e))?;
-    tracing::info!("Capture started on {:?}", input_id);
+    // Start audio capture with level metering. Mono or stereo follows the
+    // transmit channel setting (REQ-AUD-107/108).
+    let mut wanted_channels = transmit_channels.clamp(1, WIRE_CHANNELS as u32) as u16;
+    let capture_ring = start_capture_ring(
+        &mut capture_engine,
+        input_id.as_ref(),
+        wanted_channels,
+        buffer_size as usize,
+        &input_level_for_capture,
+        &monitor,
+    )
+    .map_err(|e| format!("Failed to start capture: {}", e))?;
+    let capture_channels = capture_ring.channels;
+    let capture_ring = Arc::new(std::sync::Mutex::new(capture_ring));
 
     // Start audio playback (stereo). The callback takes frames from the
     // play-out buffer itself and applies the mixer gains, so a volume change
@@ -1555,7 +1633,7 @@ async fn run_audio_streaming(
     println!("Connected to {}. Streaming active.", remote_addr);
 
     // Send our latency info to the peer (ADR-013: sample rate communication)
-    let local_latency_info = LatencyInfoMessage {
+    let mut local_latency_info = LatencyInfoMessage {
         capture_buffer_ms: (buffer_size as f32 / sample_rate as f32) * 1000.0,
         playback_buffer_ms: (buffer_size as f32 / sample_rate as f32) * 1000.0,
         encode_ms: 0.0, // PCM, no encoding delay
@@ -1564,11 +1642,12 @@ async fn run_audio_streaming(
         frame_size: buffer_size,
         sample_rate,
         codec: "pcm".to_string(),
-        channel_count: transmit_channels as u8,
+        channel_count: capture_channels as u8,
     };
     if let Err(e) = connection.send_latency_info(&local_latency_info).await {
         eprintln!("Failed to send initial latency info: {}", e);
     }
+    let mut announced_channel_count = local_latency_info.channel_count;
 
     // Wrap connection for shared access
     let connection_arc = Arc::new(tokio::sync::Mutex::new(connection));
@@ -1594,7 +1673,7 @@ async fn run_audio_streaming(
 
     // Clone buffer_size for send thread
     let send_buffer_size = buffer_size as usize;
-    let capture_consumer_for_send = capture_consumer.clone();
+    let capture_ring_for_send = capture_ring.clone();
 
     // Spawn dedicated thread to send captured audio (no tokio overhead)
     // This thread reads from rtrb consumer and sends via connection
@@ -1606,42 +1685,54 @@ async fn run_audio_streaming(
             .expect("Failed to create send thread runtime");
 
         let mut timestamp: u32 = 0;
-        let mut send_buffer = vec![0.0f32; send_buffer_size];
+        // Room for the widest capture, so a switch between mono and stereo
+        // needs no new allocation
+        let mut send_buffer = vec![0.0f32; send_buffer_size * WIRE_CHANNELS];
         // Stereo buffer for pan-converted output (2x mono size)
         let mut stereo_send_buffer = vec![0.0f32; send_buffer_size * 2];
 
         while send_thread_running_ref.load(Ordering::SeqCst) {
-            // Try to read a frame from capture ring buffer
-            let samples_read = {
-                if let Ok(mut consumer) = capture_consumer_for_send.try_lock() {
-                    let available = consumer.slots();
-                    if available >= send_buffer_size {
-                        if let Ok(chunk) = consumer.read_chunk(send_buffer_size) {
+            // Try to read a frame from capture ring buffer. Yields the channel
+            // count of the frame read: a frame is `send_buffer_size` samples
+            // per channel.
+            let channels_read = {
+                if let Ok(mut ring) = capture_ring_for_send.try_lock() {
+                    let channels = ring.channels;
+                    let frame_samples = send_buffer_size * channels;
+                    let available = ring.consumer.slots();
+                    if available >= frame_samples {
+                        if let Ok(chunk) = ring.consumer.read_chunk(frame_samples) {
                             let slices = chunk.as_slices();
                             send_buffer[..slices.0.len()].copy_from_slice(slices.0);
                             if !slices.1.is_empty() {
-                                send_buffer[slices.0.len()..send_buffer_size]
+                                send_buffer[slices.0.len()..frame_samples]
                                     .copy_from_slice(slices.1);
                             }
                             chunk.commit_all();
-                            true
+                            Some(channels)
                         } else {
-                            false
+                            None
                         }
                     } else {
-                        false
+                        None
                     }
                 } else {
-                    false
+                    None
                 }
             };
 
-            if samples_read {
+            if let Some(channels) = channels_read {
                 // Skip sending if muted
                 if !is_muted_send_ref.load(Ordering::SeqCst) {
                     let volume = local_volume_send_ref.load(Ordering::SeqCst) as f32 / 100.0;
                     let pan = local_pan_send_ref.load(Ordering::SeqCst);
-                    mono_to_wire(&send_buffer, volume, pan, &mut stereo_send_buffer);
+                    capture_to_wire(
+                        &send_buffer[..send_buffer_size * channels],
+                        channels,
+                        volume,
+                        pan,
+                        &mut stereo_send_buffer,
+                    );
 
                     rt.block_on(async {
                         let conn = connection_for_send.lock().await;
@@ -1669,6 +1760,10 @@ async fn run_audio_streaming(
     // Receive buffer is stereo (frame_size * 2) since sender transmits stereo with local_pan applied
 
     loop {
+        // Set by a command that has capture start over: a new device, or a new
+        // channel count on the current one.
+        let mut reopen_capture: Option<Option<DeviceId>> = None;
+
         // Check for commands (non-blocking)
         match cmd_rx.try_recv() {
             Ok(StreamingCommand::Stop) => {
@@ -1677,45 +1772,12 @@ async fn run_audio_streaming(
             }
             Ok(StreamingCommand::SetInputDevice(device_id)) => {
                 println!("Switching input device to: {:?}", device_id);
-                let new_device_id = device_id.map(DeviceId);
-
-                // Create new rtrb ring buffer for the new capture
-                let (mut new_producer, new_consumer) = RingBuffer::<f32>::new(capture_rb_size);
-
-                // Replace consumer in shared reference (send thread will pick this up)
-                if let Ok(mut consumer_guard) = capture_consumer.lock() {
-                    *consumer_guard = new_consumer;
-                }
-
-                let level_ref = input_level_for_capture.clone();
-                let mut new_monitor_tap = monitor.tap();
-                if let Err(e) = capture_engine.set_input_device(
-                    new_device_id.as_ref(),
-                    move |samples, _timestamp| {
-                        new_monitor_tap.push(samples);
-                        if !samples.is_empty() {
-                            level_ref.store(rms_level(samples), Ordering::SeqCst);
-                        }
-                        // Write directly to rtrb - zero allocation
-                        if let Ok(mut chunk) = new_producer.write_chunk_uninit(samples.len()) {
-                            let slices = chunk.as_mut_slices();
-                            let first_len = slices.0.len().min(samples.len());
-                            for (i, &sample) in samples[..first_len].iter().enumerate() {
-                                slices.0[i].write(sample);
-                            }
-                            if first_len < samples.len() {
-                                for (i, &sample) in samples[first_len..].iter().enumerate() {
-                                    slices.1[i].write(sample);
-                                }
-                            }
-                            unsafe {
-                                chunk.commit_all();
-                            }
-                        }
-                    },
-                ) {
-                    eprintln!("Failed to switch input device: {}", e);
-                }
+                reopen_capture = Some(device_id.map(DeviceId));
+            }
+            Ok(StreamingCommand::SetTransmitChannels(count)) => {
+                println!("Setting transmit channels to: {}", count);
+                wanted_channels = count.clamp(1, WIRE_CHANNELS as u32) as u16;
+                reopen_capture = Some(capture_engine.current_input_device().cloned());
             }
             Ok(StreamingCommand::SetOutputDevice(device_id)) => {
                 println!("Switching output device to: {:?}", device_id);
@@ -1793,6 +1855,27 @@ async fn run_audio_streaming(
             }
         }
 
+        if let Some(device_id) = reopen_capture {
+            match start_capture_ring(
+                &mut capture_engine,
+                device_id.as_ref(),
+                wanted_channels,
+                buffer_size as usize,
+                &input_level_for_capture,
+                &monitor,
+            ) {
+                Ok(ring) => {
+                    // The peer is told below if the channel count changed
+                    local_latency_info.channel_count = ring.channels as u8;
+                    // Replace the ring in the shared reference (send thread will pick this up)
+                    if let Ok(mut guard) = capture_ring.lock() {
+                        *guard = ring;
+                    }
+                }
+                Err(e) => eprintln!("Failed to restart capture: {}", e),
+            }
+        }
+
         // Check if we should still be active
         if !is_active.load(Ordering::SeqCst) {
             break;
@@ -1815,6 +1898,20 @@ async fn run_audio_streaming(
         // about the change - otherwise its display keeps the value from
         // connect time. If the connection is busy the peer is told on the next
         // tick.
+        let channel_count = local_latency_info.channel_count;
+        if channel_count != announced_channel_count {
+            if let Ok(conn) = connection_arc.try_lock() {
+                let updated = LatencyInfoMessage {
+                    jitter_buffer_ms: announced_delay_frames as f32 * frame_duration_ms,
+                    ..local_latency_info.clone()
+                };
+                if let Err(e) = conn.send_latency_info(&updated).await {
+                    eprintln!("Failed to send updated latency info: {}", e);
+                }
+                announced_channel_count = channel_count;
+            }
+        }
+
         let delay_frames = receive.delay_frames();
         if delay_frames != announced_delay_frames {
             let delay_ms = delay_frames as f32 * frame_duration_ms;

@@ -35,4 +35,4 @@ pub use resampler::{
     create_resampler, create_resampler_with_channels, AudioResampler, FastResampler,
     PassthroughResampler, ResamplerError,
 };
-pub use stream::{mono_to_wire, PeerRateChange, ReceivePath, WIRE_CHANNELS};
+pub use stream::{capture_to_wire, mono_to_wire, PeerRateChange, ReceivePath, WIRE_CHANNELS};
