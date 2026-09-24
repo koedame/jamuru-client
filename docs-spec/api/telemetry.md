@@ -30,8 +30,8 @@ sidebar_position: 8
 
 | `event` | いつ | 内容 |
 |---------|------|------|
-| `app_start` | 起動時 | `cpu_cores` `language`、取得できた `os_version` `ram_gb` `webview_version` `audio_host`、`settings`（下記） |
-| `audio_env` | 起動時 | 入出力デバイス（`name` `kind` `channels` `sample_rates` `min_buffer_frames` `is_default`）。無ければ `null` |
+| `app_start` | 起動時と、設定が変わったとき | `cpu_cores` `language`、取得できた `os_version` `ram_gb` `webview_version` `audio_host`、`settings`（下記） |
+| `audio_env` | 起動時と、使うデバイスを選び直したとき | 使っている入出力デバイス（`name` `kind` `channels` `sample_rates` `min_buffer_frames` `is_default`）。無ければ `null` |
 | `session_start` | 部屋を作った・入ったとき | `mode`（`create` / `join`） |
 | `session_end` | 部屋を出たとき | `duration_s` `end_reason` `reconnect_count` `peers_max` `xrun_count`、測れたものだけ `rtt_ms_p50` `rtt_ms_p95` `loss_pct_mean` `loss_pct_max` `fec_active_pct` |
 | `error` | エラーが起きたとき | `component` `code`（どちらも固定の列挙）`count`。メッセージ本文は送らない |
@@ -75,6 +75,8 @@ sequenceDiagram
     Srv-->>Rep: 204
 ```
 
+- 起動のあとに設定を保存して `settings` などの中身が変わったとき、使うデバイスを選び直して `audio_env` の中身が変わったときは、変わった側だけを送り直す（REQ-TEL-014）。続けて変えたときは、2 秒変化が無くなるのを待って最後の状態の 1 行にまとめる。最後に送った内容と同じなら送らない。`audio_env` の `input` / `output` は、選んだデバイス（選んでいなければ OS の既定）で、見つからなければ `null`
+- `fec_active_pct` は、回線の読み取り（2 秒ごと）のうち、その間に FEC が欠けたパケットを 1 つ以上復元したものの割合（0〜100）。FEC を送らない回線では行から外す
 - 1 回の送信は **64 KB・200 行まで**。収まらなかった分と、届かなかった分は捨てる（REQ-TEL-006）。再送で溜め込まず、失敗は利用者に見せない
 - `POST /api/v1/usage-logs`、`Content-Type: application/x-ndjson`。**匿名**（`X-Device-*` ヘッダを付けない）。204 だけを成功とみなす。リダイレクトは辿らない（REQ-TEL-007）
 - 宛先は、ビルドが持つ既定の接続先（`GET /api/v1/signaling` を問い合わせるのと同じサーバー）。設定 `server_url` の自前サーバーには送らない。ソースに宛先は書かない

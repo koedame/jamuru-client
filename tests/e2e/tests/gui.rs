@@ -649,6 +649,134 @@ fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it(
     );
 }
 
+/// Opens the settings window, turns usage reporting on and waits until the
+/// launch report is what would be sent.
+fn with_usage_reporting_on(app: &App) {
+    app.connection_screen().settings_button().click().unwrap();
+    let settings = app.settings_screen();
+    settings.wait_until_open(UI_TIMEOUT).unwrap();
+    settings.select_tab(SettingsTab::Diagnostics).unwrap();
+    let diagnostics = settings.diagnostics_tab();
+    diagnostics
+        .usage_reporting_switch()
+        .wait_until_visible(UI_TIMEOUT)
+        .unwrap();
+    diagnostics.usage_reporting_switch().click().unwrap();
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        last_usage_line(app, "audio_env").is_some() && last_usage_line(app, "app_start").is_some()
+    })
+    .expect("turning reporting on should record the launch report");
+}
+
+/// The last line of one kind in what would be sent, read from the Diagnostics
+/// tab (which it opens). What would be sent is the batch waiting, or the last
+/// batch that went out, so a line that was sent earlier is no longer in it.
+fn last_usage_line(app: &App, event: &str) -> Option<String> {
+    let settings = app.settings_screen();
+    settings.select_tab(SettingsTab::Diagnostics).unwrap();
+    let diagnostics = settings.diagnostics_tab();
+    diagnostics.show_usage_button().click().unwrap();
+    let shown = diagnostics.usage_preview().text().unwrap_or_default();
+    shown
+        .lines()
+        .rfind(|line| line.contains(&format!("\"event\":\"{event}\"")))
+        .map(str::to_string)
+}
+
+/// The line's `seq`, which is new for every line the app records.
+fn seq_of(line: &str) -> u64 {
+    let json: serde_json::Value = serde_json::from_str(line).unwrap();
+    json["seq"].as_u64().unwrap()
+}
+
+/// Changing a setting while reporting is on sends the settings again, once,
+/// not once per save the app made.
+///
+/// Verifies: REQ-TEL-014
+#[test]
+fn changing_a_setting_while_usage_reporting_is_on_reports_the_new_settings_once() {
+    let (_guard, app) = launch();
+    with_usage_reporting_on(&app);
+
+    let settings = app.settings_screen();
+    settings.select_tab(SettingsTab::General).unwrap();
+    settings
+        .general_tab()
+        .language_select()
+        .select_value("ja")
+        .unwrap();
+
+    let mut reported = None;
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        reported = last_usage_line(&app, "app_start");
+        reported
+            .as_deref()
+            .is_some_and(|line| line.contains("\"language\":\"ja\""))
+    })
+    .unwrap_or_else(|_| panic!("the new language never showed in what is sent: {reported:?}"));
+    let reported = reported.unwrap();
+
+    // Anything else the app saved after the change would have been sent by
+    // now, as a newer line.
+    std::thread::sleep(Duration::from_secs(4));
+    let later = last_usage_line(&app, "app_start").unwrap();
+    assert_eq!(
+        seq_of(&later),
+        seq_of(&reported),
+        "the change should have been reported once: {reported}\nthen {later}"
+    );
+}
+
+/// Choosing another audio device while reporting is on sends the devices
+/// again, once. Needs two input devices, like the scenario that switches them.
+///
+/// Verifies: REQ-TEL-014
+#[test]
+fn choosing_another_input_device_while_usage_reporting_is_on_reports_the_devices() {
+    let (_guard, app) = launch();
+    with_usage_reporting_on(&app);
+
+    let settings = app.settings_screen();
+    settings.select_tab(SettingsTab::Devices).unwrap();
+    let devices = settings.devices_tab();
+    let values = devices.input_device_select().option_values().unwrap();
+    let initial = devices.input_device_select().value().unwrap();
+    let other = values
+        .iter()
+        .find(|v| !v.is_empty() && **v != initial)
+        .unwrap_or_else(|| {
+            panic!(
+                "this scenario needs two input devices; the machine offers {:?}",
+                devices.input_device_select().option_labels().unwrap()
+            )
+        });
+    // Sending the device the panel picked on its own may still be under way.
+    std::thread::sleep(Duration::from_secs(4));
+    let before = last_usage_line(&app, "audio_env").map(|line| seq_of(&line));
+    settings.select_tab(SettingsTab::Devices).unwrap();
+    devices.input_device_select().select_value(other).unwrap();
+
+    let mut reported = None;
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        reported = last_usage_line(&app, "audio_env");
+        reported
+            .as_deref()
+            .is_some_and(|line| Some(seq_of(line)) != before && line.contains("\"input\":{"))
+    })
+    .unwrap_or_else(|_| {
+        panic!("choosing {other:?} never reported the devices: {reported:?} (before: {before:?})")
+    });
+    let reported = reported.unwrap();
+
+    std::thread::sleep(Duration::from_secs(4));
+    let later = last_usage_line(&app, "audio_env").unwrap();
+    assert_eq!(
+        seq_of(&later),
+        seq_of(&reported),
+        "the change should have been reported once: {reported}\nthen {later}"
+    );
+}
+
 /// The settings window is a second webview of the same app. It once mounted
 /// the connection screen for a frame before switching to the settings, and
 /// that screen connects to the signaling server as soon as it mounts, so every

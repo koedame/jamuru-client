@@ -10,7 +10,9 @@
 //! - **Settings** are sent whole except the items in [`settings::LEFT_OUT`].
 //! - **Device names** are sent as the OS reports them.
 //! - **How it is sent**: in batches of at most 64 KB and 200 lines, at
-//!   launch and when a session ends; errors ride along with the next send. A
+//!   launch, when the settings or the audio devices in use change (a run of
+//!   changes as its last state, and only if it differs from what was last
+//!   sent) and when a session ends; errors ride along with the next send. A
 //!   batch that does not arrive is dropped.
 //! - **What would be sent** can be read at any time with
 //!   [`UsageReporter::preview_ndjson`].

@@ -13,10 +13,13 @@ pub struct SessionTally {
     loss_pct_sum: f64,
     loss_pct_samples: u64,
     loss_pct_max: Option<f64>,
+    fec_samples: u64,
+    fec_active_samples: u64,
     reconnect_count: u32,
     xrun_count: u64,
     last_reconnect_total: u64,
     last_xrun_total: u64,
+    last_fec_total: u64,
     participants: u32,
     peers_max: u32,
 }
@@ -33,10 +36,13 @@ impl SessionTally {
             loss_pct_sum: 0.0,
             loss_pct_samples: 0,
             loss_pct_max: None,
+            fec_samples: 0,
+            fec_active_samples: 0,
             reconnect_count: 0,
             xrun_count: 0,
             last_reconnect_total: 0,
             last_xrun_total: 0,
+            last_fec_total: 0,
             participants: 0,
             peers_max: 0,
         }
@@ -53,6 +59,18 @@ impl SessionTally {
             self.loss_pct_sum += pct;
             self.loss_pct_samples += 1;
             self.loss_pct_max = Some(self.loss_pct_max.map_or(pct, |max| max.max(pct)));
+        }
+    }
+
+    /// One reading of a link that sends FEC: the total of packets FEC has
+    /// rebuilt so far, from a counter that restarts from zero with the
+    /// connection. The reading counts as active when that total grew since the
+    /// last reading.
+    pub fn sample_fec_total(&mut self, recovered_total: u64) {
+        let recovered = counter_growth(&mut self.last_fec_total, recovered_total);
+        self.fec_samples += 1;
+        if recovered > 0 {
+            self.fec_active_samples += 1;
         }
     }
 
@@ -112,9 +130,9 @@ impl SessionTally {
             loss_pct_mean: (self.loss_pct_samples > 0)
                 .then(|| round_tenth(self.loss_pct_sum / self.loss_pct_samples as f64)),
             loss_pct_max: self.loss_pct_max.map(round_tenth),
-            // Nothing in the connection counts the packets FEC recovered, so
-            // there is no figure to send.
-            fec_active_pct: None,
+            fec_active_pct: (self.fec_samples > 0).then(|| {
+                round_tenth(self.fec_active_samples as f64 / self.fec_samples as f64 * 100.0)
+            }),
             xrun_count: self.xrun_count,
         }
     }

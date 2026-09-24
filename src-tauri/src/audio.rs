@@ -146,11 +146,15 @@ fn log_devices(kind: &str, devices: &[AudioDeviceInfo]) {
 pub fn audio_set_input_device(
     device_id: Option<String>,
     state: tauri::State<'_, AudioState>,
+    usage: tauri::State<'_, crate::usage::UsageState>,
 ) -> Result<(), String> {
     let mut current = state.current_input_id.lock().map_err(|e| e.to_string())?;
     tracing::info!("Input device selected: {:?}", device_id);
-    *current = device_id;
+    *current = device_id.clone();
+    drop(current);
 
+    let output = state.current_output_id.lock().map_err(|e| e.to_string())?;
+    usage.devices_selected(device_id, output.clone());
     Ok(())
 }
 
@@ -163,11 +167,15 @@ pub fn audio_set_input_device(
 pub fn audio_set_output_device(
     device_id: Option<String>,
     state: tauri::State<'_, AudioState>,
+    usage: tauri::State<'_, crate::usage::UsageState>,
 ) -> Result<(), String> {
     let mut current = state.current_output_id.lock().map_err(|e| e.to_string())?;
     tracing::info!("Output device selected: {:?}", device_id);
-    *current = device_id;
+    *current = device_id.clone();
+    drop(current);
 
+    let input = state.current_input_id.lock().map_err(|e| e.to_string())?;
+    usage.devices_selected(input.clone(), device_id);
     Ok(())
 }
 

@@ -177,7 +177,7 @@ pub fn run() {
     let startup_config = load_startup_config();
     app.manage(AudioState::from_config(&startup_config));
     app.manage(StreamingState::new());
-    app.manage(ConfigState::new());
+    let config_state = ConfigState::new();
     // Loads (or generates on first launch) this installation's device
     // identity once at startup - ADR-024, replaces account sign-in.
     app.manage(DeviceIdentityState::load());
@@ -189,6 +189,9 @@ pub fn run() {
     if usage.reporter().is_enabled() {
         usage.report_launch(startup_config);
     }
+    let saved_usage = usage.clone();
+    config_state.on_saved(move |config| saved_usage.settings_saved(config));
+    app.manage(config_state);
     app.manage(usage);
 
     logging::log_startup(app.handle(), &log_spec);

@@ -375,11 +375,14 @@ enum StreamingCommand {
 
 impl StreamingState {
     /// The link's latest reading for the usage totals: the round-trip time
-    /// (`None` before the first sample) and the packet loss rate (0.0 to
-    /// 1.0). `None` while there is no connection.
-    pub(crate) fn link_reading(&self) -> Option<(Option<f32>, f32)> {
+    /// (`None` before the first sample), the packet loss rate (0.0 to 1.0)
+    /// and the packets FEC has rebuilt so far (`None` when the link sends no
+    /// FEC). `None` while there is no connection.
+    pub(crate) fn link_reading(&self) -> Option<(Option<f32>, f32, Option<u64>)> {
         let stats = self.stats.read().ok()?;
-        stats.as_ref().map(|s| (s.rtt_ms, s.packet_loss_rate))
+        stats
+            .as_ref()
+            .map(|s| (s.rtt_ms, s.packet_loss_rate, s.fec_recovered))
     }
 
     /// Buffer underruns since streaming last started.

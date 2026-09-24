@@ -8,6 +8,7 @@
 
 use cpal::traits::{DeviceTrait, HostTrait};
 
+use crate::audio::{resolve_input_device, resolve_output_device, DeviceId};
 use crate::config::{AppConfig, VALID_SAMPLE_RATES};
 use crate::environment;
 
@@ -29,16 +30,20 @@ pub fn app_start(config: &AppConfig) -> AppStart {
     }
 }
 
-/// The `audio_env` for the devices the OS has as default.
-pub fn audio_env() -> AudioEnv {
+/// The `audio_env` for the devices in use: the ones `input_id` and
+/// `output_id` name, or the OS default for a side with no id. A side whose
+/// device cannot be found is `None`.
+pub fn audio_env(input_id: Option<&str>, output_id: Option<&str>) -> AudioEnv {
     let host = cpal::default_host();
+    let default_input = host.default_input_device();
+    let default_output = host.default_output_device();
     AudioEnv {
-        input: host
-            .default_input_device()
-            .and_then(|device| describe(&device, Direction::Input)),
-        output: host
-            .default_output_device()
-            .and_then(|device| describe(&device, Direction::Output)),
+        input: resolve_input_device(input_id.map(|id| DeviceId(id.to_string())).as_ref())
+            .ok()
+            .and_then(|device| describe(&device, Direction::Input, default_input.as_ref())),
+        output: resolve_output_device(output_id.map(|id| DeviceId(id.to_string())).as_ref())
+            .ok()
+            .and_then(|device| describe(&device, Direction::Output, default_output.as_ref())),
     }
 }
 
@@ -48,12 +53,21 @@ enum Direction {
     Output,
 }
 
-fn describe(device: &cpal::Device, direction: Direction) -> Option<Device> {
+/// `default` is the OS default device for the same direction; the device is
+/// the default one when it has that device's name.
+fn describe(
+    device: &cpal::Device,
+    direction: Direction,
+    default: Option<&cpal::Device>,
+) -> Option<Device> {
     let description = device.description().ok()?;
     let name = description.name().to_string();
     if name.is_empty() {
         return None;
     }
+    let is_default = default
+        .and_then(|default| default.description().ok())
+        .is_some_and(|default| default.name() == name);
 
     let min_buffer_frames = match direction {
         Direction::Input => environment::min_input_buffer_frames(device),
@@ -91,7 +105,7 @@ fn describe(device: &cpal::Device, direction: Direction) -> Option<Device> {
         channels: channels.max(1),
         sample_rates,
         min_buffer_frames,
-        is_default: true,
+        is_default,
     })
 }
 

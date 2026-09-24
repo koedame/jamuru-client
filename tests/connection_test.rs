@@ -602,3 +602,101 @@ async fn fec_groups_line_up_with_audio_sequences_across_control_packets() {
         "the recovered frame is the one that was dropped, not a mix of others"
     );
 }
+
+/// Sends `frames` audio frames through a relay that swallows the audio frame
+/// numbered `dropped`, and returns what the receiver saw: the sequences its
+/// callback was handed, and its connection statistics.
+async fn send_frames_through_a_relay_that_drops_one(
+    fec_group_size: Option<usize>,
+    frames: u32,
+    dropped: Option<u32>,
+) -> (Vec<u32>, jamjam::network::ConnectionStats) {
+    use jamjam::audio::CodecType;
+    use jamjam::network::AudioEncodingConfig;
+    use jamjam::protocol::{Packet, PacketType};
+    use std::sync::{Arc, Mutex};
+
+    const FRAME: usize = 8;
+    let encoding = || AudioEncodingConfig {
+        codec_type: CodecType::Pcm,
+        sample_rate: 48000,
+        channels: 1,
+        frame_size: FRAME as u32,
+        bitrate: 0,
+        fec_group_size,
+    };
+
+    let mut receiver = Connection::new("127.0.0.1:0").await.expect("receiver");
+    receiver
+        .set_audio_encoding(encoding())
+        .expect("receiver encoding");
+    let delivered: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
+    let delivered_for_callback = delivered.clone();
+    receiver.set_audio_callback(move |sequence, _payload, _timestamp| {
+        delivered_for_callback.lock().unwrap().push(sequence);
+    });
+    let receiver_addr = receiver.local_addr();
+    receiver
+        .connect(receiver_addr)
+        .await
+        .expect("receiver starts its loop");
+
+    let relay = tokio::net::UdpSocket::bind("127.0.0.1:0")
+        .await
+        .expect("relay socket");
+    let relay_addr = relay.local_addr().expect("relay address");
+    tokio::spawn(async move {
+        let mut buf = [0u8; 2048];
+        while let Ok((len, _)) = relay.recv_from(&mut buf).await {
+            let swallowed = Packet::from_bytes(&buf[..len]).is_some_and(|packet| {
+                matches!(packet.packet_type, PacketType::Audio) && Some(packet.sequence) == dropped
+            });
+            if !swallowed {
+                let _ = relay.send_to(&buf[..len], receiver_addr).await;
+            }
+        }
+    });
+
+    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender");
+    sender
+        .set_audio_encoding(encoding())
+        .expect("sender encoding");
+    sender.connect(relay_addr).await.expect("sender connects");
+    for i in 0..frames {
+        let frame = vec![(i as f32 + 1.0) / 16.0; FRAME];
+        sender.send_audio(&frame, 0).await.expect("send audio");
+    }
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let sequences = delivered.lock().unwrap().clone();
+    (sequences, receiver.stats())
+}
+
+/// When a frame is lost on the way and FEC rebuilds it, the receiver counts
+/// it, and the frame reaches the audio callback once, under its own number.
+///
+/// Verifies: REQ-TEL-010
+#[tokio::test]
+async fn when_fec_rebuilds_a_lost_frame_the_connection_counts_it() {
+    let (sequences, stats) = send_frames_through_a_relay_that_drops_one(Some(4), 8, Some(2)).await;
+
+    assert_eq!(stats.fec_recovered, Some(1));
+    assert_eq!(sequences.iter().filter(|&&s| s == 2).count(), 1);
+}
+
+/// Verifies: REQ-TEL-010
+#[tokio::test]
+async fn when_nothing_is_lost_the_connection_counts_no_fec_recovery() {
+    let (_, stats) = send_frames_through_a_relay_that_drops_one(Some(4), 8, None).await;
+
+    assert_eq!(stats.fec_recovered, Some(0));
+}
+
+/// Verifies: REQ-TEL-010
+#[tokio::test]
+async fn when_the_link_sends_no_fec_the_connection_has_no_recovery_count() {
+    let (sequences, stats) = send_frames_through_a_relay_that_drops_one(None, 8, Some(2)).await;
+
+    assert_eq!(stats.fec_recovered, None);
+    assert!(!sequences.contains(&2), "nothing rebuilds the lost frame");
+}

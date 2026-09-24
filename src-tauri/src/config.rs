@@ -15,9 +15,13 @@ pub use jamjam::config::{
     DEFAULT_SERVER_URL, MAX_HISTORY_ENTRIES, VALID_SAMPLE_RATES,
 };
 
+/// Called with the new configuration after each successful save
+type SavedHook = Box<dyn Fn(&AppConfig) + Send + Sync>;
+
 /// State for configuration management
 pub struct ConfigState {
     config: Mutex<AppConfig>,
+    on_saved: Mutex<Option<SavedHook>>,
 }
 
 impl ConfigState {
@@ -26,6 +30,14 @@ impl ConfigState {
         let config = load_config().unwrap_or_default();
         Self {
             config: Mutex::new(config),
+            on_saved: Mutex::new(None),
+        }
+    }
+
+    /// Calls `hook` with the new configuration after each successful save.
+    pub fn on_saved(&self, hook: impl Fn(&AppConfig) + Send + Sync + 'static) {
+        if let Ok(mut on_saved) = self.on_saved.lock() {
+            *on_saved = Some(Box::new(hook));
         }
     }
 
@@ -59,7 +71,13 @@ impl ConfigState {
         *config = new_config.clone();
         drop(config);
 
-        save_config(&new_config)
+        save_config(&new_config)?;
+        if let Ok(on_saved) = self.on_saved.lock() {
+            if let Some(hook) = on_saved.as_ref() {
+                hook(&new_config);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -85,14 +103,8 @@ pub fn config_load(state: tauri::State<'_, ConfigState>) -> Result<AppConfig, St
 ///
 /// Validates and saves the provided configuration.
 #[tauri::command]
-pub fn config_save(
-    config: AppConfig,
-    state: tauri::State<'_, ConfigState>,
-    usage: tauri::State<'_, crate::usage::UsageState>,
-) -> Result<(), String> {
-    state.update(config.clone())?;
-    usage.apply_setting(&config);
-    Ok(())
+pub fn config_save(config: AppConfig, state: tauri::State<'_, ConfigState>) -> Result<(), String> {
+    state.update(config)
 }
 
 /// Get the jamjam server URL from configuration
