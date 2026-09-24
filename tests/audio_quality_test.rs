@@ -3,8 +3,8 @@
 //! Tests for audio quality functionality.
 
 use jamjam::audio::{
-    create_resampler, AudioCodec, AudioConfig, AudioEngine, AudioPreset, BitDepth, CaptureConfig,
-    CodecConfig, CodecType, LocalMonitor, PcmCodec, PlaybackConfig, WIRE_CHANNELS,
+    capture_to_wire, create_resampler, AudioCodec, AudioConfig, AudioEngine, AudioPreset, BitDepth,
+    CaptureConfig, CodecConfig, CodecType, LocalMonitor, PcmCodec, PlaybackConfig, WIRE_CHANNELS,
 };
 use jamjam::protocol::Packet;
 
@@ -40,36 +40,106 @@ fn test_sample_rate_96khz() {
     assert_eq!(engine.config().sample_rate, 96000);
 }
 
-/// Test: Operates with mono input
-/// When input channel is set to "mono"
-/// Then 1-channel audio is transmitted
-/// Verifies: REQ-AUD-107
-#[test]
-fn test_mono_input() {
-    let config = CaptureConfig {
-        sample_rate: 48000,
-        channels: 1,
-        frame_size: 128,
-        bit_depth: BitDepth::F32,
+/// Runs one captured frame the way a session sends it - `capture_to_wire`,
+/// then `Connection::send_audio` over a UDP socket - and returns what the peer
+/// decodes: the interleaved samples and the size of the payload on the wire.
+async fn send_captured_frame(
+    captured: &[f32],
+    channels: usize,
+    volume: f32,
+    pan: i32,
+) -> (Vec<f32>, usize) {
+    use jamjam::network::{AudioEncodingConfig, Connection};
+    use jamjam::protocol::PacketType;
+
+    let frame_size = captured.len() / channels;
+    let peer = std::net::UdpSocket::bind("127.0.0.1:0").expect("peer socket");
+    peer.set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .expect("read timeout");
+
+    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
+    sender
+        .set_audio_encoding(AudioEncodingConfig {
+            codec_type: CodecType::Pcm,
+            sample_rate: 48000,
+            channels: WIRE_CHANNELS as u16,
+            frame_size: frame_size as u32,
+            bitrate: 0,
+            fec_group_size: None,
+        })
+        .expect("encoding");
+    sender
+        .connect(peer.local_addr().expect("peer address"))
+        .await
+        .expect("connect");
+
+    let mut wire = vec![0.0f32; frame_size * WIRE_CHANNELS];
+    capture_to_wire(captured, channels, volume, pan, &mut wire);
+    sender.send_audio(&wire, 0).await.expect("send audio");
+
+    let mut buf = [0u8; 4096];
+    let payload = loop {
+        let len = peer.recv(&mut buf).expect("the sender's packet arrives");
+        let packet = Packet::from_bytes(&buf[..len]).expect("a valid packet");
+        if packet.packet_type == PacketType::Audio {
+            break packet.payload;
+        }
     };
 
-    assert_eq!(config.channels, 1);
+    let mut receiver = PcmCodec::new(&CodecConfig {
+        codec_type: CodecType::Pcm,
+        sample_rate: 48000,
+        channels: WIRE_CHANNELS as u16,
+        frame_size: frame_size as u32,
+        bitrate: 0,
+    });
+    let decoded = receiver.decode(&payload).expect("decode");
+    (decoded, payload.len())
+}
+
+/// Test: Operates with mono input
+/// When input channel is set to "mono"
+/// Then the mono capture is what is transmitted
+/// And the receiving side plays both channels the same
+/// Verifies: REQ-AUD-107
+#[tokio::test]
+async fn test_mono_input() {
+    let captured = [0.5f32, -0.25, 0.75, 0.125];
+
+    let (decoded, _) = send_captured_frame(&captured, 1, 1.0, 0).await;
+
+    assert_eq!(decoded.len(), captured.len() * WIRE_CHANNELS);
+    for (frame, &sample) in decoded.as_chunks::<WIRE_CHANNELS>().0.iter().zip(&captured) {
+        assert_eq!(frame[0], frame[1], "both channels are the same");
+        let expected = sample * std::f32::consts::FRAC_1_SQRT_2;
+        assert!(
+            (frame[0] - expected).abs() < 1e-6,
+            "the capture {sample} arrives centred: {frame:?}"
+        );
+    }
 }
 
 /// Test: Operates with stereo input
 /// When input channel is set to "stereo"
 /// Then 2-channel audio is transmitted
+/// And the receiving side plays it in stereo
 /// Verifies: REQ-AUD-108
-#[test]
-fn test_stereo_input() {
-    let config = CaptureConfig {
-        sample_rate: 48000,
-        channels: 2,
-        frame_size: 128,
-        bit_depth: BitDepth::F32,
-    };
+#[tokio::test]
+async fn test_stereo_input() {
+    // Left and right carry different audio, so mixing them across would show.
+    let captured = [0.5f32, -0.25, 0.75, 0.125, -0.5, 0.0];
 
-    assert_eq!(config.channels, 2);
+    let (decoded, payload_bytes) = send_captured_frame(&captured, 2, 1.0, 0).await;
+
+    assert_eq!(
+        payload_bytes,
+        captured.len() * std::mem::size_of::<f32>(),
+        "both channels are on the wire"
+    );
+    assert_eq!(
+        decoded, captured,
+        "the receiving side gets each side as it was captured"
+    );
 }
 
 /// Given participant B has set their transmit channel count to mono

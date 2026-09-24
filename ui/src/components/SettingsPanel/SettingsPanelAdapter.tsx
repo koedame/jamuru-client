@@ -18,6 +18,7 @@ import {
   streamingStart,
   streamingStop,
   streamingSetInputDevice,
+  streamingSetTransmitChannels,
   streamingSetOutputDevice,
   configLoad,
   configSave,
@@ -552,6 +553,16 @@ export function SettingsPanelAdapter({
         await configSetTransmitChannels(count);
         setTransmitChannels(value);
         onSettingsChange?.();
+
+        // Update running stream if active
+        try {
+          const status = await streamingStatus();
+          if (status.is_active) {
+            await streamingSetTransmitChannels(count);
+          }
+        } catch {
+          // Ignore
+        }
       } catch (err) {
         console.error("Failed to set transmit channels:", err);
       }

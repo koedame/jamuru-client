@@ -39,6 +39,38 @@ pub fn mono_to_wire(mono: &[f32], volume: f32, pan: i32, out: &mut [f32]) {
     }
 }
 
+/// Turns a captured frame of `channels` channels into the stereo frame that is
+/// sent, applying `volume` and `pan` (both as in [`mono_to_wire`]).
+///
+/// A mono capture is placed in the stereo field by `pan`. A stereo capture
+/// keeps its own image: `pan` acts as a balance, leaving the side it points to
+/// untouched and turning the other side down, so a centred balance passes the
+/// capture through unchanged. `out` must hold two samples per captured frame.
+pub fn capture_to_wire(captured: &[f32], channels: usize, volume: f32, pan: i32, out: &mut [f32]) {
+    if channels != WIRE_CHANNELS {
+        mono_to_wire(captured, volume, pan, out);
+        return;
+    }
+
+    let angle = (pan.clamp(-100, 100).unsigned_abs() as f32 / 100.0) * std::f32::consts::FRAC_PI_2;
+    let quieter = angle.cos();
+    let (left_gain, right_gain) = if pan > 0 {
+        (quieter, 1.0)
+    } else {
+        (1.0, quieter)
+    };
+
+    for (frame, pair) in out
+        .as_chunks_mut::<WIRE_CHANNELS>()
+        .0
+        .iter_mut()
+        .zip(captured.as_chunks::<WIRE_CHANNELS>().0)
+    {
+        frame[0] = pair[0] * volume * left_gain;
+        frame[1] = pair[1] * volume * right_gain;
+    }
+}
+
 /// What following the peer's sample rate changed.
 #[derive(Debug)]
 pub enum PeerRateChange {
@@ -513,5 +545,44 @@ mod tests {
         mono_to_wire(&[1.0, 1.0], 0.5, -100, &mut out);
         assert!((out[0] - 0.5).abs() < 1e-6);
         assert!(out[1].abs() < 1e-6);
+    }
+
+    /// The two sides of a stereo capture stay apart: nothing is mixed across,
+    /// and a centred balance leaves the level alone.
+    #[test]
+    fn capture_to_wire_keeps_the_sides_of_a_stereo_capture_apart() {
+        let mut out = [0.0f32; 4];
+
+        capture_to_wire(&[0.25, -0.5, 0.75, 0.125], 2, 1.0, 0, &mut out);
+
+        assert_eq!(out, [0.25, -0.5, 0.75, 0.125]);
+    }
+
+    /// Balance turns down the side away from where it points, and volume
+    /// scales both.
+    #[test]
+    fn capture_to_wire_balances_and_scales_a_stereo_capture() {
+        let mut out = [0.0f32; 2];
+
+        capture_to_wire(&[1.0, 1.0], 2, 0.5, 100, &mut out);
+        assert!(out[0].abs() < 1e-6, "hard right silences the left: {out:?}");
+        assert!((out[1] - 0.5).abs() < 1e-6);
+
+        capture_to_wire(&[1.0, 1.0], 2, 1.0, -100, &mut out);
+        assert!((out[0] - 1.0).abs() < 1e-6);
+        assert!(out[1].abs() < 1e-6, "hard left silences the right: {out:?}");
+    }
+
+    /// A mono capture takes the same path as before: one sample becomes a
+    /// panned pair.
+    #[test]
+    fn capture_to_wire_places_a_mono_capture_with_the_pan_law() {
+        let mut from_capture = [0.0f32; 4];
+        let mut from_mono = [0.0f32; 4];
+
+        capture_to_wire(&[0.5, -0.25], 1, 0.8, 30, &mut from_capture);
+        mono_to_wire(&[0.5, -0.25], 0.8, 30, &mut from_mono);
+
+        assert_eq!(from_capture, from_mono);
     }
 }

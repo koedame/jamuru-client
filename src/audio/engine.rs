@@ -206,6 +206,13 @@ impl AudioEngine {
         self.current_output_device.as_ref()
     }
 
+    /// Sets how many channels capture opens the device with, from the next
+    /// `start_capture` on. The callback then receives that many channels
+    /// interleaved.
+    pub fn set_capture_channels(&mut self, channels: u16) {
+        self.config.channels = channels;
+    }
+
     /// Start audio capture with a callback for captured samples
     ///
     /// The callback is `FnMut + Send` (not Sync) - this allows non-Sync types like
