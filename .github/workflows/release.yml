@@ -114,6 +114,10 @@ jobs:
         env:
           # The signaling server the app dials (ADR-030). Kept out of the source.
           JAMJAM_SERVER_URL: ${{ secrets.JAMJAM_SERVER_URL }}
+          # Signs the update bundles (`createUpdaterArtifacts`); the apps
+          # check them against the public key in `tauri.conf.json` (ADR-041).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # `-` is passed straight through to `codesign -s -`, i.e. an
           # ad-hoc signature. Without any signature a hand-downloaded
           # DMG opens as "damaged"; ad-hoc signed it lands on the
@@ -123,13 +127,27 @@ jobs:
           # for microphone input. Not a replacement for a Developer ID
           # signature plus notarization.
           APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.os, 'macos') && '-' || '' }}
-        run: cargo tauri build --target ${{ matrix.target }}
+        # The updater settings (public key, where to look) are given to the
+        # release build only, so a build from source never replaces itself.
+        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json
 
       - name: Check the app dials the production signaling server
         shell: bash
         env:
           JAMJAM_SERVER_URL: ${{ secrets.JAMJAM_SERVER_URL }}
         run: scripts/check-release-server-url.sh "src-tauri/target/${{ matrix.target }}/release/jamjam-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" ui/dist
+
+      # Both macOS jobs build `jamjam.app.tar.gz`. A release keeps one file per
+      # name, so the architecture goes into it.
+      - name: Name the macOS update bundle by architecture
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          arch="${{ matrix.target == 'aarch64-apple-darwin' && 'aarch64' || 'x64' }}"
+          mv "${dir}/jamjam.app.tar.gz" "${dir}/jamjam_${arch}.app.tar.gz"
+          mv "${dir}/jamjam.app.tar.gz.sig" "${dir}/jamjam_${arch}.app.tar.gz.sig"
 
       - name: Upload artifacts (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -138,6 +156,7 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
 
       - name: Upload artifacts (macOS)
@@ -147,6 +166,8 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
 
       - name: Upload artifacts (Windows)
         if: matrix.os == 'windows-latest'
@@ -155,7 +176,9 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
 
   release:
     name: Create Release
@@ -184,8 +207,8 @@ jobs:
           declare -A patterns=(
             ["Linux AppImage"]="artifacts/jamjam-linux-x64/**/*.AppImage"
             ["Linux deb"]="artifacts/jamjam-linux-x64/**/*.deb"
-            ["macOS x64 dmg"]="artifacts/jamjam-macos-x64/*.dmg"
-            ["macOS arm64 dmg"]="artifacts/jamjam-macos-arm64/*.dmg"
+            ["macOS x64 dmg"]="artifacts/jamjam-macos-x64/**/*.dmg"
+            ["macOS arm64 dmg"]="artifacts/jamjam-macos-arm64/**/*.dmg"
             ["Windows msi"]="artifacts/jamjam-windows-x64/**/*.msi"
             ["Windows exe"]="artifacts/jamjam-windows-x64/**/*.exe"
           )
@@ -208,6 +231,15 @@ jobs:
           fi
           echo "All 6 release artifacts present."
 
+      # What installed apps read to learn there is a newer release. It stops
+      # the release, before anything is published, when the bundles would not
+      # update anyone (a tag that is not the built version, a missing or
+      # unversioned signature).
+      - name: Write the update manifest
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: scripts/make-update-manifest.sh "${TAG}" artifacts > latest.json
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
@@ -220,11 +252,19 @@ jobs:
           prerelease: ${{ contains(needs.prepare.outputs.tag, '-') }}
           files: |
             artifacts/jamjam-linux-x64/**/*.AppImage
+            artifacts/jamjam-linux-x64/**/*.AppImage.sig
             artifacts/jamjam-linux-x64/**/*.deb
-            artifacts/jamjam-macos-x64/*.dmg
-            artifacts/jamjam-macos-arm64/*.dmg
+            artifacts/jamjam-macos-x64/**/*.dmg
+            artifacts/jamjam-macos-x64/**/*.app.tar.gz
+            artifacts/jamjam-macos-x64/**/*.app.tar.gz.sig
+            artifacts/jamjam-macos-arm64/**/*.dmg
+            artifacts/jamjam-macos-arm64/**/*.app.tar.gz
+            artifacts/jamjam-macos-arm64/**/*.app.tar.gz.sig
             artifacts/jamjam-windows-x64/**/*.msi
+            artifacts/jamjam-windows-x64/**/*.msi.sig
             artifacts/jamjam-windows-x64/**/*.exe
+            artifacts/jamjam-windows-x64/**/*.exe.sig
+            latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -253,7 +293,7 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
+          shopt -s nullglob globstar
 
           # Same rule as `prerelease:` in the release job above.
           if [[ "${TAG}" == *-* ]]; then
@@ -264,8 +304,8 @@ jobs:
             CONFLICTS_WITH="jamjam@beta"
           fi
 
-          arm=(artifacts/jamjam-macos-arm64/*.dmg)
-          x64=(artifacts/jamjam-macos-x64/*.dmg)
+          arm=(artifacts/jamjam-macos-arm64/**/*.dmg)
+          x64=(artifacts/jamjam-macos-x64/**/*.dmg)
           if [ ${#arm[@]} -ne 1 ] || [ ${#x64[@]} -ne 1 ]; then
             echo "ERROR: expected exactly one DMG per architecture" >&2
             ls -R artifacts >&2

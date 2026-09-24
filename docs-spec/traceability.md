@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 164 |
-| うち must | 159 |
+| 要求 総数 | 175 |
+| うち must | 170 |
 | うち should | 5 |
-| 検証済み | 137 |
+| 検証済み | 148 |
 | サーバーを立てた接続テストでのみ検証 | 24 |
 | 未検証（should のみ許容） | 3 |
 
@@ -184,6 +184,17 @@
 | REQ-TEL-012 | must | スイッチの説明文が、何のために送るか・送るもの・送らないもの・デバイス名に利用者自身の名前が入りうること・オフにすると ID と未送信の内容を捨てることを、英語と日本語で書く | `docs-spec/requirements.md` | `ui/src/components/SettingsPanel/SettingsPanelAdapter.usage.test.tsx`::en<br/>`ui/src/components/SettingsPanel/tabs/DiagnosticsTab.test.tsx`::the section is shown, it says what is sent, what is not, and that device names can hold a name |
 | REQ-TEL-013 | must | 「送る内容を見る」が、次に送る NDJSON（インストール ID を含む）を送る本文のまま表示する。オフのときは、何も集めず何も送らずインストール ID が無いことを表示する。オフにすると、表示していた内容は消える | `docs-spec/requirements.md` | `tests/e2e/tests/gui.rs`::turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.usage.test.tsx`::the user turns it off while the lines are shown, they are replaced by a note that nothing is sent and there is no ID<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.usage.test.tsx`::the user turns it on and asks what is sent, the lines with the install ID are shown<br/>`ui/src/components/SettingsPanel/tabs/DiagnosticsTab.test.tsx`::lines are waiting to be sent, they are shown as they are, install ID included<br/>`ui/src/components/SettingsPanel/tabs/DiagnosticsTab.test.tsx`::the user asks what is sent, the handler runs<br/>`ui/src/components/SettingsPanel/tabs/DiagnosticsTab.test.tsx`::usage reporting is off and the preview is empty, it says nothing is sent and there is no ID<br/>`ui/src/components/SettingsPanel/tabs/DiagnosticsTab.test.tsx`::usage reporting is on and nothing is waiting, it says so |
 | REQ-TEL-014 | must | 設定を保存して内容が変わったとき、使う音声デバイスを選び直して内容が変わったときは、変わった側だけを `app_start` / `audio_env` として送り直す。続けて変えたときは、最後の状態の 1 行にまとめる（2 秒変化が無いのを待つ）。最後に送った内容と同じなら送らない。`audio_env` は OS の既定ではなく、選んだデバイスを書く | `docs-spec/requirements.md` | `src-tauri/src/usage.rs`::when_another_device_is_chosen_the_devices_in_use_are_reported<br/>`src-tauri/src/usage.rs`::when_devices_are_chosen_several_times_in_a_row_they_are_reported_once<br/>`src-tauri/src/usage.rs`::when_the_devices_in_use_are_the_ones_already_reported_nothing_is_reported<br/>`src-tauri/src/usage.rs`::when_the_settings_are_saved_unchanged_nothing_is_reported<br/>`src-tauri/src/usage.rs`::when_the_settings_change_after_launch_the_new_settings_are_reported<br/>`src-tauri/src/usage.rs`::when_the_settings_change_and_change_back_within_the_wait_nothing_is_reported<br/>`src-tauri/src/usage.rs`::when_the_settings_change_several_times_in_a_row_only_the_last_state_is_reported<br/>`tests/e2e/tests/gui.rs`::changing_a_setting_while_usage_reporting_is_on_reports_the_new_settings_once<br/>`tests/e2e/tests/gui.rs`::choosing_another_input_device_while_usage_reporting_is_on_reports_the_devices |
+| REQ-UPD-001 | must | 設定 `auto_update` の既定はオンである。リリースのビルドは、起動の 20 秒後と、その後 6 時間おきに新しい版を確かめ、あれば利用者の操作なしに入れて再起動する | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_setting_is_on_in_a_release_build_the_app_updates_itself<br/>`src/config.rs`::when_the_setting_is_absent_the_app_updates_itself |
+| REQ-UPD-002 | must | `auto_update` をオフにすると、確認も適用もしない。設定は確認のたびに読み直すので、再起動は要らない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_setting_is_off_the_app_does_not_update_itself<br/>`src/config.rs`::when_the_setting_is_off_in_the_file_the_app_does_not_update_itself |
+| REQ-UPD-003 | must | 開発ビルドと E2E 用のビルドは自分を更新しない。更新の設定（公開鍵・取得先）は `tauri.conf.json` に無く、リリースのビルドにだけ渡す。設定が無いビルド（自前のビルド）は更新の部品も登録しない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_it_is_a_development_build_the_app_does_not_update_itself<br/>`tests/distribution_config_test.rs`::a_build_from_source_is_given_no_updater |
+| REQ-UPD-004 | must | 自分で置き換えられない配布形態（Linux の deb）は、更新を試みない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_package_cannot_replace_itself_the_app_does_not_try |
+| REQ-UPD-005 | must | セッション中は入れない。ダウンロードを済ませて待ち、セッションを抜けたら入れる | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_user_is_in_a_session_the_install_waits_until_it_ends<br/>`src-tauri/src/updater.rs`::when_the_user_is_not_in_a_session_the_install_does_not_wait |
+| REQ-UPD-006 | must | 入れるのは、アプリに埋め込んだ公開鍵で署名が合い、署名が指す版が案内された版と同じものだけである。取得先は `https` に限る。公開鍵は空でない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::updates_are_checked_against_a_public_key_and_fetched_over_https |
+| REQ-UPD-007 | must | 更新情報の取得先は最新の正式版のもの（GitHub の `releases/latest`）で、ベータ版（pre-release）は配らない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::updates_come_from_the_latest_release_only |
+| REQ-UPD-008 | must | リリースのビルドは、更新用の成果物（署名つき）を作る。そのための設定は、リリースのワークフローがビルドに渡す | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::the_release_build_makes_signed_update_bundles |
+| REQ-UPD-009 | must | 更新情報（`latest.json`）は、macOS 2 種（arm64・x64）・Linux（AppImage）・Windows（NSIS・MSI）の全部について、成果物の URL と署名を持つ | `docs-spec/requirements.md` | `tests/update_manifest_test.rs`::when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_all |
+| REQ-UPD-010 | must | タグの版がビルドした版（`tauri.conf.json`）と違うとき、更新情報を作らない（作ると、更新したアプリが同じ更新を繰り返し入れる）。ベータ版のタグ（`vX.Y.Z-beta.N`）は X.Y.Z で比べる | `docs-spec/requirements.md` | `tests/update_manifest_test.rs`::when_the_tag_is_a_beta_of_the_built_version_the_manifest_is_written<br/>`tests/update_manifest_test.rs`::when_the_tag_is_another_version_than_the_one_built_no_manifest_is_written |
+| REQ-UPD-011 | must | 署名が無い・署名が版を名指ししていない・名指した版がビルドした版と違う・成果物が欠けているとき、更新情報を作らない | `docs-spec/requirements.md` | `tests/update_manifest_test.rs`::when_a_platforms_bundle_is_missing_no_manifest_is_written<br/>`tests/update_manifest_test.rs`::when_a_signature_names_another_version_no_manifest_is_written<br/>`tests/update_manifest_test.rs`::when_a_signature_names_no_version_no_manifest_is_written |
 
 ## 未検証の要求（ギャップ）
 

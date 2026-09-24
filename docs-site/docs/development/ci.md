@@ -96,6 +96,8 @@ main ブランチへの push またはタグ作成時に実行されます。
 | `vX.Y.Z` のタグ | 正式版 | `jamjam` を更新 |
 | 手動起動 | 何も公開しない（ビルドの予行演習） | 更新しない |
 
+リリースのビルドは、更新用の成果物と署名（`.sig`）も作り、正式版だけ更新情報 `latest.json` を Release に添えます（[ADR-041](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-041-self-update.md)）。正式版のタグ `vX.Y.Z` は、`src-tauri/tauri.conf.json` の版と同じでなければ、更新情報を作る段階で失敗します。先に版を上げてからタグを打ってください。
+
 ベータ版のタグは main への push ごとに作られます。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。
 
 ## ローカルでのCI実行

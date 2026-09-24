@@ -21,7 +21,7 @@ serde_json = "1"
 
 # Core jamjam library for network functionality
 jamjam = { path = ".." }
-tokio = { version = "1", features = ["sync", "net"] }
+tokio = { version = "1", features = ["sync", "net", "time"] }
 uuid = { version = "1", features = ["v4"] }
 
 # Real-time safe ring buffer (wait-free, lock-free)
@@ -47,6 +47,9 @@ tauri-plugin-log = "2"
 
 tauri-plugin-deep-link = "2.4.9"
 
+# Installs a new release by itself (ADR-041).
+tauri-plugin-updater = "2"
+
 [dev-dependencies]
 # Isolated config/identity directories for persistence tests
 tempfile = "3"
@@ -55,6 +58,9 @@ tempfile = "3"
 # the client reconnects automatically. Pinned to the same version the
 # jamjam library uses so client and test server agree on the wire protocol.
 tokio-tungstenite = "0.30"
+
+# `#[tokio::test]` for the self-update tests
+tokio = { version = "1", features = ["macros", "rt"] }
 
 # tauri::test::mock_app(), for calling a #[tauri::command] directly in a
 # test without a real window.

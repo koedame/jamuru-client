@@ -36,7 +36,7 @@ Homebrew を使っているなら tap を追加して cask で入れられます
 brew install --cask koedame/tap/jamjam
 ```
 
-更新は `brew upgrade --cask jamjam`、削除は `brew uninstall --cask jamjam`（設定ファイルごと消すなら `brew uninstall --zap --cask jamjam`）。
+更新はアプリが自分で行います（後述の「自動更新」）。`brew upgrade --cask jamjam` でも更新できます。削除は `brew uninstall --cask jamjam`（設定ファイルごと消すなら `brew uninstall --zap --cask jamjam`）。
 
 Homebrew はダウンロードしたものに Gatekeeper の隔離属性を付けます。付いたままだと公証なしのアプリは 「"jamjam.app" is damaged and can't be opened.」で開けないため、cask 側でインストール後に属性を外しています。そのため brew で入れた場合は下の「署名なしアプリの警告」の手順は要りません。
 cask が指すのは [GitHub Releases](https://github.com/koedame/jamjam-client/releases) に公開済みのタグで、リリースのたびに自動更新されます。
@@ -50,6 +50,24 @@ brew install --cask koedame/tap/jamjam@beta
 ```
 
 正式版とベータ版は同じ `jamjam.app` を入れるため同時には入れられません。正式版に戻すときは `brew uninstall --cask jamjam@beta` のあとで `brew install --cask koedame/tap/jamjam` を実行してください。ベータ版の更新は `brew upgrade --cask jamjam@beta` です。
+
+### 自動更新
+
+新しい正式版が出ると、jamjam が自分で入れ替えます。操作は要りません。
+
+- 起動の少しあとと、その後 6 時間おきに、新しい版が出ていないかを GitHub から確かめます。あれば、ダウンロードして署名を確かめ、入れて、再起動します。
+- **セッションの途中では入れません。** セッションを抜けたあとに入れます。
+- ベータ版どうしは自動更新されません（上の「ベータ版を試す」）。ベータ版を使っていて、それより新しい正式版が出たときは、正式版に更新されます。
+- 対応するのは、Windows（`.msi`・`.exe`）、macOS、Linux の AppImage です。Linux の `.deb` で入れた場合は、パッケージ管理（`apt`）で更新してください。
+- 自分でビルドしたアプリは、自動更新しません。
+
+止めるときは、設定ファイル `config.toml` に次の 1 行を足します。設定画面には出しません。
+
+```toml
+auto_update = false
+```
+
+`config.toml` の場所は [トラブルシューティング](./troubleshooting.md) を参照してください。
 
 ### リリースビルドからのインストール
 
