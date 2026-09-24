@@ -51,7 +51,7 @@ create_devices() {
         media.class = Audio/Sink
         object.linger = true
         audio.channels = 8
-        audio.position = [ FL FR FC LFE RL RR SL SR ]
+        audio.position = [ UNK UNK UNK UNK UNK UNK UNK UNK ]
         monitor.channel-volumes = true
         monitor.passthrough = true
     }' 2>/dev/null || echo "8ch sink may already exist"
@@ -66,8 +66,9 @@ create_devices() {
     echo ""
     echo "The 8ch sink is reached through an ALSA PCM of the same name. Add this to"
     echo "~/.asoundrc, and run the app and the tests with"
-    echo "PIPEWIRE_PROPS='{ stream.capture.sink=true }' so that a capture opened on a"
-    echo "sink reads that sink's monitor:"
+    echo "PIPEWIRE_PROPS='{ stream.capture.sink=true channelmix.upmix=false }' so that a"
+    echo "capture opened on a sink reads that sink's monitor, and a stereo stream is"
+    echo "not spread over channels 3-8:"
     echo ""
     echo "  pcm.$SINK_8CH_NAME {"
     echo "    type pipewire"
