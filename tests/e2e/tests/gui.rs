@@ -868,3 +868,44 @@ fn the_loopback_device_returns_what_is_played_into_it() {
         observed
     );
 }
+
+/// The 8-channel fixture keeps channels apart: a tone put on one channel comes
+/// back on that channel and on no other. This is what lets a scenario ask
+/// "which channel did the app read or write?" and trust the answer. Checked
+/// before any assertion about the app, like [`the_loopback_device_returns_what_is_played_into_it`].
+///
+/// The Linux devices hold no history (BlackHole on macOS does, see the module
+/// doc of `loopback_audio`), so this asserts levels rather than a rise.
+///
+/// Verifies: REQ-GUI-012
+#[test]
+fn the_8ch_loopback_device_returns_each_channel_where_it_was_played() {
+    let _guard = exclusive();
+    loopback_audio::require_device_8ch().expect("8ch loopback device");
+
+    for channel in [1u16, 2, 5, 6, 8] {
+        let _tone =
+            loopback_audio::play_tone_on_channel_8ch(channel, FIXTURE_HZ, TONE_AMPLITUDE).unwrap();
+        let peaks = loopback_audio::measure_input_channel_peaks_8ch(MEASURE).unwrap();
+
+        for (index, peak) in peaks.iter().enumerate() {
+            if index + 1 == channel as usize {
+                assert!(
+                    *peak >= TONE_AMPLITUDE * 0.5,
+                    "a tone on channel {} should come back on channel {}, but the peaks are {:?}",
+                    channel,
+                    channel,
+                    peaks
+                );
+            } else {
+                assert!(
+                    *peak <= TONE_AMPLITUDE * 0.1,
+                    "a tone on channel {} leaked into channel {}: peaks are {:?}",
+                    channel,
+                    index + 1,
+                    peaks
+                );
+            }
+        }
+    }
+}

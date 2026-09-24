@@ -98,7 +98,7 @@
 | REQ-GUI-009 | must | 参加者ごとにミキサーのチャンネルが現れ、ミュートを切り替えられる | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-GUI-010 | must | チャットのメッセージが双方向に相手へ届く | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-GUI-011 | must | 設定の Devices タブに実機のオーディオデバイスが列挙され、選択が反映される。提供されていないデバイスの選択は拒否される | `docs-spec/requirements.md` | `tests/e2e/tests/gui.rs`::choosing_a_device_that_is_not_offered_fails<br/>`tests/e2e/tests/gui.rs`::choosing_a_different_input_device_takes_effect<br/>`tests/e2e/tests/gui.rs`::the_devices_tab_lists_the_machines_audio_devices |
-| REQ-GUI-012 | must | ループバックオーディオデバイスに流した信号が、その入力に現れる（音声検証の前提） | `docs-spec/requirements.md` | `tests/e2e/tests/gui.rs`::the_loopback_device_returns_what_is_played_into_it |
+| REQ-GUI-012 | must | ループバックオーディオデバイスに流した信号が、その入力に現れる（音声検証の前提） | `docs-spec/requirements.md` | `tests/e2e/tests/gui.rs`::the_8ch_loopback_device_returns_each_channel_where_it_was_played<br/>`tests/e2e/tests/gui.rs`::the_loopback_device_returns_what_is_played_into_it |
 | REQ-GUI-013 | must | レベルメーターが実入力信号に追従し、ミュートで無音（0）を示す | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-GUI-014 | must | GUI 2 台の間で音声が流れ、受信側のピアチャンネルのメーターが反応する | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-GUI-015 | must | 同室の参加者全員が同一のルームコードを表示する | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
