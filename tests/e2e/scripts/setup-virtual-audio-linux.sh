@@ -10,6 +10,7 @@ set -euo pipefail
 
 SINK_NAME="jamjam-test-sink"
 SOURCE_NAME="jamjam-test-source"
+SINK_8CH_NAME="jamjam-test-8ch"
 
 create_devices() {
     echo "Creating virtual audio devices..."
@@ -41,12 +42,39 @@ create_devices() {
         audio.rate = 48000
     }' 2>/dev/null || echo "Source may already exist"
 
+    # Create an 8-channel sink that stands in for a multi-channel audio
+    # interface (the GUI E2E scenarios about input/output channel settings)
+    pw-cli create-node adapter '{
+        factory.name = support.null-audio-sink
+        node.name = "'"$SINK_8CH_NAME"'"
+        node.description = "jamjam Test 8ch"
+        media.class = Audio/Sink
+        object.linger = true
+        audio.channels = 8
+        audio.position = [ FL FR FC LFE RL RR SL SR ]
+        monitor.channel-volumes = true
+        monitor.passthrough = true
+    }' 2>/dev/null || echo "8ch sink may already exist"
+
     # Wait for nodes to be created
     sleep 1
 
     echo "Virtual audio devices created:"
     echo "  Sink: $SINK_NAME"
     echo "  Source: $SOURCE_NAME"
+    echo "  8ch sink: $SINK_8CH_NAME"
+    echo ""
+    echo "The 8ch sink is reached through an ALSA PCM of the same name. Add this to"
+    echo "~/.asoundrc, and run the app and the tests with"
+    echo "PIPEWIRE_PROPS='{ stream.capture.sink=true }' so that a capture opened on a"
+    echo "sink reads that sink's monitor:"
+    echo ""
+    echo "  pcm.$SINK_8CH_NAME {"
+    echo "    type pipewire"
+    echo "    playback_node \"$SINK_8CH_NAME\""
+    echo "    capture_node \"$SINK_8CH_NAME\""
+    echo "    hint { show on description \"$SINK_8CH_NAME\" }"
+    echo "  }"
 
     # List created devices
     echo ""
@@ -62,6 +90,13 @@ destroy_devices() {
     if [ -n "$SINK_ID" ]; then
         pw-cli destroy "$SINK_ID" 2>/dev/null || true
         echo "Destroyed sink (id: $SINK_ID)"
+    fi
+
+    # Find and destroy the 8ch sink
+    SINK_8CH_ID=$(pw-cli list-objects Node | grep -B5 "$SINK_8CH_NAME" | grep "id:" | awk '{print $2}' | tr -d ',')
+    if [ -n "$SINK_8CH_ID" ]; then
+        pw-cli destroy "$SINK_8CH_ID" 2>/dev/null || true
+        echo "Destroyed 8ch sink (id: $SINK_8CH_ID)"
     fi
 
     # Find and destroy the source

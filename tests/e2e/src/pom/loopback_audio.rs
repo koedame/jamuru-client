@@ -68,6 +68,18 @@ const INSTALL_HINT: &str = if cfg!(target_os = "macos") {
 const CHANNELS: u16 = 2;
 const SAMPLE_RATE: u32 = 48000;
 
+/// Name of the 8-channel loopback device (Linux only): a PipeWire null sink
+/// with eight channels, reached through an ALSA PCM of this name. It stands in
+/// for a multi-channel audio interface, so a scenario can put a signal on one
+/// specific channel and see which channel the app reads or writes.
+///
+/// Unlike [`DEVICE_NAME`] it keeps no history: once a writer stops, every
+/// channel is silent again.
+pub const DEVICE_NAME_8CH: &str = "jamjam-test-8ch";
+
+/// Channel count of [`DEVICE_NAME_8CH`].
+pub const CHANNELS_8CH: u16 = 8;
+
 /// A tone playing into the loopback device. Stops when dropped.
 ///
 /// Holds the stream alive: `cpal` stops a stream as soon as its handle is
@@ -103,6 +115,37 @@ pub fn require_device() -> DriverResult<()> {
         "loopback device {:?} is not available as both input and output \
          (input: {}, output: {}). To get it: {}",
         DEVICE_NAME, has_input, has_output, INSTALL_HINT
+    ))
+}
+
+/// Confirms [`DEVICE_NAME_8CH`] exists as both input and output, with an
+/// actionable error if not. Linux only: no 8-channel loopback driver is
+/// assumed on the other platforms.
+pub fn require_device_8ch() -> DriverResult<()> {
+    let host = cpal::default_host();
+    let has_output = host
+        .output_devices()
+        .map_err(|e| format!("could not enumerate output devices: {}", e))?
+        .any(|d| {
+            d.description()
+                .is_ok_and(|desc| desc.name() == DEVICE_NAME_8CH)
+        });
+    let has_input = host
+        .input_devices()
+        .map_err(|e| format!("could not enumerate input devices: {}", e))?
+        .any(|d| {
+            d.description()
+                .is_ok_and(|desc| desc.name() == DEVICE_NAME_8CH)
+        });
+
+    if has_output && has_input {
+        return Ok(());
+    }
+    Err(format!(
+        "8-channel loopback device {:?} is not available as both input and output \
+         (input: {}, output: {}). To get it: tests/e2e/scripts/setup-virtual-audio-linux.sh create, \
+         and the ALSA PCM it prints",
+        DEVICE_NAME_8CH, has_input, has_output
     ))
 }
 
@@ -142,25 +185,54 @@ pub fn resolve_device_id(name: &str) -> DriverResult<String> {
 /// plays received audio back through the real speakers, so the tone is
 /// briefly audible while a scenario runs.
 pub fn play_tone(frequency: f32, amplitude: f32) -> DriverResult<LoopbackTone> {
-    open_output(frequency, amplitude)
+    open_output(DEVICE_NAME, CHANNELS, None, frequency, amplitude)
 }
 
-/// Opens the loopback device for output and plays a sine at `amplitude`.
-fn open_output(frequency: f32, amplitude: f32) -> DriverResult<LoopbackTone> {
+/// Starts a sine tone on one channel of [`DEVICE_NAME_8CH`] and silence on the
+/// other seven. `channel` is 1-based, the way the app's channel settings count.
+pub fn play_tone_on_channel_8ch(
+    channel: u16,
+    frequency: f32,
+    amplitude: f32,
+) -> DriverResult<LoopbackTone> {
+    if channel == 0 || channel > CHANNELS_8CH {
+        return Err(format!(
+            "channel {} is outside 1..={} of {:?}",
+            channel, CHANNELS_8CH, DEVICE_NAME_8CH
+        ));
+    }
+    open_output(
+        DEVICE_NAME_8CH,
+        CHANNELS_8CH,
+        Some(channel as usize - 1),
+        frequency,
+        amplitude,
+    )
+}
+
+/// Opens `device_name` for output with `channels` channels and plays a sine at
+/// `amplitude` - on every channel, or only on `hot` (0-based) when given.
+fn open_output(
+    device_name: &str,
+    channels: u16,
+    hot: Option<usize>,
+    frequency: f32,
+    amplitude: f32,
+) -> DriverResult<LoopbackTone> {
     let host = cpal::default_host();
     let device = host
         .output_devices()
         .map_err(|e| format!("could not enumerate output devices: {}", e))?
-        .find(|d| d.description().is_ok_and(|desc| desc.name() == DEVICE_NAME))
+        .find(|d| d.description().is_ok_and(|desc| desc.name() == device_name))
         .ok_or_else(|| {
             format!(
                 "loopback output {:?} not found. {}",
-                DEVICE_NAME, INSTALL_HINT
+                device_name, INSTALL_HINT
             )
         })?;
 
     let config = cpal::StreamConfig {
-        channels: CHANNELS,
+        channels,
         sample_rate: SAMPLE_RATE,
         buffer_size: cpal::BufferSize::Default,
     };
@@ -171,18 +243,22 @@ fn open_output(frequency: f32, amplitude: f32) -> DriverResult<LoopbackTone> {
         .build_output_stream(
             config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                for frame in data.chunks_mut(CHANNELS as usize) {
+                for frame in data.chunks_mut(channels as usize) {
                     let sample = (phase * std::f32::consts::TAU).sin() * amplitude;
                     phase = (phase + step).fract();
-                    for slot in frame.iter_mut() {
-                        *slot = sample;
+                    for (index, slot) in frame.iter_mut().enumerate() {
+                        *slot = if hot.is_none_or(|h| h == index) {
+                            sample
+                        } else {
+                            0.0
+                        };
                     }
                 }
             },
             |e| eprintln!("loopback tone error: {}", e),
             None,
         )
-        .map_err(|e| format!("could not open {:?} for output: {}", DEVICE_NAME, e))?;
+        .map_err(|e| format!("could not open {:?} for output: {}", device_name, e))?;
 
     stream
         .play()
@@ -240,4 +316,62 @@ pub fn measure_input_peak(duration: std::time::Duration) -> DriverResult<f32> {
     std::thread::sleep(duration);
 
     Ok(peak.load(Ordering::SeqCst) as f32 / 1000.0)
+}
+
+/// Measures the peak amplitude arriving on each channel of [`DEVICE_NAME_8CH`]'s
+/// input, in channel order (index 0 is channel 1).
+///
+/// The counterpart of [`play_tone_on_channel_8ch`]: it says which channels a
+/// signal came back on. Also how a scenario sees which channels the app *wrote*
+/// to when it plays to this device.
+pub fn measure_input_channel_peaks_8ch(duration: std::time::Duration) -> DriverResult<Vec<f32>> {
+    let host = cpal::default_host();
+    let device = host
+        .input_devices()
+        .map_err(|e| format!("could not enumerate input devices: {}", e))?
+        .find(|d| {
+            d.description()
+                .is_ok_and(|desc| desc.name() == DEVICE_NAME_8CH)
+        })
+        .ok_or_else(|| {
+            format!(
+                "loopback input {:?} not found. {}",
+                DEVICE_NAME_8CH, INSTALL_HINT
+            )
+        })?;
+
+    let config = cpal::StreamConfig {
+        channels: CHANNELS_8CH,
+        sample_rate: SAMPLE_RATE,
+        buffer_size: cpal::BufferSize::Default,
+    };
+
+    // Milli-units in atomics, for the same reason as `measure_input_peak`.
+    let peaks: Arc<Vec<AtomicU32>> =
+        Arc::new((0..CHANNELS_8CH).map(|_| AtomicU32::new(0)).collect());
+    let writer = peaks.clone();
+    let stream = device
+        .build_input_stream(
+            config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                for frame in data.chunks(CHANNELS_8CH as usize) {
+                    for (peak, sample) in writer.iter().zip(frame) {
+                        peak.fetch_max((sample.abs() * 1000.0) as u32, Ordering::SeqCst);
+                    }
+                }
+            },
+            |e| eprintln!("loopback capture error: {}", e),
+            None,
+        )
+        .map_err(|e| format!("could not open {:?} for input: {}", DEVICE_NAME_8CH, e))?;
+
+    stream
+        .play()
+        .map_err(|e| format!("could not start capture: {}", e))?;
+    std::thread::sleep(duration);
+
+    Ok(peaks
+        .iter()
+        .map(|peak| peak.load(Ordering::SeqCst) as f32 / 1000.0)
+        .collect())
 }

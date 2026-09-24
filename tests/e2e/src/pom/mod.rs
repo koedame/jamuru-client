@@ -66,7 +66,16 @@ impl App {
         output_device: Option<&str>,
         env: &[(&str, &str)],
     ) -> DriverResult<Self> {
-        Self::launch_binary_seeded(binary, input_device, output_device, None, None, &[], env)
+        Self::launch_binary_seeded(
+            binary,
+            input_device,
+            output_device,
+            None,
+            None,
+            &[],
+            env,
+            "",
+        )
     }
 
     /// Launches the release build with the jamjam server pinned to
@@ -86,6 +95,7 @@ impl App {
             None,
             args,
             &[],
+            "",
         )
     }
 
@@ -97,6 +107,7 @@ impl App {
         identity: Option<&[u8; 32]>,
         args: &[&str],
         env: &[(&str, &str)],
+        extra_config: &str,
     ) -> DriverResult<Self> {
         if !binary.exists() {
             return Err(format!(
@@ -114,7 +125,13 @@ impl App {
         // needs no test-only override for this.
         let home =
             tempfile::tempdir().map_err(|e| format!("could not create a temp HOME: {}", e))?;
-        seed_config(home.path(), input_device, output_device, server_url)?;
+        seed_config(
+            home.path(),
+            input_device,
+            output_device,
+            server_url,
+            extra_config,
+        )?;
         if let Some(secret) = identity {
             seed_identity(home.path(), secret)?;
         }
@@ -170,6 +187,25 @@ impl App {
         Self::launch_binary_with_devices(&default_binary_path(), input_device, output_device)
     }
 
+    /// [`Self::launch_with_devices`], also writing `settings` (TOML lines such
+    /// as `input_channel_l = 5`) into the app's `config.toml`.
+    pub fn launch_with_devices_and_settings(
+        input_device: Option<&str>,
+        output_device: Option<&str>,
+        settings: &str,
+    ) -> DriverResult<Self> {
+        Self::launch_binary_seeded(
+            &default_binary_path(),
+            input_device,
+            output_device,
+            None,
+            None,
+            &[],
+            &[],
+            settings,
+        )
+    }
+
     /// Launches the debug build with the jamjam server pinned to
     /// `server_url`, for scenarios about what the connection screen shows
     /// when that URL is wrong or unreachable (a leftover dev/test value in
@@ -184,6 +220,7 @@ impl App {
             None,
             &[],
             &[],
+            "",
         )
     }
 
@@ -200,6 +237,7 @@ impl App {
             Some(secret),
             &[],
             &[],
+            "",
         )
     }
 
@@ -279,8 +317,13 @@ fn seed_config(
     input_device: Option<&str>,
     output_device: Option<&str>,
     server_url: Option<&str>,
+    extra_config: &str,
 ) -> DriverResult<()> {
-    if input_device.is_none() && output_device.is_none() && server_url.is_none() {
+    if input_device.is_none()
+        && output_device.is_none()
+        && server_url.is_none()
+        && extra_config.is_empty()
+    {
         return Ok(());
     }
 
@@ -301,6 +344,7 @@ fn seed_config(
     if let Some(url) = server_url {
         toml.push_str(&format!("server_url = {:?}\n", url));
     }
+    toml.push_str(extra_config);
 
     let path = config_dir.join("config.toml");
     std::fs::write(&path, toml).map_err(|e| format!("could not write {}: {}", path.display(), e))
