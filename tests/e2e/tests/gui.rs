@@ -874,8 +874,8 @@ fn the_loopback_device_returns_what_is_played_into_it() {
 /// "which channel did the app read or write?" and trust the answer. Checked
 /// before any assertion about the app, like [`the_loopback_device_returns_what_is_played_into_it`].
 ///
-/// Unlike the stereo device, this one holds no history, so it asserts levels
-/// rather than a rise.
+/// The Linux devices hold no history (BlackHole on macOS does, see the module
+/// doc of `loopback_audio`), so this asserts levels rather than a rise.
 ///
 /// Verifies: REQ-GUI-012
 #[test]

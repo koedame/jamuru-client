@@ -73,8 +73,10 @@ const SAMPLE_RATE: u32 = 48000;
 /// for a multi-channel audio interface, so a scenario can put a signal on one
 /// specific channel and see which channel the app reads or writes.
 ///
-/// Unlike [`DEVICE_NAME`] it keeps no history: once a writer stops, every
-/// channel is silent again.
+/// Its channels carry signals by number only, like a real interface's: a
+/// two-channel stream uses channels 1 and 2, and nothing is mixed across. Like
+/// the other Linux device, and unlike BlackHole, it keeps no history: once a
+/// writer stops, every channel is silent again.
 pub const DEVICE_NAME_8CH: &str = "jamjam-test-8ch";
 
 /// Channel count of [`DEVICE_NAME_8CH`].
