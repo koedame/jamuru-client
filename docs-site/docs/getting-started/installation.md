@@ -43,7 +43,7 @@ cask が指すのは [GitHub Releases](https://github.com/koedame/jamjam-client/
 
 #### ベータ版を試す
 
-正式版より先に動作を確かめたい人向けに、プレリリース（`v0.2.0-beta.1` のようなタグ）を `jamjam@beta` として配っています。`brew install --cask koedame/tap/jamjam` や `brew upgrade` でベータ版が入ることはなく、正式版を使う人は何もしなくて構いません。
+正式版より先に動作を確かめたい人向けに、main ブランチにマージされるたびにベータ版（`v0.2.0-beta.7` のようなタグ）を作り、`jamjam@beta` として配っています。`brew install --cask koedame/tap/jamjam` や `brew upgrade` でベータ版が入ることはなく、正式版を使う人は何もしなくて構いません。
 
 ```bash
 brew install --cask koedame/tap/jamjam@beta
