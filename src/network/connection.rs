@@ -44,6 +44,9 @@ pub struct ConnectionStats {
     pub packets_sent: u64,
     /// Total packets received
     pub packets_received: u64,
+    /// Audio packets rebuilt from FEC because they never arrived, or `None`
+    /// when this link sends no FEC
+    pub fec_recovered: Option<u64>,
     /// Connection uptime in seconds
     pub uptime_seconds: u64,
 }
@@ -404,6 +407,7 @@ pub struct Connection {
     audio_sequence: AtomicU32,
     packets_sent: Arc<AtomicU64>,
     packets_received: Arc<AtomicU64>,
+    fec_recovered: Arc<AtomicU64>,
     bytes_sent: Arc<AtomicU64>,
     bytes_received: Arc<AtomicU64>,
     last_received: Arc<std::sync::Mutex<Instant>>,
@@ -464,6 +468,7 @@ impl Connection {
             audio_sequence: AtomicU32::new(0),
             packets_sent: Arc::new(AtomicU64::new(0)),
             packets_received: Arc::new(AtomicU64::new(0)),
+            fec_recovered: Arc::new(AtomicU64::new(0)),
             bytes_sent: Arc::new(AtomicU64::new(0)),
             bytes_received: Arc::new(AtomicU64::new(0)),
             last_received: Arc::new(std::sync::Mutex::new(Instant::now())),
@@ -966,6 +971,10 @@ impl Connection {
             bytes_received: self.bytes_received.load(Ordering::Relaxed),
             packets_sent: self.packets_sent.load(Ordering::Relaxed),
             packets_received: self.packets_received.load(Ordering::Relaxed),
+            fec_recovered: self
+                .fec_decoder
+                .as_ref()
+                .map(|_| self.fec_recovered.load(Ordering::Relaxed)),
             uptime_seconds: uptime,
         }
     }
@@ -983,6 +992,7 @@ impl Connection {
         let state = self.state.clone();
         let last_received = self.last_received.clone();
         let packets_received = self.packets_received.clone();
+        let fec_recovered = self.fec_recovered.clone();
         let bytes_received = self.bytes_received.clone();
         let audio_callback = self.audio_callback.clone();
         let fec_decoder = self.fec_decoder.clone();
@@ -1056,6 +1066,7 @@ impl Connection {
 
                         if let Some((sequence, data)) = recovered {
                             trace!("FEC recovered packet seq={}", sequence);
+                            fec_recovered.fetch_add(1, Ordering::Relaxed);
                             if let Some(ref callback) = audio_callback {
                                 // Timestamp is not recoverable from FEC; the
                                 // receive path keys off sequence (ADR-021).

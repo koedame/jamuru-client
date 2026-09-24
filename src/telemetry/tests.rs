@@ -448,7 +448,7 @@ fn when_the_real_machine_is_described_the_lines_satisfy_schema_json() {
     reporter.record(EventBody::AppStart(snapshot::app_start(
         &AppConfig::default(),
     )));
-    reporter.record(EventBody::AudioEnv(snapshot::audio_env()));
+    reporter.record(EventBody::AudioEnv(snapshot::audio_env(None, None)));
 
     let parsed = lines(&reporter.preview_ndjson());
 
@@ -828,6 +828,63 @@ fn when_readings_arrive_the_percentiles_are_nearest_rank_and_the_duration_is_the
     assert_eq!(end.rtt_ms_p50, Some(50.0));
     assert_eq!(end.rtt_ms_p95, Some(95.0));
     assert_eq!(end.loss_pct_max, Some(50.0));
+}
+
+/// Verifies: REQ-TEL-010
+#[test]
+fn when_fec_rebuilt_packets_in_some_readings_the_share_of_those_readings_is_reported() {
+    let mut tally = SessionTally::new();
+    // Totals as the connection shows them: nothing, 2 rebuilt, still 2, 5.
+    for total in [0, 2, 2, 5] {
+        tally.sample_fec_total(total);
+    }
+
+    let end = tally.finish(EndReason::Left);
+
+    assert_eq!(end.fec_active_pct, Some(50.0));
+}
+
+/// Verifies: REQ-TEL-010
+#[test]
+fn when_fec_never_rebuilt_a_packet_the_share_is_zero_not_absent() {
+    let mut tally = SessionTally::new();
+    tally.sample_fec_total(0);
+    tally.sample_fec_total(0);
+
+    assert_eq!(tally.finish(EndReason::Left).fec_active_pct, Some(0.0));
+}
+
+/// Verifies: REQ-TEL-010
+#[test]
+fn when_the_connection_restarts_its_fec_count_the_new_count_is_new_recoveries() {
+    let mut tally = SessionTally::new();
+    tally.sample_fec_total(7);
+    // A new connection counts from zero again: 1 is a recovery, 0 is none.
+    tally.sample_fec_total(1);
+    tally.sample_fec_total(0);
+
+    assert_eq!(tally.finish(EndReason::Left).fec_active_pct, Some(66.7));
+}
+
+/// Verifies: REQ-TEL-003
+#[test]
+fn when_a_session_end_carries_the_fec_share_the_line_satisfies_schema_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+
+    reporter.begin_session(SessionMode::Join);
+    reporter.with_session(|tally| {
+        tally.sample(Some(20.0), 0.01);
+        tally.sample_fec_total(1);
+        tally.sample_fec_total(1);
+    });
+    reporter.end_session(EndReason::Left);
+
+    let parsed = lines(&reporter.preview_ndjson());
+    assert_eq!(parsed[1]["fec_active_pct"], 50.0);
+    for line in &parsed {
+        assert_valid(line);
+    }
 }
 
 /// Verifies: REQ-TEL-010
