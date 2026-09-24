@@ -1380,7 +1380,11 @@ fn start_capture_ring(
         });
         match started {
             Ok(()) => {
-                tracing::info!("Capture started on {:?} with {} channel(s)", device_id, channels);
+                tracing::info!(
+                    "Capture started on {:?} with {} channel(s)",
+                    device_id,
+                    channels
+                );
                 return Ok(CaptureRing {
                     consumer,
                     channels: channels as usize,
