@@ -399,6 +399,56 @@ pub fn measure_tone_on_channel_8ch(
     })
 }
 
+/// How long [`play_confirmed_tone_on_channel_8ch`] listens to a new tone before
+/// trusting it.
+const CONFIRM_WINDOW: std::time::Duration = std::time::Duration::from_millis(1000);
+
+/// Starts a tone on one channel of [`DEVICE_NAME_8CH`] (`channel` is 1-based)
+/// and returns it only once the device is heard carrying it alone on that
+/// channel, for a scenario that needs the tone to be where it was told while
+/// something else (the app) reads it.
+///
+/// For the reason [`measure_tone_on_channel_8ch`] exists: a stream that starts
+/// out of step with the device puts its tone on a wrong channel for its whole
+/// life and reports nothing. A scenario that cannot look at the device itself
+/// would then fail waiting for a tone that is elsewhere, or pass a check that
+/// nothing arrived. A tone that is not confirmed, or came with stream errors,
+/// is dropped and replaced with a fresh one, up to [`TONE_ATTEMPTS`] times.
+pub fn play_confirmed_tone_on_channel_8ch(
+    channel: u16,
+    frequency: f32,
+    amplitude: f32,
+) -> DriverResult<LoopbackTone> {
+    let mut confirmed = None;
+    let last = first_expected_reading(TONE_ATTEMPTS, |attempt| {
+        let tone = play_tone_on_channel_8ch(channel, frequency, amplitude)?;
+        let (peaks, capture_errors) = capture_channel_peaks_8ch(CONFIRM_WINDOW)?;
+        let stream_errors = tone.stream_errors() + capture_errors;
+        let as_expected = tone_is_alone_on_channel(&peaks, channel, amplitude);
+        if stream_errors == 0 && as_expected {
+            confirmed = Some(tone);
+        } else {
+            eprintln!(
+                "8ch loopback: tone on channel {} read as {:?} with {} stream errors \
+                 (attempt {}), trying a fresh tone",
+                channel, peaks, stream_errors, attempt
+            );
+        }
+        Ok(Attempt {
+            reading: peaks,
+            stream_errors,
+            as_expected,
+        })
+    })?;
+    confirmed.ok_or_else(|| {
+        format!(
+            "a tone on channel {} of the 8-channel loopback device was not heard alone on \
+             that channel in {} attempts; the last reading was {:?}",
+            channel, TONE_ATTEMPTS, last
+        )
+    })
+}
+
 /// One try at reading a tone: what was read, how many errors the streams
 /// reported meanwhile, and whether the reading is what the tone should give.
 struct Attempt<T> {
