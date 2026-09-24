@@ -247,6 +247,11 @@ pub const WIRE_CHANNELS: usize = 2;
 /// volume: 1.0 = 等倍 / pan: -100（左）〜 100（右）、等パワー則
 pub fn mono_to_wire(mono: &[f32], volume: f32, pan: i32, out: &mut [f32]);
 
+/// キャプチャしたフレーム（channels = 1 または 2、インターリーブ）を送信用ステレオに変換する
+/// モノラルは `mono_to_wire` と同じ（パンで定位を決める）。ステレオは左右を混ぜず、
+/// pan はバランスとして働く（向いた側は変えず、反対側を絞る。中央は素通し）
+pub fn capture_to_wire(captured: &[f32], channels: usize, volume: f32, pan: i32, out: &mut [f32]);
+
 /// 受信経路。Clone はすべて同じバッファを共有する
 #[derive(Clone)]
 pub struct ReceivePath { /* ... */ }
@@ -335,6 +340,13 @@ impl MonitorTap {
     /// スレッド: リアルタイム（キャプチャコールバック）
     /// ブロッキング: No
     pub fn push(&mut self, mono: &[f32]);
+
+    /// チャンネル数 `channels` のインターリーブされたフレームを渡す。
+    /// 2 チャンネル以上は左右の平均（モニターはモノラル。ADR-033）
+    ///
+    /// スレッド: リアルタイム（キャプチャコールバック）
+    /// ブロッキング: No
+    pub fn push_interleaved(&mut self, samples: &[f32], channels: usize);
 }
 ```
 
