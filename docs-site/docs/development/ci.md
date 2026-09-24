@@ -43,10 +43,19 @@ flowchart TD
         BuildLinux[build-linux]
     end
 
+    subgraph Release["Release Workflow"]
+        Prepare[decide the tag]
+        Publish[build + GitHub Release]
+        Cask[update Homebrew cask]
+    end
+
     PR --> CI
     Push --> CI
     Push --> Build
     Tag --> Build
+    Push --> Release
+    Tag --> Release
+    Prepare --> Publish --> Cask
 ```
 
 ## CI Workflow
@@ -76,6 +85,18 @@ main ブランチへの push またはタグ作成時に実行されます。
 | Windows | windows-latest | `.msi`, `.exe` |
 | macOS | macos-latest | `.dmg`, `.app` |
 | Linux | ubuntu-latest | `.AppImage`, `.deb` |
+
+## Release Workflow
+
+main ブランチへの push またはタグ作成時に実行されます。
+
+| きっかけ | 公開されるもの | Homebrew |
+|---------|---------------|----------|
+| main への push | ベータ版（タグ `vX.Y.Z-beta.<実行番号>`、X.Y.Z は `src-tauri/tauri.conf.json` の版）。GitHub の pre-release になり "Latest" には載らない | `jamjam@beta` を更新 |
+| `vX.Y.Z` のタグ | 正式版 | `jamjam` を更新 |
+| 手動起動 | 何も公開しない（ビルドの予行演習） | 更新しない |
+
+ベータ版のタグは main への push ごとに作られます。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。
 
 ## ローカルでのCI実行
 

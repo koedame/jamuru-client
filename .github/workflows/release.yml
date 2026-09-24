@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -10,6 +12,35 @@ permissions:
   contents: write
 
 jobs:
+  # Decides which tag this run publishes under. A `v*` tag push publishes
+  # that tag. A push to main publishes a beta of the version in
+  # `src-tauri/tauri.conf.json` (`v0.2.0-beta.<run number>`; the run number
+  # keeps the tag unique, and a re-run of the same run reuses its tag). A run
+  # started by hand is a rehearsal and publishes nothing, so the tag is empty.
+  prepare:
+    name: Decide the release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Decide the tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            version=$(jq -r .version src-tauri/tauri.conf.json)
+            tag="v${version}-beta.${GITHUB_RUN_NUMBER}"
+          else
+            tag=""
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "release tag: '${tag}'"
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -129,10 +160,10 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [prepare, build]
     # A run started by hand is a rehearsal: it stops after the artifacts are
-    # uploaded. Only a v* tag publishes a release.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # uploaded. A `v*` tag or a push to main publishes a release.
+    if: needs.prepare.outputs.tag != ''
     steps:
       - uses: actions/checkout@v7
 
@@ -180,10 +211,13 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
+          # A push to main has no tag yet; this creates it on that commit.
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
-          # `v0.1.0-rc.1` and friends stay off the "Latest release"
-          # badge; only a plain `vX.Y.Z` tag is a real release.
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # `v0.1.0-rc.1`, `v0.2.0-beta.7` and friends stay off the "Latest
+          # release" badge; only a plain `vX.Y.Z` tag is a real release.
+          prerelease: ${{ contains(needs.prepare.outputs.tag, '-') }}
           files: |
             artifacts/jamjam-linux-x64/**/*.AppImage
             artifacts/jamjam-linux-x64/**/*.deb
@@ -197,10 +231,11 @@ jobs:
   update-cask:
     name: Update Homebrew Cask
     runs-on: ubuntu-latest
-    needs: release
+    needs: [prepare, release]
     # Writes a cask in `koedame/homebrew-tap`. A plain `vX.Y.Z` tag
     # updates `Casks/jamjam.rb` (`brew install --cask koedame/tap/jamjam`,
-    # what everyone gets). A prerelease tag (`v0.2.0-beta.1`) updates
+    # what everyone gets). A prerelease tag (`v0.2.0-beta.7`, made by every
+    # push to main) updates
     # `Casks/jamjam@beta.rb` instead (`brew install --cask
     # koedame/tap/jamjam@beta`), so a prerelease reaches only the people
     # who opted in and `brew upgrade jamjam` never picks it up.
@@ -215,7 +250,7 @@ jobs:
 
       - name: Generate cask
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -267,7 +302,7 @@ jobs:
       - name: Push to homebrew-tap
         env:
           TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN}" ]; then
