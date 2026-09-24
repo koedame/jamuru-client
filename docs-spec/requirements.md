@@ -245,7 +245,7 @@ CLI にあって GUI に無い機能（シグナリングサーバーを介さ�
 | REQ-CLI-004 | 提供されていないオーディオデバイスの選択は拒否され、設定に書かれない | must |
 | REQ-CLI-005 | CLI 同士（`host` / `join`）で音声が双方向に届く。受信した音声は GUI と同じ再生経路（プレイアウトバッファ・PLC・FEC、[ADR-028](./adr/ADR-028-single-stage-playout.md)）を通り、送られた音高・音量のまま再生される | must |
 | REQ-CLI-006 | ローカルモニタリングを CLI から操作できる。`--monitor` で開始時から ON、セッション中の `/monitor` `/unmonitor` で切り替わる。ミュートとは独立である（[ADR-033](./adr/ADR-033-local-monitoring.md)） | must |
-| REQ-CLI-007 | `host` / `join` は接続してから `--duration` の秒数で自分で終わり、`--input-bursts` で送ったバーストが再生されるまでの往復時間（相手が音を保持して返すなら `--echo-delay-ms` を引いたもの）を測り、`--report-json` で往復・ネットワーク・プレイアウトの値を JSON に書く（[ADR-038](./adr/ADR-038-cli-round-trip-measurement.md)） | must |
+| REQ-CLI-007 | `host` / `join` は接続してから `--duration` の秒数で自分で終わり、`--input-bursts` で送ったバーストが再生されるまでの往復時間（相手が音を保持して返すなら `--echo-delay-ms` を引いたもの）を測り、`--report-json` で往復・ネットワーク・プレイアウトの値を JSON に書く（[ADR-039](./adr/ADR-039-cli-round-trip-measurement.md)） | must |
 
 REQ-CLI-001 の検証はチャットのみで行う（`--chat-only`）。オーディオデバイスの無い環境でも `cargo test` が通る必要があるためである。REQ-CLI-005 は同じ理由で、デバイスの代わりに `--input-tone`（正弦波を送る）と `--output-file`（再生するはずの音をファイルに書く）を使って検証する。REQ-CLI-007 も同じで、音を保持して返す UDP の相手を立てて検証する。実デバイスでの CLI 同士の接続は手動で確認する。
 

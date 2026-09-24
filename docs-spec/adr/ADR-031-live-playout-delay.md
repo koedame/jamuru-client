@@ -54,7 +54,7 @@ Accepted
 
 ### 3. 自動調整を受信経路から呼ぶ
 
-`src-tauri/src/streaming.rs` の統計ループが 1 秒ごとに `adapt()` を呼ぶ（CLI のセッションも同じ周期 `ADAPT_INTERVAL` で呼ぶ。[ADR-038](./ADR-038-cli-round-trip-measurement.md)）。判定は**直近の区間**の補間率で行う（累積ではない）。
+`src-tauri/src/streaming.rs` の統計ループが 1 秒ごとに `adapt()` を呼ぶ（CLI のセッションも同じ周期 `ADAPT_INTERVAL` で呼ぶ。[ADR-039](./ADR-039-cli-round-trip-measurement.md)）。判定は**直近の区間**の補間率で行う（累積ではない）。
 
 | 区間の補間率 | 動作 |
 |-------------|------|

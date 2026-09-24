@@ -1,11 +1,11 @@
 ---
-sidebar_label: "ADR-038: CLI Round-Trip Measurement"
-sidebar_position: 38
+sidebar_label: "ADR-039: CLI Round-Trip Measurement"
+sidebar_position: 39
 ---
 
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
-# ADR-038: 音声経路の往復遅延を、CLI が区切りのある信号で測って JSON に残す
+# ADR-039: 音声経路の往復遅延を、CLI が区切りのある信号で測って JSON に残す
 
 ## Status
 

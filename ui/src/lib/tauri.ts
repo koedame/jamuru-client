@@ -569,6 +569,16 @@ export async function streamingSetInputDevice(
 }
 
 /**
+ * Set the transmit channel count during streaming
+ * @param count 1 for mono, 2 for stereo
+ */
+export async function streamingSetTransmitChannels(
+  count: number
+): Promise<void> {
+  return invoke("streaming_set_transmit_channels", { count });
+}
+
+/**
  * Set output device during streaming
  * @param deviceId Device ID to use, or null for default device
  */

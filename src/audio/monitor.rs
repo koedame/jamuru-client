@@ -221,6 +221,38 @@ impl MonitorTap {
             chunk.commit_all();
         }
     }
+
+    /// Hands a captured frame of `channels` interleaved channels to the monitor.
+    ///
+    /// The monitor is mono (ADR-033), so a stereo capture is heard as the mean
+    /// of its two sides. Same constraints as [`MonitorTap::push`].
+    pub fn push_interleaved(&mut self, samples: &[f32], channels: usize) {
+        if channels <= 1 {
+            self.push(samples);
+            return;
+        }
+        let frames = samples.len() / channels;
+        if frames == 0 || !self.enabled.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Ok(mut chunk) = self.producer.write_chunk(frames) {
+            let (first, second) = chunk.as_mut_slices();
+            let split = first.len();
+            for (slot, frame) in first
+                .iter_mut()
+                .zip(samples.chunks_exact(channels).take(split))
+            {
+                *slot = frame.iter().sum::<f32>() / channels as f32;
+            }
+            for (slot, frame) in second
+                .iter_mut()
+                .zip(samples.chunks_exact(channels).skip(split))
+            {
+                *slot = frame.iter().sum::<f32>() / channels as f32;
+            }
+            chunk.commit_all();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -311,6 +343,23 @@ mod tests {
         monitor.mix_into(&mut out);
 
         assert!(out.iter().all(|s| (*s - 0.4).abs() < 1e-6), "{out:?}");
+    }
+
+    /// Verifies: REQ-AUD-111
+    #[test]
+    fn test_monitor_plays_a_stereo_capture_as_the_mean_of_its_sides() {
+        let monitor = LocalMonitor::new(FRAME as u32);
+        let mut tap = monitor.tap();
+        monitor.set_enabled(true);
+        let stereo: Vec<f32> = (0..FRAME).flat_map(|_| [0.5, 0.25]).collect();
+        for _ in 0..3 {
+            tap.push_interleaved(&stereo, 2);
+        }
+
+        let mut out = peers(0.0);
+        monitor.mix_into(&mut out);
+
+        assert!(out.iter().all(|s| (*s - 0.375).abs() < 1e-6), "{out:?}");
     }
 
     #[test]
