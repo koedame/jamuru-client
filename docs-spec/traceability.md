@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 159 |
-| うち must | 154 |
+| 要求 総数 | 160 |
+| うち must | 155 |
 | うち should | 5 |
-| 検証済み | 132 |
+| 検証済み | 133 |
 | サーバーを立てた接続テストでのみ検証 | 24 |
 | 未検証（should のみ許容） | 3 |
 
@@ -86,6 +86,7 @@
 | REQ-DIST-003 | must | webview の CSP が有効で、スクリプトは同梱の資産だけ、接続先は Tauri の IPC だけに限られ、リモートのオリジンを 1 つも許可しない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::csp_allows_only_bundled_scripts<br/>`tests/distribution_config_test.rs`::csp_is_enabled<br/>`tests/distribution_config_test.rs`::csp_names_no_remote_origin |
 | REQ-DIST-004 | must | webview に Tauri API のグローバル（`window.__TAURI__`）を公開しない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::tauri_api_is_not_exposed_as_a_global |
 | REQ-DIST-005 | must | リリースビルドは本番のサーバー（`https://`、ループバックでないホスト）を使い、開発ビルドはローカルのサーバー（`http://localhost:17890`）を使う。使うサーバーはコアライブラリの 1 か所で決まり、UI と Tauri コマンドはサーバーの URL を持たない。本番のサーバーはソースに書かず、リリースのビルド時に渡す（渡さなければビルドが失敗する）。シグナリングの接続先はそのサーバーに問い合わせる（REQ-CON-028） | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::a_release_is_only_given_a_remote_server_over_tls<br/>`tests/distribution_config_test.rs`::development_builds_use_the_local_server<br/>`tests/distribution_config_test.rs`::no_other_source_names_a_server<br/>`tests/distribution_config_test.rs`::the_default_follows_the_build_profile<br/>`tests/distribution_config_test.rs`::the_source_names_no_production_server |
+| REQ-DIST-006 | must | webview に渡す Tauri の権限は、UI が実際に呼ぶプラグインのコマンド（イベントの購読と解除、起動時の招待リンクの取得）だけに限る。リモートのページには IPC を開かない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::no_remote_page_is_given_ipc_access<br/>`tests/distribution_config_test.rs`::the_webview_is_granted_only_the_plugin_commands_the_ui_calls |
 | REQ-GUI-001 | must | 起動すると接続画面が表示され、会員登録・サインインの UI が存在しない | `docs-spec/requirements.md` | `tests/e2e/tests/gui.rs`::launching_the_app_shows_the_connection_screen<br/>`tests/e2e/tests/gui.rs`::the_connection_screen_reports_a_defined_state<br/>`tests/e2e/tests/gui.rs`::the_first_screen_asks_for_no_account |
 | REQ-GUI-002 | must | 端末識別子が利用者の見える場所に表示されない | `docs-spec/requirements.md` | `tests/e2e/tests/gui.rs`::the_device_identifier_is_never_shown_to_the_user<br/>`tests/e2e/tests/gui.rs`::the_settings_window_does_not_show_the_device_identifier |
 | REQ-GUI-003 | must | E2E 制御チャネルの `e2e-control` feature が既定で無効である | `docs-spec/requirements.md` | `tests/release_build_guard_test.rs`::e2e_control_is_not_a_default_feature<br/>`tests/release_build_guard_test.rs`::the_guard_actually_reads_the_default_feature_list |

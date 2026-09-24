@@ -217,7 +217,7 @@ REQ-GUI-012〜014 はループバックオーディオドライバ（macOS: Blac
 
 ## REQ-DIST: 配布設定要求
 
-配布した後では直せない、または開発中には症状が出ないアプリ設定に対する要求。決定の背景は [ADR-029](./adr/ADR-029-distribution-app-settings.md)。検証は `tests/distribution_config_test.rs` が `src-tauri/tauri.conf.json` と `src-tauri/Info.plist` を読んで行う（バンドラが読むのと同じファイル）。
+配布した後では直せない、または開発中には症状が出ないアプリ設定に対する要求。決定の背景は [ADR-029](./adr/ADR-029-distribution-app-settings.md)。検証は `tests/distribution_config_test.rs` が `src-tauri/tauri.conf.json`・`src-tauri/Info.plist`・`src-tauri/capabilities/` を読んで行う（バンドラが読むのと同じファイル）。
 
 | ID | 要求 | criticality |
 |----|------|------------|
@@ -226,6 +226,7 @@ REQ-GUI-012〜014 はループバックオーディオドライバ（macOS: Blac
 | REQ-DIST-003 | webview の CSP が有効で、スクリプトは同梱の資産だけ、接続先は Tauri の IPC だけに限られ、リモートのオリジンを 1 つも許可しない | must |
 | REQ-DIST-004 | webview に Tauri API のグローバル（`window.__TAURI__`）を公開しない | must |
 | REQ-DIST-005 | リリースビルドは本番のサーバー（`https://`、ループバックでないホスト）を使い、開発ビルドはローカルのサーバー（`http://localhost:17890`）を使う。使うサーバーはコアライブラリの 1 か所で決まり、UI と Tauri コマンドはサーバーの URL を持たない。本番のサーバーはソースに書かず、リリースのビルド時に渡す（渡さなければビルドが失敗する）。シグナリングの接続先はそのサーバーに問い合わせる（REQ-CON-028） | must |
+| REQ-DIST-006 | webview に渡す Tauri の権限は、UI が実際に呼ぶプラグインのコマンド（イベントの購読と解除、起動時の招待リンクの取得）だけに限る。リモートのページには IPC を開かない | must |
 
 REQ-DIST-005 の決定は [ADR-030](./adr/ADR-030-signaling-url-by-build-profile.md)。`cargo test` は開発側の選択と、ソースに本番の接続先が無いことを検証する。リリース側の接続先の検査はアプリのビルドスクリプト（`src-tauri/build.rs`）が行い、配布物そのもの（バイナリと `ui/dist`）は `build.yml` / `release.yml` が `scripts/check-release-server-url.sh` で検査する。
 
