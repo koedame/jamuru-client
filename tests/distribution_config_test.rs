@@ -154,6 +154,70 @@ fn tauri_api_is_not_exposed_as_a_global() {
     assert_eq!(tauri_conf()["app"]["withGlobalTauri"], false);
 }
 
+/// Every capability file the bundler picks up from `src-tauri/capabilities/`.
+fn capabilities() -> Vec<(String, Value)> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src-tauri/capabilities");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("could not read {}: {}", dir.display(), e))
+        .map(|entry| entry.expect("could not list capabilities").path())
+        .collect();
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
+            let value = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("{name} is not valid JSON: {e}"));
+            (name, value)
+        })
+        .collect()
+}
+
+/// A permission handed to the webview is something hostile markup could call
+/// if it ever got past the CSP, so the list is pinned: granting another plugin
+/// command means changing this test and saying why the UI needs it.
+///
+/// Verifies: REQ-DIST-006
+#[test]
+fn the_webview_is_granted_only_the_plugin_commands_the_ui_calls() {
+    let mut granted: Vec<String> = capabilities()
+        .iter()
+        .flat_map(|(name, capability)| {
+            capability["permissions"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{name} has no permissions list"))
+                .iter()
+                .map(|permission| match permission {
+                    Value::String(id) => id.clone(),
+                    other => other["identifier"].as_str().unwrap_or_default().to_string(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    granted.sort();
+    assert_eq!(
+        granted,
+        vec![
+            "core:event:allow-listen",
+            "core:event:allow-unlisten",
+            "deep-link:allow-get-current",
+        ]
+    );
+}
+
+/// Verifies: REQ-DIST-006
+#[test]
+fn no_remote_page_is_given_ipc_access() {
+    for (name, capability) in capabilities() {
+        assert!(
+            capability.get("remote").is_none(),
+            "{name} opens the Tauri IPC to remote URLs"
+        );
+    }
+}
+
 fn host_of(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
