@@ -424,7 +424,7 @@ fn a_cli_without_monitoring_does_not_play_its_own_input() {
 }
 
 /// A UDP peer that sends every datagram straight back, except audio, which it
-/// holds for `hold` first - what an echo server does. Runs until dropped.
+/// holds for `hold` first - what a peer that replays what it hears does. Runs until dropped.
 struct EchoPeer {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
