@@ -66,8 +66,8 @@ add_platform() {
     '.[$key] = {url: $url, signature: ($signature | rtrimstr("\n"))}' <<< "$platforms")
 }
 
-add_platform darwin-aarch64-app "$artifacts/jamjam-macos-arm64/*.app.tar.gz"
-add_platform darwin-x86_64-app "$artifacts/jamjam-macos-x64/*.app.tar.gz"
+add_platform darwin-aarch64-app "$artifacts/jamjam-macos-arm64/**/*.app.tar.gz"
+add_platform darwin-x86_64-app "$artifacts/jamjam-macos-x64/**/*.app.tar.gz"
 add_platform linux-x86_64-appimage "$artifacts/jamjam-linux-x64/**/*.AppImage"
 add_platform windows-x86_64-nsis "$artifacts/jamjam-windows-x64/**/*-setup.exe"
 add_platform windows-x86_64-msi "$artifacts/jamjam-windows-x64/**/*.msi"

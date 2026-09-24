@@ -207,8 +207,8 @@ jobs:
           declare -A patterns=(
             ["Linux AppImage"]="artifacts/jamjam-linux-x64/**/*.AppImage"
             ["Linux deb"]="artifacts/jamjam-linux-x64/**/*.deb"
-            ["macOS x64 dmg"]="artifacts/jamjam-macos-x64/*.dmg"
-            ["macOS arm64 dmg"]="artifacts/jamjam-macos-arm64/*.dmg"
+            ["macOS x64 dmg"]="artifacts/jamjam-macos-x64/**/*.dmg"
+            ["macOS arm64 dmg"]="artifacts/jamjam-macos-arm64/**/*.dmg"
             ["Windows msi"]="artifacts/jamjam-windows-x64/**/*.msi"
             ["Windows exe"]="artifacts/jamjam-windows-x64/**/*.exe"
           )
@@ -254,12 +254,12 @@ jobs:
             artifacts/jamjam-linux-x64/**/*.AppImage
             artifacts/jamjam-linux-x64/**/*.AppImage.sig
             artifacts/jamjam-linux-x64/**/*.deb
-            artifacts/jamjam-macos-x64/*.dmg
-            artifacts/jamjam-macos-x64/*.app.tar.gz
-            artifacts/jamjam-macos-x64/*.app.tar.gz.sig
-            artifacts/jamjam-macos-arm64/*.dmg
-            artifacts/jamjam-macos-arm64/*.app.tar.gz
-            artifacts/jamjam-macos-arm64/*.app.tar.gz.sig
+            artifacts/jamjam-macos-x64/**/*.dmg
+            artifacts/jamjam-macos-x64/**/*.app.tar.gz
+            artifacts/jamjam-macos-x64/**/*.app.tar.gz.sig
+            artifacts/jamjam-macos-arm64/**/*.dmg
+            artifacts/jamjam-macos-arm64/**/*.app.tar.gz
+            artifacts/jamjam-macos-arm64/**/*.app.tar.gz.sig
             artifacts/jamjam-windows-x64/**/*.msi
             artifacts/jamjam-windows-x64/**/*.msi.sig
             artifacts/jamjam-windows-x64/**/*.exe
@@ -293,7 +293,7 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
+          shopt -s nullglob globstar
 
           # Same rule as `prerelease:` in the release job above.
           if [[ "${TAG}" == *-* ]]; then
@@ -304,8 +304,8 @@ jobs:
             CONFLICTS_WITH="jamjam@beta"
           fi
 
-          arm=(artifacts/jamjam-macos-arm64/*.dmg)
-          x64=(artifacts/jamjam-macos-x64/*.dmg)
+          arm=(artifacts/jamjam-macos-arm64/**/*.dmg)
+          x64=(artifacts/jamjam-macos-x64/**/*.dmg)
           if [ ${#arm[@]} -ne 1 ] || [ ${#x64[@]} -ne 1 ]; then
             echo "ERROR: expected exactly one DMG per architecture" >&2
             ls -R artifacts >&2

@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const BUNDLES: [(&str, &str); 5] = [
-    ("jamjam-macos-arm64", "jamjam_aarch64.app.tar.gz"),
-    ("jamjam-macos-x64", "jamjam_x64.app.tar.gz"),
+    ("jamjam-macos-arm64/macos", "jamjam_aarch64.app.tar.gz"),
+    ("jamjam-macos-x64/macos", "jamjam_x64.app.tar.gz"),
     ("jamjam-linux-x64/bundle/appimage", "jamjam_amd64.AppImage"),
     ("jamjam-windows-x64/bundle/nsis", "jamjam_x64-setup.exe"),
     ("jamjam-windows-x64/bundle/msi", "jamjam_x64_en-US.msi"),
@@ -117,7 +117,7 @@ fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_a
     // The apps decode this exact text, so it is the file's content, untouched.
     let on_disk = std::fs::read_to_string(
         dir.path()
-            .join("jamjam-macos-arm64/jamjam_aarch64.app.tar.gz.sig"),
+            .join("jamjam-macos-arm64/macos/jamjam_aarch64.app.tar.gz.sig"),
     )
     .unwrap();
     assert_eq!(
