@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 158 |
-| うち must | 153 |
+| 要求 総数 | 159 |
+| うち must | 154 |
 | うち should | 5 |
-| 検証済み | 131 |
+| 検証済み | 132 |
 | サーバーを立てた接続テストでのみ検証 | 24 |
 | 未検証（should のみ許容） | 3 |
 
@@ -53,6 +53,7 @@
 | REQ-CLI-004 | must | 提供されていないオーディオデバイスの選択は拒否され、設定に書かれない | `docs-spec/requirements.md` | `tests/cli_test.rs`::devices_set_refuses_a_device_this_machine_does_not_have |
 | REQ-CLI-005 | must | CLI 同士（`host` / `join`）で音声が双方向に届く。受信した音声は GUI と同じ再生経路（プレイアウトバッファ・PLC・FEC、[ADR-028](./adr/ADR-028-single-stage-playout.md)）を通り、送られた音高・音量のまま再生される | `docs-spec/requirements.md` | `tests/cli_test.rs`::two_clis_connected_directly_hear_each_other |
 | REQ-CLI-006 | must | ローカルモニタリングを CLI から操作できる。`--monitor` で開始時から ON、セッション中の `/monitor` `/unmonitor` で切り替わる。ミュートとは独立である（[ADR-033](./adr/ADR-033-local-monitoring.md)） | `docs-spec/requirements.md` | `src/main.rs`::monitor_commands_switch_local_monitoring<br/>`src/main.rs`::monitoring_without_audio_reports_that_there_is_nothing_to_monitor<br/>`tests/cli_test.rs`::a_monitoring_cli_hears_its_own_input_without_a_peer |
+| REQ-CLI-007 | must | `host` / `join` は接続してから `--duration` の秒数で自分で終わり、`--input-bursts` で送ったバーストが再生されるまでの往復時間（相手が音を保持して返すなら `--echo-delay-ms` を引いたもの）を測り、`--report-json` で往復・ネットワーク・プレイアウトの値を JSON に書く（[ADR-038](./adr/ADR-038-cli-round-trip-measurement.md)） | `docs-spec/requirements.md` | `src/audio/probe.rs`::a_burst_is_noticed_once_however_many_frames_carry_it<br/>`src/audio/probe.rs`::a_burst_signal_starts_every_interval_with_silence_between<br/>`src/audio/probe.rs`::a_sound_heard_before_the_peer_hold_has_passed_is_not_counted<br/>`src/audio/probe.rs`::a_sound_more_than_an_interval_after_the_newest_burst_is_not_counted<br/>`src/audio/probe.rs`::a_sound_with_no_burst_of_ours_before_it_is_not_counted<br/>`src/audio/probe.rs`::bursts_sent_too_late_to_return_are_not_expected<br/>`src/audio/probe.rs`::the_95th_percentile_is_the_nearest_rank<br/>`src/audio/probe.rs`::when_a_burst_is_lost_the_bursts_after_it_still_pair_with_their_own<br/>`src/audio/probe.rs`::when_the_peer_holds_audio_the_hold_is_taken_off_the_delay<br/>`tests/cli_test.rs`::a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts |
 | REQ-CON-020 | must | 1 ルームあたりの最大参加者数が 10 名である | `docs-spec/requirements.md` | `tests/connection_test.rs`::test_session_config |
 | REQ-CON-021 | must | 招待コードは 6 文字の英数字であり、生成値が形式判定を通る | `docs-spec/requirements.md` | `src/network/signaling.rs`::test_generate_invite_code_length |
 | REQ-CON-022 | must | 再接続の検知閾値は keep-alive 間隔の2倍以上に正規化され、健全な回線でフラップしない | `docs-spec/requirements.md` | `src/network/connection.rs`::reconnect_config_cannot_be_configured_to_flap |

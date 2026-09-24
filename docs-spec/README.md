@@ -62,6 +62,7 @@ sidebar_position: 1
 | [ADR-035](./adr/ADR-035-stun-through-the-audio-socket.md) | 公開アドレスは音声ソケット自身から STUN に問い合わせて公開する |
 | [ADR-036](./adr/ADR-036-diagnostic-log-file.md) | 公開ビルドでも診断ログファイル `jamjam.log` を書く（画面側の出力と失敗したコマンドを含む） |
 | [ADR-037](./adr/ADR-037-usage-reporting-opt-in.md) | 利用状況の送信は、利用者が設定でオンにしたときだけ。送るもの・外す 5 項目・止め方 |
+| [ADR-038](./adr/ADR-038-cli-round-trip-measurement.md) | CLI が区切りのある信号で音声経路の往復遅延を測り、JSON に残す |
 
 ---
 

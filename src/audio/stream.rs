@@ -22,6 +22,11 @@ use super::resampler::{create_resampler_with_channels, AudioResampler, Resampler
 /// path is stereo throughout - including the resampler.
 pub const WIRE_CHANNELS: usize = 2;
 
+/// How often [`ReceivePath::adapt`] is called (ADR-031). One second is the
+/// window each decision judges, and ten of them in a row are needed to give
+/// a frame back.
+pub const ADAPT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Turns a captured mono frame into the stereo frame that is sent.
 ///
 /// `volume` is a gain (1.0 = unchanged) and `pan` runs from -100 (left) to 100
@@ -219,7 +224,7 @@ impl ReceivePath {
     }
 
     /// Lets the delay follow the link over the time since the last call.
-    /// Returns the new delay when it moved. Call it about once a second.
+    /// Returns the new delay when it moved. Call it every [`ADAPT_INTERVAL`].
     pub fn adapt(&self) -> Option<u32> {
         self.playout.lock().ok()?.adapt()
     }

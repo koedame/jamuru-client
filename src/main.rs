@@ -15,7 +15,8 @@ use tracing_subscriber::FmtSubscriber;
 
 use jamjam::audio::{
     list_input_devices, list_output_devices, mono_to_wire, AudioConfig, AudioEngine, AudioPreset,
-    DeviceId, LocalMonitor, PeerRateChange, PlayoutStats, ReceivePath, WIRE_CHANNELS,
+    BurstProbe, BurstSignal, DeviceId, LocalMonitor, PeerRateChange, PlayoutStats, ReceivePath,
+    RoundTripReport, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 use jamjam::network::{
     candidates_to_addrs, gather_candidates, AudioEncodingConfig, Connection, ConnectionState,
@@ -68,6 +69,12 @@ struct AudioArgs {
     #[arg(long, value_name = "HZ", conflicts_with = "input_device")]
     input_tone: Option<f32>,
 
+    /// Send a short tone burst every 500 ms instead of capturing from a
+    /// device, so the round trip through the whole audio path can be timed
+    /// (see `--report-json`)
+    #[arg(long, conflicts_with_all = ["input_device", "input_tone"])]
+    input_bursts: bool,
+
     /// Write what would be played to a file instead of an output device
     /// (raw 32-bit float, little-endian, stereo interleaved)
     #[arg(long, value_name = "PATH", conflicts_with = "output_device")]
@@ -77,6 +84,23 @@ struct AudioArgs {
     /// (`/monitor` and `/unmonitor` switch it in a room session)
     #[arg(long)]
     monitor: bool,
+}
+
+/// How a `host` or `join` session ends and what it leaves behind.
+#[derive(clap::Args, Clone, Debug)]
+struct RunArgs {
+    /// Stop after this many seconds connected (default: run until Ctrl+C)
+    #[arg(long, value_name = "SECS")]
+    duration: Option<u64>,
+
+    /// Write what the session measured to this file as JSON when it ends
+    #[arg(long, value_name = "PATH")]
+    report_json: Option<PathBuf>,
+
+    /// How long the peer keeps audio before sending it back, as an echo server
+    /// does. Taken off the round trips `--input-bursts` measures
+    #[arg(long, value_name = "MS", default_value_t = 0)]
+    echo_delay_ms: u64,
 }
 
 #[derive(Subcommand)]
@@ -101,6 +125,9 @@ enum Commands {
 
         #[command(flatten)]
         audio: AudioArgs,
+
+        #[command(flatten)]
+        run: RunArgs,
     },
 
     /// Join a session by address, without a signaling server
@@ -110,6 +137,9 @@ enum Commands {
 
         #[command(flatten)]
         audio: AudioArgs,
+
+        #[command(flatten)]
+        run: RunArgs,
     },
 
     /// List rooms on a jamjam server
@@ -254,6 +284,9 @@ struct AudioSettings {
     preset: AudioPreset,
     /// Stand-in for the input device: a sine tone at this frequency.
     input_tone: Option<f32>,
+    /// Stand-in for the input device: a tone burst every 500 ms, whose round
+    /// trip is timed.
+    input_bursts: bool,
     /// Stand-in for the output device: the file played audio is written to.
     output_file: Option<PathBuf>,
     /// Whether the session starts with local monitoring on.
@@ -292,6 +325,7 @@ impl AudioArgs {
             output_device: self.output_device.clone().or(config.output_device_id),
             preset,
             input_tone: self.input_tone,
+            input_bursts: self.input_bursts,
             output_file: self.output_file.clone(),
             monitor: self.monitor,
         })
@@ -560,8 +594,9 @@ enum Direct {
     Join { address: SocketAddr },
 }
 
-/// Runs `host` or `join`: one peer, no signaling server, until Ctrl+C.
-async fn run_direct(target: Direct, settings: AudioSettings) -> Result<()> {
+/// Runs `host` or `join`: one peer, no signaling server, until Ctrl+C or the
+/// end of `--duration`.
+async fn run_direct(target: Direct, settings: AudioSettings, run: RunArgs) -> Result<()> {
     let bind = match &target {
         Direct::Host { port } => format!("0.0.0.0:{}", port),
         Direct::Join { .. } => "0.0.0.0:0".to_string(),
@@ -570,17 +605,24 @@ async fn run_direct(target: Direct, settings: AudioSettings) -> Result<()> {
     info!("Audio socket: {}", connection.local_addr());
 
     print_audio_settings(&settings);
-    let session = AudioSession::start(connection, &settings, Arc::new(AtomicBool::new(false)))?;
+    let probe = settings.input_bursts.then(|| Arc::new(BurstProbe::new()));
+    let session = AudioSession::start(
+        connection,
+        &settings,
+        Arc::new(AtomicBool::new(false)),
+        probe.clone(),
+    )?;
 
-    let connected = match target {
+    let peer = match target {
         Direct::Host { port } => {
             println!("\nHost started. Listening on port {}.", port);
             println!("Press Ctrl+C to stop.\n");
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => false,
+                _ = tokio::signal::ctrl_c() => None,
                 peer = session.accept() => {
-                    println!("Connected to {}. Session active.", peer?);
-                    true
+                    let peer = peer?;
+                    println!("Connected to {}. Session active.", peer);
+                    Some(peer)
                 }
             }
         }
@@ -588,16 +630,99 @@ async fn run_direct(target: Direct, settings: AudioSettings) -> Result<()> {
             session.connect(&[address]).await?;
             println!("\nConnected to {}. Session active.", address);
             println!("Press Ctrl+C to stop.\n");
-            true
+            Some(address)
         }
     };
 
-    if connected {
-        tokio::signal::ctrl_c().await?;
+    let connected_at = Instant::now();
+    if peer.is_some() {
+        match run.duration {
+            Some(seconds) => tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = tokio::time::sleep(Duration::from_secs(seconds)) => {}
+            },
+            None => tokio::signal::ctrl_c().await?,
+        }
     }
     info!("Shutting down...");
-    session.finish(None).await;
+    let outcome = session.finish(None).await;
+
+    if let Some(path) = &run.report_json {
+        let round_trip = probe.map(|probe| probe.report(Duration::from_millis(run.echo_delay_ms)));
+        let report = session_report(
+            &settings,
+            peer,
+            &outcome,
+            connected_at.elapsed(),
+            round_trip
+                .as_ref()
+                .map(|report| (run.echo_delay_ms, report)),
+        );
+        std::fs::write(path, format!("{}\n", report))
+            .with_context(|| format!("cannot write {}", path.display()))?;
+    }
     Ok(())
+}
+
+/// Rounds to six decimals, so a report reads `0.495` and not `0.4950000047683716`
+/// (an `f32` widened), and a loss rate of 0.04 % is not rounded away.
+fn rounded(value: f64) -> f64 {
+    (value * 1_000_000.0).round() / 1_000_000.0
+}
+
+/// What a `host` / `join` session measured, as one JSON object.
+///
+/// `round_trip` is present only when the session sent `--input-bursts`.
+fn session_report(
+    settings: &AudioSettings,
+    peer: Option<SocketAddr>,
+    outcome: &SessionOutcome,
+    connected_for: Duration,
+    round_trip: Option<(u64, &RoundTripReport)>,
+) -> serde_json::Value {
+    let stats = &outcome.stats;
+    let round_trip = round_trip.map(|(echo_delay_ms, report)| {
+        let delay = report.delay.as_ref();
+        serde_json::json!({
+            "echo_delay_ms": echo_delay_ms,
+            "bursts_sent": report.bursts_sent,
+            "bursts_expected": report.bursts_expected,
+            "bursts_heard": report.bursts_heard,
+            "min_ms": delay.map(|d| rounded(d.min_ms)),
+            "mean_ms": delay.map(|d| rounded(d.mean_ms)),
+            "median_ms": delay.map(|d| rounded(d.median_ms)),
+            "p95_ms": delay.map(|d| rounded(d.p95_ms)),
+            "max_ms": delay.map(|d| rounded(d.max_ms)),
+        })
+    });
+
+    serde_json::json!({
+        "jamjam_version": env!("CARGO_PKG_VERSION"),
+        "finished_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "peer": peer.map(|peer| peer.to_string()),
+        "connected_seconds": rounded(connected_for.as_secs_f64()),
+        "audio": {
+            "preset": settings.preset.name(),
+            "codec": format!("{:?}", settings.preset.codec_type()).to_lowercase(),
+            "sample_rate": settings.sample_rate,
+            "frame_size": settings.frame_size,
+        },
+        "network": {
+            "rtt_ms": stats.rtt_ms.map(|rtt| rounded(f64::from(rtt))),
+            "jitter_ms": rounded(f64::from(stats.jitter_ms)),
+            "packet_loss_rate": rounded(f64::from(stats.packet_loss_rate)),
+            "packets_sent": stats.packets_sent,
+            "packets_received": stats.packets_received,
+        },
+        "playout": {
+            "delay_frames": outcome.delay_frames,
+            "frames_played": outcome.playout.frames_played,
+            "frames_concealed": outcome.playout.frames_concealed,
+            "frames_late": outcome.playout.frames_late,
+            "resyncs": outcome.playout.resyncs,
+        },
+        "round_trip": round_trip,
+    })
 }
 
 fn print_audio_settings(settings: &AudioSettings) {
@@ -880,7 +1005,12 @@ async fn run_room_session(
         print_audio_settings(&audio);
         let connection = Connection::new("0.0.0.0:0").await?;
         publish_address(&mut conn, &connection).await?;
-        Some(AudioSession::start(connection, &audio, is_muted.clone())?)
+        Some(AudioSession::start(
+            connection,
+            &audio,
+            is_muted.clone(),
+            None,
+        )?)
     };
 
     // Signaling events arrive on their own task so the main loop can select
@@ -1049,6 +1179,8 @@ struct AudioSession {
     receive: ReceivePath,
     local_info: LocalLatencyInfo,
     send_task: tokio::task::JoinHandle<()>,
+    /// Lets the play-out delay follow the link, as the app does (ADR-031).
+    adapt_task: tokio::task::JoinHandle<()>,
     monitor: LocalMonitor,
     /// Held for as long as the session runs; dropping it stops the audio.
     io: AudioIo,
@@ -1059,10 +1191,14 @@ impl AudioSession {
     ///
     /// The connection must not be connected yet: connecting starts the receive
     /// loop, which takes the callbacks installed here.
+    ///
+    /// With a `probe`, the bursts sent and the bursts played out are stamped
+    /// on it.
     fn start(
         mut connection: Connection,
         settings: &AudioSettings,
         is_muted: Arc<AtomicBool>,
+        probe: Option<Arc<BurstProbe>>,
     ) -> Result<Self> {
         let preset = &settings.preset;
         let codec_type = preset.codec_type();
@@ -1124,9 +1260,15 @@ impl AudioSession {
         monitor.set_enabled(settings.monitor);
 
         let (tx_capture, mut rx_capture) = tokio::sync::mpsc::channel::<(Vec<f32>, u32)>(64);
-        let io = AudioIo::start(settings, &receive, &monitor, move |samples, timestamp| {
-            let _ = tx_capture.try_send((samples.to_vec(), timestamp));
-        })?;
+        let io = AudioIo::start(
+            settings,
+            &receive,
+            &monitor,
+            probe.clone(),
+            move |samples, timestamp| {
+                let _ = tx_capture.try_send((samples.to_vec(), timestamp));
+            },
+        )?;
 
         let connection = Arc::new(tokio::sync::Mutex::new(connection));
         let connection_for_send = connection.clone();
@@ -1140,9 +1282,26 @@ impl AudioSession {
                 mono_to_wire(&samples, 1.0, 0, &mut stereo);
                 let conn = connection_for_send.lock().await;
                 if conn.is_connected() {
+                    if let Some(probe) = &probe {
+                        probe.note_sent(&stereo);
+                    }
                     if let Err(e) = conn.send_audio(&stereo, timestamp).await {
                         warn!("Failed to send audio: {}", e);
                     }
+                }
+            }
+        });
+
+        let for_adapt = receive.clone();
+        let adapt_task = tokio::spawn(async move {
+            let mut tick = tokio::time::interval_at(
+                tokio::time::Instant::now() + ADAPT_INTERVAL,
+                ADAPT_INTERVAL,
+            );
+            loop {
+                tick.tick().await;
+                if let Some(frames) = for_adapt.adapt() {
+                    info!("Play-out delay adjusted to {} frame(s)", frames);
                 }
             }
         });
@@ -1157,6 +1316,7 @@ impl AudioSession {
             receive,
             local_info,
             send_task,
+            adapt_task,
             monitor,
             io,
         })
@@ -1229,8 +1389,9 @@ impl AudioSession {
     }
 
     /// Stops the audio, disconnects and prints what the session looked like.
-    async fn finish(self, peer_name: Option<&str>) {
+    async fn finish(self, peer_name: Option<&str>) -> SessionOutcome {
         self.send_task.abort();
+        self.adapt_task.abort();
         let (stats, peer_info) = {
             let mut connection = self.connection.lock().await;
             let stats = connection.stats();
@@ -1240,14 +1401,28 @@ impl AudioSession {
         };
         drop(self.io);
 
+        let playout = self.receive.stats();
         print_session_stats(
             &stats,
             &self.local_info,
             peer_info.as_ref(),
-            &self.receive.stats(),
+            &playout,
             peer_name,
         );
+        SessionOutcome {
+            stats,
+            playout,
+            delay_frames: self.receive.delay_frames(),
+        }
     }
+}
+
+/// What a session looked like when it ended.
+struct SessionOutcome {
+    stats: ConnectionStats,
+    playout: PlayoutStats,
+    /// The play-out delay in force at the end, after any adaptation.
+    delay_frames: u32,
 }
 
 fn frame_ms(settings: &AudioSettings) -> f32 {
@@ -1257,6 +1432,9 @@ fn frame_ms(settings: &AudioSettings) -> f32 {
 /// Peak level of `--input-tone`, below full scale so the centred stereo mix
 /// cannot clip.
 const TONE_AMPLITUDE: f32 = 0.5;
+
+/// Fills a captured frame with a stand-in signal.
+type SignalGenerator = Box<dyn FnMut(&mut [f32]) + Send>;
 
 /// Capture and playback, on the devices or on their stand-ins.
 ///
@@ -1275,11 +1453,12 @@ impl AudioIo {
     /// Starts capture, handing each mono frame and its sample timestamp to
     /// `on_capture`, and playback, taking frames from `receive`. What is
     /// captured also goes to `monitor`, which mixes it into what is played
-    /// while it is on.
+    /// while it is on. What is played is also shown to `probe`.
     fn start<F>(
         settings: &AudioSettings,
         receive: &ReceivePath,
         monitor: &LocalMonitor,
+        probe: Option<Arc<BurstProbe>>,
         mut on_capture: F,
     ) -> Result<Self>
     where
@@ -1297,19 +1476,30 @@ impl AudioIo {
             stand_ins: Vec::new(),
         };
 
-        match settings.input_tone {
-            Some(frequency) => {
-                let step = std::f64::consts::TAU * frequency as f64 / settings.sample_rate as f64;
-                let mut angle = 0.0f64;
+        let stand_in: Option<SignalGenerator> = if let Some(frequency) = settings.input_tone {
+            let step = std::f64::consts::TAU * frequency as f64 / settings.sample_rate as f64;
+            let mut angle = 0.0f64;
+            Some(Box::new(move |frame: &mut [f32]| {
+                for sample in frame.iter_mut() {
+                    *sample = TONE_AMPLITUDE * angle.sin() as f32;
+                    angle = (angle + step) % std::f64::consts::TAU;
+                }
+            }))
+        } else if settings.input_bursts {
+            let mut signal = BurstSignal::new(settings.sample_rate);
+            Some(Box::new(move |frame: &mut [f32]| signal.fill(frame)))
+        } else {
+            None
+        };
+
+        match stand_in {
+            Some(mut fill) => {
                 let mut timestamp = 0u32;
                 let mut frame = vec![0.0f32; settings.frame_size as usize];
                 let mut tap = monitor.tap();
                 io.stand_ins
                     .push(run_at_frame_rate(settings, io.running.clone(), move || {
-                        for sample in frame.iter_mut() {
-                            *sample = TONE_AMPLITUDE * angle.sin() as f32;
-                            angle = (angle + step) % std::f64::consts::TAU;
-                        }
+                        fill(&mut frame);
                         tap.push(&frame);
                         on_capture(&frame, timestamp);
                         timestamp = timestamp.wrapping_add(frame.len() as u32);
@@ -1331,6 +1521,10 @@ impl AudioIo {
         let for_monitor = monitor.clone();
         let source = move |out: &mut [f32]| {
             let samples = for_output.read_into(out).samples;
+            // Before the monitor mix: what the peer sent, not our own input.
+            if let Some(probe) = &probe {
+                probe.note_played(&out[..samples]);
+            }
             for_monitor.mix_into(&mut out[..samples]);
             samples
         };
@@ -1482,14 +1676,18 @@ async fn main() -> Result<()> {
             PresetAction::List => list_presets(),
             PresetAction::Use { name } => use_preset(&name)?,
         },
-        Commands::Host { port, audio } => {
-            run_direct(Direct::Host { port }, audio.resolve()?).await?;
+        Commands::Host { port, audio, run } => {
+            run_direct(Direct::Host { port }, audio.resolve()?, run).await?;
         }
-        Commands::Join { address, audio } => {
+        Commands::Join {
+            address,
+            audio,
+            run,
+        } => {
             let address = address
                 .parse()
                 .with_context(|| format!("{:?} is not an IP:PORT address", address))?;
-            run_direct(Direct::Join { address }, audio.resolve()?).await?;
+            run_direct(Direct::Join { address }, audio.resolve()?, run).await?;
         }
         Commands::Rooms { server } => {
             run_rooms(server).await?;

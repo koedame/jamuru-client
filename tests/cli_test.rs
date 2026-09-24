@@ -422,3 +422,155 @@ fn a_cli_without_monitoring_does_not_play_its_own_input() {
         "with monitoring off the output carries only the peers, and there are none"
     );
 }
+
+/// A UDP peer that sends every datagram straight back, except audio, which it
+/// holds for `hold` first - what an echo server does. Runs until dropped.
+struct EchoPeer {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl EchoPeer {
+    /// Byte 1 of a jamjam packet is its type; 0x01 is audio.
+    const AUDIO_TYPE_BYTE: usize = 1;
+    const AUDIO_TYPE: u8 = 0x01;
+
+    fn start(socket: std::net::UdpSocket, hold: Duration) -> Self {
+        use std::sync::atomic::Ordering;
+
+        socket
+            .set_read_timeout(Some(Duration::from_millis(2)))
+            .expect("set a read timeout");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping = stop.clone();
+        let thread = std::thread::spawn(move || {
+            let mut buffer = [0u8; 2048];
+            let mut held: std::collections::VecDeque<(Instant, std::net::SocketAddr, Vec<u8>)> =
+                Default::default();
+            while !stopping.load(Ordering::SeqCst) {
+                if let Ok((length, from)) = socket.recv_from(&mut buffer) {
+                    let datagram = buffer[..length].to_vec();
+                    if datagram.get(Self::AUDIO_TYPE_BYTE) == Some(&Self::AUDIO_TYPE) {
+                        held.push_back((Instant::now() + hold, from, datagram));
+                    } else {
+                        let _ = socket.send_to(&datagram, from);
+                    }
+                }
+                while held
+                    .front()
+                    .is_some_and(|(due, _, _)| *due <= Instant::now())
+                {
+                    let (_, to, datagram) = held.pop_front().expect("front was just seen");
+                    let _ = socket.send_to(&datagram, to);
+                }
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for EchoPeer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// `join` against a peer that echoes audio after a hold ends by itself after
+/// `--duration`, leaves a JSON report, and that report holds the round trip of
+/// the bursts sent - the hold taken off - so a change that slows the audio path
+/// shows up as a number. The sound card is replaced by `--input-bursts` and
+/// `--output-file`, so this runs wherever `cargo test` runs.
+///
+/// Verifies: REQ-CLI-007
+#[test]
+fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
+    const HOLD_MS: u64 = 200;
+    let echo_socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind the echo peer");
+    let address = echo_socket.local_addr().expect("echo address").to_string();
+    let _echo = EchoPeer::start(echo_socket, Duration::from_millis(HOLD_MS));
+
+    let home = tempfile::tempdir().expect("temp HOME");
+    let report_path = home.path().join("report.json");
+    let played = home.path().join("played.f32");
+    let started = Instant::now();
+
+    let output = run(
+        home.path(),
+        &[
+            "join",
+            &address,
+            "--preset",
+            "balanced",
+            "--sample-rate",
+            "48000",
+            "--input-bursts",
+            "--output-file",
+            played.to_str().expect("utf-8 path"),
+            "--duration",
+            "4",
+            "--echo-delay-ms",
+            &HOLD_MS.to_string(),
+            "--report-json",
+            report_path.to_str().expect("utf-8 path"),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "the session should end by itself, got {:?}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "--duration 4 should not run for {:?}",
+        started.elapsed()
+    );
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&report_path).expect("the report is written"))
+            .expect("the report is JSON");
+    let round_trip = &report["round_trip"];
+
+    let sent = round_trip["bursts_sent"].as_u64().expect("bursts_sent");
+    let expected = round_trip["bursts_expected"]
+        .as_u64()
+        .expect("bursts_expected");
+    let heard = round_trip["bursts_heard"].as_u64().expect("bursts_heard");
+    assert!(sent >= 6, "about 8 bursts go out in 4 s, got {}", sent);
+    assert!(
+        heard >= 3 && heard >= expected.saturating_sub(1),
+        "the bursts due back should come back, heard {} of {} expected",
+        heard,
+        expected
+    );
+
+    // The echo returns audio the moment its hold is up, over loopback, so what
+    // is left is the app's own path: the jitter buffer above all (about 16 ms).
+    // Failing to take the hold off leaves 200 ms or more, and taking off the
+    // wrong hold leaves a delay that is off by as much.
+    let median = round_trip["median_ms"].as_f64().expect("median_ms");
+    let min = round_trip["min_ms"].as_f64().expect("min_ms");
+    let max = round_trip["max_ms"].as_f64().expect("max_ms");
+    assert!(
+        (0.0..100.0).contains(&median) && min <= median && median <= max,
+        "the round trip should be a small positive time with the hold taken off, got min {} median {} max {}",
+        min,
+        median,
+        max
+    );
+
+    assert_eq!(report["peer"], address.as_str());
+    assert_eq!(report["audio"]["preset"], "balanced");
+    assert!(
+        report["playout"]["frames_played"].as_u64().unwrap_or(0) > 0,
+        "the play-out counters should be in the report: {}",
+        report
+    );
+}

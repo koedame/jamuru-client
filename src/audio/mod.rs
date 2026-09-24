@@ -10,6 +10,7 @@ mod monitor;
 mod playout;
 mod plc;
 mod preset;
+mod probe;
 mod resampler;
 mod stream;
 
@@ -31,8 +32,9 @@ pub use playout::{
 };
 pub use plc::PcmPlc;
 pub use preset::{AudioPreset, BUDGET_SAMPLE_RATE};
+pub use probe::{BurstProbe, BurstSignal, DelayStats, RoundTripReport};
 pub use resampler::{
     create_resampler, create_resampler_with_channels, AudioResampler, FastResampler,
     PassthroughResampler, ResamplerError,
 };
-pub use stream::{mono_to_wire, PeerRateChange, ReceivePath, WIRE_CHANNELS};
+pub use stream::{mono_to_wire, PeerRateChange, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS};
