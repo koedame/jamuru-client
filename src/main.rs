@@ -112,14 +112,6 @@ enum Commands {
         audio: AudioArgs,
     },
 
-    /// List rooms on a jamjam server
-    Rooms {
-        /// jamjam server URL (e.g., https://example.com). The CLI asks it
-        /// where its signaling server is
-        #[arg(short, long)]
-        server: String,
-    },
-
     /// Create a room on a signaling server and print its invite code
     CreateRoom {
         /// jamjam server URL (e.g., https://example.com). The CLI asks it
@@ -663,46 +655,6 @@ async fn send_chat_message(
 fn signaling_client(server: &str) -> SignalingClient {
     let identity = jamjam::identity_store::load_installation_identity();
     SignalingClient::new(server, Arc::new(identity))
-}
-
-async fn run_rooms(server: String) -> Result<()> {
-    info!("Connecting through the jamjam server: {}", server);
-
-    let client = signaling_client(&server);
-    let mut conn = client.connect().await?;
-
-    info!("Connected, listing rooms...");
-
-    conn.send(SignalingMessage::ListRooms).await?;
-
-    match conn.recv().await? {
-        SignalingMessage::RoomList { rooms } => {
-            if rooms.is_empty() {
-                println!("No rooms available.");
-            } else {
-                println!("Available rooms:");
-                for room in rooms {
-                    let password_str = if room.has_password {
-                        " (password protected)"
-                    } else {
-                        ""
-                    };
-                    println!(
-                        "  {} - {} ({}/{} peers){}",
-                        room.id, room.name, room.peer_count, room.max_peers, password_str
-                    );
-                }
-            }
-        }
-        SignalingMessage::Error { message } => {
-            anyhow::bail!("Server error: {}", message);
-        }
-        _ => {
-            anyhow::bail!("Unexpected response from server");
-        }
-    }
-
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1490,9 +1442,6 @@ async fn main() -> Result<()> {
                 .parse()
                 .with_context(|| format!("{:?} is not an IP:PORT address", address))?;
             run_direct(Direct::Join { address }, audio.resolve()?).await?;
-        }
-        Commands::Rooms { server } => {
-            run_rooms(server).await?;
         }
         Commands::CreateRoom {
             server,

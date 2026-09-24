@@ -329,7 +329,8 @@ sequenceDiagram
 /// serde: adjacently tagged format - `#[serde(tag = "type", content = "data")]`
 enum SignalingMessage {
     // --- Client → Server ---
-    /// ルーム一覧を取得
+    /// ルーム一覧を取得。アプリは接続を試すためのルーム（テストルーム）を探すのに使う。
+    /// 何を返すかはサーバーが決める（開いているルームの一覧ではない）
     ListRooms,
     /// ルームを作成
     CreateRoom {
@@ -392,6 +393,8 @@ enum SignalingMessage {
     /// されるが、`peer_id` が自分自身と一致するクライアントのみ切断すべき。
     Kicked { peer_id: Uuid, reason: String },
     /// チャットメッセージをルーム内の全ピアへブロードキャストする（送信者本人にも返る）。
+    /// 送信者（`sender_id` / `sender_name`）は、サーバーが送ってきた接続の参加者の ID と名前に置き換えて配る。
+    /// クライアントが書いた値は使われない
     ChatMessage {
         sender_id: String,
         sender_name: String,
