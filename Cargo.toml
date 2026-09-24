@@ -72,8 +72,8 @@ rustls = "0.23"
 # Encryption for P2P data
 aes-gcm = "0.11"
 x25519-dalek = { version = "3", features = ["static_secrets"] }
-sha2 = "0.10"
-hkdf = "0.12"
+sha2 = "0.11"
+hkdf = "0.13"
 
 # Device identity signing (ADR-024). Shares curve25519-dalek 5 with
 # x25519-dalek above, so no second copy of the curve arithmetic is linked in.
