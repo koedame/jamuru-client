@@ -36,7 +36,7 @@
 | REQ-AUD-104 | must | サンプルレート48kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_48khz |
 | REQ-AUD-105 | must | サンプルレート96kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_96khz |
 | REQ-AUD-106 | must | 異なるサンプルレートの参加者がいる場合 | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_mismatched_sample_rates_are_resampled |
-| REQ-AUD-107 | must | モノラル入力で動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_mono_input |
+| REQ-AUD-107 | must | モノラル入力で動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_mono_input<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.transmit.test.tsx`::the user picks mono during a session, the setting is saved and the session is told<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.transmit.test.tsx`::the user picks mono with no session running, the setting is saved and no session is told |
 | REQ-AUD-108 | must | ステレオ入力で動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_stereo_input |
 | REQ-AUD-109 | must | フレームサイズ64サンプルで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_frame_size_64 |
 | REQ-AUD-110 | must | フレームサイズ256サンプルで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_frame_size_256 |
