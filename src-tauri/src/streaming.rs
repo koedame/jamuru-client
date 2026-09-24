@@ -19,8 +19,9 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 
 use jamjam::audio::{
-    capture_to_wire, AudioConfig, AudioEngine, AudioPreset, DeviceId, LocalMonitor, PeerRateChange,
-    PlayoutResult, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
+    capture_attempts, capture_to_wire, AudioConfig, AudioEngine, AudioError, AudioPreset, DeviceId,
+    LocalMonitor, OutputRoute, PeerRateChange, PlayoutResult, ReceivePath, ADAPT_INTERVAL,
+    WIRE_CHANNELS,
 };
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
@@ -354,6 +355,10 @@ enum StreamingCommand {
     SetInputDevice(Option<String>),
     /// Capture 1 (mono) or 2 (stereo) channels from now on
     SetTransmitChannels(u32),
+    /// Capture from these input device channels (1-based settings) from now on
+    SetInputChannels(u32, Option<u32>),
+    /// Play on these output device channels (1-based settings) from now on
+    SetOutputChannels(u32, Option<u32>),
     SetOutputDevice(Option<String>),
     SetMute(bool),
     SetMonitoring(bool),
@@ -401,6 +406,30 @@ impl StreamingState {
         let tx = self.cmd_tx.lock().await;
         if let Some(ref sender) = *tx {
             let _ = sender.send(StreamingCommand::SetJitterBufferFrames(frames));
+        }
+    }
+
+    /// Tells a running session which input device channels to capture from.
+    /// A no-op when no session is active.
+    pub async fn apply_input_channels(&self, left: u32, right: Option<u32>) {
+        if !self.is_active.load(Ordering::SeqCst) {
+            return;
+        }
+        let tx = self.cmd_tx.lock().await;
+        if let Some(ref sender) = *tx {
+            let _ = sender.send(StreamingCommand::SetInputChannels(left, right));
+        }
+    }
+
+    /// Tells a running session which output device channels to play on.
+    /// A no-op when no session is active.
+    pub async fn apply_output_channels(&self, left: u32, right: Option<u32>) {
+        if !self.is_active.load(Ordering::SeqCst) {
+            return;
+        }
+        let tx = self.cmd_tx.lock().await;
+        if let Some(ref sender) = *tx {
+            let _ = sender.send(StreamingCommand::SetOutputChannels(left, right));
         }
     }
 }
@@ -617,6 +646,17 @@ pub async fn streaming_start(
         .map(|config| config.transmit_channels)
         .unwrap_or(2);
 
+    // Which channels of a multi-channel interface are read and played on
+    let (input_channels, output_channels) = config_state
+        .get()
+        .map(|config| {
+            (
+                (config.input_channel_l, config.input_channel_r),
+                (config.output_channel_l, config.output_channel_r),
+            )
+        })
+        .unwrap_or(((1, Some(2)), (1, Some(2))));
+
     // Parse remote address
     let addr: SocketAddr = remote_addr
         .parse()
@@ -740,6 +780,8 @@ pub async fn streaming_start(
                 preset,
                 sample_rate,
                 transmit_channels,
+                input_channels,
+                output_channels,
                 cmd_rx,
                 &is_active,
                 &is_muted,
@@ -1268,6 +1310,39 @@ fn playout_source(
     }
 }
 
+/// Starts playback on `device_id`, on the output channels `(left, right)` the
+/// user selected (1-based). `make_source` builds the frame source, once per
+/// attempt.
+///
+/// A device that has no such channels is played on its first two, so a stale
+/// setting never leaves a session without sound.
+fn start_playout<S>(
+    engine: &mut AudioEngine,
+    device_id: Option<&DeviceId>,
+    (left, right): (u32, Option<u32>),
+    frame_samples: usize,
+    make_source: impl Fn() -> S,
+) -> Result<(), AudioError>
+where
+    S: FnMut(&mut [f32]) -> usize + Send + 'static,
+{
+    let selected = OutputRoute::from_settings(left, right);
+    engine.set_playback_route(selected);
+    match engine.start_playback_with_source(device_id, frame_samples, make_source()) {
+        Err(e) if !selected.is_default() => {
+            tracing::warn!(
+                "Playback on {:?} to device channel(s) {:?} failed: {}",
+                device_id,
+                selected,
+                e
+            );
+            engine.set_playback_route(OutputRoute::default());
+            engine.start_playback_with_source(device_id, frame_samples, make_source())
+        }
+        result => result,
+    }
+}
+
 /// Fills `out` from the play-out buffer with the mixer gains applied, and
 /// returns how many samples it wrote.
 fn mix_peers(
@@ -1329,29 +1404,32 @@ struct CaptureRing {
     channels: usize,
 }
 
-/// Starts capture on `device_id` with `wanted` channels (1 or 2) and returns
+/// Starts capture on `device_id` with `wanted` channels (1 or 2), taken from
+/// the input channels `(left, right)` the user selected (1-based), and returns
 /// the ring the captured audio lands in.
 ///
-/// A device that will not open with two channels - a mono microphone - is
-/// opened with one instead, so a stereo setting never leaves a session
-/// without input. The ring reports how many channels it actually has.
+/// A device that has no such channels, or will not open with two - a mono
+/// microphone - is opened with the first channels instead, so a stale setting
+/// never leaves a session without input. The ring reports how many channels
+/// it actually has.
 fn start_capture_ring(
     engine: &mut AudioEngine,
     device_id: Option<&DeviceId>,
     wanted: u16,
+    (left, right): (u32, Option<u32>),
     frame_size: usize,
     input_level: &Arc<AtomicU32>,
     monitor: &LocalMonitor,
 ) -> Result<CaptureRing, String> {
-    let attempts: &[u16] = if wanted >= 2 { &[2, 1] } else { &[1] };
     let mut failure = String::new();
-    for &channels in attempts {
+    for picks in capture_attempts(left, right, wanted) {
+        let channels = picks.len() as u16;
         let (mut producer, consumer) = RingBuffer::<f32>::new(32 * frame_size * channels as usize);
         let mut monitor_tap = monitor.tap();
         let level = input_level.clone();
 
         engine.stop_capture();
-        engine.set_capture_channels(channels);
+        engine.set_capture_picks(picks.clone());
         // Zero-allocation: write directly to the rtrb producer (FnMut, no Sync needed)
         let started = engine.start_capture(device_id, move |samples, _timestamp| {
             monitor_tap.push_interleaved(samples, channels as usize);
@@ -1381,9 +1459,9 @@ fn start_capture_ring(
         match started {
             Ok(()) => {
                 tracing::info!(
-                    "Capture started on {:?} with {} channel(s)",
+                    "Capture started on {:?} from device channel(s) {:?}",
                     device_id,
-                    channels
+                    picks
                 );
                 return Ok(CaptureRing {
                     consumer,
@@ -1392,9 +1470,9 @@ fn start_capture_ring(
             }
             Err(e) => {
                 tracing::warn!(
-                    "Capture on {:?} with {} channel(s) failed: {}",
+                    "Capture on {:?} from device channel(s) {:?} failed: {}",
                     device_id,
-                    channels,
+                    picks,
                     e
                 );
                 failure = e.to_string();
@@ -1442,6 +1520,8 @@ async fn run_audio_streaming(
     preset: AudioPreset,
     sample_rate: u32,
     transmit_channels: u32,
+    mut input_channels: (u32, Option<u32>),
+    mut output_channels: (u32, Option<u32>),
     cmd_rx: std_mpsc::Receiver<StreamingCommand>,
     is_active: &AtomicBool,
     is_muted: &AtomicBool,
@@ -1558,6 +1638,7 @@ async fn run_audio_streaming(
         &mut capture_engine,
         input_id.as_ref(),
         wanted_channels,
+        input_channels,
         buffer_size as usize,
         &input_level_for_capture,
         &monitor,
@@ -1570,10 +1651,12 @@ async fn run_audio_streaming(
     // play-out buffer itself and applies the mixer gains, so a volume change
     // is heard on the next frame and nothing queues behind the buffer
     // (ADR-028).
-    playback_engine
-        .start_playback_with_source(
-            output_id.as_ref(),
-            stereo_frame_size,
+    start_playout(
+        &mut playback_engine,
+        output_id.as_ref(),
+        output_channels,
+        stereo_frame_size,
+        || {
             playout_source(
                 receive.clone(),
                 peer_volume.clone(),
@@ -1582,9 +1665,10 @@ async fn run_audio_streaming(
                 output_level.clone(),
                 underrun_count.clone(),
                 monitor.clone(),
-            ),
-        )
-        .map_err(|e| format!("Failed to start playback: {}", e))?;
+            )
+        },
+    )
+    .map_err(|e| format!("Failed to start playback: {}", e))?;
     tracing::info!("Playback started on {:?}", output_id);
 
     // Rebuild the jitter buffer when the link recovers: sequence numbers carry
@@ -1784,21 +1868,55 @@ async fn run_audio_streaming(
                 // Rebuild the stream around the same play-out buffer: the
                 // audio already waiting in it survives the switch.
                 playback_engine.stop_playback();
-                if let Err(e) = playback_engine.start_playback_with_source(
+                if let Err(e) = start_playout(
+                    &mut playback_engine,
                     new_device_id.as_ref(),
+                    output_channels,
                     stereo_frame_size,
-                    playout_source(
-                        receive.clone(),
-                        peer_volume.clone(),
-                        master_volume.clone(),
-                        peer_pan.clone(),
-                        output_level.clone(),
-                        underrun_count.clone(),
-                        monitor.clone(),
-                    ),
+                    || {
+                        playout_source(
+                            receive.clone(),
+                            peer_volume.clone(),
+                            master_volume.clone(),
+                            peer_pan.clone(),
+                            output_level.clone(),
+                            underrun_count.clone(),
+                            monitor.clone(),
+                        )
+                    },
                 ) {
                     eprintln!("Failed to switch output device: {}", e);
                 }
+            }
+            Ok(StreamingCommand::SetOutputChannels(left, right)) => {
+                println!("Setting output channels to: {} / {:?}", left, right);
+                output_channels = (left, right);
+                let current_device = playback_engine.current_output_device().cloned();
+                playback_engine.stop_playback();
+                if let Err(e) = start_playout(
+                    &mut playback_engine,
+                    current_device.as_ref(),
+                    output_channels,
+                    stereo_frame_size,
+                    || {
+                        playout_source(
+                            receive.clone(),
+                            peer_volume.clone(),
+                            master_volume.clone(),
+                            peer_pan.clone(),
+                            output_level.clone(),
+                            underrun_count.clone(),
+                            monitor.clone(),
+                        )
+                    },
+                ) {
+                    eprintln!("Failed to apply the output channels: {}", e);
+                }
+            }
+            Ok(StreamingCommand::SetInputChannels(left, right)) => {
+                println!("Setting input channels to: {} / {:?}", left, right);
+                input_channels = (left, right);
+                reopen_capture = Some(capture_engine.current_input_device().cloned());
             }
             Ok(StreamingCommand::SetMute(muted)) => {
                 println!("Setting mute state to: {}", muted);
@@ -1859,6 +1977,7 @@ async fn run_audio_streaming(
                 &mut capture_engine,
                 device_id.as_ref(),
                 wanted_channels,
+                input_channels,
                 buffer_size as usize,
                 &input_level_for_capture,
                 &monitor,

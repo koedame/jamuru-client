@@ -445,10 +445,11 @@ pub fn config_get_input_channels(
 /// channel_l: 1-based index for left/mono channel
 /// channel_r: 1-based index for right channel, or None for mono
 #[tauri::command]
-pub fn config_set_input_channels(
+pub async fn config_set_input_channels(
     channel_l: u32,
     channel_r: Option<u32>,
     state: tauri::State<'_, ConfigState>,
+    streaming_state: tauri::State<'_, crate::streaming::StreamingState>,
 ) -> Result<(), String> {
     if channel_l == 0 {
         return Err("Channel index must be >= 1".to_string());
@@ -462,7 +463,13 @@ pub fn config_set_input_channels(
     let mut config = state.get()?;
     config.input_channel_l = channel_l;
     config.input_channel_r = channel_r;
-    state.update(config)
+    state.update(config)?;
+
+    // A running session follows the setting straight away
+    streaming_state
+        .apply_input_channels(channel_l, channel_r)
+        .await;
+    Ok(())
 }
 
 /// Get output channel configuration
@@ -482,10 +489,11 @@ pub fn config_get_output_channels(
 /// channel_l: 1-based index for left/mono channel
 /// channel_r: 1-based index for right channel, or None for mono
 #[tauri::command]
-pub fn config_set_output_channels(
+pub async fn config_set_output_channels(
     channel_l: u32,
     channel_r: Option<u32>,
     state: tauri::State<'_, ConfigState>,
+    streaming_state: tauri::State<'_, crate::streaming::StreamingState>,
 ) -> Result<(), String> {
     if channel_l == 0 {
         return Err("Channel index must be >= 1".to_string());
@@ -499,7 +507,13 @@ pub fn config_set_output_channels(
     let mut config = state.get()?;
     config.output_channel_l = channel_l;
     config.output_channel_r = channel_r;
-    state.update(config)
+    state.update(config)?;
+
+    // A running session follows the setting straight away
+    streaming_state
+        .apply_output_channels(channel_l, channel_r)
+        .await;
+    Ok(())
 }
 
 /// Get transmit channel count

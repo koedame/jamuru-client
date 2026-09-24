@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 161 |
-| うち must | 156 |
+| 要求 総数 | 163 |
+| うち must | 158 |
 | うち should | 5 |
-| 検証済み | 134 |
+| 検証済み | 136 |
 | サーバーを立てた接続テストでのみ検証 | 24 |
 | 未検証（should のみ許容） | 3 |
 
@@ -47,6 +47,8 @@
 | REQ-AUD-115 | must | balancedプリセットを使用する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_preset_parameters_match_the_specification |
 | REQ-AUD-116 | must | high-qualityプリセットを使用する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_preset_parameters_match_the_specification |
 | REQ-AUD-117 | must | 相手の送信チャンネル数をミキサーに表示する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_peer_channel_count_is_carried_in_latency_info |
+| REQ-AUD-118 | must | 多チャンネルのインターフェースで、選んだ入力チャンネルを取り込む | `docs-spec/behavior/audio-quality.feature` | `src/audio/channels.rs`::test_a_device_is_opened_with_the_smallest_channel_count_that_reaches_the_channel<br/>`src/audio/channels.rs`::test_a_mono_transmit_reads_only_the_left_input_channel<br/>`src/audio/channels.rs`::test_a_selection_the_device_lacks_falls_back_to_its_first_channels<br/>`src/audio/channels.rs`::test_a_stereo_transmit_with_no_right_channel_sends_the_left_on_both_sides<br/>`src/audio/channels.rs`::test_input_channels_5_and_6_are_read_from_the_fifth_and_sixth_channel<br/>`src/audio/channels.rs`::test_the_default_input_setting_reads_the_first_two_channels<br/>`src/audio/channels.rs`::test_the_default_selection_falls_back_only_to_mono |
+| REQ-AUD-119 | must | 多チャンネルのインターフェースで、選んだ出力チャンネルに再生する | `docs-spec/behavior/audio-quality.feature` | `src/audio/channels.rs`::test_a_route_needs_a_device_with_its_highest_channel<br/>`src/audio/channels.rs`::test_an_output_with_no_right_channel_plays_both_sides_mixed_on_the_left<br/>`src/audio/channels.rs`::test_output_channels_5_and_6_play_the_left_and_right_on_the_fifth_and_sixth<br/>`src/audio/channels.rs`::test_the_default_output_setting_is_the_stereo_frame_itself<br/>`src/audio/engine.rs`::test_a_device_wider_than_stereo_is_played_on_the_selected_channels |
 | REQ-CLI-001 | must | CLI でルームを作成でき、招待コードが表示される。他の参加者はそのコードで参加し、チャットが双方に届く | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CLI-002 | must | セッション中のコマンド（`/mute` `/unmute` `/stats` `/help` `/quit`）が解釈され、ミュート状態が切り替わる。コマンド以外はチャットとして送られる | `docs-spec/requirements.md` | `src/main.rs`::muting_without_audio_reports_that_there_is_nothing_to_mute<br/>`src/main.rs`::only_commands_are_intercepted<br/>`src/main.rs`::session_commands_are_recognised_and_act |
 | REQ-CLI-003 | must | プリセットの選択を保存でき、GUI と同じ設定ファイルに書かれる。未知のプリセット名は拒否される | `docs-spec/requirements.md` | `tests/cli_test.rs`::preset_use_refuses_a_name_that_is_not_a_preset<br/>`tests/cli_test.rs`::preset_use_saves_the_choice_where_the_app_reads_it |

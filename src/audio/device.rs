@@ -143,6 +143,35 @@ pub fn resolve_output_device(device_id: Option<&DeviceId>) -> Result<cpal::Devic
     }
 }
 
+/// Channel counts `device` offers for input (`input`) or output at
+/// `sample_rate`. Empty when the device cannot say.
+pub(crate) fn offered_channel_counts(
+    device: &cpal::Device,
+    input: bool,
+    sample_rate: u32,
+) -> Vec<u16> {
+    let mut counts = Vec::new();
+    let mut note = |config: cpal::SupportedStreamConfigRange| {
+        if config.min_sample_rate() <= sample_rate && sample_rate <= config.max_sample_rate() {
+            counts.push(config.channels());
+        }
+    };
+    if input {
+        device
+            .supported_input_configs()
+            .into_iter()
+            .flatten()
+            .for_each(&mut note);
+    } else {
+        device
+            .supported_output_configs()
+            .into_iter()
+            .flatten()
+            .for_each(&mut note);
+    }
+    counts
+}
+
 /// Get supported sample rates and channel counts for a device
 fn get_device_capabilities(device: &cpal::Device) -> (Vec<u32>, Vec<u16>) {
     let mut sample_rates = Vec::new();

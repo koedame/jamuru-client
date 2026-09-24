@@ -8,7 +8,10 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{Stream, StreamConfig};
 use tracing::{debug, error, info, warn};
 
-use super::device::{display_name, resolve_input_device, resolve_output_device, DeviceId};
+use super::channels::{pick_channels, place_stereo, smallest_channel_count, OutputRoute};
+use super::device::{
+    display_name, offered_channel_counts, resolve_input_device, resolve_output_device, DeviceId,
+};
 use super::error::AudioError;
 
 /// Events that can occur during audio streaming
@@ -173,6 +176,10 @@ pub struct AudioEngine {
     // Current device IDs (None = default device)
     current_input_device: Option<DeviceId>,
     current_output_device: Option<DeviceId>,
+    // Device channels capture delivers, as indexes into a device frame
+    capture_picks: Vec<usize>,
+    // Device channels the stereo playback is written to
+    playback_route: OutputRoute,
     // Event sender for device change notifications
     event_tx: Option<Sender<AudioEvent>>,
 }
@@ -181,6 +188,8 @@ impl AudioEngine {
     /// Create a new audio engine with the given configuration
     pub fn new(config: AudioConfig) -> Self {
         Self {
+            capture_picks: (0..config.channels as usize).collect(),
+            playback_route: OutputRoute::default(),
             config,
             capture_stream: None,
             playback_stream: None,
@@ -206,11 +215,18 @@ impl AudioEngine {
         self.current_output_device.as_ref()
     }
 
-    /// Sets how many channels capture opens the device with, from the next
-    /// `start_capture` on. The callback then receives that many channels
-    /// interleaved.
-    pub fn set_capture_channels(&mut self, channels: u16) {
-        self.config.channels = channels;
+    /// Sets which device channels capture delivers, from the next
+    /// `start_capture` on. The callback receives just those channels,
+    /// interleaved in the order given. The device is opened with as many
+    /// channels as it takes to reach the highest one.
+    pub fn set_capture_picks(&mut self, picks: Vec<usize>) {
+        self.capture_picks = picks;
+    }
+
+    /// Sets which device channels playback writes to, from the next
+    /// `start_playback_with_source` on. Every other channel is silent.
+    pub fn set_playback_route(&mut self, route: OutputRoute) {
+        self.playback_route = route;
     }
 
     /// Start audio capture with a callback for captured samples
@@ -233,11 +249,19 @@ impl AudioEngine {
         // Store current device ID
         self.current_input_device = device_id.cloned();
 
+        let picks = self.capture_picks.clone();
+        let needed = picks.iter().max().map_or(1, |highest| highest + 1);
+        let device_channels =
+            open_channel_count(&device, true, self.config.sample_rate, needed) as usize;
         let stream_config = StreamConfig {
-            channels: self.config.channels,
+            channels: device_channels as u16,
             sample_rate: self.config.sample_rate,
             buffer_size: cpal::BufferSize::Fixed(self.config.frame_size),
         };
+        // A device frame that is already the frame wanted goes through as is
+        let whole_frame = picks.iter().copied().eq(0..device_channels);
+        let mut picked =
+            Vec::with_capacity(self.config.frame_size as usize * picks.len().max(1) * 4);
 
         let sample_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let sample_count_clone = sample_count.clone();
@@ -266,9 +290,16 @@ impl AudioEngine {
             .build_input_stream(
                 stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let timestamp =
-                        sample_count_clone.fetch_add(data.len() as u64, Ordering::Relaxed);
-                    callback(data, timestamp);
+                    if whole_frame {
+                        let timestamp =
+                            sample_count_clone.fetch_add(data.len() as u64, Ordering::Relaxed);
+                        callback(data, timestamp);
+                    } else {
+                        pick_channels(data, device_channels, &picks, &mut picked);
+                        let timestamp =
+                            sample_count_clone.fetch_add(picked.len() as u64, Ordering::Relaxed);
+                        callback(&picked, timestamp);
+                    }
                 },
                 err_fn,
                 None,
@@ -281,7 +312,10 @@ impl AudioEngine {
         self.capture_stream = Some(stream);
         self.running.store(true, Ordering::SeqCst);
 
-        debug!("Capture started with config: {:?}", self.config);
+        debug!(
+            "Capture started with config: {:?}, opened with {} device channel(s)",
+            self.config, device_channels
+        );
         Ok(())
     }
 
@@ -338,13 +372,25 @@ impl AudioEngine {
         info!("Starting playback on device: {}", device_name);
         self.current_output_device = device_id.cloned();
 
+        let route = self.playback_route;
+        let device_channels = open_channel_count(
+            &device,
+            false,
+            self.config.sample_rate,
+            route.channels_needed(),
+        ) as usize;
         let stream_config = StreamConfig {
-            channels: self.config.channels,
+            channels: device_channels as u16,
             sample_rate: self.config.sample_rate,
             buffer_size: cpal::BufferSize::Fixed(self.config.frame_size),
         };
 
-        let mut puller = FramePuller::new(frame_samples, fill_frame);
+        let mut puller = RoutedPuller {
+            puller: FramePuller::new(frame_samples, fill_frame),
+            stereo: vec![0.0; self.config.frame_size as usize * 2 * 4],
+            device_channels,
+            route,
+        };
 
         let err_fn = self.stream_error_handler();
         let stream = device
@@ -414,6 +460,40 @@ impl AudioEngine {
     /// Check if playback is currently running
     pub fn is_playback_running(&self) -> bool {
         self.playback_stream.is_some()
+    }
+}
+
+/// The channel count to open `device` with to reach channel number `needed`:
+/// the smallest one it offers that does. A device that does not say what it
+/// offers is asked for `needed` and left to refuse.
+fn open_channel_count(device: &cpal::Device, input: bool, sample_rate: u32, needed: usize) -> u16 {
+    let offered = offered_channel_counts(device, input, sample_rate);
+    smallest_channel_count(&offered, needed).unwrap_or(needed as u16)
+}
+
+/// Hands the device the stereo a frame source produces, on the channels the
+/// output route names.
+struct RoutedPuller<F> {
+    puller: FramePuller<F>,
+    /// The stereo for one request, before it is spread over the device's channels.
+    stereo: Vec<f32>,
+    device_channels: usize,
+    route: OutputRoute,
+}
+
+impl<F: FnMut(&mut [f32]) -> usize> RoutedPuller<F> {
+    fn fill(&mut self, data: &mut [f32]) {
+        if self.device_channels == 2 && self.route.is_default() {
+            self.puller.fill(data);
+            return;
+        }
+        let stereo_len = data.len() / self.device_channels * 2;
+        if self.stereo.len() < stereo_len {
+            self.stereo.resize(stereo_len, 0.0);
+        }
+        let stereo = &mut self.stereo[..stereo_len];
+        self.puller.fill(stereo);
+        place_stereo(stereo, data, self.device_channels, self.route);
     }
 }
 
@@ -571,5 +651,29 @@ mod tests {
         puller.fill(&mut data);
 
         assert_eq!(data, [0.0; 6]);
+    }
+
+    /// What the device asks for is stereo spread over its own channels: the
+    /// source is asked for two samples per device frame, whatever the device's
+    /// width, and they land on the channels the route names.
+    ///
+    /// Verifies: REQ-AUD-119
+    #[test]
+    fn test_a_device_wider_than_stereo_is_played_on_the_selected_channels() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut puller = RoutedPuller {
+            puller: FramePuller::new(4, counting_source(4, calls)),
+            stereo: Vec::new(),
+            device_channels: 8,
+            route: OutputRoute::from_settings(5, Some(6)),
+        };
+        let mut data = vec![f32::NAN; 16];
+
+        puller.fill(&mut data);
+
+        let mut expected = vec![0.0; 16];
+        expected[4..6].copy_from_slice(&[0.0, 1.0]);
+        expected[12..14].copy_from_slice(&[2.0, 3.0]);
+        assert_eq!(data, expected);
     }
 }

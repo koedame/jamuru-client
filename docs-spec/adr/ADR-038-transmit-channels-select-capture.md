@@ -26,5 +26,5 @@ Accepted
 ## Consequences
 
 - REQ-AUD-107/108 の検証は、`capture_to_wire` → `Connection::send_audio` → UDP → PCM デコードを実際に通す（`tests/audio_quality_test.rs`）。
-- 入力チャンネルの選択（`input_channel_l` / `input_channel_r`。多チャンネルのインターフェースの何番を使うか）は別の欠陥として残っている。デバイスは先頭の 1〜2 チャンネルで開かれる。
+- 入力チャンネルの選択（`input_channel_l` / `input_channel_r`。多チャンネルのインターフェースの何番を使うか）は [ADR-040](./ADR-040-input-output-channel-selection.md) で配線した。
 - 実デバイスでの動作（2 チャンネルで開けない場合の落とし直し、接続中の切り替え）は自動テストの外にあり、実機で確かめる（`Plans.md`「実環境待ち」）。
