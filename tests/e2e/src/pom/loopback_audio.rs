@@ -92,6 +92,15 @@ pub const CHANNELS_8CH: u16 = 8;
 /// [`quiet_the_device`].
 pub struct LoopbackTone {
     _stream: cpal::Stream,
+    stream_errors: Arc<AtomicU32>,
+}
+
+impl LoopbackTone {
+    /// How many errors the output stream has reported since it opened. An
+    /// under- or overrun (Xrun) is one.
+    pub fn stream_errors(&self) -> u32 {
+        self.stream_errors.load(Ordering::SeqCst)
+    }
 }
 
 /// Confirms the loopback device exists, with an actionable error if not.
@@ -233,12 +242,17 @@ fn open_output(
             )
         })?;
 
+    // A large buffer: the tone has no latency to keep, and on a loaded machine
+    // the default one underruns constantly (measured with one or two busy
+    // cores: an Xrun in every 0.5s reading; none with this size).
     let config = cpal::StreamConfig {
         channels,
         sample_rate: SAMPLE_RATE,
-        buffer_size: cpal::BufferSize::Default,
+        buffer_size: cpal::BufferSize::Fixed(4096),
     };
 
+    let stream_errors = Arc::new(AtomicU32::new(0));
+    let error_counter = stream_errors.clone();
     let mut phase = 0f32;
     let step = frequency / SAMPLE_RATE as f32;
     let stream = device
@@ -257,7 +271,10 @@ fn open_output(
                     }
                 }
             },
-            |e| eprintln!("loopback tone error: {}", e),
+            move |e| {
+                error_counter.fetch_add(1, Ordering::SeqCst);
+                eprintln!("loopback tone error: {}", e);
+            },
             None,
         )
         .map_err(|e| format!("could not open {:?} for output: {}", device_name, e))?;
@@ -266,7 +283,10 @@ fn open_output(
         .play()
         .map_err(|e| format!("could not start the tone: {}", e))?;
 
-    Ok(LoopbackTone { _stream: stream })
+    Ok(LoopbackTone {
+        _stream: stream,
+        stream_errors,
+    })
 }
 
 /// Measures the peak amplitude arriving on the loopback device's input.
@@ -326,7 +346,112 @@ pub fn measure_input_peak(duration: std::time::Duration) -> DriverResult<f32> {
 /// The counterpart of [`play_tone_on_channel_8ch`]: it says which channels a
 /// signal came back on. Also how a scenario sees which channels the app *wrote*
 /// to when it plays to this device.
+///
+/// Takes the reading as it is. To measure a tone the fixture itself plays, use
+/// [`measure_tone_on_channel_8ch`], which does not trust a single stream.
 pub fn measure_input_channel_peaks_8ch(duration: std::time::Duration) -> DriverResult<Vec<f32>> {
+    capture_channel_peaks_8ch(duration).map(|(peaks, _)| peaks)
+}
+
+/// How many fresh tones [`measure_tone_on_channel_8ch`] tries before giving up.
+const TONE_ATTEMPTS: u32 = 5;
+
+/// Plays a tone on one channel of [`DEVICE_NAME_8CH`] and returns the peak on
+/// each channel of its input (index 0 is channel 1), `channel` being 1-based.
+///
+/// A single output stream cannot be trusted to put the tone where it was told:
+/// on a loaded machine (a build running alongside) a stream sometimes starts
+/// out of step with the device, and for its whole life the tone comes back on
+/// a wrong channel - a tone on channel 8 on channel 2, with the peaks and
+/// every other channel silent. The stream reports nothing in that case, and
+/// re-reading the same tone gives the same wrong answer; only a new stream
+/// fixes it. So a reading that has the tone anywhere but alone on `channel`,
+/// or that came with stream errors (Xruns), is dropped and taken again with a
+/// fresh tone, up to [`TONE_ATTEMPTS`] times.
+///
+/// Returns the first reading that is as expected. If none is, returns the last
+/// one that had no stream errors, so a device that really does leak shows its
+/// real peaks to the caller's assertions. If every attempt hit stream errors,
+/// there is no reading to trust and the error says so.
+pub fn measure_tone_on_channel_8ch(
+    channel: u16,
+    frequency: f32,
+    amplitude: f32,
+    duration: std::time::Duration,
+) -> DriverResult<Vec<f32>> {
+    first_expected_reading(TONE_ATTEMPTS, |attempt| {
+        let tone = play_tone_on_channel_8ch(channel, frequency, amplitude)?;
+        let (peaks, capture_errors) = capture_channel_peaks_8ch(duration)?;
+        let stream_errors = tone.stream_errors() + capture_errors;
+        let as_expected = tone_is_alone_on_channel(&peaks, channel, amplitude);
+        if stream_errors > 0 || !as_expected {
+            eprintln!(
+                "8ch loopback: tone on channel {} read as {:?} with {} stream errors \
+                 (attempt {}), trying a fresh tone",
+                channel, peaks, stream_errors, attempt
+            );
+        }
+        Ok(Attempt {
+            reading: peaks,
+            stream_errors,
+            as_expected,
+        })
+    })
+}
+
+/// One try at reading a tone: what was read, how many errors the streams
+/// reported meanwhile, and whether the reading is what the tone should give.
+struct Attempt<T> {
+    reading: T,
+    stream_errors: u32,
+    as_expected: bool,
+}
+
+/// Whether `peaks` has the tone on `channel` (1-based) and silence elsewhere.
+/// The levels are the ones the fixture's health scenario asserts.
+fn tone_is_alone_on_channel(peaks: &[f32], channel: u16, amplitude: f32) -> bool {
+    peaks.iter().enumerate().all(|(index, peak)| {
+        if index + 1 == channel as usize {
+            *peak >= amplitude * 0.5
+        } else {
+            *peak <= amplitude * 0.1
+        }
+    })
+}
+
+/// Runs `measure` up to `attempts` times (numbered from 1) and returns the
+/// first reading as expected and free of stream errors. Failing that, the last
+/// reading free of stream errors; failing that, an error naming the Xruns. An
+/// `Err` from `measure` is not retried: that is a failure to measure at all.
+fn first_expected_reading<T>(
+    attempts: u32,
+    mut measure: impl FnMut(u32) -> DriverResult<Attempt<T>>,
+) -> DriverResult<T> {
+    let mut last_without_errors = None;
+    let mut last_errors = 0;
+    for attempt in 1..=attempts {
+        let tried = measure(attempt)?;
+        if tried.stream_errors > 0 {
+            last_errors = tried.stream_errors;
+        } else if tried.as_expected {
+            return Ok(tried.reading);
+        } else {
+            last_without_errors = Some(tried.reading);
+        }
+    }
+    last_without_errors.ok_or_else(|| {
+        format!(
+            "the 8-channel loopback device hit a buffer underrun or overrun (Xrun) on all {} \
+             attempts ({} stream errors on the last), so no reading can be trusted. \
+             Is the machine overloaded?",
+            attempts, last_errors
+        )
+    })
+}
+
+/// Captures [`DEVICE_NAME_8CH`]'s input for `duration` and returns the peak per
+/// channel plus how many errors the capture stream reported meanwhile.
+fn capture_channel_peaks_8ch(duration: std::time::Duration) -> DriverResult<(Vec<f32>, u32)> {
     let host = cpal::default_host();
     let device = host
         .input_devices()
@@ -352,6 +477,8 @@ pub fn measure_input_channel_peaks_8ch(duration: std::time::Duration) -> DriverR
     let peaks: Arc<Vec<AtomicU32>> =
         Arc::new((0..CHANNELS_8CH).map(|_| AtomicU32::new(0)).collect());
     let writer = peaks.clone();
+    let stream_errors = Arc::new(AtomicU32::new(0));
+    let error_counter = stream_errors.clone();
     let stream = device
         .build_input_stream(
             config,
@@ -362,7 +489,10 @@ pub fn measure_input_channel_peaks_8ch(duration: std::time::Duration) -> DriverR
                     }
                 }
             },
-            |e| eprintln!("loopback capture error: {}", e),
+            move |e| {
+                error_counter.fetch_add(1, Ordering::SeqCst);
+                eprintln!("loopback capture error: {}", e);
+            },
             None,
         )
         .map_err(|e| format!("could not open {:?} for input: {}", DEVICE_NAME_8CH, e))?;
@@ -372,8 +502,128 @@ pub fn measure_input_channel_peaks_8ch(duration: std::time::Duration) -> DriverR
         .map_err(|e| format!("could not start capture: {}", e))?;
     std::thread::sleep(duration);
 
-    Ok(peaks
+    let peaks = peaks
         .iter()
         .map(|peak| peak.load(Ordering::SeqCst) as f32 / 1000.0)
-        .collect())
+        .collect();
+    Ok((peaks, stream_errors.load(Ordering::SeqCst)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attempt(
+        reading: &'static str,
+        stream_errors: u32,
+        as_expected: bool,
+    ) -> Attempt<&'static str> {
+        Attempt {
+            reading,
+            stream_errors,
+            as_expected,
+        }
+    }
+
+    #[test]
+    fn a_reading_as_expected_without_stream_errors_is_returned_on_the_first_attempt() {
+        let mut calls = 0;
+        let reading = first_expected_reading(5, |_| {
+            calls += 1;
+            Ok(attempt("clean", 0, true))
+        });
+
+        assert_eq!(reading, Ok("clean"));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn a_tone_on_the_wrong_channel_is_measured_again_with_a_fresh_tone() {
+        let reading = first_expected_reading(5, |n| {
+            Ok(if n < 3 {
+                attempt("wrong channel", 0, false)
+            } else {
+                attempt("right channel", 0, true)
+            })
+        });
+
+        assert_eq!(reading, Ok("right channel"));
+    }
+
+    #[test]
+    fn a_reading_taken_during_an_xrun_is_not_trusted_even_if_it_looks_right() {
+        let reading = first_expected_reading(5, |n| {
+            Ok(if n < 2 {
+                attempt("xrun, looks right", 1, true)
+            } else {
+                attempt("clean", 0, true)
+            })
+        });
+
+        assert_eq!(reading, Ok("clean"));
+    }
+
+    #[test]
+    fn a_device_that_keeps_the_tone_on_the_wrong_channel_returns_the_last_reading_for_the_caller_to_judge(
+    ) {
+        let mut calls = 0;
+        let reading = first_expected_reading(4, |n| {
+            calls += 1;
+            Ok(attempt(if n == 4 { "last" } else { "earlier" }, 0, false))
+        });
+
+        assert_eq!(calls, 4);
+        assert_eq!(reading, Ok("last"));
+    }
+
+    #[test]
+    fn a_device_that_hits_an_xrun_on_every_attempt_fails_naming_the_xrun() {
+        let mut calls = 0;
+        let reading = first_expected_reading(4, |_| {
+            calls += 1;
+            Ok(attempt("noisy", 2, true))
+        });
+
+        assert_eq!(calls, 4);
+        let message = reading.unwrap_err();
+        assert!(message.contains("Xrun"), "{}", message);
+        assert!(message.contains("all 4 attempts"), "{}", message);
+    }
+
+    #[test]
+    fn a_failure_to_measure_is_reported_at_once_without_retrying() {
+        let mut calls = 0;
+        let reading: DriverResult<&str> = first_expected_reading(5, |_| {
+            calls += 1;
+            Err("device gone".to_string())
+        });
+
+        assert_eq!(reading, Err("device gone".to_string()));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn a_tone_alone_on_its_channel_is_as_expected() {
+        let mut peaks = [0.0; 8];
+        peaks[7] = 0.3;
+
+        assert!(tone_is_alone_on_channel(&peaks, 8, 0.3));
+    }
+
+    #[test]
+    fn a_tone_on_another_channel_than_the_one_played_is_not_as_expected() {
+        let mut peaks = [0.0; 8];
+        peaks[1] = 0.3;
+
+        assert!(!tone_is_alone_on_channel(&peaks, 8, 0.3));
+    }
+
+    #[test]
+    fn a_tone_that_also_bleeds_into_a_neighbouring_channel_is_not_as_expected() {
+        let mut peaks = [0.0; 8];
+        peaks[4] = 0.3;
+        peaks[5] = 0.1;
+
+        assert!(!tone_is_alone_on_channel(&peaks, 5, 0.3));
+    }
 }

@@ -1012,9 +1012,13 @@ fn the_8ch_loopback_device_returns_each_channel_where_it_was_played() {
     loopback_audio::require_device_8ch().expect("8ch loopback device");
 
     for channel in [1u16, 2, 5, 6, 8] {
-        let _tone =
-            loopback_audio::play_tone_on_channel_8ch(channel, FIXTURE_HZ, TONE_AMPLITUDE).unwrap();
-        let peaks = loopback_audio::measure_input_channel_peaks_8ch(MEASURE).unwrap();
+        let peaks = loopback_audio::measure_tone_on_channel_8ch(
+            channel,
+            FIXTURE_HZ,
+            TONE_AMPLITUDE,
+            MEASURE,
+        )
+        .unwrap();
 
         for (index, peak) in peaks.iter().enumerate() {
             if index + 1 == channel as usize {
