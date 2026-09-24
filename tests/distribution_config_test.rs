@@ -441,3 +441,98 @@ fn csp_sources_reads_both_object_and_string_forms() {
     assert_eq!(csp_sources(&string, "script-src"), vec!["'self'", "ipc:"]);
     assert!(csp_sources(&object, "img-src").is_empty());
 }
+
+// -- self-update (ADR-041) ---------------------------------------------------
+
+/// The settings only the release build is given (`--config` of
+/// `cargo tauri build` in release.yml).
+fn updater_conf() -> Value {
+    serde_json::from_str(&src_tauri("tauri.updater.conf.json"))
+        .expect("tauri.updater.conf.json is not valid JSON")
+}
+
+/// A build made from source (README: `cargo tauri build`) must not be
+/// replaced by an official release: it may dial a server of its own.
+///
+/// Verifies: REQ-UPD-003
+#[test]
+fn a_build_from_source_is_given_no_updater() {
+    let conf = tauri_conf();
+
+    assert!(
+        conf["plugins"].get("updater").is_none(),
+        "tauri.conf.json carries updater settings, so every build would replace itself"
+    );
+    assert!(
+        conf["bundle"].get("createUpdaterArtifacts").is_none(),
+        "tauri.conf.json asks every build for signed update bundles, which fails without the key"
+    );
+}
+
+/// Verifies: REQ-UPD-006
+#[test]
+fn updates_are_checked_against_a_public_key_and_fetched_over_https() {
+    let updater = &updater_conf()["plugins"]["updater"];
+
+    let pubkey = updater["pubkey"].as_str().unwrap_or_default();
+    assert!(!pubkey.trim().is_empty(), "the updater has no public key");
+    let endpoints = updater["endpoints"].as_array().expect("no endpoints");
+    assert!(!endpoints.is_empty());
+    for endpoint in endpoints {
+        assert!(
+            endpoint.as_str().unwrap().starts_with("https://"),
+            "update endpoint {endpoint} is not https"
+        );
+    }
+    assert_ne!(updater["dangerousInsecureTransportProtocol"], true);
+    assert_ne!(updater["dangerousAcceptInvalidCerts"], true);
+    assert_ne!(updater["dangerousAcceptInvalidHostnames"], true);
+    assert_eq!(
+        updater["requireSignedVersion"], true,
+        "without it a signed old release can be offered as a new one"
+    );
+    assert_ne!(updater["allowDowngrades"], true);
+}
+
+/// `releases/latest` is GitHub's latest non-pre-release, so the betas that
+/// every push to main publishes reach nobody.
+///
+/// Verifies: REQ-UPD-007
+#[test]
+fn updates_come_from_the_latest_release_only() {
+    let endpoints = &updater_conf()["plugins"]["updater"]["endpoints"];
+
+    assert_eq!(
+        endpoints,
+        &serde_json::json!([
+            "https://github.com/koedame/jamjam-client/releases/latest/download/latest.json"
+        ])
+    );
+}
+
+/// Verifies: REQ-UPD-008
+#[test]
+fn the_release_build_makes_signed_update_bundles() {
+    assert_eq!(
+        updater_conf()["bundle"]["createUpdaterArtifacts"],
+        true,
+        "the release would publish nothing the apps can install"
+    );
+    let workflow =
+        std::fs::read_to_string(repo_file(".github/workflows/release.yml")).expect("release.yml");
+    assert!(
+        workflow
+            .lines()
+            .any(|line| line.contains("cargo tauri build")
+                && line.contains("--config src-tauri/tauri.updater.conf.json")),
+        "release.yml does not build with the updater settings"
+    );
+    assert!(
+        workflow.contains("TAURI_SIGNING_PRIVATE_KEY:"),
+        "release.yml does not give the build the key to sign the update bundles"
+    );
+}
+
+fn repo_file(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
+}

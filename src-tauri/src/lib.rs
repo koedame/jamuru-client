@@ -12,6 +12,7 @@ mod e2e_control;
 mod logging;
 mod signaling;
 mod streaming;
+mod updater;
 mod usage;
 mod windows;
 
@@ -56,13 +57,23 @@ fn greet(name: &str) -> String {
 pub fn run() {
     let log_spec = logging::LogSpec::from_env();
 
-    let app = tauri::Builder::default()
+    let context = tauri::generate_context!();
+    // Only the release build is given updater settings (`tauri.updater.conf.json`,
+    // ADR-041), so a build made from source never replaces itself with a release.
+    let self_updating = context.config().plugins.0.contains_key("updater");
+
+    let mut builder = tauri::Builder::default()
         // First: the logger exists before anything below can log (ADR-036).
         .plugin(logging::init(log_spec.clone()))
         .plugin(tauri_plugin_shell::init())
         // Hands `jamjam://join/<code>` links from the OS to the app (REQ-CON-103).
         // The scheme is declared in tauri.conf.json under plugins.deep-link.
-        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_deep_link::init());
+    if self_updating {
+        // Driven only from `updater.rs`, never the webview.
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    let app = builder
         .setup(|_app| {
             // GUI E2E control channel (ADR-025). Compiled out entirely
             // without the `e2e-control` feature, and inert unless the
@@ -163,7 +174,7 @@ pub fn run() {
             logging::log_open_dir,
             usage::usage_preview,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     // State is built here, after the logger exists and before Tauri creates
@@ -195,6 +206,10 @@ pub fn run() {
     app.manage(usage);
 
     logging::log_startup(app.handle(), &log_spec);
+
+    if self_updating {
+        updater::spawn(app.handle().clone());
+    }
 
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {

@@ -723,6 +723,8 @@ export interface AppConfig {
   language: string | null;
   /** Whether the app may tell the jamjam server how it runs (off unless the user turns it on) */
   usage_reporting: boolean;
+  /** Whether the app installs a new release by itself (on unless the user turns it off in config.toml) */
+  auto_update: boolean;
 }
 
 /**

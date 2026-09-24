@@ -42,7 +42,7 @@ macOS/Windows/Linux向けにデスクトップアプリを配布する際、コ�
 | 証明書 | EV Code Signing Certificate |
 | ツール | SignTool.exe (Windows SDK) |
 
-### 段階3: 自動アップデート機能（将来）
+### 段階3: 自動アップデート機能（[ADR-041](./ADR-041-self-update.md) で実装済み。段階 2 を待たずに入れた）
 
 Tauri Updater を使用した自動アップデート機能を実装する。
 
@@ -51,7 +51,7 @@ Tauri Updater を使用した自動アップデート機能を実装する。
 | 方式 | Tauri Updater (tauri.conf.json の `plugins.updater`) |
 | 配信サーバー | GitHub Releases または専用サーバー |
 | 署名 | アップデートパッケージの署名検証 |
-| 前提条件 | 段階2（コード署名）の完了 |
+| 前提条件 | なし（更新パッケージの署名は OS のコード署名とは別。決定は ADR-041） |
 
 **必要な設定:**
 ```json

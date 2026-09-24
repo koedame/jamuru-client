@@ -175,10 +175,19 @@ pub struct AppConfig {
     /// Off unless the user turns it on.
     #[serde(default)]
     pub usage_reporting: bool,
+
+    /// Whether the app installs a new release by itself (ADR-041). On unless
+    /// the user turns it off in `config.toml`.
+    #[serde(default = "default_auto_update")]
+    pub auto_update: bool,
 }
 
 fn default_peer_name() -> String {
     DEFAULT_PEER_NAME.to_string()
+}
+
+fn default_auto_update() -> bool {
+    true
 }
 
 fn default_buffer_size() -> u32 {
@@ -203,6 +212,7 @@ impl Default for AppConfig {
             transmit_channels: 2,
             language: None,
             usage_reporting: false,
+            auto_update: true,
         }
     }
 }
@@ -344,6 +354,21 @@ mod tests {
         assert_eq!(config.output_device_id, None);
         assert_eq!(config.buffer_size, 64);
         assert_eq!(config.server_url, None);
+    }
+
+    /// Verifies: REQ-UPD-001
+    #[test]
+    fn when_the_setting_is_absent_the_app_updates_itself() {
+        assert!(AppConfig::default().auto_update);
+        let config: AppConfig = toml::from_str("buffer_size = 64").unwrap();
+        assert!(config.auto_update);
+    }
+
+    /// Verifies: REQ-UPD-002
+    #[test]
+    fn when_the_setting_is_off_in_the_file_the_app_does_not_update_itself() {
+        let config: AppConfig = toml::from_str("auto_update = false").unwrap();
+        assert!(!config.auto_update);
     }
 
     #[test]
