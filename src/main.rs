@@ -97,8 +97,8 @@ struct RunArgs {
     #[arg(long, value_name = "PATH")]
     report_json: Option<PathBuf>,
 
-    /// How long the peer keeps audio before sending it back, as an echo server
-    /// does. Taken off the round trips `--input-bursts` measures
+    /// How long the peer keeps audio before sending it back, as a peer that
+    /// replays what it hears does. Taken off the round trips `--input-bursts` measures
     #[arg(long, value_name = "MS", default_value_t = 0)]
     echo_delay_ms: u64,
 }

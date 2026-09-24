@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 160 |
-| うち must | 155 |
+| 要求 総数 | 161 |
+| うち must | 156 |
 | うち should | 5 |
-| 検証済み | 133 |
+| 検証済み | 134 |
 | サーバーを立てた接続テストでのみ検証 | 24 |
 | 未検証（should のみ許容） | 3 |
 
@@ -109,6 +109,7 @@
 | REQ-GUI-020 | must | 設定の Diagnostics タブにログのフォルダを開くボタンがあり、開けないときはフォルダの場所を示す | `docs-spec/requirements.md` | `src-tauri/src/logging.rs`::opener_is_missing_the_error_names_the_log_folder<br/>`src-tauri/src/logging.rs`::opener_starts_the_result_is_the_log_folder_path<br/>`tests/e2e/tests/gui.rs`::the_diagnostics_tab_offers_to_open_the_log_folder<br/>`ui/src/components/SettingsPanel/tabs/DiagnosticsTab.test.tsx`::the folder could not be opened, the reason with its path is shown as an alert<br/>`ui/src/components/SettingsPanel/tabs/DiagnosticsTab.test.tsx`::the folder was opened, its path is shown under the button<br/>`ui/src/components/SettingsPanel/tabs/DiagnosticsTab.test.tsx`::the user presses the button, the handler runs |
 | REQ-GUI-021 | must | 公開ビルドでも、画面が呼ぶプラグインのコマンド（起動時の URL の取得・イベントの購読）が拒否されず、招待リンクが画面に届く | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-GUI-022 | must | `jamjam.log` に書かれる IP アドレス（STUN で分かる公開アドレス・候補アドレス）とオーディオデバイス ID は既定でマスクされる。環境変数 `JAMJAM_LOG_REDACT=off` で無効化できる | `docs-spec/requirements.md` | `src-tauri/src/logging.rs`::a_device_id_holds_a_serial_number_only_the_product_name_survives<br/>`src-tauri/src/logging.rs`::a_global_ipv4_address_is_in_the_line_only_the_last_octet_is_masked<br/>`src-tauri/src/logging.rs`::a_lan_ipv4_address_is_in_the_line_it_is_still_recognisable_as_lan<br/>`src-tauri/src/logging.rs`::a_link_local_ipv6_address_is_in_the_line_the_eui_64_interface_id_is_masked<br/>`src-tauri/src/logging.rs`::config_summary_has_a_device_serial_number_only_the_product_name_survives<br/>`src-tauri/src/logging.rs`::device_id_redaction_is_disabled_the_raw_id_survives<br/>`src-tauri/src/logging.rs`::redaction_is_disabled_addresses_reach_the_line_unmasked |
+| REQ-GUI-023 | must | 他の参加者やサーバーから届く文字列（チャットの本文・送り主の名前・参加者の名前・ルームの表示名）は HTML として解釈されず、文字としてそのまま表示される | `docs-spec/requirements.md` | `ui/src/components/untrustedText.test.tsx`::ルームの表示名が HTML を含むとき、要素にならず文字として表示されること<br/>`ui/src/components/untrustedText.test.tsx`::入退室の通知に載る相手の名前が HTML を含むとき、要素にならず文字として表示されること<br/>`ui/src/components/untrustedText.test.tsx`::本文が HTML を含むとき、要素にならず文字として表示されること<br/>`ui/src/components/untrustedText.test.tsx`::送り主の名前が HTML を含むとき、要素にならず文字として表示されること<br/>`ui/src/screens/MainScreen.test.tsx`::相手の名前が HTML を含むとき、要素にならず文字として表示されること |
 | REQ-I18N-101 | must | 初回起動時のシステム言語検出 | `docs-spec/behavior/i18n.feature` | `ui/src/App.test.tsx`::does not override the detected language when config has none saved<br/>`ui/src/i18n/i18n.test.ts`::detects the system locale and supports Japanese<br/>`ui/src/i18n/i18n.test.ts`::falls back to English for an unsupported locale |
 | REQ-I18N-102 | must | 設定画面での言語切替 | `docs-spec/behavior/i18n.feature` | `tests/e2e/tests/gui.rs`::changing_the_language_in_settings_updates_the_main_window_immediately<br/>`ui/src/App.test.tsx`::switches language immediately when another window broadcasts a change<br/>`ui/src/i18n/i18n.test.ts`::switches the active language without a reload |
 | REQ-I18N-103 | must | 翻訳キーが存在しない場合のフォールバック | `docs-spec/behavior/i18n.feature` | `ui/src/i18n/i18n.test.ts`::falls back to English when a key is missing from the active bundle |

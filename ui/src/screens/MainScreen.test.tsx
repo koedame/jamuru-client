@@ -173,3 +173,16 @@ describe('MainScreen when the peer being streamed to leaves', () => {
     expect(streamingStartTargets()).toEqual(['192.0.2.2:5000']);
   });
 });
+
+describe('MainScreen の参加者一覧', () => {
+  // Verifies: REQ-GUI-023
+  it('相手の名前が HTML を含むとき、要素にならず文字として表示されること', async () => {
+    const payload = '<img src=x onerror=alert(1)>';
+    peersAtCreate = [{ ...peer('b', null), name: payload }];
+    await enterRoom();
+
+    const list = await screen.findByTestId('participant-list');
+    await waitFor(() => expect(list).toHaveTextContent(payload), POLL_WAIT);
+    expect(list.querySelector('img')).toBeNull();
+  });
+});

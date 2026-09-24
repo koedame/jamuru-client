@@ -6,7 +6,7 @@
 //! are paired. What that measures is everything the app adds and the network
 //! adds: send task, codec, wire, receive, decode, jitter buffer, play-out.
 //!
-//! The peer may hold audio before sending it back (an echo server does, so the
+//! The peer may hold audio before sending it back (a peer that replays what it hears does, so the
 //! bursts are not heard as themselves); the hold is given by the caller and
 //! taken off.
 //!
