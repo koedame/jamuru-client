@@ -10,6 +10,7 @@ mod diagnostics;
 #[cfg(feature = "e2e-control")]
 mod e2e_control;
 mod logging;
+mod rpc;
 mod settings;
 mod settings_help;
 mod signaling;
@@ -84,86 +85,7 @@ pub fn run() {
             e2e_control::spawn(_app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            greet,
-            signaling::signaling_connect,
-            signaling::signaling_disconnect,
-            signaling::signaling_list_rooms,
-            signaling::signaling_join_room,
-            signaling::signaling_leave_room,
-            signaling::signaling_create_room,
-            signaling::signaling_send_chat,
-            signaling::signaling_get_chat_messages,
-            signaling::signaling_add_reaction,
-            signaling::signaling_remove_reaction,
-            signaling::signaling_toggle_reaction,
-            signaling::signaling_publish_local_candidates,
-            signaling::signaling_poll_events,
-            signaling::settings_help_request,
-            signaling::settings_help_answer,
-            signaling::settings_help_propose,
-            signaling::settings_help_decide,
-            signaling::settings_help_stop,
-            settings::settings_get,
-            settings::settings_change,
-            streaming::streaming_prepare,
-            streaming::streaming_start,
-            streaming::streaming_stop,
-            streaming::streaming_status,
-            streaming::streaming_reconnect,
-            streaming::streaming_set_mute,
-            streaming::streaming_get_mute,
-            streaming::streaming_set_monitoring,
-            streaming::streaming_get_input_level,
-            streaming::streaming_set_peer_volume,
-            streaming::streaming_get_peer_volume,
-            streaming::streaming_set_master_volume,
-            streaming::streaming_get_master_volume,
-            streaming::streaming_set_peer_pan,
-            streaming::streaming_get_peer_pan,
-            streaming::streaming_set_local_volume,
-            streaming::streaming_get_local_volume,
-            streaming::streaming_set_local_pan,
-            streaming::streaming_get_local_pan,
-            config::config_load,
-            config::config_set_usage_reporting,
-            config::config_get_server_url,
-            config::config_set_server_url,
-            config::config_get_effective_server_url,
-            config::config_list_presets,
-            config::config_get_preset,
-            config::config_get_connection_history,
-            config::config_add_connection_history,
-            config::config_remove_connection_history,
-            config::config_clear_connection_history,
-            config::config_update_connection_history_label,
-            config::config_get_peer_name,
-            config::config_set_peer_name,
-            config::config_get_sample_rate,
-            config::config_get_transmit_channels,
-            config::config_get_language,
-            config::config_set_language,
-            diagnostics::diagnostics_run_complete,
-            diagnostics::diagnostics_run_network,
-            diagnostics::diagnostics_run_audio,
-            diagnostics::diagnostics_run_cpu,
-            diagnostics::diagnostics_get_recommended_preset,
-            diagnostics::diagnostics_check_zero_latency,
-            // Window management
-            windows::window_open_settings,
-            windows::window_close_settings,
-            windows::window_toggle_chat,
-            windows::window_show_chat,
-            windows::window_hide_chat,
-            windows::window_session_connected,
-            windows::window_session_disconnected,
-            windows::window_is_in_session,
-            windows::window_focus,
-            windows::window_resize_main,
-            logging::log_frontend,
-            logging::log_open_dir,
-            usage::usage_preview,
-        ])
+        .invoke_handler(rpc::spec::invoke_handler())
         .build(context)
         .expect("error while building tauri application");
 

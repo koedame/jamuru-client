@@ -14,6 +14,9 @@ sidebar_position: 8
 導入判断は [ADR-025](../adr/ADR-025-gui-e2e-control-channel.md)、コマンドの呼び出しは [ADR-043](../adr/ADR-043-remote-operation-rpc.md)。実装は
 `src-tauri/src/e2e_control.rs`、利用側は `tests/e2e/src/pom/`。
 
+チャネルは、ほかの口（遠隔デバッグ・手伝い）と同じ層（`src-tauri/src/rpc/`）の口の 1 つ（`loopback`）である。HTTP のエンドポイントは
+その層のメソッド（`ui.*` と、アプリのコマンドそのもの）を呼ぶ入口で、呼べるメソッドは許可の表で決まる（[ADR-044](../adr/ADR-044-portals-and-permissions.md)）。
+
 **このチャネルは製品機能ではない。** リリースビルドには存在しない（下記「有効化条件」）。
 
 ## Use Case

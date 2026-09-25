@@ -1036,9 +1036,12 @@ fn a_refused_setting_change_comes_back_as_the_apps_answer_and_changes_nothing() 
 }
 
 /// Any command the app registers is callable, not only those a page object
-/// wraps; a name the app does not have is an error, not a silent nothing.
+/// wraps; a name the app does not have is an error, not a silent nothing. The
+/// permission table that decides this is the one every other portal uses
+/// (ADR-044), so an unlisted command is refused before anything runs.
 ///
 /// Verifies: REQ-GUI-025
+/// Verifies: REQ-RMT-023
 #[test]
 fn any_command_the_app_registers_can_be_called_and_an_unknown_one_is_refused() {
     let (_guard, app) = launch();
