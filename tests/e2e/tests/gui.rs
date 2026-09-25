@@ -797,7 +797,7 @@ fn opening_the_settings_window_does_not_connect_to_the_signaling_server_again() 
     settings.select_tab(SettingsTab::Devices).unwrap();
     // The settings window has started up once it has listed the devices.
     let log = wait_for_log(&app, |log| {
-        log.contains("[settings] invoke audio_list_input_devices")
+        log.contains("[settings] invoke settings_get")
     });
 
     assert!(

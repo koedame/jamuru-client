@@ -355,6 +355,22 @@ impl Default for StreamingState {
     }
 }
 
+/// An audio setting a running session can take on without reconnecting
+/// ([`StreamingState::apply_setting`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionSetting {
+    InputDevice(Option<String>),
+    OutputDevice(Option<String>),
+    /// Input device channels to capture from (1-based)
+    InputChannels(u32, Option<u32>),
+    /// Output device channels to play on (1-based)
+    OutputChannels(u32, Option<u32>),
+    /// 1 (mono) or 2 (stereo)
+    TransmitChannels(u32),
+    /// Receive jitter buffer depth (ADR-020)
+    JitterBufferFrames(u32),
+}
+
 /// Commands sent to the audio thread
 enum StreamingCommand {
     Stop,
@@ -428,44 +444,34 @@ impl StreamingState {
         self.silence_giveups.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Apply a new jitter buffer depth to a session that is already running
+    /// Tells a running session about a changed audio setting, so it follows
+    /// the change straight away. A no-op when no session is active: the next
+    /// session starts from the saved settings.
     ///
-    /// Called when the preset changes mid-session (REQ-LAT-106). Only the depth
-    /// is applied live: the frame size is fixed for the lifetime of the audio
-    /// engines, so a preset's new frame size takes effect on the next connect.
-    ///
-    /// A no-op when no session is active.
-    pub async fn apply_jitter_buffer_frames(&self, frames: u32) {
+    /// Only what can change live is here. The frame size is fixed for the
+    /// lifetime of the audio engines, so a new buffer size (or a preset's new
+    /// frame size) takes effect on the next connect (REQ-LAT-106).
+    pub async fn apply_setting(&self, setting: SessionSetting) {
         if !self.is_active.load(Ordering::SeqCst) {
             return;
         }
+        let command = match setting {
+            SessionSetting::InputDevice(id) => StreamingCommand::SetInputDevice(id),
+            SessionSetting::OutputDevice(id) => StreamingCommand::SetOutputDevice(id),
+            SessionSetting::InputChannels(left, right) => {
+                StreamingCommand::SetInputChannels(left, right)
+            }
+            SessionSetting::OutputChannels(left, right) => {
+                StreamingCommand::SetOutputChannels(left, right)
+            }
+            SessionSetting::TransmitChannels(count) => StreamingCommand::SetTransmitChannels(count),
+            SessionSetting::JitterBufferFrames(frames) => {
+                StreamingCommand::SetJitterBufferFrames(frames)
+            }
+        };
         let tx = self.cmd_tx.lock().await;
         if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetJitterBufferFrames(frames));
-        }
-    }
-
-    /// Tells a running session which input device channels to capture from.
-    /// A no-op when no session is active.
-    pub async fn apply_input_channels(&self, left: u32, right: Option<u32>) {
-        if !self.is_active.load(Ordering::SeqCst) {
-            return;
-        }
-        let tx = self.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetInputChannels(left, right));
-        }
-    }
-
-    /// Tells a running session which output device channels to play on.
-    /// A no-op when no session is active.
-    pub async fn apply_output_channels(&self, left: u32, right: Option<u32>) {
-        if !self.is_active.load(Ordering::SeqCst) {
-            return;
-        }
-        let tx = self.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetOutputChannels(left, right));
+            let _ = sender.send(command);
         }
     }
 }
@@ -1059,69 +1065,6 @@ pub async fn streaming_reconnect(state: tauri::State<'_, StreamingState>) -> Res
             .map_err(|e| format!("Failed to request reconnection: {}", e)),
         None => Err("No active session".to_string()),
     }
-}
-
-/// Set input device during streaming
-#[tauri::command]
-pub async fn streaming_set_input_device(
-    device_id: Option<String>,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    if !state.is_active.load(Ordering::SeqCst) {
-        return Err("Streaming is not active".to_string());
-    }
-
-    let tx = state.cmd_tx.lock().await;
-    if let Some(ref sender) = *tx {
-        sender
-            .send(StreamingCommand::SetInputDevice(device_id))
-            .map_err(|e| format!("Failed to send command: {}", e))?;
-    }
-
-    Ok(())
-}
-
-/// Set the transmit channel count (1 = mono, 2 = stereo) during streaming
-#[tauri::command]
-pub async fn streaming_set_transmit_channels(
-    count: u32,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    if count != 1 && count != 2 {
-        return Err("Transmit channels must be 1 (mono) or 2 (stereo)".to_string());
-    }
-    if !state.is_active.load(Ordering::SeqCst) {
-        return Err("Streaming is not active".to_string());
-    }
-
-    let tx = state.cmd_tx.lock().await;
-    if let Some(ref sender) = *tx {
-        sender
-            .send(StreamingCommand::SetTransmitChannels(count))
-            .map_err(|e| format!("Failed to send command: {}", e))?;
-    }
-
-    Ok(())
-}
-
-/// Set output device during streaming
-#[tauri::command]
-pub async fn streaming_set_output_device(
-    device_id: Option<String>,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    if !state.is_active.load(Ordering::SeqCst) {
-        return Err("Streaming is not active".to_string());
-    }
-
-    let tx = state.cmd_tx.lock().await;
-    if let Some(ref sender) = *tx {
-        sender
-            .send(StreamingCommand::SetOutputDevice(device_id))
-            .map_err(|e| format!("Failed to send command: {}", e))?;
-    }
-
-    Ok(())
 }
 
 /// Set mute state

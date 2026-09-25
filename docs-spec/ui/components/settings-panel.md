@@ -331,6 +331,9 @@ Storybook は i18n を初期化しないため、各 `t(key, fallback)` の fall
 
 - `SettingsPanel`（Pure）: Tauri 非依存。全入力は Props、全出力はコールバック。
 - `SettingsPanelAdapter`: Tauri API を呼び、状態管理と Props 変換を行う。言語は i18next、診断は `diagnosticsRunComplete()` を実行。キャンセルは進行中の結果を破棄して idle に戻す（バックエンドの実処理は中断しない）。
+- 音声の設定（Devices タブ）は `settings_get` で読み、変更は 1 つずつ `settings_change` に渡す。保存・接続中のセッションへの反映・値の検査はバックエンド（`src-tauri/src/settings.rs`）が行い、Adapter は返ってきた「変更後の設定」をそのまま表示する。選択肢（デバイス・チャンネル数・バッファサイズ・サンプルレート）もバックエンドが返したものだけを出す（ADR-043、REQ-GUI-024）。
+- 他のウィンドウ・E2E・遠隔設定で設定が変わると `audio:config-changed`（ペイロードは変更後の設定）が届き、開いたままのパネルも表示を差し替える。
+- 診断の「推奨プリセットを適用」は `settings_change` の `preset` として渡す（バッファサイズはプリセットの定義から決まる）。
 
 詳細は `.claude/rules/ui-component-rules.md` を参照。
 

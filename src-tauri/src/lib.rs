@@ -10,15 +10,16 @@ mod diagnostics;
 #[cfg(feature = "e2e-control")]
 mod e2e_control;
 mod logging;
+mod settings;
 mod signaling;
 mod streaming;
 mod updater;
 mod usage;
 mod windows;
 
-use audio::AudioState;
 use config::ConfigState;
 use device_identity::DeviceIdentityState;
+use settings::SettingsState;
 use signaling::SignalingState;
 use streaming::StreamingState;
 use tauri::Manager;
@@ -97,22 +98,15 @@ pub fn run() {
             signaling::signaling_toggle_reaction,
             signaling::signaling_publish_local_candidates,
             signaling::signaling_poll_events,
-            audio::audio_list_input_devices,
-            audio::audio_list_output_devices,
-            audio::audio_set_input_device,
-            audio::audio_set_output_device,
+            settings::settings_get,
+            settings::settings_change,
             audio::audio_get_current_devices,
             audio::audio_get_buffer_size,
-            audio::audio_set_buffer_size,
-            audio::audio_get_device_channels,
             streaming::streaming_prepare,
             streaming::streaming_start,
             streaming::streaming_stop,
             streaming::streaming_status,
             streaming::streaming_reconnect,
-            streaming::streaming_set_input_device,
-            streaming::streaming_set_transmit_channels,
-            streaming::streaming_set_output_device,
             streaming::streaming_set_mute,
             streaming::streaming_get_mute,
             streaming::streaming_set_monitoring,
@@ -134,7 +128,6 @@ pub fn run() {
             config::config_get_effective_server_url,
             config::config_list_presets,
             config::config_get_preset,
-            config::config_set_preset,
             config::config_get_connection_history,
             config::config_add_connection_history,
             config::config_remove_connection_history,
@@ -143,14 +136,7 @@ pub fn run() {
             config::config_get_peer_name,
             config::config_set_peer_name,
             config::config_get_sample_rate,
-            config::config_set_sample_rate,
-            config::config_list_sample_rates,
-            config::config_get_input_channels,
-            config::config_set_input_channels,
-            config::config_get_output_channels,
-            config::config_set_output_channels,
             config::config_get_transmit_channels,
-            config::config_set_transmit_channels,
             config::config_get_language,
             config::config_set_language,
             diagnostics::diagnostics_run_complete,
@@ -182,12 +168,9 @@ pub fn run() {
     // it logs while loading (an unreadable config, a discarded device
     // identity) would go nowhere.
     app.manage(SignalingState::new());
-    // Device selection and buffer size come from config.toml, so the
-    // interface the user chose is in effect from the first frame rather
-    // than only after they open settings (ADR-026).
     let startup_config = load_startup_config();
-    app.manage(AudioState::from_config(&startup_config));
     app.manage(StreamingState::new());
+    app.manage(SettingsState::new());
     let config_state = ConfigState::new();
     // Loads (or generates on first launch) this installation's device
     // identity once at startup - ADR-024, replaces account sign-in.

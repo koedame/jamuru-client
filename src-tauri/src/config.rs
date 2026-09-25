@@ -7,7 +7,7 @@
 use std::sync::Mutex;
 
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 pub use jamjam::config::{
@@ -157,35 +157,6 @@ pub struct PresetInfo {
 pub fn config_get_preset(state: tauri::State<'_, ConfigState>) -> Result<String, String> {
     let config = state.get()?;
     Ok(config.preset.name().to_string())
-}
-
-/// Set the preset and apply its recommended settings
-#[tauri::command]
-pub async fn config_set_preset(
-    preset_name: String,
-    state: tauri::State<'_, ConfigState>,
-    streaming_state: tauri::State<'_, crate::streaming::StreamingState>,
-) -> Result<PresetInfo, String> {
-    let preset = AudioPreset::from_name(&preset_name)
-        .ok_or_else(|| format!("Unknown preset: {}", preset_name))?;
-
-    let mut config = state.get()?;
-    config.preset = preset.clone();
-    config.buffer_size = preset.frame_size();
-    state.update(config)?;
-
-    // Apply the new jitter buffer depth to a running session (REQ-LAT-106).
-    // The frame size cannot change mid-session - the audio engines own it - so
-    // it takes effect on the next connect.
-    streaming_state
-        .apply_jitter_buffer_frames(preset.jitter_buffer_frames())
-        .await;
-
-    Ok(PresetInfo {
-        id: preset.name().to_string(),
-        buffer_size: preset.frame_size(),
-        jitter_buffer_frames: preset.jitter_buffer_frames(),
-    })
 }
 
 /// List all available presets
@@ -374,38 +345,8 @@ pub fn config_get_sample_rate(state: tauri::State<'_, ConfigState>) -> Result<u3
     Ok(config.sample_rate)
 }
 
-/// Set the sample rate
-///
-/// Updates and persists the sample rate, and notifies every open window so
-/// the main window's mixer reflects it without a restart (mirrors
-/// `config_set_language`'s `i18n:language-changed` broadcast).
-///
-/// Valid values: 44100, 48000, 96000. 48000 Hz is recommended per ADR-013.
-#[tauri::command]
-pub fn config_set_sample_rate(
-    sample_rate: u32,
-    app: AppHandle,
-    state: tauri::State<'_, ConfigState>,
-) -> Result<(), String> {
-    if !VALID_SAMPLE_RATES.contains(&sample_rate) {
-        return Err(format!(
-            "Invalid sample rate: {}. Valid values are 44100, 48000, 96000",
-            sample_rate
-        ));
-    }
-
-    let mut config = state.get()?;
-    config.sample_rate = sample_rate;
-    state.update(config)?;
-
-    app.emit("audio:config-changed", ())
-        .map_err(|e| e.to_string())
-}
-
-/// Get available sample rates
-///
-/// Returns the list of valid sample rates with metadata.
-#[derive(Debug, Clone, Serialize)]
+/// A sample rate the app offers (ADR-013)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SampleRateInfo {
     /// Sample rate in Hz
     pub rate: u32,
@@ -415,8 +356,7 @@ pub struct SampleRateInfo {
     pub recommended: bool,
 }
 
-#[tauri::command]
-pub fn config_list_sample_rates() -> Vec<SampleRateInfo> {
+pub fn sample_rates() -> Vec<SampleRateInfo> {
     VALID_SAMPLE_RATES
         .iter()
         .map(|&rate| SampleRateInfo {
@@ -431,103 +371,6 @@ pub fn config_list_sample_rates() -> Vec<SampleRateInfo> {
 // Channel Configuration Commands
 // =============================================================================
 
-/// Channel configuration for input or output
-#[derive(Debug, Clone, Serialize)]
-pub struct ChannelConfig {
-    /// Left (or mono) channel (1-based index)
-    pub channel_l: u32,
-    /// Right channel (1-based index, None for mono)
-    pub channel_r: Option<u32>,
-}
-
-/// Get input channel configuration
-#[tauri::command]
-pub fn config_get_input_channels(
-    state: tauri::State<'_, ConfigState>,
-) -> Result<ChannelConfig, String> {
-    let config = state.get()?;
-    Ok(ChannelConfig {
-        channel_l: config.input_channel_l,
-        channel_r: config.input_channel_r,
-    })
-}
-
-/// Set input channel configuration
-///
-/// channel_l: 1-based index for left/mono channel
-/// channel_r: 1-based index for right channel, or None for mono
-#[tauri::command]
-pub async fn config_set_input_channels(
-    channel_l: u32,
-    channel_r: Option<u32>,
-    state: tauri::State<'_, ConfigState>,
-    streaming_state: tauri::State<'_, crate::streaming::StreamingState>,
-) -> Result<(), String> {
-    if channel_l == 0 {
-        return Err("Channel index must be >= 1".to_string());
-    }
-    if let Some(r) = channel_r {
-        if r == 0 {
-            return Err("Channel index must be >= 1".to_string());
-        }
-    }
-
-    let mut config = state.get()?;
-    config.input_channel_l = channel_l;
-    config.input_channel_r = channel_r;
-    state.update(config)?;
-
-    // A running session follows the setting straight away
-    streaming_state
-        .apply_input_channels(channel_l, channel_r)
-        .await;
-    Ok(())
-}
-
-/// Get output channel configuration
-#[tauri::command]
-pub fn config_get_output_channels(
-    state: tauri::State<'_, ConfigState>,
-) -> Result<ChannelConfig, String> {
-    let config = state.get()?;
-    Ok(ChannelConfig {
-        channel_l: config.output_channel_l,
-        channel_r: config.output_channel_r,
-    })
-}
-
-/// Set output channel configuration
-///
-/// channel_l: 1-based index for left/mono channel
-/// channel_r: 1-based index for right channel, or None for mono
-#[tauri::command]
-pub async fn config_set_output_channels(
-    channel_l: u32,
-    channel_r: Option<u32>,
-    state: tauri::State<'_, ConfigState>,
-    streaming_state: tauri::State<'_, crate::streaming::StreamingState>,
-) -> Result<(), String> {
-    if channel_l == 0 {
-        return Err("Channel index must be >= 1".to_string());
-    }
-    if let Some(r) = channel_r {
-        if r == 0 {
-            return Err("Channel index must be >= 1".to_string());
-        }
-    }
-
-    let mut config = state.get()?;
-    config.output_channel_l = channel_l;
-    config.output_channel_r = channel_r;
-    state.update(config)?;
-
-    // A running session follows the setting straight away
-    streaming_state
-        .apply_output_channels(channel_l, channel_r)
-        .await;
-    Ok(())
-}
-
 /// Get transmit channel count
 ///
 /// Returns 1 for mono, 2 for stereo
@@ -535,27 +378,4 @@ pub async fn config_set_output_channels(
 pub fn config_get_transmit_channels(state: tauri::State<'_, ConfigState>) -> Result<u32, String> {
     let config = state.get()?;
     Ok(config.transmit_channels)
-}
-
-/// Set transmit channel count, and notify every open window so the main
-/// window's mixer reflects it without a restart (mirrors
-/// `config_set_language`'s `i18n:language-changed` broadcast).
-///
-/// count: 1 for mono, 2 for stereo
-#[tauri::command]
-pub fn config_set_transmit_channels(
-    count: u32,
-    app: AppHandle,
-    state: tauri::State<'_, ConfigState>,
-) -> Result<(), String> {
-    if count != 1 && count != 2 {
-        return Err("Transmit channels must be 1 (mono) or 2 (stereo)".to_string());
-    }
-
-    let mut config = state.get()?;
-    config.transmit_channels = count;
-    state.update(config)?;
-
-    app.emit("audio:config-changed", ())
-        .map_err(|e| e.to_string())
 }

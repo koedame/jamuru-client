@@ -253,42 +253,6 @@ export interface CurrentDevices {
 }
 
 /**
- * List available input (microphone) devices
- * @returns Array of input device information
- */
-export async function audioListInputDevices(): Promise<AudioDeviceInfo[]> {
-  return invoke("audio_list_input_devices");
-}
-
-/**
- * List available output (speaker) devices
- * @returns Array of output device information
- */
-export async function audioListOutputDevices(): Promise<AudioDeviceInfo[]> {
-  return invoke("audio_list_output_devices");
-}
-
-/**
- * Set the input device
- * @param deviceId Device ID to use, or null for default device
- */
-export async function audioSetInputDevice(
-  deviceId: string | null
-): Promise<void> {
-  return invoke("audio_set_input_device", { deviceId });
-}
-
-/**
- * Set the output device
- * @param deviceId Device ID to use, or null for default device
- */
-export async function audioSetOutputDevice(
-  deviceId: string | null
-): Promise<void> {
-  return invoke("audio_set_output_device", { deviceId });
-}
-
-/**
  * Get current device selection
  * @returns Current input and output device IDs
  */
@@ -297,34 +261,77 @@ export async function audioGetCurrentDevices(): Promise<CurrentDevices> {
 }
 
 /**
- * Get current buffer size (frame_size in samples)
- * @returns Buffer size (32, 64, 128, or 256)
+ * Get the buffer size in effect (frame_size in samples, as saved)
+ * @returns Buffer size (one of AudioSettings.buffer_sizes)
  */
 export async function audioGetBufferSize(): Promise<number> {
   return invoke("audio_get_buffer_size");
 }
 
+// ============================================================================
+// Audio Settings API (ADR-043)
+// ============================================================================
+
 /**
- * Set buffer size (frame_size in samples)
- * Lower values = less latency but may cause audio crackling
- * Higher values = more stable but higher latency
- * @param size Buffer size (32, 64, 128, or 256)
+ * A left/right pair of 1-based device channels
  */
-export async function audioSetBufferSize(size: number): Promise<void> {
-  return invoke("audio_set_buffer_size", { size });
+export interface ChannelPair {
+  left: number;
+  /** null for mono */
+  right: number | null;
 }
 
 /**
- * Get the supported channel counts for a device
- * @param deviceId Device ID to query
- * @param isInput Whether this is an input device
- * @returns Array of supported channel counts
+ * The audio settings in effect, with the choices on offer.
+ * Also the payload of the `audio:config-changed` event every window hears
+ * after a change, whoever made it.
  */
-export async function audioGetDeviceChannels(
-  deviceId: string,
-  isInput: boolean
-): Promise<number[]> {
-  return invoke("audio_get_device_channels", { deviceId, isInput });
+export interface AudioSettings {
+  input_devices: AudioDeviceInfo[];
+  output_devices: AudioDeviceInfo[];
+  /** The chosen input device; null means the system default */
+  input_device_id: string | null;
+  /** The chosen output device; null means the system default */
+  output_device_id: string | null;
+  input_channels: ChannelPair;
+  output_channels: ChannelPair;
+  transmit_channels: number;
+  buffer_size: number;
+  buffer_sizes: number[];
+  sample_rate: number;
+  sample_rates: SampleRateInfo[];
+}
+
+/**
+ * One change to the audio settings, named by its setting
+ */
+export type SettingChange =
+  | { setting: "input_device"; device_id: string }
+  | { setting: "output_device"; device_id: string }
+  | { setting: "input_channels"; left: number; right: number | null }
+  | { setting: "output_channels"; left: number; right: number | null }
+  | { setting: "transmit_channels"; count: number }
+  | { setting: "buffer_size"; samples: number }
+  | { setting: "sample_rate"; hz: number }
+  | { setting: "preset"; preset: AudioPresetId };
+
+/** Event every window hears after an audio setting changed */
+export const AUDIO_SETTINGS_CHANGED = "audio:config-changed";
+
+/**
+ * Get the audio settings in effect, with the devices and values on offer
+ */
+export async function settingsGet(): Promise<AudioSettings> {
+  return invoke("settings_get");
+}
+
+/**
+ * Change one audio setting. The saved config and a running session both
+ * follow, and every window hears about it.
+ * @returns The settings now in effect
+ */
+export async function settingsChange(change: SettingChange): Promise<AudioSettings> {
+  return invoke("settings_change", { change });
 }
 
 // ============================================================================
@@ -559,36 +566,6 @@ export async function streamingStatus(): Promise<StreamingStatus> {
 }
 
 /**
- * Set input device during streaming
- * @param deviceId Device ID to use, or null for default device
- */
-export async function streamingSetInputDevice(
-  deviceId: string | null
-): Promise<void> {
-  return invoke("streaming_set_input_device", { deviceId });
-}
-
-/**
- * Set the transmit channel count during streaming
- * @param count 1 for mono, 2 for stereo
- */
-export async function streamingSetTransmitChannels(
-  count: number
-): Promise<void> {
-  return invoke("streaming_set_transmit_channels", { count });
-}
-
-/**
- * Set output device during streaming
- * @param deviceId Device ID to use, or null for default device
- */
-export async function streamingSetOutputDevice(
-  deviceId: string | null
-): Promise<void> {
-  return invoke("streaming_set_output_device", { deviceId });
-}
-
-/**
  * Set mute state
  * @param muted Whether to mute the microphone
  */
@@ -809,17 +786,6 @@ export async function configGetPreset(): Promise<AudioPresetId> {
   return invoke("config_get_preset");
 }
 
-/**
- * Set the preset and apply its recommended settings
- * @param presetName Preset identifier (e.g., "zero-latency")
- * @returns Applied preset information
- */
-export async function configSetPreset(
-  presetName: AudioPresetId
-): Promise<PresetInfo> {
-  return invoke("config_set_preset", { presetName });
-}
-
 // ============================================================================
 // Connection History API
 // ============================================================================
@@ -918,75 +884,9 @@ export async function configGetSampleRate(): Promise<number> {
   return invoke("config_get_sample_rate");
 }
 
-/**
- * Set the sample rate
- * @param sampleRate Sample rate in Hz (44100, 48000, or 96000)
- */
-export async function configSetSampleRate(sampleRate: number): Promise<void> {
-  return invoke("config_set_sample_rate", { sampleRate });
-}
-
-/**
- * List available sample rates with metadata
- * @returns Array of sample rate information
- */
-export async function configListSampleRates(): Promise<SampleRateInfo[]> {
-  return invoke("config_list_sample_rates");
-}
-
 // ============================================================================
 // Channel Configuration API
 // ============================================================================
-
-/**
- * Channel configuration for input or output
- */
-export interface ChannelConfig {
-  /** Left (or mono) channel (1-based index) */
-  channel_l: number;
-  /** Right channel (1-based index, null for mono) */
-  channel_r: number | null;
-}
-
-/**
- * Get input channel configuration
- * @returns Current input channel settings
- */
-export async function configGetInputChannels(): Promise<ChannelConfig> {
-  return invoke("config_get_input_channels");
-}
-
-/**
- * Set input channel configuration
- * @param channelL Left/mono channel (1-based index)
- * @param channelR Right channel (1-based index, null for mono)
- */
-export async function configSetInputChannels(
-  channelL: number,
-  channelR: number | null
-): Promise<void> {
-  return invoke("config_set_input_channels", { channelL, channelR });
-}
-
-/**
- * Get output channel configuration
- * @returns Current output channel settings
- */
-export async function configGetOutputChannels(): Promise<ChannelConfig> {
-  return invoke("config_get_output_channels");
-}
-
-/**
- * Set output channel configuration
- * @param channelL Left/mono channel (1-based index)
- * @param channelR Right channel (1-based index, null for mono)
- */
-export async function configSetOutputChannels(
-  channelL: number,
-  channelR: number | null
-): Promise<void> {
-  return invoke("config_set_output_channels", { channelL, channelR });
-}
 
 /**
  * Get transmit channel count
@@ -994,14 +894,6 @@ export async function configSetOutputChannels(
  */
 export async function configGetTransmitChannels(): Promise<number> {
   return invoke("config_get_transmit_channels");
-}
-
-/**
- * Set transmit channel count
- * @param count 1 for mono, 2 for stereo
- */
-export async function configSetTransmitChannels(count: number): Promise<void> {
-  return invoke("config_set_transmit_channels", { count });
 }
 
 /**

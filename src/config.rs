@@ -28,6 +28,10 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 48000;
 /// Valid sample rates per ADR-013
 pub const VALID_SAMPLE_RATES: [u32; 3] = [44100, 48000, 96000];
 
+/// Audio buffer sizes (frame sizes, in samples) the app offers and accepts.
+/// The same set as the presets' frame sizes (`AudioPreset::frame_size`).
+pub const VALID_BUFFER_SIZES: [u32; 4] = [32, 64, 128, 256];
+
 /// jamjam server a development build uses: one running on this machine on the
 /// development port 17890 (ADR-030).
 ///
@@ -229,10 +233,10 @@ impl AppConfig {
     /// Returns an error message if any value is invalid.
     pub fn validate(&self) -> Result<(), String> {
         // Validate buffer size
-        if ![32, 64, 128, 256].contains(&self.buffer_size) {
+        if !VALID_BUFFER_SIZES.contains(&self.buffer_size) {
             return Err(format!(
-                "Invalid buffer size: {}. Valid values are 32, 64, 128, 256",
-                self.buffer_size
+                "Invalid buffer size: {}. Valid values are {:?}",
+                self.buffer_size, VALID_BUFFER_SIZES
             ));
         }
 

@@ -6,20 +6,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AudioDeviceInfo,
-  audioListInputDevices,
-  audioListOutputDevices,
-  audioSetInputDevice,
-  audioSetOutputDevice,
-  audioGetCurrentDevices,
-  audioGetBufferSize,
-  audioSetBufferSize,
-  audioGetDeviceChannels,
-  streamingStatus,
-  streamingStart,
-  streamingStop,
-  streamingSetInputDevice,
-  streamingSetTransmitChannels,
-  streamingSetOutputDevice,
+  AUDIO_SETTINGS_CHANGED,
+  settingsGet,
+  settingsChange,
   configLoad,
   configSave,
   configGetPeerName,
@@ -27,24 +16,17 @@ import {
   configGetServerUrl,
   configSetServerUrl,
   configGetEffectiveServerUrl,
-  configGetSampleRate,
-  configSetSampleRate,
-  configListSampleRates,
-  configGetInputChannels,
-  configSetInputChannels,
-  configGetOutputChannels,
-  configSetOutputChannels,
-  configGetTransmitChannels,
-  configSetTransmitChannels,
   configSetLanguage,
   diagnosticsRunComplete,
-  type AppConfig,
-  type SampleRateInfo,
+  type AudioPresetId,
+  type AudioSettings,
   type CompleteDiagnosticsResult,
   type RecommendedPreset,
+  type SettingChange,
   logOpenDir,
   usagePreview as readUsagePreview,
 } from "../../lib/tauri";
+import { useWindowEvent } from "../../hooks/useWindowEvents";
 import { SettingsPanel, type SettingsTabId, type SelectOption, type DeviceInfo, type Language } from "./index";
 
 export interface SettingsPanelAdapterProps {
@@ -63,6 +45,27 @@ function toDeviceInfo(device: AudioDeviceInfo): DeviceInfo {
   };
 }
 
+/** The device in use: the chosen one, or the system default when none is chosen. */
+function deviceInUse(devices: AudioDeviceInfo[], chosen: string | null): AudioDeviceInfo | undefined {
+  return chosen !== null ? devices.find((d) => d.id === chosen) : devices.find((d) => d.is_default);
+}
+
+/** Channels a device offers; stereo when it reports none. */
+function channelCountOf(device: AudioDeviceInfo | undefined): number {
+  return device && device.supported_channels.length > 0 ? Math.max(...device.supported_channels) : 2;
+}
+
+/** The preset each diagnostics recommendation names. */
+const PRESET_OF_RECOMMENDATION: Record<RecommendedPreset, AudioPresetId> = {
+  ZeroLatency: "zero-latency",
+  UltraLowLatency: "ultra-low-latency",
+  Balanced: "balanced",
+  HighQuality: "high-quality",
+};
+
+/** Buffer sizes are labelled with their duration at 48 kHz. */
+const LABEL_SAMPLE_RATE = 48000;
+
 export function SettingsPanelAdapter({
   initialTab = "general",
   onSettingsChange,
@@ -70,13 +73,10 @@ export function SettingsPanelAdapter({
   const { i18n, t } = useTranslation();
 
   // State
-  const [inputDevices, setInputDevices] = useState<DeviceInfo[]>([]);
-  const [outputDevices, setOutputDevices] = useState<DeviceInfo[]>([]);
-  const [selectedInputId, setSelectedInputId] = useState<string | null>(null);
-  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null);
-  const [bufferSize, setBufferSize] = useState<number>(64);
-  const [sampleRate, setSampleRate] = useState<number>(48000);
-  const [sampleRateInfos, setSampleRateInfos] = useState<SampleRateInfo[]>([]);
+  // Audio settings as the backend has them in effect (ADR-043). Replaced
+  // wholesale after each change - including one made from outside this
+  // window - rather than patched field by field.
+  const [audio, setAudio] = useState<AudioSettings | null>(null);
   const [displayName, setDisplayName] = useState<string>("User");
   const [displayNameError, setDisplayNameError] = useState<string | undefined>();
   const [serverUrl, setServerUrl] = useState<string>("");
@@ -93,15 +93,6 @@ export function SettingsPanelAdapter({
   useEffect(() => {
     setLanguage((i18n.language?.startsWith("ja") ? "ja" : "en") as Language);
   }, [i18n.language]);
-
-  // Channel selection state
-  const [inputChannelL, setInputChannelL] = useState<string>("1");
-  const [inputChannelR, setInputChannelR] = useState<string>("2");
-  const [outputChannelL, setOutputChannelL] = useState<string>("1");
-  const [outputChannelR, setOutputChannelR] = useState<string>("2");
-  const [transmitChannels, setTransmitChannels] = useState<string>("2");
-  const [inputChannelCount, setInputChannelCount] = useState(2);
-  const [outputChannelCount, setOutputChannelCount] = useState(2);
 
   // Diagnostics state
   const [diagnosticsState, setDiagnosticsState] = useState<"idle" | "running" | "complete">("idle");
@@ -133,24 +124,19 @@ export function SettingsPanelAdapter({
 
   // Option labels are built on render so they follow the UI language.
   const sampleRateOptions: SelectOption[] =
-    sampleRateInfos.length > 0
-      ? sampleRateInfos.map((sr) => ({
+    audio && audio.sample_rates.length > 0
+      ? audio.sample_rates.map((sr) => ({
           value: String(sr.rate),
           label: sr.recommended ? `${sr.label} (${t("preset.recommended")})` : sr.label,
         }))
       : [{ value: "48000", label: "48 kHz" }];
 
-  // Buffer size options (samples, and their duration at 48 kHz)
-  const bufferSizeOptions: SelectOption[] = [
-    ["8", "0.17"],
-    ["16", "0.33"],
-    ["32", "0.67"],
-    ["64", "1.33"],
-    ["128", "2.67"],
-    ["256", "5.33"],
-  ].map(([samples, ms]) => ({
-    value: samples,
-    label: t("settings.devices.bufferOption", { samples, ms }),
+  const bufferSizeOptions: SelectOption[] = (audio?.buffer_sizes ?? []).map((samples) => ({
+    value: String(samples),
+    label: t("settings.devices.bufferOption", {
+      samples,
+      ms: ((samples / LABEL_SAMPLE_RATE) * 1000).toFixed(2),
+    }),
   }));
 
   // Transmit channel options
@@ -159,25 +145,14 @@ export function SettingsPanelAdapter({
     { value: "2", label: t("settings.devices.stereo", "Stereo") },
   ];
 
-  // Helper to build channel options from device channel count
-  const buildChannelOptions = (maxChannels: number): SelectOption[] => {
-    const options: SelectOption[] = [];
-    for (let i = 1; i <= maxChannels; i++) {
-      options.push({ value: String(i), label: t("settings.devices.channelOption", { channel: i }) });
-    }
-    return options.length > 0 ? options : buildChannelOptions(2);
-  };
+  const buildChannelOptions = (maxChannels: number): SelectOption[] =>
+    Array.from({ length: maxChannels }, (_, i) => ({
+      value: String(i + 1),
+      label: t("settings.devices.channelOption", { channel: i + 1 }),
+    }));
 
-  // Helper to load the channel count of a device
-  const loadDeviceChannels = async (deviceId: string, isInput: boolean): Promise<number> => {
-    try {
-      const channels = await audioGetDeviceChannels(deviceId, isInput);
-      return channels.length > 0 ? Math.max(...channels) : 2;
-    } catch {
-      // Default to stereo if we can't get device info
-      return 2;
-    }
-  };
+  const inputDevice = audio ? deviceInUse(audio.input_devices, audio.input_device_id) : undefined;
+  const outputDevice = audio ? deviceInUse(audio.output_devices, audio.output_device_id) : undefined;
 
   // Load settings on mount
   useEffect(() => {
@@ -185,79 +160,17 @@ export function SettingsPanelAdapter({
       try {
         setIsLoading(true);
 
-        const [
-          inputs,
-          outputs,
-          current,
-          currentBufferSize,
-          savedPeerName,
-          savedServerUrl,
-          currentEffectiveServerUrl,
-          currentSampleRate,
-          sampleRates,
-          inputChannelConfig,
-          outputChannelConfig,
-          transmitChannelConfig,
-        ] = await Promise.all([
-          audioListInputDevices(),
-          audioListOutputDevices(),
-          audioGetCurrentDevices(),
-          audioGetBufferSize(),
+        const [current, savedPeerName, savedServerUrl, currentEffectiveServerUrl] = await Promise.all([
+          settingsGet(),
           configGetPeerName().catch(() => "User"),
           configGetServerUrl().catch(() => null),
           configGetEffectiveServerUrl().catch(() => ""),
-          configGetSampleRate().catch(() => 48000),
-          configListSampleRates().catch(() => [] as SampleRateInfo[]),
-          configGetInputChannels().catch(() => ({ channel_l: 1, channel_r: 2 })),
-          configGetOutputChannels().catch(() => ({ channel_l: 1, channel_r: 2 })),
-          configGetTransmitChannels().catch(() => 2),
         ]);
 
-        setInputDevices(inputs.map(toDeviceInfo));
-        setOutputDevices(outputs.map(toDeviceInfo));
+        setAudio(current);
         setDisplayName(savedPeerName);
         setServerUrl(savedServerUrl ?? "");
         setEffectiveServerUrl(currentEffectiveServerUrl);
-        setBufferSize(currentBufferSize);
-        setSampleRate(currentSampleRate);
-
-        // Set channel selections from config
-        setInputChannelL(String(inputChannelConfig.channel_l));
-        setInputChannelR(inputChannelConfig.channel_r ? String(inputChannelConfig.channel_r) : "2");
-        setOutputChannelL(String(outputChannelConfig.channel_l));
-        setOutputChannelR(outputChannelConfig.channel_r ? String(outputChannelConfig.channel_r) : "2");
-        setTransmitChannels(String(transmitChannelConfig));
-
-        // Convert sample rate info to select options
-        setSampleRateInfos(sampleRates);
-
-        // Set selected devices or use defaults
-        let inputId = current.input_device_id;
-        let outputId = current.output_device_id;
-
-        if (!inputId && inputs.length > 0) {
-          const defaultInput = inputs.find((d) => d.is_default) || inputs[0];
-          inputId = defaultInput.id;
-          await audioSetInputDevice(inputId);
-        }
-
-        if (!outputId && outputs.length > 0) {
-          const defaultOutput = outputs.find((d) => d.is_default) || outputs[0];
-          outputId = defaultOutput.id;
-          await audioSetOutputDevice(outputId);
-        }
-
-        setSelectedInputId(inputId);
-        setSelectedOutputId(outputId);
-
-        // Load channel options for selected devices
-        if (inputId) {
-          setInputChannelCount(await loadDeviceChannels(inputId, true));
-        }
-
-        if (outputId) {
-          setOutputChannelCount(await loadDeviceChannels(outputId, false));
-        }
       } catch (err) {
         console.error("Failed to load settings:", err);
       } finally {
@@ -268,39 +181,28 @@ export function SettingsPanelAdapter({
     loadSettings();
   }, []);
 
+  // A change made anywhere - another window, the E2E control channel, a peer
+  // helping with the settings - arrives here with the settings now in effect.
+  useWindowEvent<AudioSettings>(AUDIO_SETTINGS_CHANGED, setAudio);
+
+  // Applies one change and shows what is now in effect.
+  const change = useCallback(
+    async (settingChange: SettingChange) => {
+      try {
+        setAudio(await settingsChange(settingChange));
+        onSettingsChange?.();
+      } catch (err) {
+        console.error(`Failed to change ${settingChange.setting}:`, err);
+      }
+    },
+    [onSettingsChange]
+  );
+
   useEffect(() => {
     configLoad()
       .then((config) => setUsageReporting(config?.usage_reporting === true))
       .catch((err) => console.error("Failed to read the usage reporting setting:", err));
   }, []);
-
-  // Save config helper
-  const saveConfig = async (
-    inputId: string | null,
-    outputId: string | null,
-    bufSize: number
-  ) => {
-    try {
-      const config = await configLoad().catch(
-        () =>
-          ({
-            input_device_id: null,
-            output_device_id: null,
-            buffer_size: 64,
-            server_url: null,
-          } as AppConfig)
-      );
-
-      await configSave({
-        ...config,
-        input_device_id: inputId,
-        output_device_id: outputId,
-        buffer_size: bufSize,
-      });
-    } catch (e) {
-      console.error("Failed to save config:", e);
-    }
-  };
 
   // Handlers
   const handleLanguageChange = useCallback(
@@ -352,222 +254,49 @@ export function SettingsPanelAdapter({
   );
 
   const handleInputDeviceChange = useCallback(
-    async (deviceId: string) => {
-      try {
-        await audioSetInputDevice(deviceId);
-        setSelectedInputId(deviceId);
-        await saveConfig(deviceId, selectedOutputId, bufferSize);
-
-        // Update channel options for new device
-        const maxChannel = await loadDeviceChannels(deviceId, true);
-        setInputChannelCount(maxChannel);
-
-        // Reset channel selections if they exceed new device's channels
-        if (parseInt(inputChannelL, 10) > maxChannel) {
-          setInputChannelL("1");
-          await configSetInputChannels(1, parseInt(inputChannelR, 10) <= maxChannel ? parseInt(inputChannelR, 10) : null);
-        }
-        if (parseInt(inputChannelR, 10) > maxChannel) {
-          setInputChannelR(String(Math.min(2, maxChannel)));
-          await configSetInputChannels(parseInt(inputChannelL, 10), Math.min(2, maxChannel));
-        }
-
-        // Update running stream if active
-        try {
-          const status = await streamingStatus();
-          if (status.is_active) {
-            await streamingSetInputDevice(deviceId);
-          }
-        } catch {
-          // Ignore
-        }
-      } catch (err) {
-        console.error("Failed to set input device:", err);
-      }
-    },
-    [selectedOutputId, bufferSize, inputChannelL, inputChannelR]
+    (deviceId: string) => change({ setting: "input_device", device_id: deviceId }),
+    [change]
   );
 
   const handleOutputDeviceChange = useCallback(
-    async (deviceId: string) => {
-      try {
-        await audioSetOutputDevice(deviceId);
-        setSelectedOutputId(deviceId);
-        await saveConfig(selectedInputId, deviceId, bufferSize);
-
-        // Update channel options for new device
-        const maxChannel = await loadDeviceChannels(deviceId, false);
-        setOutputChannelCount(maxChannel);
-
-        // Reset channel selections if they exceed new device's channels
-        if (parseInt(outputChannelL, 10) > maxChannel) {
-          setOutputChannelL("1");
-          await configSetOutputChannels(1, parseInt(outputChannelR, 10) <= maxChannel ? parseInt(outputChannelR, 10) : null);
-        }
-        if (parseInt(outputChannelR, 10) > maxChannel) {
-          setOutputChannelR(String(Math.min(2, maxChannel)));
-          await configSetOutputChannels(parseInt(outputChannelL, 10), Math.min(2, maxChannel));
-        }
-
-        // Update running stream if active
-        try {
-          const status = await streamingStatus();
-          if (status.is_active) {
-            await streamingSetOutputDevice(deviceId);
-          }
-        } catch {
-          // Ignore
-        }
-      } catch (err) {
-        console.error("Failed to set output device:", err);
-      }
-    },
-    [selectedInputId, bufferSize, outputChannelL, outputChannelR]
+    (deviceId: string) => change({ setting: "output_device", device_id: deviceId }),
+    [change]
   );
 
   const handleBufferSizeChange = useCallback(
-    async (value: string) => {
-      const newSize = parseInt(value, 10);
-      if (isNaN(newSize)) return;
-
-      try {
-        await audioSetBufferSize(newSize);
-        setBufferSize(newSize);
-        await saveConfig(selectedInputId, selectedOutputId, newSize);
-
-        // Restart streaming if active
-        try {
-          const status = await streamingStatus();
-          if (status.is_active && status.remote_addr) {
-            await streamingStop();
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            await streamingStart(
-              status.remote_addr,
-              undefined,
-              selectedInputId ?? undefined,
-              selectedOutputId ?? undefined,
-              newSize
-            );
-          }
-        } catch {
-          // Ignore
-        }
-      } catch (err) {
-        console.error("Failed to set buffer size:", err);
-      }
+    (value: string) => {
+      const samples = parseInt(value, 10);
+      if (!isNaN(samples)) change({ setting: "buffer_size", samples });
     },
-    [selectedInputId, selectedOutputId]
+    [change]
   );
 
   const handleSampleRateChange = useCallback(
-    async (value: string) => {
-      const newRate = parseInt(value, 10);
-      if (isNaN(newRate)) return;
-
-      try {
-        await configSetSampleRate(newRate);
-        setSampleRate(newRate);
-        onSettingsChange?.();
-      } catch (err) {
-        console.error("Failed to set sample rate:", err);
-      }
+    (value: string) => {
+      const hz = parseInt(value, 10);
+      if (!isNaN(hz)) change({ setting: "sample_rate", hz });
     },
-    [onSettingsChange]
+    [change]
   );
 
-  // Channel change handlers
-  const handleInputChannelLChange = useCallback(
-    async (value: string) => {
+  // A channel picker changes one side of the pair; the other keeps what is in effect.
+  const handleChannelChange = useCallback(
+    (direction: "input" | "output", side: "left" | "right", value: string) => {
       const channel = parseInt(value, 10);
-      if (isNaN(channel)) return;
-
-      try {
-        const channelR = inputChannelR ? parseInt(inputChannelR, 10) : null;
-        await configSetInputChannels(channel, channelR);
-        setInputChannelL(value);
-        onSettingsChange?.();
-      } catch (err) {
-        console.error("Failed to set input channel L:", err);
-      }
+      if (isNaN(channel) || !audio) return;
+      const pair = direction === "input" ? audio.input_channels : audio.output_channels;
+      const next = side === "left" ? { ...pair, left: channel } : { ...pair, right: channel };
+      change({ setting: direction === "input" ? "input_channels" : "output_channels", ...next });
     },
-    [inputChannelR, onSettingsChange]
-  );
-
-  const handleInputChannelRChange = useCallback(
-    async (value: string) => {
-      const channel = parseInt(value, 10);
-      if (isNaN(channel)) return;
-
-      try {
-        const channelL = parseInt(inputChannelL, 10);
-        await configSetInputChannels(channelL, channel);
-        setInputChannelR(value);
-        onSettingsChange?.();
-      } catch (err) {
-        console.error("Failed to set input channel R:", err);
-      }
-    },
-    [inputChannelL, onSettingsChange]
-  );
-
-  const handleOutputChannelLChange = useCallback(
-    async (value: string) => {
-      const channel = parseInt(value, 10);
-      if (isNaN(channel)) return;
-
-      try {
-        const channelR = outputChannelR ? parseInt(outputChannelR, 10) : null;
-        await configSetOutputChannels(channel, channelR);
-        setOutputChannelL(value);
-        onSettingsChange?.();
-      } catch (err) {
-        console.error("Failed to set output channel L:", err);
-      }
-    },
-    [outputChannelR, onSettingsChange]
-  );
-
-  const handleOutputChannelRChange = useCallback(
-    async (value: string) => {
-      const channel = parseInt(value, 10);
-      if (isNaN(channel)) return;
-
-      try {
-        const channelL = parseInt(outputChannelL, 10);
-        await configSetOutputChannels(channelL, channel);
-        setOutputChannelR(value);
-        onSettingsChange?.();
-      } catch (err) {
-        console.error("Failed to set output channel R:", err);
-      }
-    },
-    [outputChannelL, onSettingsChange]
+    [audio, change]
   );
 
   const handleTransmitChannelsChange = useCallback(
-    async (value: string) => {
+    (value: string) => {
       const count = parseInt(value, 10);
-      if (isNaN(count) || (count !== 1 && count !== 2)) return;
-
-      try {
-        await configSetTransmitChannels(count);
-        setTransmitChannels(value);
-        onSettingsChange?.();
-
-        // Update running stream if active
-        try {
-          const status = await streamingStatus();
-          if (status.is_active) {
-            await streamingSetTransmitChannels(count);
-          }
-        } catch {
-          // Ignore
-        }
-      } catch (err) {
-        console.error("Failed to set transmit channels:", err);
-      }
+      if (count === 1 || count === 2) change({ setting: "transmit_channels", count });
     },
-    [onSettingsChange]
+    [change]
   );
 
   // Run diagnostics handler
@@ -671,29 +400,8 @@ export function SettingsPanelAdapter({
 
   // Apply recommended preset handler
   const handleApplyPreset = useCallback(
-    async (preset: RecommendedPreset) => {
-      // Apply preset settings based on recommendation
-      // This maps presets to buffer size and other settings
-      const presetSettings: Record<RecommendedPreset, { bufferSize: number }> = {
-        ZeroLatency: { bufferSize: 8 },
-        UltraLowLatency: { bufferSize: 32 },
-        Balanced: { bufferSize: 64 },
-        HighQuality: { bufferSize: 128 },
-      };
-
-      const settings = presetSettings[preset];
-      if (settings) {
-        try {
-          await audioSetBufferSize(settings.bufferSize);
-          setBufferSize(settings.bufferSize);
-          await saveConfig(selectedInputId, selectedOutputId, settings.bufferSize);
-          onSettingsChange?.();
-        } catch (err) {
-          console.error("Failed to apply preset:", err);
-        }
-      }
-    },
-    [selectedInputId, selectedOutputId, onSettingsChange]
+    (preset: RecommendedPreset) => change({ setting: "preset", preset: PRESET_OF_RECOMMENDATION[preset] }),
+    [change]
   );
 
   return (
@@ -704,32 +412,32 @@ export function SettingsPanelAdapter({
       effectiveServerUrl={effectiveServerUrl}
       displayName={displayName}
       displayNameError={displayNameError}
-      inputDevices={inputDevices}
-      outputDevices={outputDevices}
-      selectedInputId={selectedInputId}
-      selectedOutputId={selectedOutputId}
-      inputChannelOptions={buildChannelOptions(inputChannelCount)}
-      outputChannelOptions={buildChannelOptions(outputChannelCount)}
-      selectedInputChannelL={inputChannelL}
-      selectedInputChannelR={inputChannelR}
-      selectedOutputChannelL={outputChannelL}
-      selectedOutputChannelR={outputChannelR}
+      inputDevices={(audio?.input_devices ?? []).map(toDeviceInfo)}
+      outputDevices={(audio?.output_devices ?? []).map(toDeviceInfo)}
+      selectedInputId={inputDevice?.id ?? null}
+      selectedOutputId={outputDevice?.id ?? null}
+      inputChannelOptions={buildChannelOptions(channelCountOf(inputDevice))}
+      outputChannelOptions={buildChannelOptions(channelCountOf(outputDevice))}
+      selectedInputChannelL={String(audio?.input_channels.left ?? 1)}
+      selectedInputChannelR={String(audio?.input_channels.right ?? 2)}
+      selectedOutputChannelL={String(audio?.output_channels.left ?? 1)}
+      selectedOutputChannelR={String(audio?.output_channels.right ?? 2)}
       sampleRateOptions={sampleRateOptions}
-      selectedSampleRate={String(sampleRate)}
+      selectedSampleRate={String(audio?.sample_rate ?? 48000)}
       bufferSizeOptions={bufferSizeOptions}
-      selectedBufferSize={String(bufferSize)}
+      selectedBufferSize={String(audio?.buffer_size ?? "")}
       transmitChannelOptions={transmitChannelOptions}
-      selectedTransmitChannels={transmitChannels}
+      selectedTransmitChannels={String(audio?.transmit_channels ?? 2)}
       isLoading={isLoading}
       onLanguageChange={handleLanguageChange}
       onServerUrlChange={handleServerUrlChange}
       onDisplayNameChange={handleDisplayNameChange}
       onInputDeviceChange={handleInputDeviceChange}
       onOutputDeviceChange={handleOutputDeviceChange}
-      onInputChannelLChange={handleInputChannelLChange}
-      onInputChannelRChange={handleInputChannelRChange}
-      onOutputChannelLChange={handleOutputChannelLChange}
-      onOutputChannelRChange={handleOutputChannelRChange}
+      onInputChannelLChange={(value) => handleChannelChange("input", "left", value)}
+      onInputChannelRChange={(value) => handleChannelChange("input", "right", value)}
+      onOutputChannelLChange={(value) => handleChannelChange("output", "left", value)}
+      onOutputChannelRChange={(value) => handleChannelChange("output", "right", value)}
       onSampleRateChange={handleSampleRateChange}
       onBufferSizeChange={handleBufferSizeChange}
       onTransmitChannelsChange={handleTransmitChannelsChange}

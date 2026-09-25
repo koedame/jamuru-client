@@ -11,9 +11,11 @@ import i18n from '../../i18n';
 import en from '../../../locales/en.json';
 import ja from '../../../locales/ja.json';
 import { SettingsPanelAdapter } from './SettingsPanelAdapter';
+import { audioSettings } from './audioSettingsFixture';
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 
 const INSTALL_LINE =
   '{"v":1,"seq":1,"event":"app_start","install_id":"a91d5c0e7b3f4a68b2c1d0e9f8a7b6c5"}';
@@ -31,24 +33,10 @@ function fakeBackend(saved: { usage_reporting: boolean }) {
         return undefined;
       case 'usage_preview':
         return saved.usage_reporting ? INSTALL_LINE : '';
-      case 'audio_list_input_devices':
-      case 'audio_list_output_devices':
-        return [];
-      case 'audio_get_current_devices':
-        return { input_device_id: null, output_device_id: null };
-      case 'audio_get_buffer_size':
-        return 64;
+      case 'settings_get':
+        return audioSettings();
       case 'config_get_peer_name':
         return 'Taro';
-      case 'config_get_sample_rate':
-        return 48000;
-      case 'config_list_sample_rates':
-        return [];
-      case 'config_get_transmit_channels':
-        return 2;
-      case 'config_get_input_channels':
-      case 'config_get_output_channels':
-        return { channel_l: 1, channel_r: 2 };
       default:
         return undefined;
     }

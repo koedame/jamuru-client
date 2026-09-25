@@ -1,46 +1,51 @@
 /**
- * The transmit channel setting in the settings panel: choosing mono or stereo
- * is saved, and reaches a session that is already running.
+ * The audio settings in the settings panel: a choice is handed to the app as
+ * one change, the panel shows what the app says is now in effect, and a
+ * change made from outside the panel (another window, a peer helping with
+ * the settings) shows up without reopening it.
+ *
+ * Saving the change and telling a running session are the app's side
+ * (`src-tauri/src/settings.rs`), verified there.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import i18n from '../../i18n';
 import en from '../../../locales/en.json';
+import type { AudioSettings } from '../../lib/tauri';
 import { SettingsPanelAdapter } from './SettingsPanelAdapter';
+import { audioSettings } from './audioSettingsFixture';
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-/** A stand-in for the app; `streaming` says whether a session is running. */
-function fakeBackend({ streaming }: { streaming: boolean }) {
+/** Handlers the panel registered, by event name, so a test can raise one. */
+const listeners = vi.hoisted(() => new Map<string, (event: { payload: unknown }) => void>());
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn((name: string, handler: (event: { payload: unknown }) => void) => {
+    listeners.set(name, handler);
+    return Promise.resolve(() => listeners.delete(name));
+  }),
+}));
+
+/** A stand-in for the app: it holds `settings` and applies changes to them. */
+function fakeBackend(settings: AudioSettings) {
   const calls: { command: string; args: unknown }[] = [];
   invoke.mockImplementation(async (command: string, args?: unknown) => {
     calls.push({ command, args });
     switch (command) {
-      case 'config_load':
-        return { buffer_size: 64 };
-      case 'streaming_status':
-        return { is_active: streaming };
-      case 'audio_list_input_devices':
-      case 'audio_list_output_devices':
-        return [];
-      case 'audio_get_current_devices':
-        return { input_device_id: null, output_device_id: null };
-      case 'audio_get_buffer_size':
-        return 64;
+      case 'settings_get':
+        return settings;
+      case 'settings_change': {
+        const change = (args as { change: { setting: string; count?: number } }).change;
+        if (change.setting === 'transmit_channels') {
+          settings = { ...settings, transmit_channels: change.count! };
+        }
+        return settings;
+      }
       case 'config_get_peer_name':
         return 'Taro';
-      case 'config_get_sample_rate':
-        return 48000;
-      case 'config_list_sample_rates':
-        return [];
-      case 'config_get_transmit_channels':
-        return 2;
-      case 'config_get_input_channels':
-      case 'config_get_output_channels':
-        return { channel_l: 1, channel_r: 2 };
       default:
         return undefined;
     }
@@ -48,38 +53,58 @@ function fakeBackend({ streaming }: { streaming: boolean }) {
   return calls;
 }
 
-describe('the transmit channel setting in the settings panel', () => {
+const monoButton = () => screen.findByRole('button', { name: en.settings.devices.mono });
+
+describe('the audio settings in the settings panel', () => {
   beforeEach(async () => {
     invoke.mockReset();
+    listeners.clear();
     await i18n.changeLanguage('en');
   });
 
   // Verifies: REQ-AUD-107
-  it('the user picks mono during a session, the setting is saved and the session is told', async () => {
-    const calls = fakeBackend({ streaming: true });
+  // Verifies: REQ-GUI-024
+  it('the user picks mono, the app is asked for that one change and the panel shows mono', async () => {
+    const calls = fakeBackend(audioSettings({ transmit_channels: 2 }));
     render(<SettingsPanelAdapter initialTab="devices" />);
 
-    fireEvent.click(await screen.findByRole('button', { name: en.settings.devices.mono }));
+    fireEvent.click(await monoButton());
 
     await waitFor(() =>
-      expect(calls).toContainEqual({ command: 'streaming_set_transmit_channels', args: { count: 1 } })
+      expect(calls).toContainEqual({
+        command: 'settings_change',
+        args: { change: { setting: 'transmit_channels', count: 1 } },
+      })
     );
-    expect(calls).toContainEqual({ command: 'config_set_transmit_channels', args: { count: 1 } });
+    await waitFor(() => expect(screen.getByRole('button', { name: en.settings.devices.mono })).toHaveAttribute('aria-pressed', 'true'));
   });
 
-  // Verifies: REQ-AUD-107
-  it('the user picks mono with no session running, the setting is saved and no session is told', async () => {
-    const calls = fakeBackend({ streaming: false });
+  // Verifies: REQ-GUI-024
+  it('the settings change elsewhere while the panel is open, the panel shows the new settings', async () => {
+    fakeBackend(audioSettings({ transmit_channels: 2 }));
+    render(<SettingsPanelAdapter initialTab="devices" />);
+    const mono = await monoButton();
+    await waitFor(() => expect(listeners.has('audio:config-changed')).toBe(true));
+    expect(mono).toHaveAttribute('aria-pressed', 'false');
+
+    act(() => listeners.get('audio:config-changed')!({ payload: audioSettings({ transmit_channels: 1 }) }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: en.settings.devices.mono })).toHaveAttribute('aria-pressed', 'true'));
+  });
+
+  // The buffer sizes on offer are the app's: the panel once listed 8 and 16
+  // samples of its own, which the app could not save.
+  //
+  // Verifies: REQ-GUI-024
+  it('the panel offers exactly the buffer sizes the app reports', async () => {
+    fakeBackend(audioSettings({ buffer_sizes: [32, 64, 128, 256] }));
     render(<SettingsPanelAdapter initialTab="devices" />);
 
-    const mono = await screen.findByRole('button', { name: en.settings.devices.mono });
-    const statusChecksBefore = calls.filter((c) => c.command === 'streaming_status').length;
-    fireEvent.click(mono);
-
-    await waitFor(() =>
-      expect(calls.filter((c) => c.command === 'streaming_status').length).toBeGreaterThan(statusChecksBefore)
-    );
-    expect(calls).toContainEqual({ command: 'config_set_transmit_channels', args: { count: 1 } });
-    expect(calls.some((c) => c.command === 'streaming_set_transmit_channels')).toBe(false);
+    await monoButton();
+    const offered = screen
+      .getAllByRole('option')
+      .map((option) => option.getAttribute('value'))
+      .filter((value) => ['8', '16', '32', '64', '128', '256'].includes(value ?? ''));
+    expect(offered).toEqual(['32', '64', '128', '256']);
   });
 });

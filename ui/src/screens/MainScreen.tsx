@@ -236,11 +236,10 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     loadConfigAndConnect();
   }, []);
 
-  // The settings window broadcasts this after saving sample rate or transmit
-  // channel count (config.rs's config_set_sample_rate / config_set_transmit_
-  // channels), so the mixer's quality badge reflects the change immediately
-  // instead of only after an app restart. Mirrors the i18n:language-changed
-  // handling in App.tsx.
+  // Every audio setting change is announced with this (settings.rs, ADR-043),
+  // whether the settings window, a helping peer or a test made it, so the
+  // mixer's quality badge reflects the change immediately instead of only
+  // after an app restart. Mirrors the i18n:language-changed handling in App.tsx.
   const handleAudioConfigChanged = useCallback(async () => {
     try {
       const sampleRate = await configGetSampleRate();
