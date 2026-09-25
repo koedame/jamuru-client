@@ -69,6 +69,7 @@ struct DomBody<'a> {
 struct InvokeBody<'a> {
     command: &'a str,
     args: &'a serde_json::Value,
+    window: Option<&'a str>,
 }
 
 /// Matches `InvokeResult` in `src-tauri/src/e2e_control.rs`.
@@ -185,10 +186,26 @@ impl Driver {
         command: &str,
         args: &serde_json::Value,
     ) -> DriverResult<Result<serde_json::Value, String>> {
+        self.invoke_in(command, args, None)
+    }
+
+    /// [`Self::invoke`] through the IPC of the window `window` (the main window
+    /// when `None`): a command that answers for the window that called it, such
+    /// as a helper's window reaching the app it helps.
+    pub(crate) fn invoke_in(
+        &self,
+        command: &str,
+        args: &serde_json::Value,
+        window: Option<&str>,
+    ) -> DriverResult<Result<serde_json::Value, String>> {
         // The command's own run time, which the channel allows up to a minute.
         let result: InvokeResult = ureq::post(&format!("{}/e2e/invoke", self.base))
             .timeout(Duration::from_secs(70))
-            .send_json(ureq::json!(InvokeBody { command, args }))
+            .send_json(ureq::json!(InvokeBody {
+                command,
+                args,
+                window
+            }))
             .map_err(|e| format!("invoking {} failed: {}", command, e))?
             .into_json()
             .map_err(|e| format!("invoking {} returned unexpected JSON: {}", command, e))?;
