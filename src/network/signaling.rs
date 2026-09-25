@@ -442,14 +442,31 @@ impl SignalingConnection {
     }
 
     /// Receive a message from the server
+    ///
+    /// A message whose `type` this client does not know is skipped: the
+    /// server may have gained a message type after this client was built, and
+    /// failing here would make every such message look like a lost connection
+    /// to an app that is already installed. A known type that does not parse
+    /// is still an error - that is a real incompatibility, not a newer message.
     pub async fn recv(&mut self) -> Result<SignalingMessage, NetworkError> {
         loop {
             match self.ws_stream.next().await {
-                Some(Ok(Message::Text(text))) => {
-                    return serde_json::from_str(&text).map_err(|e| {
-                        NetworkError::SignalingError(format!("Deserialize failed: {}", e))
-                    });
-                }
+                Some(Ok(Message::Text(text))) => match serde_json::from_str(&text) {
+                    Ok(msg) => return Ok(msg),
+                    Err(e) if is_unknown_message_type(&e) => {
+                        debug!(
+                            "Skipping a signaling message this client does not know: {}",
+                            e
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(NetworkError::SignalingError(format!(
+                            "Deserialize failed: {}",
+                            e
+                        )));
+                    }
+                },
                 Some(Ok(Message::Close(_))) | None => {
                     return Err(NetworkError::ConnectionClosed);
                 }
@@ -472,6 +489,16 @@ impl SignalingConnection {
             .map_err(|e| NetworkError::SignalingError(format!("Close failed: {}", e)))?;
         Ok(())
     }
+}
+
+/// Whether `e` is serde rejecting a `type` outside [`SignalingMessage`].
+///
+/// serde reports that - and only that - as "unknown variant"; a known type
+/// with a field of the wrong shape reports the field instead. The tests pin
+/// both, so a change in serde's wording fails them rather than silently
+/// turning newer messages back into lost connections.
+fn is_unknown_message_type(e: &serde_json::Error) -> bool {
+    e.is_data() && e.to_string().starts_with("unknown variant")
 }
 
 /// Gather all address candidates for the local peer
@@ -583,6 +610,31 @@ mod tests {
         };
         assert!(rooms[0].test_room);
         assert_eq!(rooms[0].invite_code, "ABC234");
+    }
+
+    /// Verifies: REQ-CON-030
+    #[test]
+    fn a_message_of_a_type_the_protocol_gained_later_is_classified_as_unknown() {
+        let e = serde_json::from_str::<SignalingMessage>(
+            r#"{"type":"SomethingNewer","data":{"anything":[1,2,{"nested":true}]}}"#,
+        )
+        .unwrap_err();
+
+        assert!(is_unknown_message_type(&e), "{}", e);
+    }
+
+    /// A known type that does not parse is an incompatibility to report, not
+    /// a newer message to skip.
+    ///
+    /// Verifies: REQ-CON-030
+    #[test]
+    fn a_known_message_type_with_a_malformed_field_is_not_classified_as_unknown() {
+        let e = serde_json::from_str::<SignalingMessage>(
+            r#"{"type":"PeerLeft","data":{"peer_id":"not-a-uuid"}}"#,
+        )
+        .unwrap_err();
+
+        assert!(!is_unknown_message_type(&e), "{}", e);
     }
 
     #[test]

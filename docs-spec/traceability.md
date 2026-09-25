@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 179 |
-| うち must | 174 |
+| 要求 総数 | 180 |
+| うち must | 175 |
 | うち should | 5 |
-| 検証済み | 152 |
+| 検証済み | 153 |
 | サーバーを立てた接続テストでのみ検証 | 24 |
 | 未検証（should のみ許容） | 3 |
 
@@ -66,6 +66,7 @@
 | REQ-CON-027 | must | 公開するグローバルアドレスは音声ソケット自身から STUN に問い合わせた結果（IP とポート）であり、ポートを付け替える NAT の内側でも相手のパケットが音声ソケットに届く | `docs-spec/requirements.md` | `tests/stun_nat_test.rs`::datagram_arrives_before_stun_reply_then_reply_is_still_found<br/>`tests/stun_nat_test.rs`::nat_renumbers_port_then_published_address_is_the_one_stun_saw<br/>`tests/stun_nat_test.rs`::peer_sends_to_published_address_then_audio_socket_receives_it<br/>`tests/stun_nat_test.rs`::stun_unreachable_then_no_server_reflexive_candidate_is_published |
 | REQ-CON-028 | must | シグナリングの接続先をアプリは持たない。接続するたびにサーバーへ問い合わせ（`GET /api/v1/signaling`）、返された URL に繋ぐ | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CON-029 | must | 問い合わせの答えが `ws://` / `wss://` の URL でなければ繋がない。`https://` で問い合わせたのに暗号化されない `ws://` が返ったときも繋がない | `docs-spec/requirements.md` | `src/network/discovery.rs`::a_server_asked_over_https_cannot_send_the_app_to_an_unencrypted_websocket<br/>`src/network/discovery.rs`::an_answer_that_is_not_a_websocket_url_is_refused<br/>`src/network/discovery.rs`::when_the_server_names_something_other_than_a_websocket_the_app_does_not_connect |
+| REQ-CON-030 | must | シグナリングサーバーから知らない種類のメッセージが届いても、接続が切れたことにはならず、読み飛ばして続きのメッセージを受け取る（サーバーにメッセージの種類を足しても、配布済みのアプリがルームから落ちない）。知っている種類なのに読めないメッセージは、これまでどおり失敗として報告する | `docs-spec/requirements.md` | `src-tauri/src/signaling.rs`::a_server_message_of_a_type_this_app_does_not_know_is_skipped_not_reported_as_a_lost_connection<br/>`src/network/signaling.rs`::a_known_message_type_with_a_malformed_field_is_not_classified_as_unknown<br/>`src/network/signaling.rs`::a_message_of_a_type_the_protocol_gained_later_is_classified_as_unknown |
 | REQ-CON-101 | must | ルームを作成する | `docs-spec/behavior/connection.feature` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CON-102 | must | パスワード付きルームを作成する | `docs-spec/behavior/connection.feature` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CON-103 | must | 招待URLでルームに参加する | `docs-spec/behavior/connection.feature` | `tests/connection_test.rs`::test_invite_url_round_trips<br/>`ui/src/lib/deepLink.test.ts`::extracts the code from a well-formed link<br/>`ui/src/lib/deepLink.test.ts`::wrong scheme |
