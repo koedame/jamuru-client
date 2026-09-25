@@ -15,7 +15,7 @@ import {
   settingsHelpStop,
   type AudioSettings,
   type HelpEvent,
-  type PeerInfo,
+  type Participant,
   type SettingChange,
 } from "../../lib/tauri";
 import { SidePanel } from "../SidePanel";
@@ -71,7 +71,7 @@ export interface SettingsHelp {
   /** Hand every SettingsHelp event of the room's polling to this */
   onEvent: (event: HelpEvent) => void;
   /** Whether this app can offer `peer` help now */
-  canOffer: (peer: PeerInfo) => boolean;
+  canOffer: (peer: Participant) => boolean;
   offer: (peerId: string) => void;
   /** The bars for help going on, for the session screen */
   bars: ReactNode;
@@ -79,7 +79,7 @@ export interface SettingsHelp {
   overlays: ReactNode;
 }
 
-export function useSettingsHelp(connId: number | null, participants: PeerInfo[]): SettingsHelp {
+export function useSettingsHelp(connId: number | null, participants: Participant[]): SettingsHelp {
   const { t } = useTranslation();
   const [giving, setGiving] = useState<Giving | null>(null);
   const [receiving, setReceiving] = useState<Receiving | null>(null);
@@ -246,7 +246,7 @@ export function useSettingsHelp(connId: number | null, participants: PeerInfo[])
   const helpedTab = useAudioSettingsTab(giving?.status === "active" ? giving.settings : null, propose);
 
   const canOffer = useCallback(
-    (peer: PeerInfo) => giving === null && (peer.features ?? []).includes(PEER_MESSAGE_FEATURE),
+    (peer: Participant) => giving === null && (peer.features ?? []).includes(PEER_MESSAGE_FEATURE),
     [giving]
   );
 

@@ -641,7 +641,6 @@ pub struct StreamingStatus {
 /// Idempotent - repeated calls report the same address, so a rejoin or a
 /// double-invoke does not move the port out from under a peer that already
 /// learned it.
-#[tauri::command]
 pub async fn streaming_prepare(state: tauri::State<'_, StreamingState>) -> Result<String, String> {
     state.prepare_socket().await.map(|addr| addr.to_string())
 }
@@ -665,7 +664,6 @@ fn merge_candidate_addrs(addr: SocketAddr, others: &[SocketAddr]) -> Vec<SocketA
 }
 
 /// Start audio streaming to a remote peer
-#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn streaming_start(
     remote_addr: String,
@@ -885,7 +883,6 @@ pub async fn streaming_start(
 }
 
 /// Stop audio streaming
-#[tauri::command]
 pub async fn streaming_stop(state: tauri::State<'_, StreamingState>) -> Result<(), String> {
     if !state.is_active.load(Ordering::SeqCst) {
         return Ok(()); // Already stopped

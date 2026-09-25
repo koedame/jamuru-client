@@ -201,7 +201,7 @@ mod tests {
     #[tokio::test]
     async fn a_method_the_portal_may_not_call_is_denied_and_not_run() {
         let app = app();
-        for method in ["signaling_send_chat", "signaling_leave_room", "rpc_settle"] {
+        for method in ["signaling_send_chat", "session_leave", "rpc_settle"] {
             let error = dispatch(&app, Portal::Help, call(method))
                 .await
                 .unwrap_err();

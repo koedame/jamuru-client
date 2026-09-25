@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 
@@ -149,9 +149,8 @@ pub struct JoinResult {
 /// where its signaling is, then presents this installation's device identity
 /// (ADR-024) on the handshake, so the server can identify the device without
 /// any account registration.
-#[tauri::command]
-pub async fn signaling_connect(
-    app: AppHandle,
+pub async fn signaling_connect<R: Runtime>(
+    app: AppHandle<R>,
     state: tauri::State<'_, SignalingState>,
     identity_state: tauri::State<'_, DeviceIdentityState>,
     config_state: tauri::State<'_, ConfigState>,
@@ -196,7 +195,7 @@ pub async fn signaling_connect(
 /// Pings `conn_id` on a timer until the connection is gone (disconnected by
 /// the frontend, or dead - a ping on a closed socket errors just like any
 /// other send). Self-terminating, so callers don't need to cancel it.
-fn spawn_keepalive(app: AppHandle, conn_id: u32) {
+fn spawn_keepalive<R: Runtime>(app: AppHandle<R>, conn_id: u32) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(KEEPALIVE_INTERVAL).await;
@@ -214,7 +213,6 @@ fn spawn_keepalive(app: AppHandle, conn_id: u32) {
 }
 
 /// Disconnect from a signaling server
-#[tauri::command]
 pub async fn signaling_disconnect(
     conn_id: u32,
     state: tauri::State<'_, SignalingState>,
@@ -231,7 +229,6 @@ pub async fn signaling_disconnect(
 }
 
 /// List available rooms
-#[tauri::command]
 pub async fn signaling_list_rooms(
     conn_id: u32,
     state: tauri::State<'_, SignalingState>,
@@ -253,12 +250,11 @@ pub async fn signaling_list_rooms(
 }
 
 /// Join a room
-#[tauri::command]
-pub async fn signaling_join_room(
+pub async fn signaling_join_room<R: Runtime>(
     conn_id: u32,
     room_id: String,
     peer_name: String,
-    app: AppHandle,
+    app: AppHandle<R>,
     state: tauri::State<'_, SignalingState>,
     usage: tauri::State<'_, UsageState>,
 ) -> Result<JoinResult, String> {
@@ -333,7 +329,6 @@ pub async fn signaling_join_room(
 /// not.
 ///
 /// `local_port` is the port from `streaming_prepare`.
-#[tauri::command]
 pub async fn signaling_publish_local_candidates(
     conn_id: u32,
     local_port: u16,
@@ -431,7 +426,6 @@ async fn local_candidates(streaming: &StreamingState, local_port: u16) -> Vec<Ad
 }
 
 /// Leave the current room
-#[tauri::command]
 pub async fn signaling_leave_room(
     conn_id: u32,
     state: tauri::State<'_, SignalingState>,
@@ -456,12 +450,11 @@ pub async fn signaling_leave_room(
 }
 
 /// Create a new room
-#[tauri::command]
-pub async fn signaling_create_room(
+pub async fn signaling_create_room<R: Runtime>(
     conn_id: u32,
     room_name: String,
     peer_name: String,
-    app: AppHandle,
+    app: AppHandle<R>,
     state: tauri::State<'_, SignalingState>,
     usage: tauri::State<'_, UsageState>,
 ) -> Result<JoinResult, String> {
@@ -765,7 +758,6 @@ pub enum SignalingEvent {
 
 /// Poll for signaling events (peer join/leave, chat messages)
 /// Returns pending events and clears them from the queue
-#[tauri::command]
 pub async fn signaling_poll_events(
     conn_id: u32,
     state: tauri::State<'_, SignalingState>,

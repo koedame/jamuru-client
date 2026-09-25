@@ -7,8 +7,6 @@
  * `src/network/signaling.rs`: same length, same alphabet.
  */
 
-import type { RoomInfo } from './tauri';
-
 /** Characters used by invite codes. Excludes 0, O, I, 1, L as confusable. */
 export const INVITE_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
@@ -26,13 +24,4 @@ export function isValidInviteCode(code: string): boolean {
     }
   }
   return true;
-}
-
-/**
- * The invite code of the room the server offers for trying a connection, or
- * `null` when it offers none. The app holds no such code itself: the server
- * decides which room that is and whom to show it to.
- */
-export function testRoomCodeOf(rooms: RoomInfo[]): string | null {
-  return rooms.find((room) => room.test_room === true)?.invite_code ?? null;
 }

@@ -485,8 +485,9 @@ fn jamjam_log_overrides_the_levels_the_file_is_written_at() {
 
 /// The state the connection screen is in decides which buttons do anything,
 /// so its transitions and the failure that caused them are in the file: the
-/// screen's own lines, the failed command, and the Rust side's account of the
-/// connection attempt with its URL, error and duration.
+/// backend's own account (the step it was at and the connection attempt with
+/// its URL, error and duration), the screen's line for what it saw, and the
+/// failed command when the person tries again.
 ///
 /// The start-up auto-connect fails here because no signaling server is
 /// listening (see [`launch`]).
@@ -501,17 +502,20 @@ fn a_failed_start_up_connection_is_written_to_the_log_file_from_both_sides() {
     });
 
     assert!(
-        log.contains("[main] [session] (start) -> connecting_server"),
-        "the screen's first state is missing:\n{}",
-        log
-    );
-    assert!(
         log.contains("Signaling connect to http://localhost:17890 failed after"),
         "the Rust side's account of the failed connection is missing:\n{}",
         log
     );
     assert!(
-        log.contains("invoke signaling_connect failed"),
+        log.contains("[main] [session] ") && log.contains("-> error"),
+        "the screen's line for the failed connection is missing:\n{}",
+        log
+    );
+
+    app.connection_screen().retry_button().click().unwrap();
+    let log = wait_for_log(&app, |log| log.contains("invoke session_connect failed"));
+    assert!(
+        log.contains("invoke session_connect failed"),
         "the failed command is missing:\n{}",
         log
     );

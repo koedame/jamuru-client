@@ -11,7 +11,7 @@ import { useEffect } from "react";
 import i18n from "../../i18n";
 import en from "../../../locales/en.json";
 import ja from "../../../locales/ja.json";
-import type { HelpEvent, PeerInfo } from "../../lib/tauri";
+import type { HelpEvent, Participant } from "../../lib/tauri";
 import { ChatMessage } from "../ChatPanel/ChatMessage";
 import { audioSettings } from "../SettingsPanel/audioSettingsFixture";
 import { ALLOW_DELAY_MS } from "./SettingsHelpQuestion";
@@ -23,20 +23,20 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 
 const CONN = 7;
 
-function peer(id: string, name: string, features: string[] = ["peer_message"]): PeerInfo {
-  return { id, name, candidates: [], public_addr: null, local_addr: null, features };
+function peer(id: string, name: string, features: string[] = ["peer_message"]): Participant {
+  return { id, name, features };
 }
 
 const AKI = peer("aki-id", "Aki");
 const BO = peer("bo-id", "Bo");
 
 /** Mounts the hook as the main window does, and hands back its handle. */
-function mount(participants: PeerInfo[]) {
+function mount(participants: Participant[]) {
   return mountWith(() => participants);
 }
 
 /** `mount`, with the participants read on each render (`rerender` after changing them). */
-function mountWith(participantsNow: () => PeerInfo[]) {
+function mountWith(participantsNow: () => Participant[]) {
   let help: SettingsHelp | undefined;
   function Harness() {
     const participants = participantsNow();
