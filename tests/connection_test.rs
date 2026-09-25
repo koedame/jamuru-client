@@ -274,6 +274,22 @@ async fn test_direct_connection_without_signaling() {
 // Reconnection (ADR-022)
 // ---------------------------------------------------------------------------
 
+/// Poll until the connection reports `wanted`, or `within` has passed
+async fn wait_for_state(
+    conn: &Connection,
+    wanted: jamjam::network::ConnectionState,
+    within: std::time::Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + within;
+    while conn.state() != wanted {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    true
+}
+
 /// Given the user is in a session
 /// When the network drops for 3 seconds
 /// Then reconnection is attempted, and the session continues once it succeeds
@@ -319,19 +335,23 @@ async fn test_short_outage_recovers_without_asking_the_user() {
     assert!(conn.is_connected());
 
     // The peer never answers, so the link goes quiet and reconnection starts.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(
-        conn.state(),
-        ConnectionState::Reconnecting,
-        "silence must be detected as connection loss"
+    // Waited for rather than slept for: on a loaded machine the check that
+    // notices the silence runs late, and what matters is that it does run.
+    assert!(
+        wait_for_state(&conn, ConnectionState::Reconnecting, Duration::from_secs(2)).await,
+        "silence must be detected as connection loss, state is {:?}",
+        conn.state()
     );
 
     // The network comes back: the peer now answers, which starts its keep-alive
     // traffic towards us. Packets arriving is the only evidence needed.
     peer.connect(conn_addr).await.expect("peer connects back");
 
-    // Long enough for a keep-alive to arrive and be noticed.
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    // Recovery is judged by whether it happens, not by a fixed delay: the
+    // liveness check runs on a timer, and a stall in this process (CPU
+    // throttling, a busy build next door) makes it wake up before the receive
+    // loop has counted the packets that are already waiting.
+    let recovered = wait_for_state(&conn, ConnectionState::Connected, Duration::from_secs(2)).await;
 
     let observed = states.lock().unwrap().clone();
     assert!(
@@ -339,9 +359,8 @@ async fn test_short_outage_recovers_without_asking_the_user() {
         "the caller must be told the link was lost, got {:?}",
         observed
     );
-    assert_eq!(
-        conn.state(),
-        ConnectionState::Connected,
+    assert!(
+        recovered,
         "traffic resuming must restore the session, states seen: {:?}",
         observed
     );
