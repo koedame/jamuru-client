@@ -337,6 +337,23 @@ impl<'a> SessionScreen<'a> {
         self.chat_panel_text()
     }
 
+    /// Waits for the chat's first system line of `kind` (`join`,
+    /// `settings_help_changed`, ...) and returns its text as shown.
+    pub fn wait_for_system_line(
+        &self,
+        kind: &str,
+        timeout: std::time::Duration,
+    ) -> DriverResult<String> {
+        let line = Element::new(
+            self.driver,
+            format!("[data-testid='chat-panel'] [data-system-kind='{}']", kind),
+            None,
+            "chat system line",
+        );
+        line.wait_until_visible(timeout)?;
+        line.text()
+    }
+
     /// Sends a message the way a user would: type, then press send.
     pub fn send_chat(&self, message: &str) -> DriverResult<()> {
         self.chat_input().type_text(message)?;
