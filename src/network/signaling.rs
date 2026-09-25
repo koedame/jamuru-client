@@ -453,7 +453,7 @@ impl SignalingConnection {
             match self.ws_stream.next().await {
                 Some(Ok(Message::Text(text))) => match serde_json::from_str(&text) {
                     Ok(msg) => return Ok(msg),
-                    Err(e) if is_unknown_message_type(&e) => {
+                    Err(e) if is_of_unknown_type(&text) => {
                         debug!(
                             "Skipping a signaling message this client does not know: {}",
                             e
@@ -491,14 +491,24 @@ impl SignalingConnection {
     }
 }
 
-/// Whether `e` is serde rejecting a `type` outside [`SignalingMessage`].
+/// Whether `text` is a message whose `type` is not one of [`SignalingMessage`]'s.
 ///
-/// serde reports that - and only that - as "unknown variant"; a known type
-/// with a field of the wrong shape reports the field instead. The tests pin
-/// both, so a change in serde's wording fails them rather than silently
-/// turning newer messages back into lost connections.
-fn is_unknown_message_type(e: &serde_json::Error) -> bool {
-    e.is_data() && e.to_string().starts_with("unknown variant")
+/// Decided from the tag alone: the tag is parsed on its own, with no data
+/// beside it, so serde's "unknown variant" can only be about the tag. Parsing
+/// the whole message would give the same wording for an unknown value deep
+/// inside a known message (a candidate type the protocol gained later), which
+/// is an incompatibility to report, not a newer message to skip.
+fn is_of_unknown_type(text: &str) -> bool {
+    let Some(tag) = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(String::from))
+    else {
+        return false;
+    };
+    match serde_json::from_value::<SignalingMessage>(serde_json::json!({ "type": tag })) {
+        Ok(_) => false,
+        Err(e) => e.to_string().starts_with("unknown variant"),
+    }
 }
 
 /// Gather all address candidates for the local peer
@@ -615,12 +625,10 @@ mod tests {
     /// Verifies: REQ-CON-030
     #[test]
     fn a_message_of_a_type_the_protocol_gained_later_is_classified_as_unknown() {
-        let e = serde_json::from_str::<SignalingMessage>(
-            r#"{"type":"SomethingNewer","data":{"anything":[1,2,{"nested":true}]}}"#,
-        )
-        .unwrap_err();
-
-        assert!(is_unknown_message_type(&e), "{}", e);
+        assert!(is_of_unknown_type(
+            r#"{"type":"SomethingNewer","data":{"anything":[1,2,{"nested":true}]}}"#
+        ));
+        assert!(is_of_unknown_type(r#"{"data":{},"type":"SomethingNewer"}"#));
     }
 
     /// A known type that does not parse is an incompatibility to report, not
@@ -629,12 +637,33 @@ mod tests {
     /// Verifies: REQ-CON-030
     #[test]
     fn a_known_message_type_with_a_malformed_field_is_not_classified_as_unknown() {
-        let e = serde_json::from_str::<SignalingMessage>(
-            r#"{"type":"PeerLeft","data":{"peer_id":"not-a-uuid"}}"#,
-        )
-        .unwrap_err();
+        let malformed = r#"{"type":"PeerLeft","data":{"peer_id":"not-a-uuid"}}"#;
+        assert!(serde_json::from_str::<SignalingMessage>(malformed).is_err());
+        assert!(!is_of_unknown_type(malformed));
+    }
 
-        assert!(!is_unknown_message_type(&e), "{}", e);
+    /// An unknown value inside a known message reads, to serde, exactly like an
+    /// unknown message type. It must still be reported: skipping it would drop
+    /// a peer's arrival without a trace.
+    ///
+    /// Verifies: REQ-CON-030
+    #[test]
+    fn a_known_message_carrying_an_unknown_value_deep_inside_is_not_classified_as_unknown() {
+        let peer_id = Uuid::new_v4();
+        let text = format!(
+            r#"{{"type":"PeerJoined","data":{{"peer":{{"id":"{peer_id}","name":"A","candidates":[{{"address":"192.0.2.1:5000","candidate_type":"Relay","priority":1}}]}}}}}}"#
+        );
+        let e = serde_json::from_str::<SignalingMessage>(&text).unwrap_err();
+        assert!(e.to_string().starts_with("unknown variant"), "{}", e);
+
+        assert!(!is_of_unknown_type(&text));
+    }
+
+    #[test]
+    fn text_that_is_not_a_tagged_message_is_not_classified_as_unknown() {
+        for text in ["not json", "[]", r#"{"data":{}}"#, r#"{"type":7}"#] {
+            assert!(!is_of_unknown_type(text), "{}", text);
+        }
     }
 
     #[test]
