@@ -10,7 +10,7 @@
 //! - macOS: ~/Library/Application Support/jamjam/config.toml
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
@@ -284,7 +284,7 @@ pub fn config_dir() -> Option<PathBuf> {
 /// Get the configuration file path
 ///
 /// Returns None if the configuration directory cannot be determined.
-fn config_path() -> Option<PathBuf> {
+pub fn config_path() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("config.toml"))
 }
 
@@ -293,13 +293,16 @@ fn config_path() -> Option<PathBuf> {
 /// Returns the loaded configuration, or an error if loading fails.
 /// If the file doesn't exist, returns an error (use unwrap_or_default for fallback).
 pub fn load_config() -> Result<AppConfig, String> {
-    let path = config_path().ok_or("Could not determine config path")?;
+    load_config_from(&config_path().ok_or("Could not determine config path")?)
+}
 
+/// [`load_config`] from the file at `path`.
+pub fn load_config_from(path: &Path) -> Result<AppConfig, String> {
     if !path.exists() {
         return Err("Config file does not exist".to_string());
     }
 
-    let content = fs::read_to_string(&path)
+    let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read config file at {:?}: {}", path, e))?;
 
     let config: AppConfig =
@@ -328,13 +331,21 @@ pub fn load_config() -> Result<AppConfig, String> {
 ///
 /// Creates the config directory if it doesn't exist.
 pub fn save_config(config: &AppConfig) -> Result<(), String> {
-    let config_dir = config_dir().ok_or("Could not determine config directory")?;
-    let config_path = config_dir.join("config.toml");
+    save_config_to(
+        &config_path().ok_or("Could not determine config directory")?,
+        config,
+    )
+}
 
+/// [`save_config`] to the file at `path`.
+pub fn save_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
     // Create config directory if it doesn't exist
-    if !config_dir.exists() {
-        fs::create_dir_all(&config_dir)
-            .map_err(|e| format!("Failed to create config directory {:?}: {}", config_dir, e))?;
+    if let Some(config_dir) = path.parent() {
+        if !config_dir.exists() {
+            fs::create_dir_all(config_dir).map_err(|e| {
+                format!("Failed to create config directory {:?}: {}", config_dir, e)
+            })?;
+        }
     }
 
     // Serialize config to TOML
@@ -342,8 +353,8 @@ pub fn save_config(config: &AppConfig) -> Result<(), String> {
         toml::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
 
     // Write to file
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config file {:?}: {}", config_path, e))?;
+    fs::write(path, content)
+        .map_err(|e| format!("Failed to write config file {:?}: {}", path, e))?;
 
     Ok(())
 }

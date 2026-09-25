@@ -244,30 +244,6 @@ export interface AudioDeviceInfo {
   is_asio: boolean;
 }
 
-/**
- * Current device selection
- */
-export interface CurrentDevices {
-  input_device_id: string | null;
-  output_device_id: string | null;
-}
-
-/**
- * Get current device selection
- * @returns Current input and output device IDs
- */
-export async function audioGetCurrentDevices(): Promise<CurrentDevices> {
-  return invoke("audio_get_current_devices");
-}
-
-/**
- * Get the buffer size in effect (frame_size in samples, as saved)
- * @returns Buffer size (one of AudioSettings.buffer_sizes)
- */
-export async function audioGetBufferSize(): Promise<number> {
-  return invoke("audio_get_buffer_size");
-}
-
 // ============================================================================
 // Audio Settings API (ADR-043)
 // ============================================================================
@@ -287,12 +263,18 @@ export interface ChannelPair {
  * after a change, whoever made it.
  */
 export interface AudioSettings {
+  /** Counts up with every change; a newer one replaces an older one, never the reverse */
+  revision: number;
   input_devices: AudioDeviceInfo[];
   output_devices: AudioDeviceInfo[];
   /** The chosen input device; null means the system default */
   input_device_id: string | null;
   /** The chosen output device; null means the system default */
   output_device_id: string | null;
+  /** Channels the input device in use offers; null when it does not say */
+  input_channel_count: number | null;
+  /** Channels the output device in use offers; null when it does not say */
+  output_channel_count: number | null;
   input_channels: ChannelPair;
   output_channels: ChannelPair;
   transmit_channels: number;
@@ -302,14 +284,18 @@ export interface AudioSettings {
   sample_rates: SampleRateInfo[];
 }
 
+/** Which channel of a left/right pair */
+export type ChannelSide = "left" | "right";
+
 /**
- * One change to the audio settings, named by its setting
+ * One change to the audio settings, named by its setting. A channel change
+ * sets one side of the pair; `channel: null` on the right side is mono.
  */
 export type SettingChange =
   | { setting: "input_device"; device_id: string }
   | { setting: "output_device"; device_id: string }
-  | { setting: "input_channels"; left: number; right: number | null }
-  | { setting: "output_channels"; left: number; right: number | null }
+  | { setting: "input_channel"; side: ChannelSide; channel: number | null }
+  | { setting: "output_channel"; side: ChannelSide; channel: number | null }
   | { setting: "transmit_channels"; count: number }
   | { setting: "buffer_size"; samples: number }
   | { setting: "sample_rate"; hz: number }
@@ -523,21 +509,19 @@ export async function signalingPublishLocalCandidates(
   return invoke("signaling_publish_local_candidates", { connId, localPort });
 }
 
+/**
+ * Start streaming to a peer. The devices, buffer size and sample rate are the
+ * saved settings (ADR-043), so the session runs with what the settings show.
+ * @param remoteAddr The peer's preferred address
+ * @param remoteCandidates The peer's other addresses, tried alongside it
+ */
 export async function streamingStart(
   remoteAddr: string,
-  remoteCandidates?: string[],
-  inputDeviceId?: string,
-  outputDeviceId?: string,
-  bufferSize?: number,
-  sampleRate?: number
+  remoteCandidates?: string[]
 ): Promise<void> {
   return invoke("streaming_start", {
     remoteAddr,
     remoteCandidates: remoteCandidates ?? null,
-    inputDeviceId: inputDeviceId ?? null,
-    outputDeviceId: outputDeviceId ?? null,
-    bufferSize: bufferSize ?? 64,
-    sampleRate: sampleRate ?? null,
   });
 }
 
@@ -734,11 +718,10 @@ export async function configLoad(): Promise<AppConfig> {
 }
 
 /**
- * Save configuration to disk
- * @param config The configuration to save
+ * Turn usage reporting on or off (ADR-037)
  */
-export async function configSave(config: AppConfig): Promise<void> {
-  return invoke("config_save", { config });
+export async function configSetUsageReporting(enabled: boolean): Promise<void> {
+  return invoke("config_set_usage_reporting", { enabled });
 }
 
 /**

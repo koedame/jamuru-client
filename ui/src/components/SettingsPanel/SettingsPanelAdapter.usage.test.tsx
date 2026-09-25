@@ -28,8 +28,8 @@ function fakeBackend(saved: { usage_reporting: boolean }) {
     switch (command) {
       case 'config_load':
         return { ...saved, buffer_size: 64 };
-      case 'config_save':
-        saved.usage_reporting = (args as { config: { usage_reporting: boolean } }).config.usage_reporting;
+      case 'config_set_usage_reporting':
+        saved.usage_reporting = (args as { enabled: boolean }).enabled;
         return undefined;
       case 'usage_preview':
         return saved.usage_reporting ? INSTALL_LINE : '';
@@ -81,8 +81,10 @@ describe('the usage reporting switch in the settings panel', () => {
     fireEvent.click(await screen.findByRole('switch', { name: en.settings.diagnostics.usageToggle }));
 
     await waitFor(() => expect(saved.usage_reporting).toBe(true));
-    const save = calls.find((c) => c.command === 'config_save');
-    expect(save?.args).toEqual({ config: { usage_reporting: true, buffer_size: 64 } });
+    // Only the switch's own setting travels: nothing read earlier is written
+    // back over a change made meanwhile.
+    expect(calls).toContainEqual({ command: 'config_set_usage_reporting', args: { enabled: true } });
+    expect(calls.some((c) => c.command === 'config_save')).toBe(false);
   });
 
   // Verifies: REQ-TEL-011
@@ -90,7 +92,7 @@ describe('the usage reporting switch in the settings panel', () => {
     fakeBackend({ usage_reporting: false });
     const backend = invoke.getMockImplementation()!;
     invoke.mockImplementation(async (command: string, args?: unknown) => {
-      if (command === 'config_save') throw 'disk full';
+      if (command === 'config_set_usage_reporting') throw 'disk full';
       return backend(command, args);
     });
     render(<SettingsPanelAdapter initialTab="diagnostics" />);

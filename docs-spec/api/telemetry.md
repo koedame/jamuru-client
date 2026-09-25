@@ -111,7 +111,7 @@ sequenceDiagram
 sequenceDiagram
     actor U as 利用者
     participant UI as 設定画面
-    participant App as アプリ（config_save）
+    participant App as アプリ（config_set_usage_reporting）
     participant Rep as UsageReporter
 
     U->>UI: スイッチをオンにする

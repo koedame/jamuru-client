@@ -33,8 +33,6 @@ import {
   streamingStatus,
   streamingSetMute,
   streamingSetMonitoring,
-  audioGetCurrentDevices,
-  audioGetBufferSize,
   streamingSetPeerVolume,
   streamingSetPeerPan,
   streamingSetLocalVolume,
@@ -512,17 +510,8 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
 
     streamingPeerIdRef.current = peerWithAddr.id;
     try {
-      const [devices, bufferSize] = await Promise.all([
-        audioGetCurrentDevices(),
-        audioGetBufferSize(),
-      ]);
-      await streamingStart(
-        addr,
-        candidates,
-        devices.input_device_id ?? undefined,
-        devices.output_device_id ?? undefined,
-        bufferSize
-      );
+      // The devices, buffer size and sample rate are the saved settings.
+      await streamingStart(addr, candidates);
       console.log("Streaming started to:", addr, "candidates:", candidates);
     } catch (streamErr) {
       // Allow a later PeerUpdated to retry rather than leaving the session

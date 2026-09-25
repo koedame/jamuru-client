@@ -85,10 +85,6 @@ beforeEach(() => {
         return '0.0.0.0:40000';
       case 'streaming_status':
         return { is_active: false };
-      case 'audio_get_current_devices':
-        return { input_device_id: null, output_device_id: null };
-      case 'audio_get_buffer_size':
-        return 64;
       case 'config_get_peer_name':
         return 'Me';
       case 'config_get_connection_history':

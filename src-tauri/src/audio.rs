@@ -1,14 +1,14 @@
-//! Audio device IPC for Tauri
+//! Audio devices for the settings (ADR-043)
 //!
-//! Lists the audio devices and reports the selection in effect. Choosing a
-//! device, like every other audio setting, goes through
-//! [`crate::settings::settings_change`] (ADR-043).
+//! Lists the audio devices on offer. Choosing one, like every other audio
+//! setting, goes through [`crate::settings::settings_change`]; the choice in
+//! effect is the saved config.
+
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
 use jamjam::audio::{list_input_devices, list_output_devices};
-
-use crate::config::ConfigState;
 
 /// Audio device information for IPC
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,13 +19,6 @@ pub struct AudioDeviceInfo {
     pub supported_channels: Vec<u16>,
     pub is_default: bool,
     pub is_asio: bool,
-}
-
-/// Current device selection
-#[derive(Debug, Clone, Serialize)]
-pub struct CurrentDevices {
-    pub input_device_id: Option<String>,
-    pub output_device_id: Option<String>,
 }
 
 /// Available input (microphone) devices
@@ -73,8 +66,12 @@ pub fn output_devices() -> Result<Vec<AudioDeviceInfo>, String> {
 }
 
 /// What the OS offered, so a report can show "no interface was found" apart
-/// from "the interface was found but not selected".
+/// from "the interface was found but not selected". Written when the list
+/// differs from the one written last: the settings list the devices on every
+/// change, and the same list again says nothing new.
 fn log_devices(kind: &str, devices: &[AudioDeviceInfo]) {
+    static LAST: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
     let names: Vec<String> = devices
         .iter()
         .map(|d| {
@@ -85,28 +82,13 @@ fn log_devices(kind: &str, devices: &[AudioDeviceInfo]) {
             }
         })
         .collect();
-    tracing::info!(
-        "Found {} {} device(s): {}",
-        devices.len(),
-        kind,
-        names.join(", ")
-    );
-}
-
-/// The device selection in effect, as saved in `config.toml` (ADR-026)
-#[tauri::command]
-pub fn audio_get_current_devices(
-    state: tauri::State<'_, ConfigState>,
-) -> Result<CurrentDevices, String> {
-    let config = state.get()?;
-    Ok(CurrentDevices {
-        input_device_id: config.input_device_id,
-        output_device_id: config.output_device_id,
-    })
-}
-
-/// The buffer size in effect (frame size, in samples), as saved in `config.toml`
-#[tauri::command]
-pub fn audio_get_buffer_size(state: tauri::State<'_, ConfigState>) -> Result<u32, String> {
-    Ok(state.get()?.buffer_size)
+    let line = format!("{} {} device(s): {}", devices.len(), kind, names.join(", "));
+    if let Ok(mut last) = LAST.lock() {
+        match last.iter_mut().find(|(k, _)| k == kind) {
+            Some((_, previous)) if *previous == line => return,
+            Some((_, previous)) => *previous = line.clone(),
+            None => last.push((kind.to_string(), line.clone())),
+        }
+    }
+    tracing::info!("Found {}", line);
 }

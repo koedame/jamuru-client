@@ -227,6 +227,8 @@ const backend: Record<string, unknown> = {
     ],
     input_device_id: 'in1',
     output_device_id: 'out1',
+    input_channel_count: 3,
+    output_channel_count: 2,
     sample_rates: [
       { rate: 44100, label: '44.1 kHz', recommended: false },
       { rate: 48000, label: '48 kHz', recommended: true },

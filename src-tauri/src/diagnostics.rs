@@ -10,7 +10,6 @@ use jamjam::diagnostics::{
 };
 use jamjam::network::SignalingClient;
 
-use crate::audio::audio_get_current_devices;
 use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
 
@@ -30,11 +29,11 @@ pub async fn diagnostics_run_complete(
     identity_state: State<'_, DeviceIdentityState>,
 ) -> Result<CompleteDiagnosticsResult, String> {
     let signaling = signaling_client(&config_state, &identity_state);
-    let devices = audio_get_current_devices(config_state.clone())?;
+    let config = config_state.get()?;
     let result = jamjam::diagnostics::run_complete_diagnostics(
         &signaling,
-        devices.input_device_id.as_deref(),
-        devices.output_device_id.as_deref(),
+        config.input_device_id.as_deref(),
+        config.output_device_id.as_deref(),
     )
     .await;
     Ok(result)
@@ -56,10 +55,10 @@ pub async fn diagnostics_run_network(
 pub fn diagnostics_run_audio(
     config_state: State<'_, ConfigState>,
 ) -> Result<AudioDiagnosticsResult, String> {
-    let devices = audio_get_current_devices(config_state.clone())?;
+    let config = config_state.get()?;
     let result = AudioDiagnostics::run(
-        devices.input_device_id.as_deref(),
-        devices.output_device_id.as_deref(),
+        config.input_device_id.as_deref(),
+        config.output_device_id.as_deref(),
     );
     Ok(result)
 }
@@ -78,11 +77,11 @@ pub async fn diagnostics_get_recommended_preset(
     identity_state: State<'_, DeviceIdentityState>,
 ) -> Result<String, String> {
     let signaling = signaling_client(&config_state, &identity_state);
-    let devices = audio_get_current_devices(config_state.clone())?;
+    let config = config_state.get()?;
     let result = jamjam::diagnostics::run_complete_diagnostics(
         &signaling,
-        devices.input_device_id.as_deref(),
-        devices.output_device_id.as_deref(),
+        config.input_device_id.as_deref(),
+        config.output_device_id.as_deref(),
     )
     .await;
     Ok(result.recommended_preset.as_str().to_string())
@@ -95,11 +94,11 @@ pub async fn diagnostics_check_zero_latency(
     identity_state: State<'_, DeviceIdentityState>,
 ) -> Result<bool, String> {
     let signaling = signaling_client(&config_state, &identity_state);
-    let devices = audio_get_current_devices(config_state.clone())?;
+    let config = config_state.get()?;
     let result = jamjam::diagnostics::run_complete_diagnostics(
         &signaling,
-        devices.input_device_id.as_deref(),
-        devices.output_device_id.as_deref(),
+        config.input_device_id.as_deref(),
+        config.output_device_id.as_deref(),
     )
     .await;
     Ok(result.zero_latency_compatible)

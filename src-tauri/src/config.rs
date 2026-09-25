@@ -4,6 +4,7 @@
 //! (`jamjam::config`) so the CLI shares one config file with the GUI
 //! (ADR-027). This module is the IPC surface over it.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use chrono::Utc;
@@ -11,15 +12,24 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 pub use jamjam::config::{
-    load_config, save_config, AppConfig, AudioPreset, ConnectionHistoryEntry, DEFAULT_SAMPLE_RATE,
-    DEFAULT_SERVER_URL, MAX_HISTORY_ENTRIES, VALID_SAMPLE_RATES,
+    config_path, load_config, load_config_from, save_config_to, AppConfig, AudioPreset,
+    ConnectionHistoryEntry, DEFAULT_SAMPLE_RATE, DEFAULT_SERVER_URL, MAX_HISTORY_ENTRIES,
+    VALID_SAMPLE_RATES,
 };
 
 /// Called with the new configuration after each successful save
 type SavedHook = Box<dyn Fn(&AppConfig) + Send + Sync>;
 
 /// State for configuration management
+///
+/// The one place the app's configuration is changed: every change is a
+/// read-modify-write under one lock ([`Self::update_with`]), so two made at
+/// once - the user in one window and a helper, say - cannot both start from
+/// the same old config and have the second undo the first.
 pub struct ConfigState {
+    /// Where the configuration is saved; `None` when the platform has no
+    /// config directory, in which case every save fails.
+    path: Option<PathBuf>,
     config: Mutex<AppConfig>,
     on_saved: Mutex<Option<SavedHook>>,
 }
@@ -27,8 +37,24 @@ pub struct ConfigState {
 impl ConfigState {
     /// Create a new ConfigState, loading existing config or using defaults
     pub fn new() -> Self {
-        let config = load_config().unwrap_or_default();
+        let path = config_path();
+        let config = path
+            .as_deref()
+            .and_then(|path| load_config_from(path).ok())
+            .unwrap_or_default();
+        Self::with(path, config)
+    }
+
+    /// A ConfigState saving to the file at `path`, starting from `config`
+    /// (what is in the file is not read).
+    #[cfg(test)]
+    pub fn at(path: PathBuf, config: AppConfig) -> Self {
+        Self::with(Some(path), config)
+    }
+
+    fn with(path: Option<PathBuf>, config: AppConfig) -> Self {
         Self {
+            path,
             config: Mutex::new(config),
             on_saved: Mutex::new(None),
         }
@@ -59,25 +85,45 @@ impl ConfigState {
             .unwrap_or_else(|_| DEFAULT_SERVER_URL.to_string())
     }
 
-    /// Update the configuration and save to disk
-    pub fn update(&self, new_config: AppConfig) -> Result<(), String> {
-        new_config.validate()?;
-
+    /// Changes the configuration and saves it, as one step.
+    ///
+    /// `change` gets the configuration as it is and returns the one to save,
+    /// with a value to hand back. Nothing changes - in memory or on disk - if
+    /// `change` fails, the result does not validate, or it cannot be saved.
+    pub fn update_with<T, E: From<String>>(
+        &self,
+        change: impl FnOnce(&AppConfig) -> Result<(AppConfig, T), E>,
+    ) -> Result<(AppConfig, T), E> {
         let mut config = self
             .config
             .lock()
             .map_err(|e| format!("Failed to lock config: {}", e))?;
-
-        *config = new_config.clone();
+        let (next, value) = change(&config)?;
+        next.validate()?;
+        let path = self
+            .path
+            .as_deref()
+            .ok_or_else(|| "Could not determine config directory".to_string())?;
+        save_config_to(path, &next)?;
+        *config = next.clone();
         drop(config);
 
-        save_config(&new_config)?;
         if let Ok(on_saved) = self.on_saved.lock() {
             if let Some(hook) = on_saved.as_ref() {
-                hook(&new_config);
+                hook(&next);
             }
         }
-        Ok(())
+        Ok((next, value))
+    }
+
+    /// [`Self::update_with`] for a change that cannot fail by itself.
+    pub fn modify(&self, change: impl FnOnce(&mut AppConfig)) -> Result<AppConfig, String> {
+        self.update_with(|current| {
+            let mut next = current.clone();
+            change(&mut next);
+            Ok::<_, String>((next, ()))
+        })
+        .map(|(config, ())| config)
     }
 }
 
@@ -99,12 +145,14 @@ pub fn config_load(state: tauri::State<'_, ConfigState>) -> Result<AppConfig, St
     state.get()
 }
 
-/// Save configuration to disk
-///
-/// Validates and saves the provided configuration.
+/// Turn usage reporting on or off (ADR-037)
 #[tauri::command]
-pub fn config_save(config: AppConfig, state: tauri::State<'_, ConfigState>) -> Result<(), String> {
-    state.update(config)
+pub fn config_set_usage_reporting(
+    enabled: bool,
+    state: tauri::State<'_, ConfigState>,
+) -> Result<(), String> {
+    state.modify(|config| config.usage_reporting = enabled)?;
+    Ok(())
 }
 
 /// Get the jamjam server URL from configuration
@@ -126,9 +174,8 @@ pub fn config_set_server_url(
     url: Option<String>,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
-    config.server_url = url;
-    state.update(config)
+    state.modify(|config| config.server_url = url)?;
+    Ok(())
 }
 
 /// Get the jamjam server URL the app will actually use.
@@ -197,27 +244,26 @@ pub fn config_add_connection_history(
     label: Option<String>,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
+    state.modify(|config| {
+        // Remove existing entry with same room code (if any)
+        config
+            .connection_history
+            .retain(|e| e.room_code != room_code);
 
-    // Remove existing entry with same room code (if any)
-    config
-        .connection_history
-        .retain(|e| e.room_code != room_code);
+        // Add new entry at the beginning
+        config.connection_history.insert(
+            0,
+            ConnectionHistoryEntry {
+                room_code,
+                connected_at: Utc::now(),
+                label,
+            },
+        );
 
-    // Add new entry at the beginning
-    config.connection_history.insert(
-        0,
-        ConnectionHistoryEntry {
-            room_code,
-            connected_at: Utc::now(),
-            label,
-        },
-    );
-
-    // Trim to max entries
-    config.connection_history.truncate(MAX_HISTORY_ENTRIES);
-
-    state.update(config)
+        // Trim to max entries
+        config.connection_history.truncate(MAX_HISTORY_ENTRIES);
+    })?;
+    Ok(())
 }
 
 /// Remove a connection from history
@@ -228,19 +274,19 @@ pub fn config_remove_connection_history(
     room_code: String,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
-    config
-        .connection_history
-        .retain(|e| e.room_code != room_code);
-    state.update(config)
+    state.modify(|config| {
+        config
+            .connection_history
+            .retain(|e| e.room_code != room_code)
+    })?;
+    Ok(())
 }
 
 /// Clear all connection history
 #[tauri::command]
 pub fn config_clear_connection_history(state: tauri::State<'_, ConfigState>) -> Result<(), String> {
-    let mut config = state.get()?;
-    config.connection_history.clear();
-    state.update(config)
+    state.modify(|config| config.connection_history.clear())?;
+    Ok(())
 }
 
 /// Update a connection history entry label
@@ -250,17 +296,17 @@ pub fn config_update_connection_history_label(
     label: Option<String>,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
-    if let Some(entry) = config
-        .connection_history
-        .iter_mut()
-        .find(|e| e.room_code == room_code)
-    {
+    state.update_with(|current| {
+        let mut next = current.clone();
+        let entry = next
+            .connection_history
+            .iter_mut()
+            .find(|e| e.room_code == room_code)
+            .ok_or_else(|| format!("Room code not found in history: {}", room_code))?;
         entry.label = label;
-        state.update(config)
-    } else {
-        Err(format!("Room code not found in history: {}", room_code))
-    }
+        Ok::<_, String>((next, ()))
+    })?;
+    Ok(())
 }
 
 // =============================================================================
@@ -292,9 +338,8 @@ pub fn config_set_peer_name(
         return Err("Peer name cannot exceed 32 characters".to_string());
     }
 
-    let mut config = state.get()?;
-    config.peer_name = trimmed.to_string();
-    state.update(config)
+    state.modify(|config| config.peer_name = trimmed.to_string())?;
+    Ok(())
 }
 
 // =============================================================================
@@ -324,9 +369,7 @@ pub fn config_set_language(
     app: AppHandle,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
-    config.language = Some(language.clone());
-    state.update(config)?;
+    state.modify(|config| config.language = Some(language.clone()))?;
 
     app.emit("i18n:language-changed", language)
         .map_err(|e| e.to_string())

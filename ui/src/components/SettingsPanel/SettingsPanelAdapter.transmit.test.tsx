@@ -97,14 +97,58 @@ describe('the audio settings in the settings panel', () => {
   //
   // Verifies: REQ-GUI-024
   it('the panel offers exactly the buffer sizes the app reports', async () => {
-    fakeBackend(audioSettings({ buffer_sizes: [32, 64, 128, 256] }));
-    render(<SettingsPanelAdapter initialTab="devices" />);
+    fakeBackend(audioSettings({ buffer_sizes: [64, 256], buffer_size: 64 }));
+    const { container } = render(<SettingsPanelAdapter initialTab="devices" />);
 
     await monoButton();
-    const offered = screen
-      .getAllByRole('option')
-      .map((option) => option.getAttribute('value'))
-      .filter((value) => ['8', '16', '32', '64', '128', '256'].includes(value ?? ''));
-    expect(offered).toEqual(['32', '64', '128', '256']);
+    const offered = Array.from(container.querySelectorAll('#buffer-size option'))
+      .filter((option) => !(option as HTMLOptionElement).disabled)
+      .map((option) => option.getAttribute('value'));
+    expect(offered).toEqual(['64', '256']);
+  });
+
+  // The answer to a change and the announcement of another can arrive in
+  // either order; the newer settings stay on screen.
+  //
+  // Verifies: REQ-GUI-024
+  it('settings older than the ones shown arrive, the panel keeps the newer ones', async () => {
+    fakeBackend(audioSettings({ revision: 0, transmit_channels: 2 }));
+    render(<SettingsPanelAdapter initialTab="devices" />);
+    await monoButton();
+    await waitFor(() => expect(listeners.has('audio:config-changed')).toBe(true));
+
+    act(() => listeners.get('audio:config-changed')!({ payload: audioSettings({ revision: 5, transmit_channels: 1 }) }));
+    act(() => listeners.get('audio:config-changed')!({ payload: audioSettings({ revision: 4, transmit_channels: 2 }) }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: en.settings.devices.mono })).toHaveAttribute('aria-pressed', 'true'));
+  });
+
+  // A channel picker changes its own side only, so two quick changes cannot
+  // undo each other; the right picker's empty choice is mono.
+  //
+  // Verifies: REQ-GUI-024
+  it('the user picks none as the right input channel, the app is asked for mono on that side only', async () => {
+    const calls = fakeBackend(audioSettings({ input_channels: { left: 1, right: 2 } }));
+    const { container } = render(<SettingsPanelAdapter initialTab="devices" />);
+    await monoButton();
+
+    fireEvent.change(container.querySelector('#input-channel-r')!, { target: { value: '' } });
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        command: 'settings_change',
+        args: { change: { setting: 'input_channel', side: 'right', channel: null } },
+      })
+    );
+  });
+
+  // Verifies: REQ-GUI-024
+  it('the input is mono, the right channel picker shows none', async () => {
+    fakeBackend(audioSettings({ input_channels: { left: 3, right: null }, input_channel_count: 4 }));
+    const { container } = render(<SettingsPanelAdapter initialTab="devices" />);
+    await monoButton();
+
+    await waitFor(() => expect((container.querySelector('#input-channel-r') as HTMLSelectElement).value).toBe(''));
+    expect((container.querySelector('#input-channel-l') as HTMLSelectElement).value).toBe('3');
   });
 });

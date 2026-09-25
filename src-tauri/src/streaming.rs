@@ -372,7 +372,8 @@ pub enum SessionSetting {
 }
 
 /// Commands sent to the audio thread
-enum StreamingCommand {
+#[derive(Debug, PartialEq)]
+pub(crate) enum StreamingCommand {
     Stop,
     SetInputDevice(Option<String>),
     /// Capture 1 (mono) or 2 (stereo) channels from now on
@@ -442,6 +443,24 @@ impl StreamingState {
     #[cfg(test)]
     pub(crate) fn add_silence_giveup_for_test(&self) {
         self.silence_giveups.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Stands in for a running session: what it is told arrives on the
+    /// returned receiver instead of an audio thread.
+    #[cfg(test)]
+    pub(crate) async fn attach_session_for_test(&self) -> std_mpsc::Receiver<StreamingCommand> {
+        let rx = self.detached_session_for_test().await;
+        self.is_active.store(true, Ordering::SeqCst);
+        rx
+    }
+
+    /// A receiver for commands while no session is running, to show that
+    /// nothing is sent to one.
+    #[cfg(test)]
+    pub(crate) async fn detached_session_for_test(&self) -> std_mpsc::Receiver<StreamingCommand> {
+        let (tx, rx) = std_mpsc::channel();
+        *self.cmd_tx.lock().await = Some(tx);
+        rx
     }
 
     /// Tells a running session about a changed audio setting, so it follows
@@ -657,10 +676,6 @@ pub async fn streaming_start(
     // `remote_addr` so a peer on the same network is reached directly
     // instead of only through its public address (REQ-CON-113).
     remote_candidates: Option<Vec<String>>,
-    input_device_id: Option<String>,
-    output_device_id: Option<String>,
-    buffer_size: u32,
-    sample_rate: Option<u32>,
     state: tauri::State<'_, StreamingState>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
     usage: tauri::State<'_, crate::usage::UsageState>,
@@ -670,34 +685,26 @@ pub async fn streaming_start(
         return Err("Streaming already active".to_string());
     }
 
-    // Use provided sample rate or default (ADR-013)
-    let sample_rate = sample_rate.unwrap_or(DEFAULT_SAMPLE_RATE);
-
+    // The session runs with the audio settings as saved: the one store every
+    // change goes through (ADR-043), so what the settings show is what the
+    // session gets - the sample rate once never reached it, because the
+    // caller had to pass it and did not.
+    let config = config_state.get()?;
+    let input_device_id = config.input_device_id.clone();
+    let output_device_id = config.output_device_id.clone();
+    let buffer_size = config.buffer_size;
+    // User-selectable (ADR-013)
+    let sample_rate = config.sample_rate;
     // Jitter buffer depth comes from the selected preset (ADR-019/ADR-020).
     // The frame *duration* comes from the buffer_size actually in use, so the
     // resulting delay is correct even if the two were configured separately.
-    let preset = config_state
-        .get()
-        .map(|config| config.preset)
-        .unwrap_or_default();
-
+    let preset = config.preset.clone();
     // Transmit channel count, told to the peer so its mixer can show whether
     // we're sending mono or stereo.
-    let transmit_channels = config_state
-        .get()
-        .map(|config| config.transmit_channels)
-        .unwrap_or(2);
-
+    let transmit_channels = config.transmit_channels;
     // Which channels of a multi-channel interface are read and played on
-    let (input_channels, output_channels) = config_state
-        .get()
-        .map(|config| {
-            (
-                (config.input_channel_l, config.input_channel_r),
-                (config.output_channel_l, config.output_channel_r),
-            )
-        })
-        .unwrap_or(((1, Some(2)), (1, Some(2))));
+    let input_channels = (config.input_channel_l, config.input_channel_r);
+    let output_channels = (config.output_channel_l, config.output_channel_r);
 
     // Parse remote address
     let addr: SocketAddr = remote_addr

@@ -6,10 +6,13 @@ import type { AudioSettings } from "../../lib/tauri";
 
 export function audioSettings(overrides: Partial<AudioSettings> = {}): AudioSettings {
   return {
+    revision: 0,
     input_devices: [],
     output_devices: [],
     input_device_id: null,
     output_device_id: null,
+    input_channel_count: null,
+    output_channel_count: null,
     input_channels: { left: 1, right: 2 },
     output_channels: { left: 1, right: 2 },
     transmit_channels: 2,

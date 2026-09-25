@@ -10,7 +10,7 @@ import {
   settingsGet,
   settingsChange,
   configLoad,
-  configSave,
+  configSetUsageReporting,
   configGetPeerName,
   configSetPeerName,
   configGetServerUrl,
@@ -20,9 +20,11 @@ import {
   diagnosticsRunComplete,
   type AudioPresetId,
   type AudioSettings,
+  type ChannelPair,
   type CompleteDiagnosticsResult,
   type RecommendedPreset,
   type SettingChange,
+  type ChannelSide,
   logOpenDir,
   usagePreview as readUsagePreview,
 } from "../../lib/tauri";
@@ -45,14 +47,17 @@ function toDeviceInfo(device: AudioDeviceInfo): DeviceInfo {
   };
 }
 
-/** The device in use: the chosen one, or the system default when none is chosen. */
-function deviceInUse(devices: AudioDeviceInfo[], chosen: string | null): AudioDeviceInfo | undefined {
-  return chosen !== null ? devices.find((d) => d.id === chosen) : devices.find((d) => d.is_default);
+/**
+ * How many channel choices to offer: what the device in use says it has, or
+ * - when it does not say - enough to show the pair chosen now (at least two).
+ */
+function channelChoices(count: number | null, pair: ChannelPair | undefined): number {
+  return count ?? Math.max(2, pair?.left ?? 1, pair?.right ?? 1);
 }
 
-/** Channels a device offers; stereo when it reports none. */
-function channelCountOf(device: AudioDeviceInfo | undefined): number {
-  return device && device.supported_channels.length > 0 ? Math.max(...device.supported_channels) : 2;
+/** The device shown as selected: the chosen one, or the system default when none is. */
+function shownDevice(devices: AudioDeviceInfo[], chosen: string | null): string | null {
+  return chosen ?? devices.find((d) => d.is_default)?.id ?? null;
 }
 
 /** The preset each diagnostics recommendation names. */
@@ -77,6 +82,12 @@ export function SettingsPanelAdapter({
   // wholesale after each change - including one made from outside this
   // window - rather than patched field by field.
   const [audio, setAudio] = useState<AudioSettings | null>(null);
+  // Settings arrive from three places (loading, the answer to a change, the
+  // announcement of any change) in no fixed order; the revision decides which
+  // is newest, so an older one never replaces a newer one.
+  const showSettings = useCallback((next: AudioSettings) => {
+    setAudio((shown) => (shown && shown.revision > next.revision ? shown : next));
+  }, []);
   const [displayName, setDisplayName] = useState<string>("User");
   const [displayNameError, setDisplayNameError] = useState<string | undefined>();
   const [serverUrl, setServerUrl] = useState<string>("");
@@ -151,9 +162,6 @@ export function SettingsPanelAdapter({
       label: t("settings.devices.channelOption", { channel: i + 1 }),
     }));
 
-  const inputDevice = audio ? deviceInUse(audio.input_devices, audio.input_device_id) : undefined;
-  const outputDevice = audio ? deviceInUse(audio.output_devices, audio.output_device_id) : undefined;
-
   // Load settings on mount
   useEffect(() => {
     const loadSettings = async () => {
@@ -167,7 +175,7 @@ export function SettingsPanelAdapter({
           configGetEffectiveServerUrl().catch(() => ""),
         ]);
 
-        setAudio(current);
+        showSettings(current);
         setDisplayName(savedPeerName);
         setServerUrl(savedServerUrl ?? "");
         setEffectiveServerUrl(currentEffectiveServerUrl);
@@ -183,19 +191,19 @@ export function SettingsPanelAdapter({
 
   // A change made anywhere - another window, the E2E control channel, a peer
   // helping with the settings - arrives here with the settings now in effect.
-  useWindowEvent<AudioSettings>(AUDIO_SETTINGS_CHANGED, setAudio);
+  useWindowEvent<AudioSettings>(AUDIO_SETTINGS_CHANGED, showSettings);
 
   // Applies one change and shows what is now in effect.
   const change = useCallback(
     async (settingChange: SettingChange) => {
       try {
-        setAudio(await settingsChange(settingChange));
+        showSettings(await settingsChange(settingChange));
         onSettingsChange?.();
       } catch (err) {
         console.error(`Failed to change ${settingChange.setting}:`, err);
       }
     },
-    [onSettingsChange]
+    [onSettingsChange, showSettings]
   );
 
   useEffect(() => {
@@ -279,16 +287,15 @@ export function SettingsPanelAdapter({
     [change]
   );
 
-  // A channel picker changes one side of the pair; the other keeps what is in effect.
+  // A channel picker changes one side of the pair; the app keeps the other
+  // side as it is. The right picker's empty choice is mono.
   const handleChannelChange = useCallback(
-    (direction: "input" | "output", side: "left" | "right", value: string) => {
-      const channel = parseInt(value, 10);
-      if (isNaN(channel) || !audio) return;
-      const pair = direction === "input" ? audio.input_channels : audio.output_channels;
-      const next = side === "left" ? { ...pair, left: channel } : { ...pair, right: channel };
-      change({ setting: direction === "input" ? "input_channels" : "output_channels", ...next });
+    (direction: "input" | "output", side: ChannelSide, value: string) => {
+      const channel = value === "" ? null : parseInt(value, 10);
+      if (channel !== null && isNaN(channel)) return;
+      change({ setting: direction === "input" ? "input_channel" : "output_channel", side, channel });
     },
-    [audio, change]
+    [change]
   );
 
   const handleTransmitChannelsChange = useCallback(
@@ -375,8 +382,7 @@ export function SettingsPanelAdapter({
     async (enabled: boolean) => {
       setUsageReporting(enabled);
       try {
-        const config = await configLoad();
-        await configSave({ ...config, usage_reporting: enabled });
+        await configSetUsageReporting(enabled);
         setUsagePreviewError(null);
         // What is shown follows the setting: turning it off empties it.
         if (usagePreview !== null) await handleShowUsagePreview();
@@ -414,14 +420,18 @@ export function SettingsPanelAdapter({
       displayNameError={displayNameError}
       inputDevices={(audio?.input_devices ?? []).map(toDeviceInfo)}
       outputDevices={(audio?.output_devices ?? []).map(toDeviceInfo)}
-      selectedInputId={inputDevice?.id ?? null}
-      selectedOutputId={outputDevice?.id ?? null}
-      inputChannelOptions={buildChannelOptions(channelCountOf(inputDevice))}
-      outputChannelOptions={buildChannelOptions(channelCountOf(outputDevice))}
+      selectedInputId={audio ? shownDevice(audio.input_devices, audio.input_device_id) : null}
+      selectedOutputId={audio ? shownDevice(audio.output_devices, audio.output_device_id) : null}
+      inputChannelOptions={buildChannelOptions(
+        channelChoices(audio?.input_channel_count ?? null, audio?.input_channels)
+      )}
+      outputChannelOptions={buildChannelOptions(
+        channelChoices(audio?.output_channel_count ?? null, audio?.output_channels)
+      )}
       selectedInputChannelL={String(audio?.input_channels.left ?? 1)}
-      selectedInputChannelR={String(audio?.input_channels.right ?? 2)}
+      selectedInputChannelR={audio?.input_channels.right == null ? "" : String(audio.input_channels.right)}
       selectedOutputChannelL={String(audio?.output_channels.left ?? 1)}
-      selectedOutputChannelR={String(audio?.output_channels.right ?? 2)}
+      selectedOutputChannelR={audio?.output_channels.right == null ? "" : String(audio.output_channels.right)}
       sampleRateOptions={sampleRateOptions}
       selectedSampleRate={String(audio?.sample_rate ?? 48000)}
       bufferSizeOptions={bufferSizeOptions}

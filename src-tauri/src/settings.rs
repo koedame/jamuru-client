@@ -1,17 +1,18 @@
 //! Audio settings (ADR-043)
 //!
 //! Every change to the audio settings goes through [`apply`]: from the
-//! settings window ([`settings_change`]), from the E2E control channel, and
-//! from a peer who is helping with the settings. One implementation means a
-//! change takes effect the same way whoever makes it - the saved config and a
-//! running session both follow - and every window hears about it on
-//! [`CHANGED_EVENT`], carrying the settings now in effect.
+//! settings window ([`settings_change`]) and from the E2E control channel. One
+//! implementation means a change takes effect the same way whoever makes it -
+//! the saved config and a running session both follow - and every window
+//! hears about it on [`CHANGED_EVENT`], carrying the settings now in effect.
 //!
 //! The decision of what a change does is [`plan`], a pure function of the
 //! current config and the devices on offer. [`apply`] only carries it out.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Mutex;
 
 use jamjam::config::{AppConfig, AudioPreset, VALID_BUFFER_SIZES, VALID_SAMPLE_RATES};
@@ -26,8 +27,14 @@ use crate::usage::UsageState;
 /// effect as the payload.
 pub const CHANGED_EVENT: &str = "audio:config-changed";
 
-/// Channels a device is assumed to have when it reports none.
-const FALLBACK_CHANNELS: u32 = 2;
+/// Which channel of a left/right pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelSide {
+    /// Left, or the only channel when mono
+    Left,
+    Right,
+}
 
 /// One change to the audio settings.
 ///
@@ -43,15 +50,17 @@ pub enum SettingChange {
     OutputDevice {
         device_id: String,
     },
-    /// Input device channels to capture from (1-based; `right` is `None` for mono)
-    InputChannels {
-        left: u32,
-        right: Option<u32>,
+    /// One side of the input channel pair (1-based). The other side stays as
+    /// it is, so two quick changes cannot undo each other. A right channel of
+    /// `None` is mono; the left one is always a channel.
+    InputChannel {
+        side: ChannelSide,
+        channel: Option<u32>,
     },
-    /// Output device channels to play on (1-based; `right` is `None` for mono)
-    OutputChannels {
-        left: u32,
-        right: Option<u32>,
+    /// One side of the output channel pair, as [`Self::InputChannel`].
+    OutputChannel {
+        side: ChannelSide,
+        channel: Option<u32>,
     },
     /// 1 (mono) or 2 (stereo)
     TransmitChannels {
@@ -98,12 +107,19 @@ pub struct ChannelPair {
 /// The audio settings in effect, with the choices on offer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioSettings {
+    /// Counts up with every change. A window holding settings of a later
+    /// revision ignores older ones, whichever order they arrive in.
+    pub revision: u64,
     pub input_devices: Vec<AudioDeviceInfo>,
     pub output_devices: Vec<AudioDeviceInfo>,
     /// The chosen input device; `None` means the system default
     pub input_device_id: Option<String>,
     /// The chosen output device; `None` means the system default
     pub output_device_id: Option<String>,
+    /// Channels the input device in use offers; `None` when it does not say
+    pub input_channel_count: Option<u32>,
+    /// Channels the output device in use offers; `None` when it does not say
+    pub output_channel_count: Option<u32>,
     pub input_channels: ChannelPair,
     pub output_channels: ChannelPair,
     pub transmit_channels: u32,
@@ -121,22 +137,31 @@ pub enum SettingsError {
         channel: u32,
         available: u32,
     },
+    /// The left channel was given as none; only the right one can be (mono).
+    NoLeftChannel,
     InvalidTransmitChannels(u32),
     InvalidBufferSize(u32),
     InvalidSampleRate(u32),
-    /// The devices could not be listed or the config could not be saved.
+    /// The config could not be read or saved.
     Unavailable(String),
 }
 
 impl std::fmt::Display for SettingsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SettingsError::DeviceNotOffered(id) => write!(f, "Device not found: {}", id),
+            // Masked: the message reaches jamjam.log through the webview's
+            // record of failed commands (REQ-GUI-022).
+            SettingsError::DeviceNotOffered(id) => write!(
+                f,
+                "Device not found: {}",
+                redact_device_id(id, redaction_enabled())
+            ),
             SettingsError::ChannelOutOfRange { channel, available } => write!(
                 f,
                 "Channel {} is not on the device, which has {}",
                 channel, available
             ),
+            SettingsError::NoLeftChannel => f.write_str("The left channel cannot be none"),
             SettingsError::InvalidTransmitChannels(count) => write!(
                 f,
                 "Transmit channels must be 1 (mono) or 2 (stereo), not {}",
@@ -159,6 +184,12 @@ impl std::fmt::Display for SettingsError {
 
 impl std::error::Error for SettingsError {}
 
+impl From<String> for SettingsError {
+    fn from(message: String) -> Self {
+        SettingsError::Unavailable(message)
+    }
+}
+
 impl From<SettingsError> for String {
     fn from(e: SettingsError) -> Self {
         e.to_string()
@@ -173,11 +204,20 @@ pub struct Devices {
 }
 
 impl Devices {
-    fn list() -> Result<Self, SettingsError> {
-        Ok(Self {
-            input: audio::input_devices().map_err(SettingsError::Unavailable)?,
-            output: audio::output_devices().map_err(SettingsError::Unavailable)?,
-        })
+    /// The devices the system lists. A direction that cannot be listed counts
+    /// as offering none: that refuses choosing one of its devices, but leaves
+    /// every other setting (buffer size, sample rate, ...) changeable.
+    fn list() -> Self {
+        let or_none = |listed: Result<Vec<AudioDeviceInfo>, String>, kind: &str| {
+            listed.unwrap_or_else(|e| {
+                tracing::warn!("Could not list the {} devices: {}", kind, e);
+                Vec::new()
+            })
+        };
+        Self {
+            input: or_none(audio::input_devices(), "input"),
+            output: or_none(audio::output_devices(), "output"),
+        }
     }
 }
 
@@ -190,9 +230,9 @@ pub struct Plan {
 
 /// Decides what `change` does to `config`, given the devices on offer.
 ///
-/// A new device keeps the chosen channels when it has them, and falls back to
-/// the first ones when it does not - otherwise a channel of the previous
-/// interface would be asked of one that is too small to have it.
+/// A new device keeps the chosen channel pair when it has both channels, and
+/// falls back to the first ones when it does not - otherwise a channel of the
+/// previous interface would be asked of one too small to have it.
 pub fn plan(
     config: &AppConfig,
     devices: &Devices,
@@ -231,19 +271,31 @@ pub fn plan(
             }
             session.push(SessionSetting::OutputDevice(Some(device_id.clone())));
         }
-        SettingChange::InputChannels { left, right } => {
-            let available = selected(&devices.input, &config.input_device_id).map(channel_count);
-            check_channels(*left, *right, available)?;
-            next.input_channel_l = *left;
-            next.input_channel_r = *right;
-            session.push(SessionSetting::InputChannels(*left, *right));
+        SettingChange::InputChannel { side, channel } => {
+            let available =
+                selected(&devices.input, &config.input_device_id).and_then(channel_count);
+            let (left, right) = with_side(
+                (config.input_channel_l, config.input_channel_r),
+                *side,
+                *channel,
+                available,
+            )?;
+            next.input_channel_l = left;
+            next.input_channel_r = right;
+            session.push(SessionSetting::InputChannels(left, right));
         }
-        SettingChange::OutputChannels { left, right } => {
-            let available = selected(&devices.output, &config.output_device_id).map(channel_count);
-            check_channels(*left, *right, available)?;
-            next.output_channel_l = *left;
-            next.output_channel_r = *right;
-            session.push(SessionSetting::OutputChannels(*left, *right));
+        SettingChange::OutputChannel { side, channel } => {
+            let available =
+                selected(&devices.output, &config.output_device_id).and_then(channel_count);
+            let (left, right) = with_side(
+                (config.output_channel_l, config.output_channel_r),
+                *side,
+                *channel,
+                available,
+            )?;
+            next.output_channel_l = left;
+            next.output_channel_r = right;
+            session.push(SessionSetting::OutputChannels(left, right));
         }
         SettingChange::TransmitChannels { count } => {
             if *count != 1 && *count != 2 {
@@ -300,45 +352,61 @@ fn selected<'a>(
     }
 }
 
-fn channel_count(device: &AudioDeviceInfo) -> u32 {
+/// The most channels `device` offers; `None` when it does not say.
+fn channel_count(device: &AudioDeviceInfo) -> Option<u32> {
     device
         .supported_channels
         .iter()
         .max()
         .map(|&c| u32::from(c))
-        .unwrap_or(FALLBACK_CHANNELS)
 }
 
-/// Keeps the chosen channels that the device has; a left channel it lacks
-/// becomes 1, a right one becomes 2 (or 1 on a mono device).
-fn fit_channels(left: u32, right: Option<u32>, available: u32) -> (u32, Option<u32>) {
-    let left = if left > available { 1 } else { left };
-    let right = right.map(|r| if r > available { available.min(2) } else { r });
-    (left, right)
+/// Keeps the pair when the device has both channels, and falls back to the
+/// first ones as a pair when it does not: channels 1 and 2 (1 and 1 on a mono
+/// device; mono stays mono). A device that does not say keeps the pair.
+fn fit_channels(left: u32, right: Option<u32>, available: Option<u32>) -> (u32, Option<u32>) {
+    let Some(available) = available else {
+        return (left, right);
+    };
+    let fits = |channel: u32| channel <= available;
+    if fits(left) && right.is_none_or(fits) {
+        return (left, right);
+    }
+    (1, right.map(|_| available.min(2)))
 }
 
-/// Channels are 1-based and must exist on the device in use. With no device
-/// to check against, only the lower bound can be.
-fn check_channels(
-    left: u32,
-    right: Option<u32>,
+/// The pair with `side` set to `channel`, checked against the device in use.
+/// With no device to check against, only the lower bound can be.
+fn with_side(
+    (left, right): (u32, Option<u32>),
+    side: ChannelSide,
+    channel: Option<u32>,
     available: Option<u32>,
-) -> Result<(), SettingsError> {
-    for channel in std::iter::once(left).chain(right) {
-        let upper = available.unwrap_or(u32::MAX);
-        if channel == 0 || channel > upper {
+) -> Result<(u32, Option<u32>), SettingsError> {
+    if let Some(channel) = channel {
+        if channel == 0 || available.is_some_and(|available| channel > available) {
             return Err(SettingsError::ChannelOutOfRange {
                 channel,
                 available: available.unwrap_or(0),
             });
         }
     }
-    Ok(())
+    match side {
+        ChannelSide::Left => Ok((channel.ok_or(SettingsError::NoLeftChannel)?, right)),
+        ChannelSide::Right => Ok((left, channel)),
+    }
 }
 
 /// The settings `config` describes, with `devices` on offer.
-pub fn snapshot(config: &AppConfig, devices: Devices) -> AudioSettings {
+pub fn snapshot(config: &AppConfig, devices: Devices, revision: u64) -> AudioSettings {
+    let input_channel_count =
+        selected(&devices.input, &config.input_device_id).and_then(channel_count);
+    let output_channel_count =
+        selected(&devices.output, &config.output_device_id).and_then(channel_count);
     AudioSettings {
+        revision,
+        input_channel_count,
+        output_channel_count,
         input_devices: devices.input,
         output_devices: devices.output,
         input_device_id: config.input_device_id.clone(),
@@ -359,11 +427,13 @@ pub fn snapshot(config: &AppConfig, devices: Devices) -> AudioSettings {
     }
 }
 
-/// Serializes changes, so two made at once (the user and a helper) cannot
-/// both read the old config and one overwrite the other.
+/// Orders the changes: one at a time from reading the devices to announcing
+/// the result, each numbered, so the settings windows can tell a newer
+/// announcement from an older one.
 #[derive(Default)]
 pub struct SettingsState {
     changing: Mutex<()>,
+    revision: AtomicU64,
 }
 
 impl SettingsState {
@@ -373,33 +443,34 @@ impl SettingsState {
 }
 
 /// The audio settings in effect.
-pub fn current(app: &AppHandle) -> Result<AudioSettings, SettingsError> {
-    let config = app
-        .state::<ConfigState>()
-        .get()
-        .map_err(SettingsError::Unavailable)?;
-    Ok(snapshot(&config, Devices::list()?))
+pub async fn current<R: Runtime>(app: &AppHandle<R>) -> Result<AudioSettings, SettingsError> {
+    let settings_state = app.state::<SettingsState>();
+    let _changing = settings_state.changing.lock().await;
+    let config = app.state::<ConfigState>().get()?;
+    Ok(snapshot(
+        &config,
+        Devices::list(),
+        settings_state.revision.load(Ordering::SeqCst),
+    ))
 }
 
 /// Applies `change`: saves it, tells a running session, and announces the new
 /// settings to every window. Returns the settings now in effect.
-pub async fn apply(
-    app: &AppHandle,
+pub async fn apply<R: Runtime>(
+    app: &AppHandle<R>,
     change: &SettingChange,
 ) -> Result<AudioSettings, SettingsError> {
     let settings_state = app.state::<SettingsState>();
     let _changing = settings_state.changing.lock().await;
 
-    let config_state = app.state::<ConfigState>();
-    let devices = Devices::list()?;
-    let current = config_state.get().map_err(SettingsError::Unavailable)?;
-    let plan = plan(&current, &devices, change)?;
-    config_state
-        .update(plan.config.clone())
-        .map_err(SettingsError::Unavailable)?;
+    let devices = Devices::list();
+    let (config, session) = app.state::<ConfigState>().update_with(|current| {
+        plan(current, &devices, change).map(|plan| (plan.config, plan.session))
+    })?;
+    let revision = settings_state.revision.fetch_add(1, Ordering::SeqCst) + 1;
 
     let streaming = app.state::<StreamingState>();
-    for setting in plan.session {
+    for setting in session {
         streaming.apply_setting(setting).await;
     }
     if matches!(
@@ -407,8 +478,8 @@ pub async fn apply(
         SettingChange::InputDevice { .. } | SettingChange::OutputDevice { .. }
     ) {
         app.state::<UsageState>().devices_selected(
-            plan.config.input_device_id.clone(),
-            plan.config.output_device_id.clone(),
+            config.input_device_id.clone(),
+            config.output_device_id.clone(),
         );
     }
     tracing::info!(
@@ -416,7 +487,7 @@ pub async fn apply(
         change.describe(redaction_enabled())
     );
 
-    let settings = snapshot(&plan.config, devices);
+    let settings = snapshot(&config, devices, revision);
     if let Err(e) = app.emit(CHANGED_EVENT, &settings) {
         // The change itself is in effect; only the other windows' view of it
         // is stale until they next read the settings.
@@ -428,7 +499,7 @@ pub async fn apply(
 /// The audio settings in effect, with the choices on offer.
 #[tauri::command]
 pub async fn settings_get(app: AppHandle) -> Result<AudioSettings, String> {
-    Ok(current(&app)?)
+    Ok(current(&app).await?)
 }
 
 /// Changes one audio setting. Returns the settings now in effect.
@@ -480,9 +551,13 @@ mod tests {
         (config, devices)
     }
 
+    fn input_channel(side: ChannelSide, channel: Option<u32>) -> SettingChange {
+        SettingChange::InputChannel { side, channel }
+    }
+
     /// Verifies: REQ-GUI-024
     #[test]
-    fn switching_to_an_input_device_with_the_chosen_channels_keeps_them() {
+    fn switching_to_an_input_device_with_the_chosen_channels_plans_to_keep_them() {
         let (mut config, devices) = setup();
         config.input_device_id = Some("alsa:builtin".to_string());
         config.input_channel_l = 1;
@@ -516,7 +591,7 @@ mod tests {
     ///
     /// Verifies: REQ-GUI-024
     #[test]
-    fn switching_to_an_input_device_without_the_chosen_channels_falls_back_to_the_first_ones() {
+    fn switching_to_an_input_device_without_the_chosen_channels_plans_the_first_ones() {
         let (config, devices) = setup();
 
         let plan = plan(
@@ -542,9 +617,34 @@ mod tests {
         );
     }
 
+    /// Falling back one channel at a time could leave a doubled or reversed
+    /// pair (2 and 3 on a stereo device becoming 2 and 2).
+    ///
     /// Verifies: REQ-GUI-024
     #[test]
-    fn switching_to_a_mono_output_device_plays_on_its_only_channel() {
+    fn when_only_one_channel_of_the_pair_is_missing_the_whole_pair_falls_back() {
+        let (mut config, devices) = setup();
+        config.input_channel_l = 2;
+        config.input_channel_r = Some(3);
+
+        let plan = plan(
+            &config,
+            &devices,
+            &SettingChange::InputDevice {
+                device_id: "alsa:builtin".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            (plan.config.input_channel_l, plan.config.input_channel_r),
+            (1, Some(2))
+        );
+    }
+
+    /// Verifies: REQ-GUI-024
+    #[test]
+    fn switching_to_a_mono_output_device_plans_its_only_channel() {
         let (config, mut devices) = setup();
         devices.output.push(device("alsa:mono", &[1], false));
 
@@ -563,10 +663,34 @@ mod tests {
         );
     }
 
+    /// A device that does not report its channels (a busy one, say) keeps the
+    /// pair: refusing on a guess would drop an 8-channel interface's choice.
+    ///
+    /// Verifies: REQ-GUI-024
+    #[test]
+    fn a_device_that_does_not_say_how_many_channels_it_has_keeps_the_chosen_pair() {
+        let (config, mut devices) = setup();
+        devices.input.push(device("alsa:busy", &[], false));
+
+        let plan = plan(
+            &config,
+            &devices,
+            &SettingChange::InputDevice {
+                device_id: "alsa:busy".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            (plan.config.input_channel_l, plan.config.input_channel_r),
+            (5, Some(6))
+        );
+    }
+
     /// Verifies: REQ-GUI-011
     /// Verifies: REQ-GUI-024
     #[test]
-    fn a_device_that_is_not_offered_is_refused_and_nothing_changes() {
+    fn a_device_that_is_not_offered_is_refused() {
         let (config, devices) = setup();
 
         let result = plan(
@@ -588,17 +712,12 @@ mod tests {
     fn a_channel_the_device_in_use_does_not_have_is_refused() {
         let (config, devices) = setup();
 
-        let result = plan(
-            &config,
-            &devices,
-            &SettingChange::InputChannels {
-                left: 9,
-                right: None,
-            },
-        );
-
         assert_eq!(
-            result,
+            plan(
+                &config,
+                &devices,
+                &input_channel(ChannelSide::Left, Some(9))
+            ),
             Err(SettingsError::ChannelOutOfRange {
                 channel: 9,
                 available: 8
@@ -615,17 +734,12 @@ mod tests {
         let (mut config, devices) = setup();
         config.input_device_id = None;
 
-        let result = plan(
-            &config,
-            &devices,
-            &SettingChange::InputChannels {
-                left: 1,
-                right: Some(3),
-            },
-        );
-
         assert_eq!(
-            result,
+            plan(
+                &config,
+                &devices,
+                &input_channel(ChannelSide::Right, Some(3))
+            ),
             Err(SettingsError::ChannelOutOfRange {
                 channel: 3,
                 available: 2
@@ -642,9 +756,9 @@ mod tests {
         let result = plan(
             &config,
             &devices,
-            &SettingChange::OutputChannels {
-                left: 0,
-                right: None,
+            &SettingChange::OutputChannel {
+                side: ChannelSide::Left,
+                channel: Some(0),
             },
         );
 
@@ -654,34 +768,53 @@ mod tests {
         ));
     }
 
+    /// Changing one side keeps the other as it is in the config - not as a
+    /// window last saw it - so two quick changes cannot undo each other.
+    ///
     /// Verifies: REQ-GUI-024
     #[test]
-    fn choosing_channels_the_device_has_is_saved_and_reaches_a_running_session() {
+    fn changing_one_channel_of_the_pair_plans_the_other_as_it_is() {
         let (config, devices) = setup();
 
         let plan = plan(
             &config,
             &devices,
-            &SettingChange::OutputChannels {
-                left: 3,
-                right: Some(4),
+            &SettingChange::OutputChannel {
+                side: ChannelSide::Right,
+                channel: Some(4),
             },
         )
         .unwrap();
 
         assert_eq!(
             (plan.config.output_channel_l, plan.config.output_channel_r),
-            (3, Some(4))
+            (7, Some(4))
         );
         assert_eq!(
             plan.session,
-            vec![SessionSetting::OutputChannels(3, Some(4))]
+            vec![SessionSetting::OutputChannels(7, Some(4))]
+        );
+    }
+
+    /// Verifies: REQ-GUI-024
+    #[test]
+    fn no_right_channel_plans_mono_and_no_left_channel_is_refused() {
+        let (config, devices) = setup();
+
+        let mono = plan(&config, &devices, &input_channel(ChannelSide::Right, None)).unwrap();
+        assert_eq!(
+            (mono.config.input_channel_l, mono.config.input_channel_r),
+            (5, None)
+        );
+        assert_eq!(
+            plan(&config, &devices, &input_channel(ChannelSide::Left, None)),
+            Err(SettingsError::NoLeftChannel)
         );
     }
 
     /// Verifies: REQ-AUD-107
     #[test]
-    fn choosing_mono_is_saved_and_reaches_a_running_session() {
+    fn choosing_mono_plans_to_save_it_and_to_tell_a_running_session() {
         let (config, devices) = setup();
 
         let plan = plan(
@@ -715,7 +848,7 @@ mod tests {
     ///
     /// Verifies: REQ-GUI-024
     #[test]
-    fn a_new_buffer_size_is_saved_for_the_next_connect_and_the_session_is_left_alone() {
+    fn a_new_buffer_size_is_planned_for_the_next_connect_and_the_session_is_left_alone() {
         let (config, devices) = setup();
 
         let plan = plan(
@@ -745,17 +878,27 @@ mod tests {
         }
     }
 
-    /// Every buffer size on offer is one the config accepts.
+    /// Applying a preset writes its frame size as the buffer size, so every
+    /// preset's frame size has to be one the app offers and can save.
     ///
-    /// Verifies: REQ-GUI-024
+    /// Verifies: REQ-LAT-106
     #[test]
-    fn every_buffer_size_on_offer_can_be_saved() {
+    fn every_presets_frame_size_is_a_buffer_size_on_offer() {
         let (config, devices) = setup();
-        for samples in snapshot(&config, devices.clone()).buffer_sizes {
-            let plan = plan(&config, &devices, &SettingChange::BufferSize { samples }).unwrap();
-            plan.config
+        let offered = snapshot(&config, devices.clone(), 0).buffer_sizes;
+        for preset in AudioPreset::all() {
+            assert!(
+                offered.contains(&preset.frame_size()),
+                "{:?}'s frame size {} is not offered ({:?})",
+                preset,
+                preset.frame_size(),
+                offered
+            );
+            plan(&config, &devices, &SettingChange::Preset { preset })
+                .unwrap()
+                .config
                 .validate()
-                .unwrap_or_else(|e| panic!("{} samples cannot be saved: {}", samples, e));
+                .unwrap();
         }
     }
 
@@ -779,7 +922,7 @@ mod tests {
     ///
     /// Verifies: REQ-LAT-106
     #[test]
-    fn applying_a_preset_saves_its_frame_size_and_retunes_a_running_session() {
+    fn applying_a_preset_plans_its_frame_size_and_a_new_jitter_depth_for_a_running_session() {
         let (config, devices) = setup();
 
         let plan = plan(
@@ -804,15 +947,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_settings_report_the_channels_of_the_devices_in_use() {
+        let (mut config, devices) = setup();
+        config.output_device_id = None;
+
+        let settings = snapshot(&config, devices, 3);
+
+        assert_eq!(settings.input_channel_count, Some(8));
+        assert_eq!(settings.output_channel_count, Some(2), "the system default");
+        assert_eq!(settings.revision, 3);
+    }
+
     /// The name a change travels under is part of the protocol a helping
     /// peer speaks, so it is pinned.
     #[test]
     fn a_change_is_named_by_its_setting_on_the_wire() {
-        let change = SettingChange::BufferSize { samples: 128 };
+        let change = input_channel(ChannelSide::Right, None);
         let json = serde_json::to_value(&change).unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"setting": "buffer_size", "samples": 128})
+            serde_json::json!({"setting": "input_channel", "side": "right", "channel": null})
         );
         assert_eq!(
             serde_json::from_value::<SettingChange>(json).unwrap(),
@@ -821,12 +976,162 @@ mod tests {
     }
 
     #[test]
-    fn a_device_change_is_logged_with_the_device_id_masked() {
-        let change = SettingChange::InputDevice {
-            device_id: "coreaudio:AppleUSBAudioEngine:Yamaha:AG06:20221310:1,2".to_string(),
-        };
-        let line = change.describe(true);
+    fn a_device_change_and_its_refusal_mask_the_device_id() {
+        let id = "coreaudio:AppleUSBAudioEngine:Yamaha:AG06:20221310:1,2";
+        let line = SettingChange::InputDevice {
+            device_id: id.to_string(),
+        }
+        .describe(true);
         assert!(!line.contains("20221310"), "{}", line);
         assert!(line.contains("AG06"), "{}", line);
+        assert!(!SettingsError::DeviceNotOffered(id.to_string())
+            .to_string()
+            .contains("20221310"));
+    }
+
+    mod applying {
+        use super::*;
+        use std::sync::{Arc, Mutex as StdMutex};
+        use tauri::Listener;
+
+        use crate::streaming::StreamingCommand;
+
+        /// A mock app with its config in `dir`, starting from `config`.
+        fn app(dir: &tempfile::TempDir, config: AppConfig) -> tauri::App<tauri::test::MockRuntime> {
+            let app = tauri::test::mock_app();
+            app.manage(ConfigState::at(dir.path().join("config.toml"), config));
+            app.manage(SettingsState::new());
+            app.manage(StreamingState::new());
+            app.manage(UsageState::with_reporter(
+                jamjam::telemetry::UsageReporter::new(
+                    None,
+                    "test",
+                    Arc::new(jamjam::telemetry::NoTransport),
+                    false,
+                ),
+            ));
+            app
+        }
+
+        fn saved(dir: &tempfile::TempDir) -> AppConfig {
+            config::load_config_from(&dir.path().join("config.toml")).unwrap()
+        }
+
+        /// Verifies: REQ-AUD-107
+        /// Verifies: REQ-GUI-024
+        #[tokio::test]
+        async fn a_change_during_a_session_is_saved_reaches_the_session_and_is_announced() {
+            let dir = tempfile::tempdir().unwrap();
+            let app = app(&dir, AppConfig::default());
+            let session = app
+                .state::<StreamingState>()
+                .attach_session_for_test()
+                .await;
+            let announced = Arc::new(StdMutex::new(Vec::<AudioSettings>::new()));
+            let heard = announced.clone();
+            app.listen_any(CHANGED_EVENT, move |event| {
+                heard
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::from_str(event.payload()).unwrap());
+            });
+
+            let settings = apply(app.handle(), &SettingChange::TransmitChannels { count: 1 })
+                .await
+                .unwrap();
+
+            assert_eq!(settings.transmit_channels, 1);
+            assert_eq!(saved(&dir).transmit_channels, 1);
+            assert_eq!(
+                session.try_recv().unwrap(),
+                StreamingCommand::SetTransmitChannels(1)
+            );
+            assert_eq!(*announced.lock().unwrap(), vec![settings]);
+        }
+
+        /// Verifies: REQ-AUD-107
+        #[tokio::test]
+        async fn a_change_with_no_session_running_is_saved_and_no_session_is_told() {
+            let dir = tempfile::tempdir().unwrap();
+            let app = app(&dir, AppConfig::default());
+            let session = app
+                .state::<StreamingState>()
+                .detached_session_for_test()
+                .await;
+
+            apply(app.handle(), &SettingChange::TransmitChannels { count: 1 })
+                .await
+                .unwrap();
+
+            assert_eq!(saved(&dir).transmit_channels, 1);
+            assert!(session.try_recv().is_err(), "no session was running");
+        }
+
+        /// Verifies: REQ-GUI-024
+        #[tokio::test]
+        async fn a_refused_change_leaves_the_saved_settings_the_session_and_the_revision_alone() {
+            let dir = tempfile::tempdir().unwrap();
+            let app = app(&dir, AppConfig::default());
+            let session = app
+                .state::<StreamingState>()
+                .attach_session_for_test()
+                .await;
+            let before = current(app.handle()).await.unwrap();
+
+            let result = apply(app.handle(), &SettingChange::TransmitChannels { count: 3 }).await;
+
+            assert_eq!(result, Err(SettingsError::InvalidTransmitChannels(3)));
+            assert!(
+                !dir.path().join("config.toml").exists(),
+                "nothing was saved"
+            );
+            assert!(session.try_recv().is_err(), "the session was not told");
+            assert_eq!(current(app.handle()).await.unwrap(), before);
+        }
+
+        /// A change that cannot be saved is not in effect either: the next
+        /// connect must not use a value the file does not hold.
+        ///
+        /// Verifies: REQ-GUI-024
+        #[tokio::test]
+        async fn a_change_that_cannot_be_saved_is_not_in_effect() {
+            let dir = tempfile::tempdir().unwrap();
+            let blocked = dir.path().join("not-a-directory");
+            std::fs::write(&blocked, "").unwrap();
+            let app = tauri::test::mock_app();
+            app.manage(ConfigState::at(
+                blocked.join("config.toml"),
+                AppConfig::default(),
+            ));
+            app.manage(SettingsState::new());
+            app.manage(StreamingState::new());
+
+            let result = apply(app.handle(), &SettingChange::BufferSize { samples: 32 }).await;
+
+            assert!(matches!(result, Err(SettingsError::Unavailable(_))));
+            assert_eq!(
+                app.state::<ConfigState>().get().unwrap().buffer_size,
+                AppConfig::default().buffer_size
+            );
+        }
+
+        #[tokio::test]
+        async fn every_applied_change_carries_a_later_revision() {
+            let dir = tempfile::tempdir().unwrap();
+            let app = app(&dir, AppConfig::default());
+
+            let first = apply(app.handle(), &SettingChange::BufferSize { samples: 32 })
+                .await
+                .unwrap();
+            let second = apply(app.handle(), &SettingChange::SampleRate { hz: 96000 })
+                .await
+                .unwrap();
+
+            assert!(second.revision > first.revision);
+            assert_eq!(
+                current(app.handle()).await.unwrap().revision,
+                second.revision
+            );
+        }
     }
 }
