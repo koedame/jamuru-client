@@ -137,7 +137,10 @@
     "system": {
       "joined": "{{name}}さんが参加しました",
       "left": "{{name}}さんが退出しました",
-      "leftUnknown": "参加者が退出しました"
+      "leftUnknown": "参加者が退出しました",
+      "settingsHelpStarted": "{{helper}}さんが{{helped}}さんの音声の設定の手伝いを始めました",
+      "settingsHelpChanged": "{{helper}}さんが{{helped}}さんの{{setting}}設定を変更しました",
+      "settingsHelpEnded": "{{helper}}さんによる{{helped}}さんの設定の手伝いが終わりました"
     },
     "reaction": {
       "quick": "クイックリアクション",
@@ -671,5 +674,53 @@
     "received": "受信",
     "bytesSent": "送信バイト数",
     "bytesReceived": "受信バイト数"
+  },
+  "settingsHelp": {
+    "offer": "設定を手伝う",
+    "offerLabel": "{{name}}さんの音声の設定を手伝う",
+    "request": {
+      "message": "{{name}}さんが音声の設定を手伝いたいそうです",
+      "allow": "許可する",
+      "decline": "断る"
+    },
+    "proposal": {
+      "message": "{{name}}さんが{{setting}}を「{{value}}」に変えようとしています",
+      "allow": "変更を許可",
+      "decline": "断る",
+      "stop": "手伝いを止める"
+    },
+    "helped": {
+      "bar": "{{name}}さんが音声の設定を手伝っています",
+      "stop": "停止"
+    },
+    "helper": {
+      "asking": "{{name}}さんの返事を待っています",
+      "cancel": "取り消す",
+      "title": "{{name}}さんの音声の設定",
+      "bar": "{{name}}さんの設定を手伝っています",
+      "open": "設定を開く",
+      "stop": "手伝いをやめる",
+      "pending": "{{name}}さんの許可を待っています",
+      "declined": "{{name}}さんが断りました",
+      "busy": "{{name}}さんは今ほかの人に手伝ってもらっています",
+      "changeDeclined": "{{name}}さんが変更を断りました",
+      "refused": {
+        "device_gone": "その機器は{{name}}さんのところで接続されていないため、変更できませんでした",
+        "invalid_value": "{{name}}さんのところではその値を使えないため、変更できませんでした",
+        "unavailable": "{{name}}さんのところで変更を保存できませんでした"
+      }
+    },
+    "ended": {
+      "stopped": "{{name}}さんが設定の手伝いを止めました",
+      "left": "{{name}}さんが退出したので、設定の手伝いが終わりました"
+    },
+    "setting": {
+      "preset": "プリセット",
+      "unknown": "音声の"
+    },
+    "value": {
+      "samples": "{{samples}} サンプル",
+      "unknownDevice": "接続されていない機器"
+    }
   }
 }

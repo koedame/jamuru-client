@@ -64,6 +64,8 @@ export function ChatPanel({
         locale={timeLocale}
         reactions={message.reactions}
         systemKind={message.systemKind}
+        helperName={message.helperName}
+        setting={message.setting}
         onReactionClick={
           onReactionClick
             ? (emoji) => onReactionClick(message.id, emoji)

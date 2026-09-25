@@ -1,0 +1,133 @@
+/**
+ * Helping with settings (ADR-043): the question the helped side answers, the
+ * bar that shows help is going on, and the helper's panel.
+ */
+
+.settings-help__button {
+  height: 32px;
+  padding: 0 var(--space-md);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.settings-help__button:hover {
+  border-color: var(--color-text-primary);
+}
+
+.settings-help__button--primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-text-inverse);
+  font-weight: var(--font-weight-bold);
+}
+
+.settings-help__button--primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.settings-help__button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-help-question__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-overlay);
+}
+
+.settings-help-question {
+  width: 360px;
+  max-width: calc(100vw - 2 * var(--space-lg));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-modal);
+}
+
+.settings-help-question__text {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.settings-help-question__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.settings-help-question__stop {
+  margin-right: auto;
+}
+
+.settings-help-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-card);
+}
+
+.settings-help-bar__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-help-bar__message {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.settings-help-bar__status {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.settings-help-bar__actions {
+  display: flex;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.settings-help-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.settings-help-panel__status {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.settings-help-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}

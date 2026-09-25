@@ -12,6 +12,7 @@ import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
 import { Toast } from "../components/Toast";
 import { LeaveDialog } from "../components/LeaveDialog";
+import { useSettingsHelp } from "../components/SettingsHelp";
 import { formatErrorForDisplay } from "../lib/errorMessages";
 import { registerInviteLinkHandler } from "../lib/deepLink";
 import { testRoomCodeOf } from "../lib/inviteCode";
@@ -464,6 +465,11 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   // events per poll before React re-renders.
   const participantsRef = useRef<PeerInfo[]>([]);
   participantsRef.current = sessionState.status === "connected" ? sessionState.participants : [];
+
+  // Helping with settings (ADR-043). Its events arrive with the room's.
+  const settingsHelp = useSettingsHelp(connectionId, participantsRef.current);
+  const settingsHelpEventRef = useRef(settingsHelp.onEvent);
+  settingsHelpEventRef.current = settingsHelp.onEvent;
   const updateParticipants = (update: (peers: PeerInfo[]) => PeerInfo[]) => {
     participantsRef.current = update(participantsRef.current);
     setSessionState((prev) =>
@@ -665,6 +671,8 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
             setConnectionId(null);
             void attemptSignalingReconnect(roomToRejoin);
             return;
+          } else if (event.type === "SettingsHelp") {
+            settingsHelpEventRef.current(event.event);
           }
           // ChatMessageReceived events are handled by ChatPanel's own polling
         }
@@ -1170,6 +1178,19 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
                       </span>
                       <span className="participant__name">{participant.name}</span>
                     </span>
+                    {settingsHelp.canOffer(participant) && (
+                      <button
+                        type="button"
+                        className="participant__help"
+                        data-testid="settings-help-offer"
+                        data-peer-name={participant.name}
+                        onClick={() => settingsHelp.offer(participant.id)}
+                        aria-label={t("settingsHelp.offerLabel", { name: participant.name })}
+                        title={t("settingsHelp.offerLabel", { name: participant.name })}
+                      >
+                        {t("settingsHelp.offer")}
+                      </button>
+                    )}
                     {upMs !== null && downMs !== null && (
                       <span className="participant__latency">
                         <span className="participant__latency-item">
@@ -1204,6 +1225,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
 
           {/* Mixer */}
           <div className="main-mixer-column">
+            {settingsHelp.bars}
             <MixerPanel
               channels={mixerChannels}
               onChannelVolumeChange={handleChannelVolumeChange}
@@ -1283,6 +1305,8 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
             </div>
           )}
         </footer>
+
+        {settingsHelp.overlays}
 
         <LeaveDialog
           open={showLeaveDialog}

@@ -138,7 +138,10 @@
     "system": {
       "joined": "{{name}} joined",
       "left": "{{name}} left",
-      "leftUnknown": "A participant left"
+      "leftUnknown": "A participant left",
+      "settingsHelpStarted": "{{helper}} started helping {{helped}} with audio settings",
+      "settingsHelpChanged": "{{helper}} changed {{helped}}'s {{setting}} setting",
+      "settingsHelpEnded": "{{helper}} is no longer helping {{helped}} with audio settings"
     },
     "reaction": {
       "quick": "Quick reactions",
@@ -673,5 +676,53 @@
     "received": "Received",
     "bytesSent": "Bytes sent",
     "bytesReceived": "Bytes received"
+  },
+  "settingsHelp": {
+    "offer": "Help with settings",
+    "offerLabel": "Help {{name}} with audio settings",
+    "request": {
+      "message": "{{name}} wants to help with your audio settings",
+      "allow": "Allow",
+      "decline": "Decline"
+    },
+    "proposal": {
+      "message": "{{name}} wants to change your {{setting}} to {{value}}",
+      "allow": "Allow change",
+      "decline": "Decline",
+      "stop": "Stop help"
+    },
+    "helped": {
+      "bar": "{{name}} is helping with your audio settings",
+      "stop": "Stop"
+    },
+    "helper": {
+      "asking": "Waiting for {{name}} to answer",
+      "cancel": "Cancel",
+      "title": "{{name}}'s audio settings",
+      "bar": "Helping {{name}} with audio settings",
+      "open": "Open settings",
+      "stop": "Stop helping",
+      "pending": "Waiting for {{name}} to allow the change",
+      "declined": "{{name}} declined",
+      "busy": "{{name}} is already getting help from someone else",
+      "changeDeclined": "{{name}} declined the change",
+      "refused": {
+        "device_gone": "{{name}}'s app could not switch: that device is no longer connected",
+        "invalid_value": "{{name}}'s app could not use that value",
+        "unavailable": "{{name}}'s app could not save the change"
+      }
+    },
+    "ended": {
+      "stopped": "{{name}} stopped the help with settings",
+      "left": "{{name}} left, so the help with settings ended"
+    },
+    "setting": {
+      "preset": "Preset",
+      "unknown": "audio"
+    },
+    "value": {
+      "samples": "{{samples}} samples",
+      "unknownDevice": "a device that is not connected"
+    }
   }
 }

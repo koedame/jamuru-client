@@ -7,9 +7,18 @@
 import { useTranslation } from "react-i18next";
 import { ReactionBar, type Reaction } from "./ReactionBar";
 import { AddReactionButton } from "./AddReactionButton";
+import { settingLabel } from "../SettingsHelp/settingText";
 import "./ChatMessage.css";
 
 export type ChatMessageType = "own" | "other" | "system";
+
+/** What a system line is about: someone joining or leaving, or help with settings (ADR-043) */
+export type ChatSystemKind =
+  | "join"
+  | "leave"
+  | "settings_help_started"
+  | "settings_help_changed"
+  | "settings_help_ended";
 
 export interface ChatMessageProps {
   /** Message type determines visual style */
@@ -42,7 +51,11 @@ export interface ChatMessageProps {
    * `content` is shown as-is and the kind is inferred from it - see
    * `inferSystemKind`.
    */
-  systemKind?: "join" | "leave" | null;
+  systemKind?: ChatSystemKind | null;
+  /** For a settings help line: who helped (`senderName` is who was helped) */
+  helperName?: string | null;
+  /** For "settings_help_changed": the setting that changed, as a settings change names it */
+  setting?: string | null;
 }
 
 /**
@@ -88,6 +101,32 @@ function LogInIcon() {
   );
 }
 
+function SlidersIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="4" y1="21" x2="4" y2="14" />
+      <line x1="4" y1="10" x2="4" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12" y2="3" />
+      <line x1="20" y1="21" x2="20" y2="16" />
+      <line x1="20" y1="12" x2="20" y2="3" />
+      <line x1="1" y1="14" x2="7" y2="14" />
+      <line x1="9" y1="8" x2="15" y2="8" />
+      <line x1="17" y1="16" x2="23" y2="16" />
+    </svg>
+  );
+}
+
 function LogOutIcon() {
   return (
     <svg
@@ -120,6 +159,8 @@ export function ChatMessage({
   recentEmojis = [],
   showActions,
   systemKind,
+  helperName,
+  setting,
 }: ChatMessageProps) {
   const { t, i18n } = useTranslation();
   const timeLocale = locale ?? i18n.language;
@@ -128,18 +169,25 @@ export function ChatMessage({
   if (type === "system") {
     const kind = systemKind ?? inferSystemKind(content);
     let text = content;
+    const names = { helper: helperName ?? "", helped: senderName ?? "" };
     if (systemKind === "join") {
       text = t("chat.system.joined", { name: senderName });
     } else if (systemKind === "leave") {
       text = senderName
         ? t("chat.system.left", { name: senderName })
         : t("chat.system.leftUnknown");
+    } else if (systemKind === "settings_help_started") {
+      text = t("chat.system.settingsHelpStarted", names);
+    } else if (systemKind === "settings_help_changed") {
+      text = t("chat.system.settingsHelpChanged", { ...names, setting: settingLabel(setting, t) });
+    } else if (systemKind === "settings_help_ended") {
+      text = t("chat.system.settingsHelpEnded", names);
     }
     return (
-      <div className="chat-message chat-message--system">
+      <div className="chat-message chat-message--system" data-system-kind={kind ?? undefined}>
         {kind && (
           <span className="chat-message__system-icon">
-            {kind === "join" ? <LogInIcon /> : <LogOutIcon />}
+            {kind === "join" ? <LogInIcon /> : kind === "leave" ? <LogOutIcon /> : <SlidersIcon />}
           </span>
         )}
         <span className="chat-message__system-content">{text}</span>
