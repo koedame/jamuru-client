@@ -576,6 +576,7 @@ fn on_the_first_launch_usage_reporting_is_off_and_nothing_asks_about_it() {
 ///
 /// Verifies: REQ-TEL-002
 /// Verifies: REQ-TEL-013
+/// Verifies: REQ-TEL-018
 #[test]
 fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it() {
     let (_guard, app) = launch();
@@ -618,12 +619,7 @@ fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it(
         "the lines should carry the install ID:\n{}",
         shown
     );
-    for left_out in [
-        "peer_name",
-        "connection_history",
-        "server_url",
-        "input_device_id",
-    ] {
+    for left_out in ["peer_name", "connection_history"] {
         assert!(
             !shown.contains(left_out),
             "{} must not be in what is sent:\n{}",
@@ -631,6 +627,11 @@ fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it(
             shown
         );
     }
+    assert!(
+        shown.contains("\"server_is_default\":true"),
+        "the launch report should say the server is the built-in one:\n{}",
+        shown
+    );
 
     diagnostics.usage_reporting_switch().click().unwrap();
     jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {

@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use super::*;
 use crate::config::{config_dir, AppConfig, ConnectionHistoryEntry};
+use crate::network::{AddressCandidate, LinkFacts, LinkSnapshot};
 
 // -- helpers ------------------------------------------------------------
 
@@ -87,14 +88,37 @@ fn app_start() -> EventBody {
         webview_version: Some("128".into()),
         language: Some("ja".into()),
         audio_host: Some(AudioHost::Coreaudio),
+        server_is_default: Some(true),
         settings: settings::settings_for_report(&AppConfig::default()),
     })
+}
+
+/// A session end whose link came up on `route` and that offered two of its own
+/// addresses and a public one.
+fn session_end_with_link_and_addresses() -> SessionEnd {
+    let facts = LinkFacts::new();
+    facts.link_up(
+        "203.0.113.7:5000".parse().unwrap(),
+        true,
+        Instant::now() - Duration::from_millis(120),
+    );
+    facts.audio_received();
+    let mut tally = SessionTally::new();
+    tally.set_link(facts.snapshot());
+    tally.set_local_candidates(&[
+        AddressCandidate::host("192.168.1.20:41000".parse().unwrap()),
+        AddressCandidate::host("10.0.0.5:41000".parse().unwrap()),
+        AddressCandidate::server_reflexive("198.51.100.9:52000".parse().unwrap()),
+    ]);
+    tally.finish(EndReason::Left)
 }
 
 fn audio_env() -> EventBody {
     EventBody::AudioEnv(AudioEnv {
         input: Some(device("Scarlett 2i2 USB")),
         output: None,
+        input_id: None,
+        output_id: None,
     })
 }
 
@@ -238,6 +262,8 @@ fn every_event() -> Vec<EventBody> {
                 kind: DeviceKind::Bluetooth,
                 ..device("太郎の AirPods")
             }),
+            input_id: None,
+            output_id: None,
         }),
         EventBody::SessionStart(SessionStart {
             mode: SessionMode::Join,
@@ -250,10 +276,21 @@ fn every_event() -> Vec<EventBody> {
             tally.finish(EndReason::Left)
         }),
         EventBody::SessionEnd(SessionTally::new().finish(EndReason::AppQuit)),
+        EventBody::SessionEnd(session_end_with_link_and_addresses()),
         EventBody::Error(ErrorEvent {
             component: Component::AudioInput,
             code: ErrorCode::DeviceOpenFailed,
             count: 3,
+        }),
+        EventBody::Error(ErrorEvent {
+            component: Component::Ice,
+            code: ErrorCode::NoPackets,
+            count: 1,
+        }),
+        EventBody::Error(ErrorEvent {
+            component: Component::Signaling,
+            code: ErrorCode::Http5xx,
+            count: 2,
         }),
         EventBody::Crash(Crash {
             file: "src/network/connection.rs".into(),
@@ -471,7 +508,7 @@ fn settings_line_for(config: &AppConfig) -> (String, Value) {
 
 /// Verifies: REQ-TEL-004
 #[test]
-fn when_settings_are_sent_the_five_left_out_items_are_not_in_the_line() {
+fn when_settings_are_sent_the_name_and_the_room_history_are_not_in_the_line() {
     let config = AppConfig {
         peer_name: "Alice Anderson".into(),
         connection_history: vec![ConnectionHistoryEntry {
@@ -479,10 +516,6 @@ fn when_settings_are_sent_the_five_left_out_items_are_not_in_the_line() {
             connected_at: chrono::Utc::now(),
             label: Some("band practice".into()),
         }],
-        // Built from parts: the distribution test flags any literal server URL.
-        server_url: Some(concat!("https", "://user:hunter2@my-own-server.example").into()),
-        input_device_id: Some("alsa:hw:CARD=Alice,DEV=0".into()),
-        output_device_id: Some("alsa:hw:CARD=Bob,DEV=1".into()),
         ..AppConfig::default()
     };
 
@@ -494,15 +527,7 @@ fn when_settings_are_sent_the_five_left_out_items_are_not_in_the_line() {
             "{name} is in the settings: {body}"
         );
     }
-    for value in [
-        "Alice Anderson",
-        "ROOMCODE123",
-        "band practice",
-        "hunter2",
-        "my-own-server",
-        "CARD=Alice",
-        "CARD=Bob",
-    ] {
+    for value in ["Alice Anderson", "ROOMCODE123", "band practice"] {
         assert!(!body.contains(value), "{value} reached the line: {body}");
     }
     assert_valid(&line);
@@ -510,7 +535,7 @@ fn when_settings_are_sent_the_five_left_out_items_are_not_in_the_line() {
 
 /// Verifies: REQ-TEL-004
 #[test]
-fn when_the_left_out_list_is_read_it_is_exactly_the_five_named_items() {
+fn when_the_left_out_list_is_read_it_is_exactly_the_four_named_items() {
     let mut names = settings::LEFT_OUT.to_vec();
     names.sort_unstable();
 
@@ -520,17 +545,112 @@ fn when_the_left_out_list_is_read_it_is_exactly_the_five_named_items() {
             "connection_history",
             "input_device_id",
             "output_device_id",
-            "peer_name",
-            "server_url"
+            "peer_name"
         ]
     );
 }
 
 /// Verifies: REQ-TEL-004
 #[test]
+fn when_the_server_url_is_set_only_its_scheme_host_and_port_are_sent() {
+    // Built from parts: the distribution test flags any literal server URL.
+    let url = concat!(
+        "https",
+        "://user:hunter2@my-own-server.example:8443/rooms/x?token=abc#frag"
+    );
+    let config = AppConfig {
+        server_url: Some(url.into()),
+        ..AppConfig::default()
+    };
+
+    let (body, line) = settings_line_for(&config);
+
+    assert_eq!(
+        line["settings"]["server_url"],
+        concat!("https", "://my-own-server.example:8443")
+    );
+    for secret in ["user", "hunter2", "rooms", "token", "abc", "frag"] {
+        assert!(!body.contains(secret), "{secret} reached the line: {body}");
+    }
+    assert_valid(&line);
+}
+
+/// Verifies: REQ-TEL-004
+#[test]
+fn when_the_server_url_has_no_host_nothing_of_it_is_sent() {
+    for url in ["not a url", concat!("https", "://user:pw@"), "://host"] {
+        let config = AppConfig {
+            server_url: Some(url.into()),
+            ..AppConfig::default()
+        };
+
+        let sent = settings::settings_for_report(&config);
+
+        assert!(!sent.contains_key("server_url"), "{url}: {sent:?}");
+    }
+}
+
+/// Verifies: REQ-TEL-005
+#[test]
+fn when_audio_devices_are_chosen_their_ids_are_sent_in_audio_env_and_not_in_the_settings() {
+    let config = AppConfig {
+        input_device_id: Some("alsa:hw:CARD=Alice,DEV=0".into()),
+        output_device_id: Some("alsa:hw:CARD=Bob,DEV=1".into()),
+        ..AppConfig::default()
+    };
+    let (body, settings_line) = settings_line_for(&config);
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+
+    // Names no device this machine has: the IDs go out with `null` devices.
+    reporter.record(EventBody::AudioEnv(snapshot::audio_env(
+        config.input_device_id.as_deref(),
+        config.output_device_id.as_deref(),
+    )));
+    let env_line = lines(&reporter.preview_ndjson()).remove(0);
+
+    assert!(!body.contains("CARD=Alice"), "{body}");
+    assert!(!body.contains("CARD=Bob"), "{body}");
+    assert_eq!(env_line["input_id"], "alsa:hw:CARD=Alice,DEV=0");
+    assert_eq!(env_line["output_id"], "alsa:hw:CARD=Bob,DEV=1");
+    assert_valid(&settings_line);
+    assert_valid(&env_line);
+}
+
+/// Verifies: REQ-TEL-005
+#[test]
+fn when_a_device_is_left_on_the_os_default_no_id_is_in_audio_env() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+
+    reporter.record(EventBody::AudioEnv(snapshot::audio_env(None, None)));
+
+    let line = lines(&reporter.preview_ndjson()).remove(0);
+    assert!(line.get("input_id").is_none(), "{line}");
+    assert!(line.get("output_id").is_none(), "{line}");
+    assert_valid(&line);
+}
+
+/// Verifies: REQ-TEL-018
+#[test]
+fn when_the_server_is_the_one_the_app_was_built_for_the_start_says_so() {
+    let (_, default_line) = settings_line_for(&AppConfig::default());
+    let (_, own_line) = settings_line_for(&AppConfig {
+        server_url: Some(concat!("https", "://my-own-server.example").into()),
+        ..AppConfig::default()
+    });
+
+    assert_eq!(default_line["server_is_default"], true);
+    assert_eq!(own_line["server_is_default"], false);
+    assert_valid(&default_line);
+    assert_valid(&own_line);
+}
+
+/// Verifies: REQ-TEL-004
+#[test]
 fn when_a_setting_is_added_it_is_sent_unless_it_is_left_out() {
     // Whatever the settings file can hold (every item, set or not) is what is
-    // sent, minus the five. A setting added to `AppConfig` tomorrow appears
+    // sent, minus the two. A setting added to `AppConfig` tomorrow appears
     // here without this test or the reporter being touched.
     let everything = serde_json::to_value(AppConfig::default()).unwrap();
     let mut expected: Vec<&String> = everything
@@ -582,6 +702,8 @@ fn when_a_device_is_reported_its_name_is_sent_exactly_as_the_os_gave_it() {
         reporter.record(EventBody::AudioEnv(AudioEnv {
             input: Some(device(name)),
             output: Some(device(name)),
+            input_id: None,
+            output_id: None,
         }));
     }
 
@@ -627,6 +749,8 @@ async fn when_the_lines_are_long_one_send_stays_within_64_kilobytes() {
         reporter.record(EventBody::AudioEnv(AudioEnv {
             input: Some(device(&"あ".repeat(128))),
             output: Some(device(&"い".repeat(128))),
+            input_id: None,
+            output_id: None,
         }));
     }
 
@@ -882,6 +1006,184 @@ fn when_a_session_end_carries_the_fec_share_the_line_satisfies_schema_json() {
 
     let parsed = lines(&reporter.preview_ndjson());
     assert_eq!(parsed[1]["fec_active_pct"], 50.0);
+    for line in &parsed {
+        assert_valid(line);
+    }
+}
+
+/// Verifies: REQ-TEL-015
+#[test]
+fn when_the_link_came_up_the_session_end_says_which_kind_of_route_and_how_long_it_took() {
+    let end = session_end_with_link_and_addresses();
+    let json = serde_json::to_value(&end).unwrap();
+
+    assert_eq!(json["route"], "public");
+    assert_eq!(json["route_confirmed"], true);
+    assert!(json["connect_ms"].as_u64().unwrap() >= 120);
+    assert!(json["first_audio_ms"].is_u64());
+}
+
+/// Verifies: REQ-TEL-015
+#[test]
+fn when_no_link_came_up_the_route_and_the_times_are_left_out_of_session_end() {
+    let json = serde_json::to_value(SessionTally::new().finish(EndReason::Disconnected)).unwrap();
+
+    for key in ["route", "route_confirmed", "connect_ms", "first_audio_ms"] {
+        assert!(json.get(key).is_none(), "{key} was written as {json}");
+    }
+}
+
+/// Verifies: REQ-TEL-015
+#[test]
+fn when_no_audio_ever_arrived_the_first_audio_time_is_left_out() {
+    let facts = LinkFacts::new();
+    facts.link_up("192.168.1.20:5000".parse().unwrap(), false, Instant::now());
+    let mut tally = SessionTally::new();
+    tally.set_link(facts.snapshot());
+
+    let json = serde_json::to_value(tally.finish(EndReason::Disconnected)).unwrap();
+
+    assert_eq!(json["route"], "lan");
+    assert_eq!(json["route_confirmed"], false);
+    assert!(json.get("first_audio_ms").is_none(), "{json}");
+}
+
+/// Verifies: REQ-TEL-015
+#[test]
+fn when_a_reading_has_no_link_the_last_real_one_is_kept() {
+    let facts = LinkFacts::new();
+    facts.link_up("192.168.1.20:5000".parse().unwrap(), true, Instant::now());
+    let mut tally = SessionTally::new();
+    tally.set_link(facts.snapshot());
+
+    tally.set_link(LinkSnapshot::default());
+
+    let json = serde_json::to_value(tally.finish(EndReason::Left)).unwrap();
+    assert_eq!(json["route"], "lan");
+}
+
+/// Verifies: REQ-TEL-016
+#[test]
+fn when_the_user_offered_addresses_their_ips_are_in_the_session_end_without_the_ports() {
+    let json = serde_json::to_value(session_end_with_link_and_addresses()).unwrap();
+
+    assert_eq!(
+        json["local_ips"],
+        serde_json::json!(["192.168.1.20", "10.0.0.5"])
+    );
+    assert_eq!(json["public_ip"], "198.51.100.9");
+    let text = json.to_string();
+    for port in ["41000", "52000"] {
+        assert!(!text.contains(port), "{port} reached the line: {text}");
+    }
+}
+
+/// Verifies: REQ-TEL-016
+#[tokio::test]
+async fn when_a_session_ends_the_peers_address_is_nowhere_in_the_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+    let mut ours = crate::network::Connection::new("127.0.0.1:0")
+        .await
+        .unwrap();
+    let theirs = crate::network::Connection::new("127.0.0.1:0")
+        .await
+        .unwrap();
+    ours.connect(theirs.local_addr()).await.unwrap();
+    let peer = theirs.local_addr();
+
+    reporter.begin_session(SessionMode::Join);
+    reporter.with_session(|tally| tally.set_link(ours.link_facts().snapshot()));
+    reporter.end_session(EndReason::Left);
+
+    let body = reporter.preview_ndjson();
+    assert!(body.contains("\"route\":\"loopback\""), "{body}");
+    assert!(!body.contains(&peer.ip().to_string()), "{body}");
+    assert!(!body.contains(&peer.port().to_string()), "{body}");
+    for line in lines(&body) {
+        assert_valid(&line);
+    }
+}
+
+/// Verifies: REQ-TEL-016
+#[test]
+fn when_more_addresses_are_offered_than_a_line_may_carry_only_the_first_sixteen_are_kept() {
+    let candidates: Vec<AddressCandidate> = (1..=20)
+        .map(|n| AddressCandidate::host(format!("10.0.0.{n}:41000").parse().unwrap()))
+        .collect();
+    let mut tally = SessionTally::new();
+
+    tally.set_local_candidates(&candidates);
+
+    let json = serde_json::to_value(tally.finish(EndReason::Left)).unwrap();
+    assert_eq!(json["local_ips"].as_array().unwrap().len(), 16);
+    assert!(json.get("public_ip").is_none(), "{json}");
+}
+
+/// Verifies: REQ-TEL-016
+#[test]
+fn when_the_same_address_is_offered_on_two_ports_it_is_listed_once() {
+    let mut tally = SessionTally::new();
+
+    tally.set_local_candidates(&[
+        AddressCandidate::host("192.168.1.20:41000".parse().unwrap()),
+        AddressCandidate::host("192.168.1.20:41001".parse().unwrap()),
+    ]);
+
+    let json = serde_json::to_value(tally.finish(EndReason::Left)).unwrap();
+    assert_eq!(json["local_ips"], serde_json::json!(["192.168.1.20"]));
+}
+
+/// Verifies: REQ-TEL-016
+#[test]
+fn when_the_addresses_are_not_addresses_the_schema_refuses_the_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+    reporter.record(EventBody::SessionEnd(session_end_with_link_and_addresses()));
+    let line = lines(&reporter.preview_ndjson()).remove(0);
+    assert_valid(&line);
+
+    let mut bad = line.clone();
+    bad["public_ip"] = "my-house.example.com".into();
+    assert!(!is_valid(&bad), "the schema accepted a line it must refuse");
+    let mut bad = line.clone();
+    bad["local_ips"] = Value::Array(vec!["192.168.1.20".into(); 17]);
+    assert!(!is_valid(&bad), "the schema accepted a line it must refuse");
+    let mut bad = line.clone();
+    bad["route"] = "192.168.1.20".into();
+    assert!(!is_valid(&bad), "the schema accepted a line it must refuse");
+}
+
+/// Verifies: REQ-TEL-017
+#[test]
+fn when_a_new_kind_of_failure_is_recorded_its_word_is_the_one_the_schema_lists() {
+    let words = [
+        (ErrorCode::NoPackets, "no_packets"),
+        (ErrorCode::Http4xx, "http_4xx"),
+        (ErrorCode::Http5xx, "http_5xx"),
+        (ErrorCode::Tls, "tls"),
+        (ErrorCode::Dns, "dns"),
+        (ErrorCode::WsClosed, "ws_closed"),
+    ];
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+
+    for (code, word) in words {
+        reporter.record_error(Component::Signaling, code);
+        assert_eq!(serde_json::to_value(code).unwrap(), word);
+    }
+    reporter.begin_session(SessionMode::Create);
+    reporter.end_session(EndReason::Left);
+
+    let parsed = lines(&reporter.preview_ndjson());
+    let recorded: Vec<&str> = parsed
+        .iter()
+        .filter(|line| line["event"] == "error")
+        .map(|line| line["code"].as_str().unwrap())
+        .collect();
+    for (_, word) in words {
+        assert!(recorded.contains(&word), "{word} missing in {recorded:?}");
+    }
     for line in &parsed {
         assert_valid(line);
     }

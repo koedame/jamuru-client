@@ -30,30 +30,38 @@ sidebar_position: 8
 
 | `event` | いつ | 内容 |
 |---------|------|------|
-| `app_start` | 起動時と、設定が変わったとき | `cpu_cores` `language`、取得できた `os_version` `ram_gb` `webview_version` `audio_host`、`settings`（下記） |
-| `audio_env` | 起動時と、使うデバイスを選び直したとき | 使っている入出力デバイス（`name` `kind` `channels` `sample_rates` `min_buffer_frames` `is_default`）。無ければ `null` |
+| `app_start` | 起動時と、設定が変わったとき | `cpu_cores` `language` `server_is_default`（接続先がアプリの既定のサーバーか）、取得できた `os_version` `ram_gb` `webview_version` `audio_host`、`settings`（下記） |
+| `audio_env` | 起動時と、使うデバイスを選び直したとき | 使っている入出力デバイス（`name` `kind` `channels` `sample_rates` `min_buffer_frames` `is_default`）。無ければ `null`。選んだデバイスの ID を `input_id` `output_id` に付ける（既定のままの側は無い） |
 | `session_start` | 部屋を作った・入ったとき | `mode`（`create` / `join`） |
-| `session_end` | 部屋を出たとき | `duration_s` `end_reason` `reconnect_count` `peers_max` `xrun_count`、測れたものだけ `rtt_ms_p50` `rtt_ms_p95` `loss_pct_mean` `loss_pct_max` `fec_active_pct` |
-| `error` | エラーが起きたとき | `component` `code`（どちらも固定の列挙）`count`。メッセージ本文は送らない |
+| `session_end` | 部屋を出たとき | `duration_s` `end_reason` `reconnect_count` `peers_max` `xrun_count`、測れたものだけ `rtt_ms_p50` `rtt_ms_p95` `loss_pct_mean` `loss_pct_max` `fec_active_pct`、経路（`route` `route_confirmed` `connect_ms` `first_audio_ms`）、自分のアドレス（`local_ips` `public_ip`）。下の「経路とアドレス」 |
+| `error` | エラーが起きたとき | `component` `code`（どちらも固定の列挙）`count`。メッセージ本文は送らない。`code` には、相手が黙って接続を諦めた `no_packets`、シグナリングサーバーに繋がらなかった理由の `http_4xx` `http_5xx` `tls` `dns` `timeout`、サーバー側から閉じられた `ws_closed` がある（REQ-TEL-017） |
 | `crash` | クラッシュした次の起動時 | `file` `line` `function`。パニックのメッセージ本文は送らない |
 
 - `event` / `code` / `end_reason` / `kind` は列挙で閉じている。定義に無い項目・値の行は `schema.json` に適合しない
 - 自由な文字列を持つ項目は、デバイスの `name`（OS が返す名前のまま。REQ-TEL-005）と `settings` の値だけ
 - 取れなかった値は `0` や空文字にせず、行から外す（`audio_env` の `min_buffer_frames` だけは `null`）
-- 音声・チャット本文・部屋のパスワードと招待コード・部屋の名前・相手の情報・自分の IP・表示名・端末識別子・ホスト名・ユーザー名・ファイルパス・位置情報は送らない
+- 音声・チャット本文・部屋のパスワードと招待コード・部屋の名前・相手の情報（相手の IP アドレスを含む）・表示名・端末識別子・ホスト名・ユーザー名・ファイルパス・位置情報は送らない。調査に役立つ自分の情報（自分の IP アドレス・接続先サーバーのホストとポート・選んだデバイスの ID）は、利用者がオンにしているので送る（[ADR-042](../adr/ADR-042-usage-reporting-includes-investigation-data.md)）
+
+### 経路とアドレス（`session_end`）
+
+- `route` は、最後に繋がった接続で音声が向かった先のアドレスの種類。`lan`（プライベート・リンクローカル・ユニークローカル）/ `public`（それ以外）/ `loopback`（この端末自身）。相手のアドレスそのものは送らない（REQ-TEL-015）
+- `route_confirmed` は、そのアドレスが探査に応答したから選ばれたか。`false` は、応答が無いまま先頭の候補で繋いだ（候補が 1 つだけ、または時間切れ）ことを表す
+- `connect_ms` は接続を始めてから繋がるまで、`first_audio_ms` は繋がってから最初の音声パケットが届くまで（ミリ秒）。音声が 1 つも届かなかった接続では `first_audio_ms` が行に無い
+- `local_ips` は、自分が相手に伝えたアドレスのうち自分のネットワーク上のもの（IP アドレスだけ。最大 16 件）、`public_ip` は STUN が見た自分の公開アドレス。ポートは送らない。相手のアドレスは、相手が利用状況の送信をオンにしているとは限らないので、行のどこにも入れない（REQ-TEL-016）
 
 ### 設定（`settings`）
 
-設定ファイルの項目を**丸ごと**入れる。送る項目の一覧は持たないので、項目が増えれば勝手に送られる。外すのは次の 5 項目だけ（REQ-TEL-004）。
+設定ファイルの項目を**丸ごと**入れる。送る項目の一覧は持たないので、項目が増えれば勝手に送られる。外すのは次の 4 項目だけ（REQ-TEL-004）。
 
 | 外す項目 | 理由 |
 |----------|------|
 | `peer_name` | 表示名 |
 | `connection_history` | 入った部屋の履歴 |
-| `server_url` | 自前サーバーの URL（認証情報が入りうる） |
-| `input_device_id` / `output_device_id` | 音声機器の構成が分かる |
+| `input_device_id` / `output_device_id` | 送らないのではなく、`audio_env` の `input_id` / `output_id` で送る。デバイスの選び直しが、設定の変更と `audio_env` の 2 行に割れないようにするため |
 
-設定に名前・URL・ID・パスの類を足すときは、外す側（`src/telemetry/settings.rs` の `LEFT_OUT`）に入れる（[ADR-037](../adr/ADR-037-usage-reporting-opt-in.md)）。値が文字列で 128 文字を超えるもの、リストや表になっているものは、行を不適合にしないために送らない。
+`server_url`（自前サーバーの URL）は、スキーム・ホスト・ポートだけにして送る。ユーザー名・パスワード（認証情報）・パス・クエリ・フラグメントは、秘密が入りうるので落とす。ホストが読み取れない値は送らない。選んだデバイスの ID は `audio_env` にそのまま入れる（REQ-TEL-005）。
+
+設定に人の名前や部屋を特定できるものを足すときは、外す側（`src/telemetry/settings.rs` の `LEFT_OUT`）に入れる（[ADR-037](../adr/ADR-037-usage-reporting-opt-in.md)、[ADR-042](../adr/ADR-042-usage-reporting-includes-investigation-data.md)）。値が文字列で 128 文字を超えるもの、リストや表になっているものは、行を不適合にしないために送らない。
 
 ## いつ・どう送るか
 

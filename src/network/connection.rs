@@ -15,6 +15,7 @@ use crate::protocol::{LatencyInfoMessage, LatencyPing, LatencyPong, Packet, Pack
 
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
+use super::link_facts::LinkFacts;
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
 use super::transport::UdpTransport;
@@ -441,6 +442,8 @@ pub struct Connection {
     latency_info_callback: Option<Arc<LatencyInfoCallback>>,
     /// Connection start time for uptime tracking
     connection_start: Arc<std::sync::Mutex<Option<Instant>>>,
+    /// How the link came up, for the usage log
+    link_facts: Arc<LinkFacts>,
 }
 
 impl Connection {
@@ -487,6 +490,7 @@ impl Connection {
             peer_latency_info: Arc::new(RwLock::new(None)),
             latency_info_callback: None,
             connection_start: Arc::new(std::sync::Mutex::new(None)),
+            link_facts: Arc::new(LinkFacts::new()),
         })
     }
 
@@ -502,6 +506,12 @@ impl Connection {
         self.remote_addr
     }
 
+    /// How the link came up (route, connect time, first audio). Stays valid
+    /// after the connection moves elsewhere.
+    pub fn link_facts(&self) -> Arc<LinkFacts> {
+        self.link_facts.clone()
+    }
+
     /// The audio socket, for gathering address candidates through it before
     /// [`Self::connect`] starts the receive loop.
     pub fn socket(&self) -> &Arc<tokio::net::UdpSocket> {
@@ -514,6 +524,7 @@ impl Connection {
             return Err(NetworkError::AlreadyConnected);
         }
 
+        let started = Instant::now();
         self.remote_addr = remote_addr;
         self.set_state(ConnectionState::Connecting);
         info!("Connecting to {}", remote_addr);
@@ -527,6 +538,7 @@ impl Connection {
             *start = Some(Instant::now());
         }
 
+        self.link_facts.link_up(remote_addr, false, started);
         self.set_state(ConnectionState::Connected);
         self.start_receive_loop();
         self.start_keepalive_loop();
@@ -573,6 +585,7 @@ impl Connection {
             return self.connect(candidates[0]).await;
         }
 
+        let started = Instant::now();
         self.set_state(ConnectionState::CheckingConnectivity);
         info!("Checking connectivity with {} candidates", candidates.len());
 
@@ -631,6 +644,7 @@ impl Connection {
                     *start = Some(Instant::now());
                 }
 
+                self.link_facts.link_up(selected_addr, true, started);
                 self.set_state(ConnectionState::Connected);
                 self.start_receive_loop();
                 self.start_keepalive_loop();
@@ -655,6 +669,7 @@ impl Connection {
                     *start = Some(Instant::now());
                 }
 
+                self.link_facts.link_up(candidates[0], false, started);
                 self.set_state(ConnectionState::Connected);
                 self.start_receive_loop();
                 self.start_keepalive_loop();
@@ -1001,6 +1016,7 @@ impl Connection {
         let rtt_measurement = self.rtt_measurement.clone();
         let peer_latency_info = self.peer_latency_info.clone();
         let latency_info_callback = self.latency_info_callback.clone();
+        let link_facts = self.link_facts.clone();
         let remote_addr = self.remote_addr;
         let sequence = Arc::new(AtomicU32::new(1_000_000)); // Separate sequence for pong responses
 
@@ -1019,6 +1035,8 @@ impl Connection {
 
                 match packet.packet_type {
                     PacketType::Audio => {
+                        link_facts.audio_received();
+
                         // Loss is measured from the gaps in the audio sequence.
                         // Without this `ConnectionStats::packet_loss_rate` would
                         // be a constant, and the quality classification that
@@ -1352,6 +1370,65 @@ mod tests {
         conn1.connect_with_candidates(&candidates).await.unwrap();
 
         assert!(conn1.is_connected());
+    }
+
+    /// Verifies: REQ-TEL-015
+    #[tokio::test]
+    async fn when_a_candidate_answers_the_link_facts_say_the_route_was_confirmed() {
+        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        // conn2 opens with a keep-alive, which conn1's probe wait takes as the answer.
+        conn2.connect(conn1.local_addr()).await.unwrap();
+        let candidates = vec!["127.0.0.1:59999".parse().unwrap(), conn2.local_addr()];
+
+        conn1.connect_with_candidates(&candidates).await.unwrap();
+
+        let snapshot = conn1.link_facts().snapshot();
+        assert_eq!(conn1.remote_addr(), conn2.local_addr());
+        assert_eq!(snapshot.route, Some(super::super::LinkRoute::Loopback));
+        assert_eq!(snapshot.route_confirmed, Some(true));
+        assert!(snapshot.connect_ms.is_some());
+        assert_eq!(snapshot.first_audio_ms, None);
+    }
+
+    /// Verifies: REQ-TEL-015
+    #[tokio::test]
+    async fn when_no_candidate_answers_the_link_facts_say_the_route_was_not_confirmed() {
+        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        let candidates = vec![
+            "127.0.0.1:59998".parse().unwrap(),
+            "127.0.0.1:59999".parse().unwrap(),
+        ];
+
+        conn1.connect_with_candidates(&candidates).await.unwrap();
+
+        let snapshot = conn1.link_facts().snapshot();
+        assert_eq!(snapshot.route, Some(super::super::LinkRoute::Loopback));
+        assert_eq!(snapshot.route_confirmed, Some(false));
+        assert!(
+            snapshot.connect_ms.is_some_and(|ms| ms >= 900),
+            "the fallback waits out the probe timeout: {snapshot:?}"
+        );
+    }
+
+    /// Verifies: REQ-TEL-015
+    #[tokio::test]
+    async fn when_audio_arrives_the_link_facts_have_a_first_audio_time() {
+        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        conn1.connect(conn2.local_addr()).await.unwrap();
+        conn2.connect(conn1.local_addr()).await.unwrap();
+        assert_eq!(conn1.link_facts().snapshot().first_audio_ms, None);
+
+        conn2.send_audio(&[0.0f32; 64], 0).await.unwrap();
+        for _ in 0..50 {
+            if conn1.link_facts().snapshot().first_audio_ms.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        assert!(conn1.link_facts().snapshot().first_audio_ms.is_some());
     }
 
     /// A `detect_after` below two keep-alive intervals would declare loss on a

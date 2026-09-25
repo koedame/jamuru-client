@@ -25,8 +25,8 @@ use jamjam::audio::{
 };
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
-    BandwidthVerdict, Connection, ConnectionState, ConnectionStats, LatencyBreakdown,
-    LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
+    BandwidthVerdict, Connection, ConnectionState, ConnectionStats, LatencyBreakdown, LinkFacts,
+    LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
@@ -214,6 +214,10 @@ pub struct StreamingState {
     delay_adjustments: Arc<AtomicU64>,
     /// How many times the connection dropped and began to reconnect
     reconnect_count: Arc<AtomicU64>,
+    /// How many times an established link was given up for silence
+    silence_giveups: Arc<AtomicU64>,
+    /// How the current link came up, once the audio thread has a connection
+    link_facts: Arc<RwLock<Option<Arc<LinkFacts>>>>,
     /// Peer (received) audio volume (0-200, 100 = unity gain)
     peer_volume: Arc<AtomicU32>,
     /// Master output volume (0-200, 100 = unity gain)
@@ -259,6 +263,8 @@ impl StreamingState {
             underrun_count: Arc::new(AtomicU64::new(0)),
             delay_adjustments: Arc::new(AtomicU64::new(0)),
             reconnect_count: Arc::new(AtomicU64::new(0)),
+            silence_giveups: Arc::new(AtomicU64::new(0)),
+            link_facts: Arc::new(RwLock::new(None)),
             peer_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             master_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             peer_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
@@ -393,6 +399,33 @@ impl StreamingState {
     /// Times the connection began to reconnect since streaming last started.
     pub(crate) fn reconnects(&self) -> u64 {
         self.reconnect_count.load(Ordering::Relaxed)
+    }
+
+    /// Times an established link was given up for silence since streaming
+    /// last started.
+    pub(crate) fn silence_giveups(&self) -> u64 {
+        self.silence_giveups.load(Ordering::Relaxed)
+    }
+
+    /// How the current link came up. Empty before there is a connection.
+    pub(crate) fn link_snapshot(&self) -> LinkSnapshot {
+        self.link_facts
+            .read()
+            .ok()
+            .and_then(|facts| facts.as_ref().map(|facts| facts.snapshot()))
+            .unwrap_or_default()
+    }
+
+    /// Stands in for the audio thread: a link that came up as `facts` says.
+    #[cfg(test)]
+    pub(crate) fn set_link_facts_for_test(&self, facts: Arc<LinkFacts>) {
+        *self.link_facts.write().unwrap() = Some(facts);
+    }
+
+    /// Stands in for the audio thread giving up an established link.
+    #[cfg(test)]
+    pub(crate) fn add_silence_giveup_for_test(&self) {
+        self.silence_giveups.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Apply a new jitter buffer depth to a session that is already running
@@ -726,6 +759,8 @@ pub async fn streaming_start(
     let underrun_count = state.underrun_count.clone();
     let delay_adjustments = state.delay_adjustments.clone();
     let reconnect_count = state.reconnect_count.clone();
+    let silence_giveups = state.silence_giveups.clone();
+    let shared_link_facts = state.link_facts.clone();
     let peer_volume = state.peer_volume.clone();
     let master_volume = state.master_volume.clone();
     let peer_pan = state.peer_pan.clone();
@@ -748,6 +783,10 @@ pub async fn streaming_start(
     state.underrun_count.store(0, Ordering::SeqCst);
     state.delay_adjustments.store(0, Ordering::SeqCst);
     state.reconnect_count.store(0, Ordering::SeqCst);
+    state.silence_giveups.store(0, Ordering::SeqCst);
+    if let Ok(mut facts) = state.link_facts.write() {
+        *facts = None;
+    }
     // Reset volumes to unity gain and pan to center
     state.peer_volume.store(100, Ordering::SeqCst);
     state.master_volume.store(100, Ordering::SeqCst);
@@ -798,6 +837,8 @@ pub async fn streaming_start(
                 &underrun_count,
                 &delay_adjustments,
                 &reconnect_count,
+                &silence_giveups,
+                &shared_link_facts,
                 &peer_volume,
                 &master_volume,
                 &peer_pan,
@@ -1538,6 +1579,8 @@ async fn run_audio_streaming(
     underrun_count: &Arc<AtomicU64>,
     delay_adjustments: &AtomicU64,
     reconnect_count: &Arc<AtomicU64>,
+    silence_giveups: &Arc<AtomicU64>,
+    shared_link_facts: &RwLock<Option<Arc<LinkFacts>>>,
     peer_volume: &Arc<AtomicU32>,
     master_volume: &Arc<AtomicU32>,
     peer_pan: &Arc<std::sync::atomic::AtomicI32>,
@@ -1680,6 +1723,11 @@ async fn run_audio_streaming(
     let receive_for_state = receive.clone();
     let shared_connection_state_for_cb = shared_connection_state.clone();
     let reconnect_count_for_cb = reconnect_count.clone();
+    let silence_giveups_for_cb = silence_giveups.clone();
+    let link_facts = connection.link_facts();
+    if let Ok(mut shared) = shared_link_facts.write() {
+        *shared = Some(link_facts.clone());
+    }
     connection.set_state_change_callback(move |state| {
         tracing::info!("Audio connection state: {:?}", state);
         if state == ConnectionState::Connected {
@@ -1687,6 +1735,11 @@ async fn run_audio_streaming(
         }
         if state == ConnectionState::Reconnecting {
             reconnect_count_for_cb.fetch_add(1, Ordering::Relaxed);
+        }
+        // Failing to connect at all is reported by the connect call itself;
+        // a failure after the link came up is the peer going silent.
+        if state == ConnectionState::Failed && link_facts.snapshot().route.is_some() {
+            silence_giveups_for_cb.fetch_add(1, Ordering::Relaxed);
         }
 
         // Publish the transition so the UI can show reconnection progress and

@@ -4,8 +4,12 @@
 //! the app builds and serializes; a test checks that every line they produce
 //! satisfies the schema, so the two cannot drift apart.
 
+use std::net::IpAddr;
+
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
+
+pub use crate::network::LinkRoute;
 
 /// The schema version written to every line (`v`).
 pub const SCHEMA_VERSION: u32 = 1;
@@ -64,6 +68,10 @@ pub struct AppStart {
     pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_host: Option<AudioHost>,
+    /// Whether the app talks to the jamjam server it was built for, rather
+    /// than one the user set in `server_url`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_is_default: Option<bool>,
     /// The settings file's items, minus the ones [`super::settings`] leaves out.
     pub settings: serde_json::Map<String, serde_json::Value>,
 }
@@ -80,10 +88,19 @@ pub enum AudioHost {
 }
 
 /// The input and output device in use, `None` when there is none.
+///
+/// `input_id` and `output_id` are the IDs the user chose, as the settings file
+/// holds them: absent for a side left on the OS default. They are here rather
+/// than in the settings so that they are sent with the device they name, also
+/// when that device could not be found.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct AudioEnv {
     pub input: Option<Device>,
     pub output: Option<Device>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_id: Option<String>,
 }
 
 /// One audio device.
@@ -136,7 +153,12 @@ pub enum EndReason {
 /// How a session went, in totals. Nothing per packet.
 ///
 /// A figure that was never measured (no round-trip sample arrived, the link
-/// has no FEC) is left out of the line, not written as `0`.
+/// has no FEC, no audio ever arrived) is left out of the line, not written as
+/// `0`.
+///
+/// `route` and the times describe the last link the session brought up. The
+/// peer's address is never sent: a peer who has not turned reporting on has not
+/// agreed to that. The user's own addresses are.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SessionEnd {
     pub duration_s: u64,
@@ -154,6 +176,24 @@ pub struct SessionEnd {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fec_active_pct: Option<f64>,
     pub xrun_count: u64,
+    /// The kind of address the audio went to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<LinkRoute>,
+    /// Whether that address was picked because it answered a probe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_confirmed: Option<bool>,
+    /// Milliseconds from starting to connect to the link going up.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect_ms: Option<u64>,
+    /// Milliseconds from the link going up to the first audio packet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_audio_ms: Option<u64>,
+    /// The user's own addresses on their networks that were offered to the peer.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub local_ips: Vec<IpAddr>,
+    /// The user's public address as a STUN server saw it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_ip: Option<IpAddr>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
@@ -173,6 +213,18 @@ pub enum Component {
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     ConnectFailed,
+    /// The peer stopped sending and the link was given up.
+    NoPackets,
+    /// The signaling server answered with a 4xx status.
+    #[serde(rename = "http_4xx")]
+    Http4xx,
+    /// The signaling server answered with a 5xx status.
+    #[serde(rename = "http_5xx")]
+    Http5xx,
+    Tls,
+    Dns,
+    /// The signaling connection was closed by the other end.
+    WsClosed,
     Timeout,
     Disconnected,
     HandshakeFailed,

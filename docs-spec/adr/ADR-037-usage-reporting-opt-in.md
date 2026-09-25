@@ -7,7 +7,7 @@ sidebar_position: 37
 
 ## Status
 
-Accepted
+Accepted。決定 2 の「送らない」と決定 4・5 の「外す 5 項目」は、[ADR-042](./ADR-042-usage-reporting-includes-investigation-data.md) で変わった（デバイス ID・自前サーバーの URL・自分の IP アドレスは送る。外すのは表示名と部屋の履歴の 2 項目。デバイス ID は設定でなく `audio_env` で送る）。
 
 ## Context
 

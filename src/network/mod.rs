@@ -10,6 +10,7 @@ mod encryption;
 mod error;
 mod fec;
 mod latency;
+mod link_facts;
 mod quality;
 mod sequence_tracker;
 mod session;
@@ -32,11 +33,12 @@ pub use discovery::{
     SIGNALING_ENDPOINT_PATH,
 };
 pub use encryption::{EncryptedTransport, EncryptionContext, KeyExchangeMessage, KeyPair};
-pub use error::NetworkError;
+pub use error::{NetworkError, SignalingFailure};
 pub use fec::{FecDecoder, FecEncoder, FecPacket, RecoveredPacket, FEC_GROUP_SIZE};
 pub use latency::{
     DownstreamLatency, LatencyBreakdown, LocalLatencyInfo, NetworkLatencyInfo, UpstreamLatency,
 };
+pub use link_facts::{LinkFacts, LinkRoute, LinkSnapshot};
 pub use quality::{ConnectionQuality, QualityChange, QualityMonitor};
 pub use sequence_tracker::SequenceTracker;
 pub use session::{Session, SessionConfig};

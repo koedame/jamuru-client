@@ -9,7 +9,7 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 
 use crate::audio::{resolve_input_device, resolve_output_device, DeviceId};
-use crate::config::{AppConfig, VALID_SAMPLE_RATES};
+use crate::config::{AppConfig, DEFAULT_SERVER_URL, VALID_SAMPLE_RATES};
 use crate::environment;
 
 use super::event::{AppStart, AudioEnv, AudioHost, Device, DeviceKind};
@@ -25,6 +25,7 @@ pub fn app_start(config: &AppConfig) -> AppStart {
         ram_gb: environment::ram_gb(),
         audio_host: Some(audio_host_of(&environment::audio_host())),
         language: config.language.clone(),
+        server_is_default: Some(config.effective_server_url() == DEFAULT_SERVER_URL),
         settings: settings_for_report(config),
         ..AppStart::default()
     }
@@ -38,6 +39,8 @@ pub fn audio_env(input_id: Option<&str>, output_id: Option<&str>) -> AudioEnv {
     let default_input = host.default_input_device();
     let default_output = host.default_output_device();
     AudioEnv {
+        input_id: input_id.map(str::to_string),
+        output_id: output_id.map(str::to_string),
         input: resolve_input_device(input_id.map(|id| DeviceId(id.to_string())).as_ref())
             .ok()
             .and_then(|device| describe(&device, Direction::Input, default_input.as_ref())),

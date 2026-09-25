@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::error::NetworkError;
+use super::error::{NetworkError, SignalingFailure};
 
 /// Where the server answers with its signaling address.
 pub const SIGNALING_ENDPOINT_PATH: &str = "/api/v1/signaling";
@@ -33,30 +33,35 @@ pub struct SignalingEndpoint {
 /// caller logs the error.
 pub async fn discover_signaling_url(server_url: &str) -> Result<String, NetworkError> {
     let endpoint = signaling_endpoint_url(server_url)?;
-    let fail = |what: String| {
-        NetworkError::SignalingError(format!(
+    let fail = |failure: SignalingFailure, what: String| NetworkError::SignalingUnreachable {
+        failure,
+        message: format!(
             "Asking the server for its signaling server failed: {}",
             what
-        ))
+        ),
     };
 
     let client = reqwest::Client::builder()
         .timeout(DISCOVERY_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|e| fail(e.without_url().to_string()))?;
-    let response = client
-        .get(&endpoint)
-        .send()
-        .await
-        .map_err(|e| fail(e.without_url().to_string()))?;
+        .map_err(|e| fail(SignalingFailure::Other, e.without_url().to_string()))?;
+    let response = client.get(&endpoint).send().await.map_err(|e| {
+        let e = e.without_url();
+        fail(SignalingFailure::of_error(&e), e.to_string())
+    })?;
     if !response.status().is_success() {
-        return Err(fail(format!("answered {}", response.status())));
+        return Err(fail(
+            SignalingFailure::of_status(response.status().as_u16()),
+            format!("answered {}", response.status()),
+        ));
     }
-    let answer: SignalingEndpoint = response
-        .json()
-        .await
-        .map_err(|e| fail(format!("unexpected answer: {}", e.without_url())))?;
+    let answer: SignalingEndpoint = response.json().await.map_err(|e| {
+        fail(
+            SignalingFailure::Other,
+            format!("unexpected answer: {}", e.without_url()),
+        )
+    })?;
     check_signaling_url(server_url, &answer.url)?;
     Ok(answer.url)
 }
@@ -165,6 +170,78 @@ mod tests {
         )
         .await;
         assert!(discover_signaling_url(&server).await.is_err());
+    }
+
+    /// Verifies: REQ-TEL-017
+    #[tokio::test]
+    async fn when_the_server_answers_530_the_failure_is_a_5xx() {
+        let (server, _) = answering_server("530 Origin Down", String::new()).await;
+
+        let error = discover_signaling_url(&server).await.unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                NetworkError::SignalingUnreachable {
+                    failure: SignalingFailure::Http5xx,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    /// Verifies: REQ-TEL-017
+    #[tokio::test]
+    async fn when_the_server_answers_404_the_failure_is_a_4xx() {
+        let (server, _) = answering_server("404 Not Found", String::new()).await;
+
+        let error = discover_signaling_url(&server).await.unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                NetworkError::SignalingUnreachable {
+                    failure: SignalingFailure::Http4xx,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    /// Verifies: REQ-TEL-017
+    #[tokio::test]
+    async fn when_the_server_name_does_not_resolve_the_failure_is_dns() {
+        // `.invalid` never resolves (RFC 6761).
+        let error = discover_signaling_url(&format!("{}://no-such-host.invalid", "https"))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                NetworkError::SignalingUnreachable {
+                    failure: SignalingFailure::Dns,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    /// The text the user sees when the server cannot be reached is the same
+    /// as before the failure had a kind.
+    #[tokio::test]
+    async fn when_the_server_answers_530_the_message_still_names_the_status() {
+        let (server, _) = answering_server("530 Origin Down", String::new()).await;
+
+        let error = discover_signaling_url(&server).await.unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Asking the server for its signaling server failed: answered 530 <unknown status code>"
+        );
     }
 
     #[tokio::test]

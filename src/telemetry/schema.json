@@ -19,6 +19,10 @@
       "type": "string",
       "pattern": "^[0-9a-f]{32}$"
     },
+    "ip": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f:.]{2,45}$"
+    },
     "envelope": {
       "type": "object",
       "required": ["v", "ts", "seq", "event", "install_id", "launch_id", "session_id", "app_version", "os", "arch"],
@@ -51,6 +55,7 @@
         "webview_version": { "type": "string", "pattern": "^[0-9]{1,4}$", "description": "Major only." },
         "language": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Za-z]{2,4})?$" },
         "audio_host": { "enum": ["coreaudio", "wasapi", "asio", "alsa", "jack", "other"] },
+        "server_is_default": { "type": "boolean", "description": "Whether the app talks to the server it was built for rather than one set in server_url." },
         "settings": { "$ref": "#/$defs/settings" }
       },
       "required": ["settings"]
@@ -93,7 +98,9 @@
       "properties": {
         "event": { "const": "audio_env" },
         "input": { "oneOf": [{ "$ref": "#/$defs/device" }, { "type": "null" }] },
-        "output": { "oneOf": [{ "$ref": "#/$defs/device" }, { "type": "null" }] }
+        "output": { "oneOf": [{ "$ref": "#/$defs/device" }, { "type": "null" }] },
+        "input_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "The input device ID the user chose; absent when they left it on the OS default." },
+        "output_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "The output device ID the user chose; absent when they left it on the OS default." }
       },
       "required": ["input", "output"]
     },
@@ -116,7 +123,18 @@
         "loss_pct_mean": { "type": "number", "minimum": 0, "maximum": 100 },
         "loss_pct_max": { "type": "number", "minimum": 0, "maximum": 100 },
         "fec_active_pct": { "type": "number", "minimum": 0, "maximum": 100 },
-        "xrun_count": { "type": "integer", "minimum": 0 }
+        "xrun_count": { "type": "integer", "minimum": 0 },
+        "route": { "enum": ["lan", "public", "loopback"], "description": "The kind of address the audio went to on the last link the session brought up." },
+        "route_confirmed": { "type": "boolean", "description": "Whether that address was picked because it answered a probe." },
+        "connect_ms": { "type": "integer", "minimum": 0, "maximum": 3600000, "description": "From starting to connect to the link going up." },
+        "first_audio_ms": { "type": "integer", "minimum": 0, "maximum": 3600000, "description": "From the link going up to the first audio packet." },
+        "local_ips": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/ip" },
+          "description": "The user's own addresses on their networks that were offered to the peer. Never the peer's."
+        },
+        "public_ip": { "$ref": "#/$defs/ip", "description": "The user's public address as a STUN server saw it." }
       },
       "required": ["duration_s", "end_reason", "reconnect_count", "peers_max", "xrun_count"]
     },
@@ -127,6 +145,12 @@
         "code": {
           "enum": [
             "connect_failed",
+            "no_packets",
+            "http_4xx",
+            "http_5xx",
+            "tls",
+            "dns",
+            "ws_closed",
             "timeout",
             "disconnected",
             "handshake_failed",

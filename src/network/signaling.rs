@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::device_identity::DeviceIdentity;
 use super::discovery::discover_signaling_url;
-use super::error::NetworkError;
+use super::error::{NetworkError, SignalingFailure};
 
 /// Current Unix time in whole seconds, the timestamp a device identity signs
 /// when connecting.
@@ -386,9 +386,19 @@ impl SignalingClient {
             })?;
             request.headers_mut().insert(name, header_value);
         }
-        let (ws_stream, _) = connect_async(request)
-            .await
-            .map_err(|e| NetworkError::SignalingError(format!("Connect failed: {}", e)))?;
+        let (ws_stream, _) = connect_async(request).await.map_err(|e| {
+            use tokio_tungstenite::tungstenite::Error as WsError;
+            let failure = match &e {
+                WsError::Http(response) => SignalingFailure::of_status(response.status().as_u16()),
+                WsError::Tls(_) => SignalingFailure::Tls,
+                WsError::Io(io) => SignalingFailure::of_error(io),
+                _ => SignalingFailure::Other,
+            };
+            NetworkError::SignalingUnreachable {
+                failure,
+                message: format!("Connect failed: {}", e),
+            }
+        })?;
 
         debug!("Connected to signaling server: {}", signaling_url);
 
