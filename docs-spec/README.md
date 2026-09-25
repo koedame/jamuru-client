@@ -65,6 +65,9 @@ sidebar_position: 1
 | [ADR-038](./adr/ADR-038-transmit-channels-select-capture.md) | 送信チャンネル設定は取り込むチャンネル数を決める。線路は常にステレオ |
 | [ADR-039](./adr/ADR-039-cli-round-trip-measurement.md) | CLI が区切りのある信号で音声経路の往復遅延を測り、JSON に残す |
 | [ADR-040](./adr/ADR-040-input-output-channel-selection.md) | 入力・出力チャンネルの設定は、デバイスを開くチャンネル数と、取り出す・置く番号を決める |
+| [ADR-041](./adr/ADR-041-self-update.md) | 新しい正式版は、利用者の操作なしにアプリ自身が入れる |
+| [ADR-042](./adr/ADR-042-usage-reporting-includes-investigation-data.md) | 利用状況の送信に、不具合の調査に役立つ項目（自分の IP アドレス・デバイス ID・接続先）を含める |
+| [ADR-043](./adr/ADR-043-remote-operation-rpc.md) | アプリの操作は名前付きのコマンド（RPC）。E2E は全部を、相手の設定の手伝いは音声の設定だけを、許可された間に 1 件ずつ呼ぶ |
 
 ---
 
