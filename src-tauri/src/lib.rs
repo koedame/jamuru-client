@@ -4,6 +4,8 @@
 //! and multi-window management.
 
 mod audio;
+#[cfg(feature = "debug-tools")]
+mod audio_tap;
 mod config;
 #[cfg(feature = "debug-remote")]
 mod debug_remote;
