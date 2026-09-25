@@ -40,7 +40,12 @@ const STABLE_AFTER: Duration = Duration::from_secs(60);
 /// Starts the loop that keeps the debug portal connected while enrolled. Call
 /// from setup; returns immediately.
 pub fn spawn(app: AppHandle) {
-    tracing::info!("Remote debugging is built in ({})", MARKER);
+    // The server enrolls a device by this ID; the log is where its owner reads it from.
+    tracing::info!(
+        "Remote debugging is built in ({}); this device is {}",
+        MARKER,
+        app.state::<DeviceIdentityState>().identity().device_id()
+    );
     crate::rpc::events::install(&app);
     tauri::async_runtime::spawn(async move {
         let mut wait = RETRY_MIN;

@@ -269,9 +269,18 @@ mod tests {
     fn write_the_whole_permission_table() {
         let out = std::env::var_os("JAMJAM_PERMISSION_TABLE_OUT")
             .expect("JAMJAM_PERMISSION_TABLE_OUT names the file to write");
-        let mark = |method: &Method, portal| if method.access.allows(portal) { "○" } else { "×" };
+        let mark = |method: &Method, portal| {
+            if method.access.allows(portal) {
+                "○"
+            } else {
+                "×"
+            }
+        };
         let mut table = String::new();
-        for (heading, kind) in [("アプリの操作", Kind::App), ("画面の操作・情報の取得・端末の操作", Kind::Native)] {
+        for (heading, kind) in [
+            ("アプリの操作", Kind::App),
+            ("画面の操作・情報の取得・端末の操作", Kind::Native),
+        ] {
             table.push_str(&format!(
                 "\n## {heading}\n\n| 操作 | 内容 | 利用者本人 | デバッグモード | 設定の手伝い |\n|---|---|:-:|:-:|:-:|\n"
             ));
