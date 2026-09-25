@@ -33,15 +33,11 @@ export const Asking: Story = {
   },
 };
 
-/** Helping, with the settings panel closed */
+/** Helping: who, and Stop */
 export const Helping: Story = {
   args: {
     message: "Helping Bo with audio settings",
-    status: "Bo declined the change",
-    actions: [
-      { label: "Open settings", onClick: () => {}, testId: "open" },
-      { label: "Stop helping", onClick: () => {}, testId: "stop" },
-    ],
+    actions: [{ label: "Stop helping", onClick: () => {}, testId: "stop" }],
   },
 };
 

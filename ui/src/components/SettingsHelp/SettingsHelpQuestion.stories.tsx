@@ -23,7 +23,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Someone asks to help with the settings */
+/** Someone asks to help with the settings: the one question the helped side answers */
 export const Default: Story = {
   args: {
     open: true,
@@ -35,46 +35,27 @@ export const Default: Story = {
   },
 };
 
-/** The helper proposes one change; the help can be stopped from here too */
-export const Proposal: Story = {
+/** The same, in Japanese: the two buttons fit the card */
+export const Japanese: Story = {
   args: {
     open: true,
-    message: "Aki wants to change your Input Device to Scarlett 2i2 USB",
-    allowLabel: "Allow change",
-    declineLabel: "Decline",
-    onAllow: () => {},
-    onDecline: () => {},
-    stopLabel: "Stop help",
-    onStop: () => {},
-  },
-};
-
-/** The same, in Japanese: the three buttons fit the card */
-export const ProposalJapanese: Story = {
-  args: {
-    open: true,
-    message: "Akiさんが入力デバイスを「Scarlett 2i2 USB」に変えようとしています",
-    allowLabel: "変更を許可",
+    message: "Akiさんが音声の設定を手伝いたいそうです",
+    allowLabel: "許可する",
     declineLabel: "断る",
     onAllow: () => {},
     onDecline: () => {},
-    stopLabel: "手伝いを止める",
-    onStop: () => {},
   },
 };
 
-/** A long device name wraps inside the card */
-export const LongValue: Story = {
+/** A long name wraps inside the card */
+export const LongName: Story = {
   args: {
     open: true,
-    message:
-      "Aki wants to change your Output Device to Focusrite Scarlett 18i20 3rd Gen (Line Outputs 3-4, Speakers B)",
-    allowLabel: "Allow change",
+    message: "Aki Takahashi-Montgomery the Third of Osaka wants to help with your audio settings",
+    allowLabel: "Allow",
     declineLabel: "Decline",
     onAllow: () => {},
     onDecline: () => {},
-    stopLabel: "Stop help",
-    onStop: () => {},
   },
 };
 

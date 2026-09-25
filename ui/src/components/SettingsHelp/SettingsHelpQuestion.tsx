@@ -1,8 +1,9 @@
 /**
- * SettingsHelpQuestion - asks the helped participant to allow something
- * (ADR-043): that someone helps with their audio settings, or one change the
- * helper proposes. Nothing happens until they answer; Escape declines, and
- * clicking outside does nothing, so a stray click cannot answer for them.
+ * SettingsHelpQuestion - asks the helped participant to allow someone to help
+ * with their audio settings (ADR-044 §5). The only time they are asked: what
+ * the helper may do afterwards is not asked again. Nothing happens until they
+ * answer; Escape declines, and clicking outside does nothing, so a stray click
+ * cannot answer for them.
  *
  * Allowing takes effect only once a question has been up for a moment: a
  * double click on Allow, or a click meant for the question before, cannot
@@ -25,9 +26,6 @@ export interface SettingsHelpQuestionProps {
   declineLabel: string;
   onAllow: () => void;
   onDecline: () => void;
-  /** Ending the whole help from the question, so it is never out of reach */
-  stopLabel?: string;
-  onStop?: () => void;
 }
 
 export function SettingsHelpQuestion({
@@ -37,8 +35,6 @@ export function SettingsHelpQuestion({
   declineLabel,
   onAllow,
   onDecline,
-  stopLabel,
-  onStop,
 }: SettingsHelpQuestionProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const declineRef = useRef<HTMLButtonElement>(null);
@@ -96,16 +92,6 @@ export function SettingsHelpQuestion({
       >
         <p className="settings-help-question__text">{message}</p>
         <div className="settings-help-question__actions">
-          {stopLabel && onStop && (
-            <button
-              type="button"
-              className="settings-help__button settings-help-question__stop"
-              data-testid="settings-help-question-stop"
-              onClick={onStop}
-            >
-              {stopLabel}
-            </button>
-          )}
           <button
             type="button"
             className="settings-help__button settings-help__button--primary"

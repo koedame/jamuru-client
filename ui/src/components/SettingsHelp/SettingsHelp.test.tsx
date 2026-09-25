@@ -1,7 +1,9 @@
 /**
- * Helping with settings in the main window (ADR-043): who is offered help,
- * the questions the helped side answers, the helper's panel, and stopping.
- * The app's side (what is sent, what is applied) is `src-tauri/src/settings_help.rs`.
+ * Helping with settings in the main window (ADR-044 §5): who is offered help,
+ * the one question the helped side answers, the bars that say a help is going
+ * on, and stopping. The app's side (what is sent, when the help ends) is
+ * `src-tauri/src/settings_help.rs`; what the helper does is in their own window
+ * (`HelperScreen`).
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -13,7 +15,6 @@ import en from "../../../locales/en.json";
 import ja from "../../../locales/ja.json";
 import type { HelpEvent, Participant } from "../../lib/tauri";
 import { ChatMessage } from "../ChatPanel/ChatMessage";
-import { audioSettings } from "../SettingsPanel/audioSettingsFixture";
 import { ALLOW_DELAY_MS } from "./SettingsHelpQuestion";
 import { useSettingsHelp, type SettingsHelp } from "./useSettingsHelp";
 
@@ -90,18 +91,7 @@ beforeEach(async () => {
   invoke.mockReset();
   invoke.mockImplementation(async (command: string, args?: unknown) => {
     calls.push({ command, args });
-    switch (command) {
-      case "settings_get":
-        return audioSettings({
-          input_devices: [
-            { id: "alsa:scarlett", name: "Scarlett 2i2", supported_sample_rates: [48000], supported_channels: [2], is_default: false, is_asio: false },
-          ],
-        });
-      case "settings_help_propose":
-        return 1;
-      default:
-        return undefined;
-    }
+    return undefined;
   });
   await i18n.changeLanguage("en");
 });
@@ -137,6 +127,17 @@ describe("offering help", () => {
     expect(screen.getByText(fill(en.settingsHelp.helper.declined, { name: "Aki" }))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "offer Aki" })).toBeInTheDocument();
   });
+
+  // Verifies: REQ-RMT-005
+  it("the other person is already helped by someone else, the offer ends and says so", async () => {
+    const { send } = mount([AKI]);
+    fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
+    await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
+
+    send({ type: "declined", peer: "aki-id", busy: true });
+
+    expect(screen.getByText(fill(en.settingsHelp.helper.busy, { name: "Aki" }))).toBeInTheDocument();
+  });
 });
 
 describe("being helped", () => {
@@ -171,44 +172,48 @@ describe("being helped", () => {
     expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-002
-  it("the helper proposes a device, the question names the setting and the device, and allowing approves it", async () => {
+  // Verifies: REQ-RMT-001
+  it("allowing closes the question at once and asks nothing again", async () => {
     const { send } = mount([AKI]);
     send({ type: "requested", peer: "aki-id", peer_name: "Aki" });
-    send({ type: "started", role: "helped", peer: "aki-id", settings: null });
-
-    send({ type: "proposed", id: 3, change: { setting: "input_device", device_id: "alsa:scarlett" }, device_name: "Scarlett 2i2" });
-
-    await waitFor(() =>
-      expect(screen.getByTestId("settings-help-question")).toHaveTextContent(
-        fill(en.settingsHelp.proposal.message, {
-          name: "Aki",
-          setting: en.settings.devices.inputDevice,
-          value: "Scarlett 2i2",
-        })
-      )
-    );
     await untilAllowIsReady();
+
     fireEvent.click(screen.getByTestId("settings-help-allow"));
-    expect(calls).toContainEqual({ command: "settings_help_decide", args: { connId: CONN, id: 3, approve: true } });
+
+    expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-help-allow")).not.toBeInTheDocument();
+    send({ type: "started", role: "helped", peer: "aki-id", peer_name: "Aki" });
+    expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
+    expect(calls.filter((c) => c.command === "settings_help_answer")).toHaveLength(1);
+  });
+
+  // Verifies: REQ-RMT-001
+  it("allowing fails, the question is not left waiting for a help that will not begin", async () => {
+    invoke.mockImplementation(async (command: string, args?: unknown) => {
+      calls.push({ command, args });
+      if (command === "settings_help_answer") throw new Error("could not reach the relay");
+      return undefined;
+    });
+    const { send } = mount([AKI]);
+    send({ type: "requested", peer: "aki-id", peer_name: "Aki" });
+    await untilAllowIsReady();
+
+    fireEvent.click(screen.getByTestId("settings-help-allow"));
+
+    await waitFor(() => expect(calls.some((c) => c.command === "settings_help_answer")).toBe(true));
+    expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
   });
 
   // Verifies: REQ-RMT-002
   it("a question that has just appeared does not take a click on Allow, so a double click answers only the first", async () => {
     const { send } = mount([AKI]);
     send({ type: "requested", peer: "aki-id", peer_name: "Aki" });
-    send({ type: "started", role: "helped", peer: "aki-id", settings: null });
-    send({ type: "proposed", id: 1, change: { setting: "buffer_size", samples: 128 }, device_name: null });
-    await untilAllowIsReady();
 
     fireEvent.click(screen.getByTestId("settings-help-allow"));
-    send({ type: "proposed", id: 2, change: { setting: "transmit_channels", count: 1 }, device_name: null });
-    fireEvent.click(screen.getByTestId("settings-help-allow"));
 
-    const decided = calls.filter((c) => c.command === "settings_help_decide");
-    expect(decided).toEqual([{ command: "settings_help_decide", args: { connId: CONN, id: 1, approve: true } }]);
-    expect(screen.getByTestId("settings-help-question")).toHaveTextContent(en.settings.devices.transmitChannels);
-    expect(screen.getByTestId("settings-help-decline")).toHaveFocus();
+    expect(calls.filter((c) => c.command === "settings_help_answer")).toEqual([]);
+    expect(screen.getByTestId("settings-help-allow")).toHaveAttribute("aria-disabled", "true");
   });
 
   // Verifies: REQ-RMT-003
@@ -253,38 +258,10 @@ describe("being helped", () => {
   });
 
   // Verifies: REQ-RMT-003
-  it("while a change is asked about, the question itself offers to stop the help", () => {
-    const { send } = mount([AKI]);
-    send({ type: "requested", peer: "aki-id", peer_name: "Aki" });
-    send({ type: "started", role: "helped", peer: "aki-id", settings: null });
-    send({ type: "proposed", id: 1, change: { setting: "buffer_size", samples: 128 }, device_name: null });
-
-    fireEvent.click(screen.getByTestId("settings-help-question-stop"));
-
-    expect(calls).toContainEqual({ command: "settings_help_stop", args: { connId: CONN, role: "helped" } });
-    expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
-  });
-
-  // Verifies: REQ-RMT-006
-  it("a proposed device without a name is not named by its id", async () => {
-    const { send } = mount([AKI]);
-    send({ type: "requested", peer: "aki-id", peer_name: "Aki" });
-    send({ type: "started", role: "helped", peer: "aki-id", settings: null });
-
-    send({ type: "proposed", id: 1, change: { setting: "input_device", device_id: "coreaudio:AG06:Y8XJ2KA0123456:1,2" }, device_name: null });
-
-    await waitFor(() =>
-      expect(screen.getByTestId("settings-help-question")).toHaveTextContent(en.settingsHelp.value.unknownDevice)
-    );
-    expect(screen.getByTestId("settings-help-question")).not.toHaveTextContent("Y8XJ2KA0123456");
-  });
-
-  // Verifies: REQ-RMT-003
   it("while helped, the bar says who helps and Stop ends it", () => {
     const { send } = mount([AKI]);
     send({ type: "requested", peer: "aki-id", peer_name: "Aki" });
-    send({ type: "started", role: "helped", peer: "aki-id", settings: null });
+    send({ type: "started", role: "helped", peer: "aki-id", peer_name: "Aki" });
 
     expect(screen.getByTestId("settings-help-bar")).toHaveTextContent(fill(en.settingsHelp.helped.bar, { name: "Aki" }));
     fireEvent.click(screen.getByTestId("settings-help-stop-helped"));
@@ -292,77 +269,44 @@ describe("being helped", () => {
     expect(calls).toContainEqual({ command: "settings_help_stop", args: { connId: CONN, role: "helped" } });
     expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
   });
+
+  // Verifies: REQ-RMT-003
+  it("the helper leaves the room, the bar goes and says so", () => {
+    const { send } = mount([AKI]);
+    send({ type: "started", role: "helped", peer: "aki-id", peer_name: "Aki" });
+
+    send({ type: "ended", role: "helped", peer: "aki-id", reason: "peer_left" });
+
+    expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
+    expect(screen.getByText(fill(en.settingsHelp.ended.left, { name: "Aki" }))).toBeInTheDocument();
+  });
 });
 
 describe("helping", () => {
-  // Verifies: REQ-RMT-002
-  it("the other person allows the help, their settings open and a choice is proposed and shown as waiting", async () => {
+  // Verifies: REQ-RMT-003
+  it("the other person allows the help, the bar says who is helped and Stop ends it", async () => {
     const { send } = mount([AKI]);
     fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
     await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
 
-    send({ type: "started", role: "helper", peer: "aki-id", settings: audioSettings({ buffer_size: 64 }) });
-    const panel = await screen.findByTestId("settings-help-panel");
-    fireEvent.change(panel.querySelector("#buffer-size")!, { target: { value: "128" } });
+    send({ type: "started", role: "helper", peer: "aki-id", peer_name: "Aki" });
 
-    await waitFor(() =>
-      expect(calls).toContainEqual({
-        command: "settings_help_propose",
-        args: { connId: CONN, change: { setting: "buffer_size", samples: 128 } },
-      })
-    );
-    expect(await screen.findByTestId("settings-help-panel-status")).toHaveTextContent(
-      fill(en.settingsHelp.helper.pending, { name: "Aki" })
-    );
-  });
-
-  // Verifies: REQ-RMT-002
-  it("an approved change comes back, the panel shows the settings now in effect", async () => {
-    const { send } = mount([AKI]);
-    fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
-    await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
-    send({ type: "started", role: "helper", peer: "aki-id", settings: audioSettings({ revision: 1, buffer_size: 64 }) });
-    const panel = await screen.findByTestId("settings-help-panel");
-    fireEvent.change(panel.querySelector("#buffer-size")!, { target: { value: "128" } });
-    await waitFor(() => expect(calls.some((c) => c.command === "settings_help_propose")).toBe(true));
-
-    send({ type: "answered", id: 1, answer: { outcome: "applied", settings: audioSettings({ revision: 2, buffer_size: 128 }) } });
-
-    await waitFor(() => expect((panel.querySelector("#buffer-size") as HTMLSelectElement).value).toBe("128"));
-    expect(screen.queryByTestId("settings-help-panel-status")).not.toBeInTheDocument();
-
-    // Settings older than those shown arrive late: the panel keeps the newer ones.
-    send({ type: "settings", settings: audioSettings({ revision: 1, buffer_size: 64 }) });
-    expect((panel.querySelector("#buffer-size") as HTMLSelectElement).value).toBe("128");
-  });
-
-  // Verifies: REQ-RMT-002
-  it("a change the other app refused says why in the user's language", async () => {
-    const { send } = mount([AKI]);
-    fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
-    await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
-    send({ type: "started", role: "helper", peer: "aki-id", settings: audioSettings({ buffer_size: 64 }) });
-    const panel = await screen.findByTestId("settings-help-panel");
-    fireEvent.change(panel.querySelector("#buffer-size")!, { target: { value: "128" } });
-    await waitFor(() => expect(calls.some((c) => c.command === "settings_help_propose")).toBe(true));
-
-    send({ type: "answered", id: 1, answer: { outcome: "refused", reason: "device_gone" } });
-
-    expect(await screen.findByTestId("settings-help-panel-status")).toHaveTextContent(
-      fill(en.settingsHelp.helper.refused.device_gone, { name: "Aki" })
-    );
+    expect(screen.getByTestId("settings-help-bar")).toHaveTextContent(fill(en.settingsHelp.helper.bar, { name: "Aki" }));
+    fireEvent.click(screen.getByTestId("settings-help-stop-helper"));
+    expect(calls).toContainEqual({ command: "settings_help_stop", args: { connId: CONN, role: "helper" } });
+    expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
   });
 
   // Verifies: REQ-RMT-003
-  it("the other person stops the help, the panel closes and says so", async () => {
+  it("the other person stops the help, the bar goes and says so", async () => {
     const { send } = mount([AKI]);
     fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
     await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
-    send({ type: "started", role: "helper", peer: "aki-id", settings: audioSettings() });
+    send({ type: "started", role: "helper", peer: "aki-id", peer_name: "Aki" });
 
     send({ type: "ended", role: "helper", peer: "aki-id", reason: "peer_stopped" });
 
-    expect(screen.queryByTestId("settings-help-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
     expect(screen.getByText(fill(en.settingsHelp.ended.stopped, { name: "Aki" }))).toBeInTheDocument();
   });
 
@@ -371,14 +315,14 @@ describe("helping", () => {
     const { send } = mount([AKI, BO]);
     fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
     await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
-    send({ type: "started", role: "helper", peer: "aki-id", settings: audioSettings() });
+    send({ type: "started", role: "helper", peer: "aki-id", peer_name: "Aki" });
     send({ type: "requested", peer: "bo-id", peer_name: "Bo" });
-    send({ type: "started", role: "helped", peer: "bo-id", settings: null });
+    send({ type: "started", role: "helped", peer: "bo-id", peer_name: "Bo" });
 
     send({ type: "ended", role: "helper", peer: "aki-id", reason: "peer_stopped" });
 
-    expect(screen.queryByTestId("settings-help-panel")).not.toBeInTheDocument();
     expect(screen.getByTestId("settings-help-bar")).toHaveTextContent(fill(en.settingsHelp.helped.bar, { name: "Bo" }));
+    expect(screen.queryByTestId("settings-help-stop-helper")).not.toBeInTheDocument();
   });
 
   // Verifies: REQ-RMT-003
@@ -386,7 +330,7 @@ describe("helping", () => {
     const { send } = mount([AKI, BO]);
     fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
     await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
-    send({ type: "started", role: "helper", peer: "aki-id", settings: audioSettings() });
+    send({ type: "started", role: "helper", peer: "aki-id", peer_name: "Aki" });
     fireEvent.click(screen.getByTestId("settings-help-stop-helper"));
     fireEvent.click(screen.getByRole("button", { name: "offer Bo" }));
     await waitFor(() =>
@@ -404,7 +348,7 @@ describe("helping", () => {
     const { send, rerender } = mountWith(() => people);
     fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
     await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
-    send({ type: "started", role: "helper", peer: "aki-id", settings: audioSettings() });
+    send({ type: "started", role: "helper", peer: "aki-id", peer_name: "Aki" });
 
     people = [];
     rerender();

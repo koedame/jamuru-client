@@ -683,12 +683,6 @@
       "allow": "許可する",
       "decline": "断る"
     },
-    "proposal": {
-      "message": "{{name}}さんが{{setting}}を「{{value}}」に変えようとしています",
-      "allow": "変更を許可",
-      "decline": "断る",
-      "stop": "手伝いを止める"
-    },
     "helped": {
       "bar": "{{name}}さんが音声の設定を手伝っています",
       "stop": "停止"
@@ -698,12 +692,9 @@
       "cancel": "取り消す",
       "title": "{{name}}さんの音声の設定",
       "bar": "{{name}}さんの設定を手伝っています",
-      "open": "設定を開く",
       "stop": "手伝いをやめる",
-      "pending": "{{name}}さんの許可を待っています",
       "declined": "{{name}}さんが断りました",
       "busy": "{{name}}さんは今ほかの人に手伝ってもらっています",
-      "changeDeclined": "{{name}}さんが変更を断りました",
       "refused": {
         "device_gone": "その機器は{{name}}さんのところで接続されていないため、変更できませんでした",
         "invalid_value": "{{name}}さんのところではその値を使えないため、変更できませんでした",
@@ -718,9 +709,9 @@
       "preset": "プリセット",
       "unknown": "音声の"
     },
-    "value": {
-      "samples": "{{samples}} サンプル",
-      "unknownDevice": "接続されていない機器"
+    "window": {
+      "banner": "{{name}}さんのアプリを操作しています。ここで変えたことは、{{name}}さんのアプリに反映されます。",
+      "waiting": "{{name}}さんのアプリがルームに入るのを待っています"
     }
   }
 }

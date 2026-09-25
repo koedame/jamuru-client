@@ -685,12 +685,6 @@
       "allow": "Allow",
       "decline": "Decline"
     },
-    "proposal": {
-      "message": "{{name}} wants to change your {{setting}} to {{value}}",
-      "allow": "Allow change",
-      "decline": "Decline",
-      "stop": "Stop help"
-    },
     "helped": {
       "bar": "{{name}} is helping with your audio settings",
       "stop": "Stop"
@@ -700,12 +694,9 @@
       "cancel": "Cancel",
       "title": "{{name}}'s audio settings",
       "bar": "Helping {{name}} with audio settings",
-      "open": "Open settings",
       "stop": "Stop helping",
-      "pending": "Waiting for {{name}} to allow the change",
       "declined": "{{name}} declined",
       "busy": "{{name}} is already getting help from someone else",
-      "changeDeclined": "{{name}} declined the change",
       "refused": {
         "device_gone": "{{name}}'s app could not switch: that device is no longer connected",
         "invalid_value": "{{name}}'s app could not use that value",
@@ -720,9 +711,9 @@
       "preset": "Preset",
       "unknown": "audio"
     },
-    "value": {
-      "samples": "{{samples}} samples",
-      "unknownDevice": "a device that is not connected"
+    "window": {
+      "banner": "You are working in {{name}}'s app. What you change here changes theirs.",
+      "waiting": "Waiting for {{name}}'s app to be in the room"
     }
   }
 }

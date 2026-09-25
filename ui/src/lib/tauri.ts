@@ -65,7 +65,7 @@ export type SystemKind =
   | "settings_help_ended";
 
 // ============================================================================
-// Helping with settings (ADR-043)
+// Helping with settings (ADR-044 §5)
 // ============================================================================
 
 /** Which side of a help this app is on */
@@ -74,28 +74,20 @@ export type HelpRole = "helper" | "helped";
 /** Why a help ended: this app stopped it, the peer did, or the peer left */
 export type HelpEndReason = "stopped" | "peer_stopped" | "peer_left";
 
-/** Why the helped app refused a change its user approved */
+/**
+ * Why the app being helped did not apply a change, as the closed set of
+ * reasons its `settings_change` answers with (the error's `message`).
+ */
 export type HelpRefusal = "device_gone" | "invalid_value" | "unavailable";
-
-/** What the helped side did with a proposed change */
-export type HelpAnswer =
-  | { outcome: "applied"; settings: AudioSettings }
-  | { outcome: "refused"; reason: HelpRefusal }
-  | { outcome: "declined" };
 
 /**
  * Something about helping with settings to show. Peer ids are the room's
- * participant ids. The helper's copy of the helped side's settings names
- * devices by stand-in ids, which a proposal may use as they are. A
- * "proposed" id is this app's number for the question: decide with it.
+ * participant ids.
  */
 export type HelpEvent =
   | { type: "requested"; peer: string; peer_name: string }
-  | { type: "started"; role: HelpRole; peer: string; settings: AudioSettings | null }
+  | { type: "started"; role: HelpRole; peer: string; peer_name: string }
   | { type: "declined"; peer: string; busy: boolean }
-  | { type: "proposed"; id: number; change: SettingChange; device_name: string | null }
-  | { type: "answered"; id: number; answer: HelpAnswer }
-  | { type: "settings"; settings: AudioSettings }
   | { type: "ended"; role: HelpRole; peer: string; reason: HelpEndReason };
 
 /** The feature an app announces when it can take part in settings help */
@@ -106,27 +98,27 @@ export async function settingsHelpRequest(connId: number, peerId: string): Promi
   return invoke("settings_help_request", { connId, peerId });
 }
 
-/** Answer `peerId`'s request to help with this app's settings - the one the user was shown */
+/**
+ * Answer `peerId`'s request to help with this app's settings - the one the user
+ * was shown. Yes lets them operate this app until either stops the help.
+ */
 export async function settingsHelpAnswer(connId: number, peerId: string, accept: boolean): Promise<void> {
   return invoke("settings_help_answer", { connId, peerId, accept });
-}
-
-/**
- * Propose a change to the settings of the participant this app helps
- * @returns The proposal's id, which its answer names
- */
-export async function settingsHelpPropose(connId: number, change: SettingChange): Promise<number> {
-  return invoke("settings_help_propose", { connId, change });
-}
-
-/** Approve or decline the proposed change the user was asked about (`id` from its "proposed" event) */
-export async function settingsHelpDecide(connId: number, id: number, approve: boolean): Promise<void> {
-  return invoke("settings_help_decide", { connId, id, approve });
 }
 
 /** Stop helping ("helper") or being helped ("helped") */
 export async function settingsHelpStop(connId: number, role: HelpRole): Promise<void> {
   return invoke("settings_help_stop", { connId, role });
+}
+
+/** Who a helper's window is helping */
+export interface HelpWindowInfo {
+  peer_name: string;
+}
+
+/** Who this window helps; rejects in a window that helps no one */
+export async function helpWindowInfo(): Promise<HelpWindowInfo> {
+  return invoke("help_window_info");
 }
 
 // ============================================================================
@@ -177,7 +169,7 @@ export interface SessionSnapshot {
 /** Event the backend sends with the new snapshot whenever the session changes */
 export const SESSION_CHANGED = "session:changed";
 
-/** Event carrying something about helping with settings that the screen shows (ADR-043) */
+/** Event carrying something about helping with settings that the screen shows (ADR-044 §5) */
 export const SESSION_SETTINGS_HELP = "session:settings-help";
 
 /** The session as it is */

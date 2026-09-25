@@ -1,48 +1,32 @@
 /**
- * Helping with settings in the main window (ADR-043): the state of the help
- * this app gives and receives, built from the events the room's polling
- * delivers, and what to show for it - the questions the helped side answers,
- * the bar that shows help is going on (with Stop), and the helper's panel.
+ * Helping with settings in the main window (ADR-044 §5): the state of the help
+ * this app gives and receives, built from the events the backend sends, and what
+ * to show for it - the one question the helped side answers, and the bar that
+ * shows help is going on (with Stop).
+ *
+ * The help itself is not drawn here. The person helping works in a window of
+ * their own that shows the helped app's screen (`HelperScreen`); the person
+ * helped keeps working in this one, with the bar to stop it whenever they like.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   PEER_MESSAGE_FEATURE,
   settingsHelpAnswer,
-  settingsHelpDecide,
-  settingsHelpPropose,
   settingsHelpRequest,
   settingsHelpStop,
-  type AudioSettings,
   type HelpEvent,
   type Participant,
-  type SettingChange,
 } from "../../lib/tauri";
-import { SidePanel } from "../SidePanel";
 import { Toast } from "../Toast";
-import { useAudioSettingsTab } from "../SettingsPanel/useAudioSettingsTab";
 import { SettingsHelpBar } from "./SettingsHelpBar";
-import { SettingsHelpPanel } from "./SettingsHelpPanel";
 import { SettingsHelpQuestion } from "./SettingsHelpQuestion";
-import { changeValue, settingLabel } from "./settingText";
 
 /**
  * This app helping someone. `name` is kept from when the help began, so it
  * can still be said after they leave the participant list.
  */
-type Giving =
-  | { status: "asking"; peer: string; name: string }
-  | {
-      status: "active";
-      peer: string;
-      name: string;
-      settings: AudioSettings | null;
-      /** The proposal not answered yet: one at a time */
-      waiting: number | null;
-      /** The last answer worth saying (a decline or a refusal) */
-      note: string | null;
-      panelOpen: boolean;
-    };
+type Giving = { status: "asking" | "active"; peer: string; name: string };
 
 /**
  * Someone helping this app. `serial` numbers each request this app was
@@ -51,31 +35,22 @@ type Giving =
  */
 type Receiving =
   | { status: "asked"; peer: string; name: string; serial: number }
-  | {
-      status: "active";
-      peer: string;
-      name: string;
-      serial: number;
-      /**
-       * The change the user is asked about (the app asks one at a time). Its
-       * id is the app's number for it; `deviceName` names the device the
-       * change is to, as the helper saw it.
-       */
-      question: { id: number; change: SettingChange; deviceName: string | null } | null;
-    };
+  /** Allowed; the help begins once the app has opened its end of the connection */
+  | { status: "starting"; peer: string; name: string }
+  | { status: "active"; peer: string; name: string };
 
 /** How long a passing notice (declined, ended) stays up */
 const NOTICE_MS = 6000;
 
 export interface SettingsHelp {
-  /** Hand every SettingsHelp event of the room's polling to this */
+  /** Hand every SettingsHelp event the backend sends to this */
   onEvent: (event: HelpEvent) => void;
   /** Whether this app can offer `peer` help now */
   canOffer: (peer: Participant) => boolean;
   offer: (peerId: string) => void;
   /** The bars for help going on, for the session screen */
   bars: ReactNode;
-  /** Questions and the helper's panel, drawn over the screen */
+  /** The question of whether to allow a help, drawn over the screen */
   overlays: ReactNode;
 }
 
@@ -113,24 +88,9 @@ export function useSettingsHelp(connId: number | null, participants: Participant
           break;
         case "started":
           if (event.role === "helper") {
-            setGiving((prev) => ({
-              status: "active",
-              peer: event.peer,
-              name: prev?.peer === event.peer ? prev.name : nameOf(event.peer),
-              settings: event.settings,
-              waiting: null,
-              note: null,
-              panelOpen: true,
-            }));
+            setGiving({ status: "active", peer: event.peer, name: event.peer_name });
           } else {
-            const serial = ++requests.current;
-            setReceiving((prev) => ({
-              status: "active",
-              peer: event.peer,
-              name: prev?.peer === event.peer ? prev.name : nameOf(event.peer),
-              serial: prev?.peer === event.peer ? prev.serial : serial,
-              question: null,
-            }));
+            setReceiving({ status: "active", peer: event.peer, name: event.peer_name });
           }
           break;
         case "declined":
@@ -139,40 +99,6 @@ export function useSettingsHelp(connId: number | null, participants: Participant
             t(event.busy ? "settingsHelp.helper.busy" : "settingsHelp.helper.declined", {
               name: givingRef.current?.name || nameOf(event.peer),
             })
-          );
-          break;
-        case "proposed":
-          setReceiving((prev) =>
-            prev?.status === "active"
-              ? { ...prev, question: { id: event.id, change: event.change, deviceName: event.device_name } }
-              : prev
-          );
-          break;
-        case "answered":
-          setGiving((prev) => {
-            if (prev?.status !== "active") return prev;
-            const answer = event.answer;
-            return {
-              ...prev,
-              waiting: prev.waiting === event.id ? null : prev.waiting,
-              settings:
-                answer.outcome === "applied" && (!prev.settings || answer.settings.revision >= prev.settings.revision)
-                  ? answer.settings
-                  : prev.settings,
-              note:
-                answer.outcome === "declined"
-                  ? t("settingsHelp.helper.changeDeclined", { name: prev.name })
-                  : answer.outcome === "refused"
-                    ? t(`settingsHelp.helper.refused.${answer.reason}`, { name: prev.name })
-                    : null,
-            };
-          });
-          break;
-        case "settings":
-          setGiving((prev) =>
-            prev?.status === "active" && (!prev.settings || event.settings.revision >= prev.settings.revision)
-              ? { ...prev, settings: event.settings }
-              : prev
           );
           break;
         case "ended": {
@@ -216,34 +142,19 @@ export function useSettingsHelp(connId: number | null, participants: Participant
     (peer: string, accept: boolean) => {
       if (connId === null) return;
       // Declining starts nothing, so nothing will come back to clear the question.
-      if (!accept) setReceiving(null);
-      settingsHelpAnswer(connId, peer, accept).catch((e) => console.error("Could not answer the offer of help:", e));
-    },
-    [connId]
-  );
-
-  const decide = useCallback(
-    (id: number, approve: boolean) => {
-      if (connId === null) return;
+      // Allowing takes the app a moment (it opens its end of the connection), so
+      // the question closes now and the help is shown when it has started.
       setReceiving((prev) =>
-        prev?.status === "active" && prev.question?.id === id ? { ...prev, question: null } : prev
+        accept && prev?.status === "asked" ? { status: "starting", peer: prev.peer, name: prev.name } : null
       );
-      settingsHelpDecide(connId, id, approve).catch((e) => console.error("Could not answer the change:", e));
+      settingsHelpAnswer(connId, peer, accept).catch((e) => {
+        console.error("Could not answer the offer of help:", e);
+        // The help did not start, so nothing else will end the wait.
+        setReceiving((prev) => (prev?.status === "starting" && prev.peer === peer ? null : prev));
+      });
     },
     [connId]
   );
-
-  const propose = useCallback(
-    (change: SettingChange) => {
-      if (connId === null) return;
-      settingsHelpPropose(connId, change)
-        .then((id) => setGiving((prev) => (prev?.status === "active" ? { ...prev, waiting: id, note: null } : prev)))
-        .catch((e) => console.error("Could not propose the change:", e));
-    },
-    [connId]
-  );
-
-  const helpedTab = useAudioSettingsTab(giving?.status === "active" ? giving.settings : null, propose);
 
   const canOffer = useCallback(
     (peer: Participant) => giving === null && (peer.features ?? []).includes(PEER_MESSAGE_FEATURE),
@@ -270,31 +181,17 @@ export function useSettingsHelp(connId: number | null, participants: Participant
     );
   }
   if (giving?.status === "active") {
-    const actions = [
-      { label: t("settingsHelp.helper.stop"), onClick: () => stop("helper"), testId: "settings-help-stop-helper" },
-    ];
-    if (!giving.panelOpen) {
-      actions.unshift({
-        label: t("settingsHelp.helper.open"),
-        onClick: () => setGiving((prev) => (prev?.status === "active" ? { ...prev, panelOpen: true } : prev)),
-        testId: "settings-help-open",
-      });
-    }
     bars.push(
-      <SettingsHelpBar key="giving" message={t("settingsHelp.helper.bar", { name: giving.name })} actions={actions} />
+      <SettingsHelpBar
+        key="giving"
+        message={t("settingsHelp.helper.bar", { name: giving.name })}
+        actions={[{ label: t("settingsHelp.helper.stop"), onClick: () => stop("helper"), testId: "settings-help-stop-helper" }]}
+      />
     );
   }
   if (notice) {
     bars.push(<Toast key="notice" type="info" message={notice} />);
   }
-
-  const pendingStatus =
-    giving?.status === "active"
-      ? giving.waiting !== null
-        ? t("settingsHelp.helper.pending", { name: giving.name })
-        : giving.note
-      : null;
-  const question = receiving?.status === "active" ? receiving.question : null;
 
   // Each question is mounted afresh (and keyed), so Allow is held back from
   // its first frame and focus returns when it goes.
@@ -310,33 +207,6 @@ export function useSettingsHelp(connId: number | null, participants: Participant
           onAllow={() => answerRequest(receiving.peer, true)}
           onDecline={() => answerRequest(receiving.peer, false)}
         />
-      )}
-      {receiving?.status === "active" && question && (
-        <SettingsHelpQuestion
-          key={`proposal-${receiving.serial}-${question.id}`}
-          open
-          message={t("settingsHelp.proposal.message", {
-            name: receiving.name,
-            setting: settingLabel(question.change.setting, t),
-            value: changeValue(question.change, question.deviceName, t),
-          })}
-          allowLabel={t("settingsHelp.proposal.allow")}
-          declineLabel={t("settingsHelp.proposal.decline")}
-          onAllow={() => decide(question.id, true)}
-          onDecline={() => decide(question.id, false)}
-          stopLabel={t("settingsHelp.proposal.stop")}
-          onStop={() => stop("helped")}
-        />
-      )}
-      {/* Mounted only while helping, so nothing of the other person's settings stays behind. */}
-      {giving?.status === "active" && (
-        <SidePanel
-          isOpen={giving.panelOpen}
-          onClose={() => setGiving((prev) => (prev?.status === "active" ? { ...prev, panelOpen: false } : prev))}
-          title={t("settingsHelp.helper.title", { name: giving.name })}
-        >
-          <SettingsHelpPanel devicesTab={helpedTab} status={pendingStatus} waiting={giving.waiting !== null} />
-        </SidePanel>
       )}
     </>
   );

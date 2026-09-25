@@ -1,5 +1,5 @@
 /**
- * SettingsHelpQuestion (ADR-043): a question that has just appeared does not
+ * SettingsHelpQuestion (ADR-044 §5): a question that has just appeared does not
  * take Allow, from the very frame it is drawn.
  */
 

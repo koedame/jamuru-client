@@ -72,14 +72,14 @@ export const Default: Story = {
   args: { devicesTab },
 };
 
-/** A change waits for the other person to allow it; further choices wait too */
+/** A change is on its way to the other person's app; further choices wait */
 export const Waiting: Story = {
-  args: { devicesTab, status: "Waiting for Bo to allow the change", waiting: true },
+  args: { devicesTab, waiting: true },
 };
 
-/** The last change was declined */
-export const Declined: Story = {
-  args: { devicesTab, status: "Bo declined the change" },
+/** The other person's app could not apply the last change */
+export const Refused: Story = {
+  args: { devicesTab, status: "Bo's app could not switch: that device is no longer connected" },
 };
 
 /** The other person's app lists no devices */

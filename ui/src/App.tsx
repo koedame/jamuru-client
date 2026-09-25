@@ -2,17 +2,20 @@
  * Main Application
  *
  * Root component for the jamjam P2P audio application.
- * Settings opens in a separate Tauri window.
+ * Settings opens in a separate Tauri window. So does the window someone
+ * helping works in, which draws the helped app's screen (`HelperScreen`).
  * Diagnostics are integrated into the Settings window's Diagnostics tab.
  */
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { MainScreen } from "./screens/MainScreen";
+import { HelperScreen } from "./screens/HelperScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { windowOpenSettings, configGetLanguage } from "./lib/tauri";
 import { useWindowEvent } from "./hooks/useWindowEvents";
+import { HELP_HASH } from "./lib/helperBackend";
 
-type Screen = "main" | "settings";
+type Screen = "main" | "settings" | "help";
 
 /**
  * The screen a Tauri window was opened for, from its URL hash. Read while
@@ -22,6 +25,7 @@ type Screen = "main" | "settings";
  */
 function screenFromHash(): Screen {
   const hash = window.location.hash;
+  if (hash === HELP_HASH) return "help";
   return hash === "#/settings" || hash === "#settings" ? "settings" : "main";
 }
 
@@ -69,6 +73,9 @@ function App() {
 
   if (currentScreen === "settings") {
     return <SettingsScreen />;
+  }
+  if (currentScreen === "help") {
+    return <HelperScreen />;
   }
 
   return <MainScreen onSettingsClick={handleOpenSettings} />;
