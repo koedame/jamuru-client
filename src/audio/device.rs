@@ -31,7 +31,8 @@ pub struct AudioDevice {
     pub name: String,
     /// Supported sample rates (Hz)
     pub supported_sample_rates: Vec<u32>,
-    /// Supported channel counts
+    /// Channel counts the device offers in this direction. Empty when the
+    /// device reports none (unknown, not zero).
     pub supported_channels: Vec<u16>,
     /// Whether this is the default device
     pub is_default: bool,
@@ -59,7 +60,8 @@ pub fn list_input_devices() -> Result<Vec<AudioDevice>, AudioError> {
             let id = stable_device_id(&device)?;
             let name = display_name(&device)?;
             let is_default = default_id.as_ref() == Some(&id);
-            let (sample_rates, channels) = get_device_capabilities(&device);
+            let (sample_rates, channels) =
+                capabilities(device.supported_input_configs().into_iter().flatten());
             Some(AudioDevice {
                 id: DeviceId(id),
                 name,
@@ -94,7 +96,8 @@ pub fn list_output_devices() -> Result<Vec<AudioDevice>, AudioError> {
             let id = stable_device_id(&device)?;
             let name = display_name(&device)?;
             let is_default = default_id.as_ref() == Some(&id);
-            let (sample_rates, channels) = get_device_capabilities(&device);
+            let (sample_rates, channels) =
+                capabilities(device.supported_output_configs().into_iter().flatten());
             Some(AudioDevice {
                 id: DeviceId(id),
                 name,
@@ -172,18 +175,18 @@ pub(crate) fn offered_channel_counts(
     counts
 }
 
-/// Get supported sample rates and channel counts for a device
-fn get_device_capabilities(device: &cpal::Device) -> (Vec<u32>, Vec<u16>) {
+/// Sample rates and channel counts offered by `configs`, the stream
+/// configurations of one direction of a device.
+///
+/// Only that direction: an interface with 2 inputs and 8 outputs must not
+/// offer input channel 7. A device that reports nothing (one that is busy, or
+/// whose driver cannot say) gets no channel counts - unknown, not stereo - so
+/// a channel chosen earlier is not refused on a guess.
+fn capabilities(
+    configs: impl IntoIterator<Item = cpal::SupportedStreamConfigRange>,
+) -> (Vec<u32>, Vec<u16>) {
     let mut sample_rates = Vec::new();
     let mut channels = Vec::new();
-
-    // Try input configs first, then output configs
-    let configs: Vec<_> = device
-        .supported_input_configs()
-        .into_iter()
-        .flatten()
-        .chain(device.supported_output_configs().into_iter().flatten())
-        .collect();
 
     for config in configs {
         // Add common sample rates that fall within the supported range
@@ -207,9 +210,6 @@ fn get_device_capabilities(device: &cpal::Device) -> (Vec<u32>, Vec<u16>) {
     // Provide defaults if nothing was detected
     if sample_rates.is_empty() {
         sample_rates = vec![44100, 48000];
-    }
-    if channels.is_empty() {
-        channels = vec![1, 2];
     }
 
     (sample_rates, channels)
@@ -252,6 +252,30 @@ mod tests {
                 device
             );
         }
+    }
+
+    fn config(channels: u16) -> cpal::SupportedStreamConfigRange {
+        cpal::SupportedStreamConfigRange::new(
+            channels,
+            44100,
+            48000,
+            cpal::SupportedBufferSize::Unknown,
+            cpal::SampleFormat::F32,
+        )
+    }
+
+    #[test]
+    fn a_direction_offers_the_channel_counts_of_its_own_configs() {
+        let (_, channels) = capabilities([config(8), config(2), config(8)]);
+        assert_eq!(channels, vec![2, 8]);
+    }
+
+    /// A device that cannot say what it offers must not look like a stereo
+    /// one: the settings would then refuse a channel chosen on it earlier.
+    #[test]
+    fn a_device_that_reports_no_configs_has_unknown_channel_counts() {
+        let (_, channels) = capabilities([]);
+        assert!(channels.is_empty());
     }
 
     /// A device id that no longer exists must be an error, not a silent
