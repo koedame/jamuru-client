@@ -61,6 +61,11 @@ impl<'a> SessionScreen<'a> {
         self.element("[data-testid='leave-room']", "leave button")
     }
 
+    /// The confirm button of the dialog the leave button opens.
+    pub fn leave_confirm_button(&self) -> Element<'a> {
+        self.element(".leave-dialog__confirm", "leave confirm button")
+    }
+
     // --- participants ---
 
     /// How many people the sidebar shows, including the user themselves.
