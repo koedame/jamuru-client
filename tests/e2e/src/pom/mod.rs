@@ -265,6 +265,39 @@ impl App {
         SettingsScreen::new(&self.driver)
     }
 
+    /// Calls one of the app's commands the way its own UI does (ADR-043):
+    /// any command the app registers, with its arguments named as the webview
+    /// names them (camelCase: `{"connId": 1}`). The outer error is the control
+    /// channel failing; the inner `Result` is the command's own answer, so a
+    /// scenario can assert on a refusal.
+    ///
+    /// For putting the app into a state quickly, or reaching a feature no
+    /// page object covers yet. What a user does and sees still goes through
+    /// the screens.
+    pub fn invoke(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> DriverResult<Result<serde_json::Value, String>> {
+        self.driver.invoke(command, &args)
+    }
+
+    /// The audio settings in effect (`settings_get`).
+    pub fn audio_settings(&self) -> DriverResult<serde_json::Value> {
+        self.invoke("settings_get", serde_json::json!({}))?
+            .map_err(|e| format!("settings_get failed: {}", e))
+    }
+
+    /// Changes one audio setting (`settings_change`), for example
+    /// `json!({"setting": "buffer_size", "samples": 128})`. Returns the
+    /// settings now in effect, or the app's reason for refusing.
+    pub fn change_audio_setting(
+        &self,
+        change: serde_json::Value,
+    ) -> DriverResult<Result<serde_json::Value, String>> {
+        self.invoke("settings_change", serde_json::json!({ "change": change }))
+    }
+
     /// Labels of the windows the user currently has open.
     pub fn open_windows(&self) -> DriverResult<Vec<String>> {
         self.driver.open_windows()

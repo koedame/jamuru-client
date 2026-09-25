@@ -30,6 +30,9 @@ pub(crate) struct QueryResult {
 pub(crate) struct SelectOption {
     pub value: String,
     pub label: String,
+    /// Shown but not choosable (a placeholder such as "Select device").
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,6 +63,20 @@ struct InputBody<'a> {
 #[derive(Serialize)]
 struct DomBody<'a> {
     window: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct InvokeBody<'a> {
+    command: &'a str,
+    args: &'a serde_json::Value,
+}
+
+/// Matches `InvokeResult` in `src-tauri/src/e2e_control.rs`.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum InvokeResult {
+    Ok { value: serde_json::Value },
+    Err { error: String },
 }
 
 /// Errors are strings rather than a rich enum: every one of them ends up in
@@ -159,6 +176,26 @@ impl Driver {
                 selector
             ))
         }
+    }
+
+    /// Calls an app command through the webview's IPC. The outer result is
+    /// the channel's; the inner one is the command's own answer.
+    pub(crate) fn invoke(
+        &self,
+        command: &str,
+        args: &serde_json::Value,
+    ) -> DriverResult<Result<serde_json::Value, String>> {
+        // The command's own run time, which the channel allows up to a minute.
+        let result: InvokeResult = ureq::post(&format!("{}/e2e/invoke", self.base))
+            .timeout(Duration::from_secs(70))
+            .send_json(ureq::json!(InvokeBody { command, args }))
+            .map_err(|e| format!("invoking {} failed: {}", command, e))?
+            .into_json()
+            .map_err(|e| format!("invoking {} returned unexpected JSON: {}", command, e))?;
+        Ok(match result {
+            InvokeResult::Ok { value } => Ok(value),
+            InvokeResult::Err { error } => Err(error),
+        })
     }
 
     fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> DriverResult<T> {

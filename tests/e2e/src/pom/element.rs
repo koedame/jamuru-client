@@ -64,25 +64,29 @@ impl<'a> Element<'a> {
             .ok_or_else(|| format!("{} has no value", self.name))
     }
 
-    /// Labels of the choices a `<select>` offers, in order.
+    /// Labels of the choices a `<select>` offers, in order. A disabled
+    /// option (a "Select device" placeholder) is not a choice and is left out.
     pub fn option_labels(&self) -> DriverResult<Vec<String>> {
         Ok(self
             .driver
             .query(&self.selector, self.window())?
             .options
             .into_iter()
+            .filter(|o| !o.disabled)
             .map(|o| o.label)
             .collect())
     }
 
     /// Values of the choices a `<select>` offers, in order. Values are what
-    /// `select_value` takes - labels are for humans.
+    /// `select_value` takes - labels are for humans. Disabled options are
+    /// left out: a user cannot pick them.
     pub fn option_values(&self) -> DriverResult<Vec<String>> {
         Ok(self
             .driver
             .query(&self.selector, self.window())?
             .options
             .into_iter()
+            .filter(|o| !o.disabled)
             .map(|o| o.value)
             .collect())
     }

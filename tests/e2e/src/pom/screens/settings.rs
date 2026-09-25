@@ -254,4 +254,8 @@ impl<'a> DevicesTab<'a> {
     pub fn sample_rate_select(&self) -> Element<'a> {
         self.element("#sample-rate", "sample rate dropdown")
     }
+
+    pub fn buffer_size_select(&self) -> Element<'a> {
+        self.element("#buffer-size", "buffer size dropdown")
+    }
 }
