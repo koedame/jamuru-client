@@ -686,7 +686,8 @@
     "proposal": {
       "message": "{{name}}さんが{{setting}}を「{{value}}」に変えようとしています",
       "allow": "変更を許可",
-      "decline": "断る"
+      "decline": "断る",
+      "stop": "手伝いを止める"
     },
     "helped": {
       "bar": "{{name}}さんが音声の設定を手伝っています",
@@ -703,7 +704,11 @@
       "declined": "{{name}}さんが断りました",
       "busy": "{{name}}さんは今ほかの人に手伝ってもらっています",
       "changeDeclined": "{{name}}さんが変更を断りました",
-      "changeRefused": "変更できませんでした: {{reason}}"
+      "refused": {
+        "device_gone": "その機器は{{name}}さんのところで接続されていないため、変更できませんでした",
+        "invalid_value": "{{name}}さんのところではその値を使えないため、変更できませんでした",
+        "unavailable": "{{name}}さんのところで変更を保存できませんでした"
+      }
     },
     "ended": {
       "stopped": "{{name}}さんが設定の手伝いを止めました",
@@ -714,7 +719,8 @@
       "unknown": "音声の"
     },
     "value": {
-      "samples": "{{samples}} サンプル"
+      "samples": "{{samples}} サンプル",
+      "unknownDevice": "接続されていない機器"
     }
   }
 }

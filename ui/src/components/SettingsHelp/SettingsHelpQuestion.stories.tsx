@@ -35,15 +35,33 @@ export const Default: Story = {
   },
 };
 
-/** The helper proposes one change */
+/** The helper proposes one change; the help can be stopped from here too */
 export const Proposal: Story = {
   args: {
     open: true,
+    questionKey: 1,
     message: "Aki wants to change your Input Device to Scarlett 2i2 USB",
     allowLabel: "Allow change",
     declineLabel: "Decline",
     onAllow: () => {},
     onDecline: () => {},
+    stopLabel: "Stop help",
+    onStop: () => {},
+  },
+};
+
+/** The same, in Japanese: the three buttons fit the card */
+export const ProposalJapanese: Story = {
+  args: {
+    open: true,
+    questionKey: 1,
+    message: "Akiさんが入力デバイスを「Scarlett 2i2 USB」に変えようとしています",
+    allowLabel: "変更を許可",
+    declineLabel: "断る",
+    onAllow: () => {},
+    onDecline: () => {},
+    stopLabel: "手伝いを止める",
+    onStop: () => {},
   },
 };
 
@@ -57,6 +75,8 @@ export const LongValue: Story = {
     declineLabel: "Decline",
     onAllow: () => {},
     onDecline: () => {},
+    stopLabel: "Stop help",
+    onStop: () => {},
   },
 };
 

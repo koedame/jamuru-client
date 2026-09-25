@@ -141,16 +141,20 @@ export type HelpRole = "helper" | "helped";
 /** Why a help ended: this app stopped it, the peer did, or the peer left */
 export type HelpEndReason = "stopped" | "peer_stopped" | "peer_left";
 
+/** Why the helped app refused a change its user approved */
+export type HelpRefusal = "device_gone" | "invalid_value" | "unavailable";
+
 /** What the helped side did with a proposed change */
 export type HelpAnswer =
   | { outcome: "applied"; settings: AudioSettings }
-  | { outcome: "refused"; error: string }
+  | { outcome: "refused"; reason: HelpRefusal }
   | { outcome: "declined" };
 
 /**
  * Something about helping with settings to show. Peer ids are the room's
  * participant ids. The helper's copy of the helped side's settings names
- * devices by stand-in ids, which a proposal may use as they are.
+ * devices by stand-in ids, which a proposal may use as they are. A
+ * "proposed" id is this app's number for the question: decide with it.
  */
 export type HelpEvent =
   | { type: "requested"; peer: string; peer_name: string }
@@ -169,9 +173,9 @@ export async function settingsHelpRequest(connId: number, peerId: string): Promi
   return invoke("settings_help_request", { connId, peerId });
 }
 
-/** Answer a request to help with this app's settings */
-export async function settingsHelpAnswer(connId: number, accept: boolean): Promise<void> {
-  return invoke("settings_help_answer", { connId, accept });
+/** Answer `peerId`'s request to help with this app's settings - the one the user was shown */
+export async function settingsHelpAnswer(connId: number, peerId: string, accept: boolean): Promise<void> {
+  return invoke("settings_help_answer", { connId, peerId, accept });
 }
 
 /**
@@ -182,7 +186,7 @@ export async function settingsHelpPropose(connId: number, change: SettingChange)
   return invoke("settings_help_propose", { connId, change });
 }
 
-/** Approve or decline a proposed change to this app's settings */
+/** Approve or decline the proposed change the user was asked about (`id` from its "proposed" event) */
 export async function settingsHelpDecide(connId: number, id: number, approve: boolean): Promise<void> {
   return invoke("settings_help_decide", { connId, id, approve });
 }

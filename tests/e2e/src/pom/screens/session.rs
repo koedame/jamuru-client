@@ -246,6 +246,26 @@ impl<'a> SessionScreen<'a> {
         self.element("[data-testid='settings-help-allow']", "allow button")
     }
 
+    /// Allows what the question asks. A question that has just appeared
+    /// holds Allow back for a moment (a click then does nothing), so this
+    /// waits until it takes clicks.
+    pub fn settings_help_allow(&self, timeout: std::time::Duration) -> DriverResult<()> {
+        let allow = self.settings_help_allow_button();
+        crate::pom::wait_until(timeout, || {
+            allow.attribute("aria-disabled").ok().flatten().as_deref() == Some("false")
+        })
+        .map_err(|_| format!("Allow was still held back after {:?}", timeout))?;
+        allow.click()
+    }
+
+    /// Stop, from the question about a change (the helped side).
+    pub fn settings_help_question_stop_button(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-question-stop']",
+            "stop from the question",
+        )
+    }
+
     pub fn settings_help_decline_button(&self) -> Element<'a> {
         self.element("[data-testid='settings-help-decline']", "decline button")
     }

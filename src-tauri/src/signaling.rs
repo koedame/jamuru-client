@@ -21,7 +21,9 @@ use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
 use crate::settings::{self, AudioSettings, SettingChange};
-use crate::settings_help::{Help, HelpEvent, HelpMessage, NoticeEvent, Out, PeerBody, Role};
+use crate::settings_help::{
+    Help, HelpEvent, HelpMessage, NoticeEvent, Out, PeerBody, Refusal, Role,
+};
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
 use jamjam::telemetry::{Component, EndReason, SessionMode};
@@ -79,6 +81,19 @@ struct RoomState {
     peer_id: String,
     peer_name: String,
     chat_messages: Vec<ChatMessage>,
+    /// Names of the participants seen in the room, by id, kept after they
+    /// leave: a settings help line names the helper from here, not from
+    /// what the peer who sent it wrote.
+    peer_names: HashMap<String, String>,
+}
+
+impl RoomState {
+    fn name_of(&self, peer_id: &str) -> Option<&str> {
+        if peer_id == self.peer_id {
+            return Some(&self.peer_name);
+        }
+        self.peer_names.get(peer_id).map(String::as_str)
+    }
 }
 
 /// Signaling state managed by Tauri
@@ -279,6 +294,10 @@ pub async fn signaling_join_room(
                 peer_id: peer_id_str.clone(),
                 peer_name,
                 chat_messages: vec![],
+                peer_names: peers
+                    .iter()
+                    .map(|p| (p.id.to_string(), p.name.clone()))
+                    .collect(),
             });
 
             tracing::info!(
@@ -475,6 +494,7 @@ pub async fn signaling_create_room(
                 peer_id: peer_id_str.clone(),
                 peer_name,
                 chat_messages: vec![],
+                peer_names: HashMap::new(),
             });
 
             tracing::info!("Created room {} as peer {}", room_id, peer_id_str);
@@ -773,6 +793,7 @@ pub async fn signaling_poll_events(
                         // Add system message for join
                         let mut room_state = state.room_state.lock().await;
                         if let Some(ref mut rs) = *room_state {
+                            rs.peer_names.insert(peer.id.to_string(), peer.name.clone());
                             rs.chat_messages.push(ChatMessage {
                                 id: Uuid::new_v4().to_string(),
                                 sender_id: String::new(),
@@ -871,8 +892,10 @@ pub async fn signaling_poll_events(
 
                         usage.session_ended(&streaming, EndReason::Disconnected);
                         tracing::warn!("Room closed by the server: {}", reason);
-                        events.push(SignalingEvent::RoomClosed { reason });
+                        // Before the room event: the window stops reading
+                        // the batch there.
                         events.extend(help_events(lock_help(&state).reset()));
+                        events.push(SignalingEvent::RoomClosed { reason });
                     }
                     SignalingMessage::Kicked { peer_id, reason } => {
                         let peer_id_str = peer_id.to_string();
@@ -945,10 +968,11 @@ pub async fn signaling_poll_events(
                     let mut room_state = state.room_state.lock().await;
                     *room_state = None;
                     drop(room_state);
+                    // Before the loss: the window stops reading the batch there.
+                    events.extend(help_events(lock_help(&state).reset()));
                     events.push(SignalingEvent::ConnectionLost {
                         reason: e.to_string(),
                     });
-                    events.extend(help_events(lock_help(&state).reset()));
                 }
                 break;
             }
@@ -1016,14 +1040,20 @@ async fn carry_out(
             Out::Broadcast(message) => send_help(conn, None, message).await,
             Out::Event(HelpEvent::Notice {
                 event,
-                helper_name,
+                helper,
                 helped_name,
                 setting,
             }) => {
-                let message = help_chat_line(event, helper_name, helped_name, setting);
-                if let Some(room) = state.room_state.lock().await.as_mut() {
-                    room.chat_messages.push(message.clone());
-                }
+                let mut room = state.room_state.lock().await;
+                let Some(room) = room.as_mut() else { continue };
+                // A notice naming someone never seen in the room is not
+                // about a help this room had.
+                let Some(helper_name) = room.name_of(&helper.to_string()) else {
+                    tracing::debug!("Skipping a settings help notice about an unknown helper");
+                    continue;
+                };
+                let message = help_chat_line(event, helper_name.to_string(), helped_name, setting);
+                room.chat_messages.push(message.clone());
                 events.push(SignalingEvent::ChatMessageReceived { message });
             }
             Out::Event(event) => events.push(SignalingEvent::SettingsHelp { event }),
@@ -1116,20 +1146,22 @@ pub async fn settings_help_request(
     .await
 }
 
-/// Answers a request to help with this app's settings. On yes, the helper
-/// gets the settings as they are now.
+/// Answers `peer_id`'s request to help with this app's settings - the one
+/// the user was shown. On yes, the helper gets the settings as they are now.
 #[tauri::command]
 pub async fn settings_help_answer(
     conn_id: u32,
+    peer_id: String,
     accept: bool,
     app: AppHandle,
     state: tauri::State<'_, SignalingState>,
 ) -> Result<(), String> {
-    let current = settings::current(&app).await?;
+    let peer = Uuid::parse_str(&peer_id).map_err(|e| format!("Invalid peer id: {}", e))?;
+    let current = settings::current(&app).await.map_err(|e| e.to_string())?;
     act_on_help(&state, conn_id, |help| {
         Ok((
             (),
-            help.answer_request(accept, current)
+            help.answer_request(peer, accept, current)
                 .map_err(|e| e.to_string())?,
         ))
     })
@@ -1150,8 +1182,9 @@ pub async fn settings_help_propose(
     .await
 }
 
-/// Approves or declines proposal `id`. An approved change is applied as a
-/// change made in the settings window would be, and the room hears of it.
+/// Approves or declines the question numbered `id` - the one the user was
+/// shown. An approved change is applied as a change made in the settings
+/// window would be, and the room hears of it.
 #[tauri::command]
 pub async fn settings_help_decide(
     conn_id: u32,
@@ -1160,26 +1193,18 @@ pub async fn settings_help_decide(
     app: AppHandle,
     state: tauri::State<'_, SignalingState>,
 ) -> Result<(), String> {
-    let change = lock_help(&state)
+    let taken = lock_help(&state)
         .take_proposal(id)
         .map_err(|e| e.to_string())?;
     if !approve {
-        return act_on_help(&state, conn_id, |help| {
-            Ok(((), help.decline(id).map_err(|e| e.to_string())?))
-        })
-        .await;
+        return act_on_help(&state, conn_id, |help| Ok(((), help.decline(taken)))).await;
     }
-    let result = settings::apply(&app, &change)
-        .await
-        .map_err(|e| e.to_string());
-    act_on_help(&state, conn_id, |help| {
-        Ok((
-            (),
-            help.report(id, &change, result)
-                .map_err(|e| e.to_string())?,
-        ))
-    })
-    .await
+    let result = settings::apply(&app, &taken.change).await;
+    if let Err(e) = &result {
+        tracing::warn!("A settings change a helper proposed was refused: {}", e);
+    }
+    let result = result.map_err(|e| Refusal::from(&e));
+    act_on_help(&state, conn_id, |help| Ok(((), help.report(taken, result)))).await
 }
 
 /// Stops helping (`helper`) or being helped (`helped`).
@@ -1405,5 +1430,136 @@ mod tests {
             "expected only the PeerLeft behind the unknown message, got {:?}",
             events
         );
+    }
+
+    /// Polls connection 1 until something arrives (or a second passes).
+    async fn poll_until_events(app: &tauri::App<tauri::test::MockRuntime>) -> Vec<SignalingEvent> {
+        let mut events = Vec::new();
+        for _ in 0..20 {
+            events.extend(
+                signaling_poll_events(
+                    1,
+                    app.state::<SignalingState>(),
+                    app.state::<UsageState>(),
+                    app.state::<StreamingState>(),
+                )
+                .await
+                .unwrap(),
+            );
+            if !events.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        events
+    }
+
+    fn is_help_ended(event: &SignalingEvent) -> bool {
+        matches!(
+            event,
+            SignalingEvent::SettingsHelp {
+                event: HelpEvent::Ended { .. }
+            }
+        )
+    }
+
+    /// The window stops reading a batch of events at the room closing or the
+    /// connection dropping, so the help's end has to come first - or the
+    /// window would go on showing a help that is over.
+    ///
+    /// Verifies: REQ-RMT-003
+    #[tokio::test]
+    async fn when_the_room_closes_or_the_connection_drops_the_help_ends_before_the_window_hears_it()
+    {
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        for url in [
+            spawn_server_sending(vec![
+                r#"{"type":"RoomClosed","data":{"reason":"closed"}}"#.to_string()
+            ])
+            .await,
+            spawn_reset_server().await,
+        ] {
+            let conn = SignalingClient::new(&url, identity.clone())
+                .connect()
+                .await
+                .unwrap();
+            let app = app_with_connection(conn);
+            lock_help(&app.state::<SignalingState>()).receive(
+                Uuid::new_v4(),
+                "Aki",
+                HelpMessage::Request,
+            );
+
+            let events = poll_until_events(&app).await;
+
+            assert!(
+                matches!(
+                    events.as_slice(),
+                    [ended, SignalingEvent::RoomClosed { .. } | SignalingEvent::ConnectionLost { .. }]
+                        if is_help_ended(ended)
+                ),
+                "expected the help to end first, got {:?}",
+                events
+            );
+        }
+    }
+
+    /// A chat line about a help names the helper as the room knows them: a
+    /// peer cannot put another name in it, nor name someone never in the
+    /// room.
+    ///
+    /// Verifies: REQ-RMT-004
+    #[tokio::test]
+    async fn a_settings_help_line_names_the_helper_from_the_rooms_participants() {
+        let helper = Uuid::new_v4();
+        let sender = Uuid::new_v4();
+        let notice = |helper: Uuid| {
+            format!(
+                r#"{{"type":"PeerMessage","data":{{"from":"{sender}","from_name":"Bo","body":{{"settings_help":{{"kind":"notice","event":"changed","helper":"{helper}","setting":"buffer_size"}}}}}}}}"#
+            )
+        };
+        let url = spawn_server_sending(vec![notice(Uuid::new_v4()), notice(helper)]).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        *app.state::<SignalingState>().room_state.try_lock().unwrap() = Some(RoomState {
+            _room_id: "room".to_string(),
+            peer_id: Uuid::new_v4().to_string(),
+            peer_name: "Me".to_string(),
+            chat_messages: vec![],
+            peer_names: HashMap::from([
+                (helper.to_string(), "Aki".to_string()),
+                (sender.to_string(), "Bo".to_string()),
+            ]),
+        });
+
+        let mut events = Vec::new();
+        for _ in 0..3 {
+            events.extend(poll_until_events(&app).await);
+        }
+
+        let lines: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                SignalingEvent::ChatMessageReceived { message } => Some(message),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            lines.len(),
+            1,
+            "only the notice about a participant: {:?}",
+            events
+        );
+        assert_eq!(lines[0].helper_name.as_deref(), Some("Aki"));
+        assert_eq!(lines[0].sender_name, "Bo");
+        assert_eq!(
+            lines[0].system_kind.as_deref(),
+            Some("settings_help_changed")
+        );
+        assert_eq!(lines[0].setting.as_deref(), Some("buffer_size"));
     }
 }

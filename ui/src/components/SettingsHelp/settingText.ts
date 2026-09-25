@@ -35,8 +35,9 @@ const PRESET_NAME_KEYS: Record<string, string> = {
  * own list, channels as the pickers name them.
  */
 export function changeValue(change: SettingChange, audio: AudioSettings | null, t: TFunction): string {
+  // A device the app no longer lists is not named by its id: the id can carry a serial number.
   const deviceName = (devices: AudioSettings["input_devices"] | undefined, id: string) =>
-    devices?.find((d) => d.id === id)?.name ?? id;
+    devices?.find((d) => d.id === id)?.name ?? t("settingsHelp.value.unknownDevice");
   const channel = (n: number | null) =>
     n === null ? t("common.none", "None") : t("settings.devices.channelOption", { channel: n });
   const side = (s: "left" | "right") =>

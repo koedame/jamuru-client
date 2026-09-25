@@ -32,6 +32,11 @@
   border-color: var(--color-accent-hover);
 }
 
+.settings-help__button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .settings-help-question__overlay {
   position: fixed;
   inset: 0;
@@ -43,7 +48,8 @@
 }
 
 .settings-help-question {
-  width: 320px;
+  width: 360px;
+  max-width: calc(100vw - 2 * var(--space-lg));
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
@@ -63,8 +69,13 @@
 
 .settings-help-question__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-sm);
+}
+
+.settings-help-question__stop {
+  margin-right: auto;
 }
 
 .settings-help-bar {

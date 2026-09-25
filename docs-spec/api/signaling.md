@@ -327,9 +327,12 @@ sequenceDiagram
 **相手あてのメッセージの中身（`PeerMessage.body`）。** トピックの名前 1 つをキーにしたオブジェクトで、いまあるのは
 `settings_help`（設定の手伝い。[ADR-043](../adr/ADR-043-remote-operation-rpc.md)）だけ。中身は `kind` で区別する:
 `request`（手伝わせて）・`accepted`（いいよ。設定つき）・`declined`（断る。`busy` なら別の人に手伝われている）・
-`propose`（この変更を。`id` と `change`）・`answered`（その変更の結果。`applied` / `refused` / `declined`）・
-`settings`（こちらで設定が変わった）・`stop`（手伝いをやめる）・`notice`（ルーム全員へ。チャットの記録用）。
-知らないトピックは読まずに捨てる（新しいアプリからのもの）。デバイス ID は仮の名前に置き換えて渡す（REQ-RMT-006）。
+`propose`（この変更を。`id` と `change`。答えが来るまで次は送らない）・`answered`（その変更の結果。`applied` /
+`refused`（`reason` は `device_gone` / `invalid_value` / `unavailable`）/ `declined`）・
+`settings`（こちらで設定が変わった）・`stop`（手伝いをやめる。`role` は送り手の側 `helper` / `helped`）・
+`notice`（ルーム全員へ。チャットの記録用。手伝う人は `helper` の参加者 ID で、名前は受け取った側が引く）。
+知らないトピックは読まずに捨てる（新しいアプリからのもの）。デバイス ID は仮の名前（入力は `input-N`、出力は `output-N`）に
+置き換えて渡す（REQ-RMT-006）。数値は整数の ID と設定値だけで、±(2^53−1) に収まる。
 
 **知らない種類は読み飛ばす（REQ-CON-030）。** `SignalingConnection::recv()` は、`type` がこの列挙に無いメッセージを
 捨てて次のメッセージを待つ。サーバーにメッセージの種類を足しても、配布済みのアプリはルームから落ちない。

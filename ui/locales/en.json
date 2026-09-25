@@ -688,7 +688,8 @@
     "proposal": {
       "message": "{{name}} wants to change your {{setting}} to {{value}}",
       "allow": "Allow change",
-      "decline": "Decline"
+      "decline": "Decline",
+      "stop": "Stop help"
     },
     "helped": {
       "bar": "{{name}} is helping with your audio settings",
@@ -705,7 +706,11 @@
       "declined": "{{name}} declined",
       "busy": "{{name}} is already getting help from someone else",
       "changeDeclined": "{{name}} declined the change",
-      "changeRefused": "The change could not be made: {{reason}}"
+      "refused": {
+        "device_gone": "{{name}}'s app could not switch: that device is no longer connected",
+        "invalid_value": "{{name}}'s app could not use that value",
+        "unavailable": "{{name}}'s app could not save the change"
+      }
     },
     "ended": {
       "stopped": "{{name}} stopped the help with settings",
@@ -716,7 +721,8 @@
       "unknown": "audio"
     },
     "value": {
-      "samples": "{{samples}} samples"
+      "samples": "{{samples}} samples",
+      "unknownDevice": "a device that is not connected"
     }
   }
 }
