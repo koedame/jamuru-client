@@ -158,9 +158,11 @@ impl<'a> SessionScreen<'a> {
         self.channel_peak(PEER_PEAK)
     }
 
-    /// Sample rate (Hz) the remote peer's channel says the peer sends at.
-    /// It comes from the peer's app over the connection, so it says what the
-    /// peer's session actually runs at - not what this app is set to.
+    /// Sample rate (Hz) the remote peer's channel shows.
+    ///
+    /// Once the peer's audio details arrive over the connection this is the
+    /// rate the peer's session runs at. Until then the channel shows the
+    /// default (48 kHz), so a scenario proving a rate must use another one.
     pub fn peer_channel_sample_rate(&self) -> DriverResult<u32> {
         let raw = self
             .element(PEER_QUALITY_BADGE, "peer quality badge")

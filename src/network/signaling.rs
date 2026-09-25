@@ -124,9 +124,7 @@ impl PeerInfo {
     pub fn takes_peer_messages(&self) -> bool {
         self.features.iter().any(|f| f == PEER_MESSAGE_FEATURE)
     }
-}
 
-impl PeerInfo {
     /// Get all candidate addresses sorted by priority (highest first)
     pub fn get_sorted_candidates(&self) -> Vec<SocketAddr> {
         let mut candidates = self.candidates.clone();
@@ -267,10 +265,16 @@ pub enum SignalingMessage {
 
     /// A message from one app to another in the same room, relayed by the
     /// server (ADR-043). Sent with `to` naming one participant, or without it
-    /// for everyone in the room who takes peer messages - the sender
-    /// included. It arrives with `from` and `from_name` set by the server to
-    /// the sending participant, whatever the sender wrote there. The server
-    /// does not read `body`: what it means is between the apps.
+    /// for everyone in the room who takes peer messages (the sender too, when
+    /// it announced that it takes them). It arrives with `from` and
+    /// `from_name` set by the server to the sending participant, whatever the
+    /// sender wrote there; a received one without `from` did not come through
+    /// a server and is to be dropped. The server does not read `body` - what
+    /// it means is between the apps - but it has to be a JSON object.
+    ///
+    /// Nothing comes back when the server does not deliver it (the addressee
+    /// left, is in another room, or does not take peer messages): an exchange
+    /// built on these messages cannot wait for an answer forever.
     PeerMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<Uuid>,
@@ -278,7 +282,7 @@ pub enum SignalingMessage {
         from: Option<Uuid>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from_name: Option<String>,
-        body: serde_json::Value,
+        body: serde_json::Map<String, serde_json::Value>,
     },
 }
 
@@ -753,6 +757,10 @@ mod tests {
         assert!(newer.takes_peer_messages());
     }
 
+    fn object(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        value.as_object().expect("an object").clone()
+    }
+
     /// Sent, a peer message carries only the addressee and the body; relayed,
     /// it arrives with the sender the server stamped.
     ///
@@ -764,7 +772,7 @@ mod tests {
             to: Some(to),
             from: None,
             from_name: None,
-            body: serde_json::json!({"settings_help": {"kind": "request"}}),
+            body: object(serde_json::json!({"settings_help": {"kind": "request"}})),
         })
         .unwrap();
         assert_eq!(
@@ -790,7 +798,17 @@ mod tests {
         assert_eq!(to, None, "to everyone in the room");
         assert_eq!(stamped, Some(from));
         assert_eq!(from_name.as_deref(), Some("Aki"));
-        assert_eq!(body, serde_json::json!({"any": 1}));
+        assert_eq!(body, object(serde_json::json!({"any": 1})));
+
+        let not_an_object: Result<SignalingMessage, _> =
+            serde_json::from_value(serde_json::json!({
+                "type": "PeerMessage",
+                "data": {"from": from, "from_name": "Aki", "body": "text"}
+            }));
+        assert!(
+            not_an_object.is_err(),
+            "a body that is not an object is refused"
+        );
     }
 
     #[test]
