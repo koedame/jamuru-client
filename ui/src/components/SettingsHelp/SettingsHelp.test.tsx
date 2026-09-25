@@ -64,6 +64,11 @@ function mountWith(participantsNow: () => PeerInfo[]) {
       act(() => {
         help!.onEvent(event);
       }),
+    /** Several events handed over in one go, as one poll delivers them */
+    sendAll: (events: HelpEvent[]) =>
+      act(() => {
+        for (const event of events) help!.onEvent(event);
+      }),
     rerender: () => rerender(<Harness />),
   };
 }
@@ -204,6 +209,33 @@ describe("being helped", () => {
     expect(decided).toEqual([{ command: "settings_help_decide", args: { connId: CONN, id: 1, approve: true } }]);
     expect(screen.getByTestId("settings-help-question")).toHaveTextContent(en.settings.devices.transmitChannels);
     expect(screen.getByTestId("settings-help-decline")).toHaveFocus();
+  });
+
+  // Verifies: REQ-RMT-003
+  it("a request and its withdrawal arrive in the same poll, no question is left up", () => {
+    const { sendAll } = mount([AKI]);
+
+    sendAll([
+      { type: "requested", peer: "aki-id", peer_name: "Aki" },
+      { type: "ended", role: "helped", peer: "aki-id", reason: "peer_stopped" },
+    ]);
+
+    expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
+    expect(screen.getByText(fill(en.settingsHelp.ended.stopped, { name: "Aki" }))).toBeInTheDocument();
+  });
+
+  // Verifies: REQ-RMT-002
+  it("the same person withdraws and asks again in one poll, the new question holds Allow back again", async () => {
+    const { send, sendAll } = mount([AKI]);
+    send({ type: "requested", peer: "aki-id", peer_name: "Aki" });
+    await untilAllowIsReady();
+
+    sendAll([
+      { type: "ended", role: "helped", peer: "aki-id", reason: "peer_stopped" },
+      { type: "requested", peer: "aki-id", peer_name: "Aki" },
+    ]);
+
+    expect(screen.getByTestId("settings-help-allow")).toHaveAttribute("aria-disabled", "true");
   });
 
   it("the question closes, focus goes back where it was", async () => {
@@ -350,7 +382,7 @@ describe("helping", () => {
   });
 
   // Verifies: REQ-RMT-003
-  it("the end of a help this app stopped arrives after it offered help to someone else, the new offer stays", async () => {
+  it("an end about someone else leaves the offer to the person asked now", async () => {
     const { send } = mount([AKI, BO]);
     fireEvent.click(screen.getByRole("button", { name: "offer Aki" }));
     await waitFor(() => expect(screen.getByTestId("settings-help-bar")).toBeInTheDocument());
@@ -361,7 +393,7 @@ describe("helping", () => {
       expect(screen.getByTestId("settings-help-bar")).toHaveTextContent(fill(en.settingsHelp.helper.asking, { name: "Bo" }))
     );
 
-    send({ type: "ended", role: "helper", peer: "aki-id", reason: "stopped" });
+    send({ type: "ended", role: "helper", peer: "aki-id", reason: "peer_left" });
 
     expect(screen.getByTestId("settings-help-bar")).toHaveTextContent(fill(en.settingsHelp.helper.asking, { name: "Bo" }));
   });

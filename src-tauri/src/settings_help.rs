@@ -137,7 +137,7 @@ pub enum Role {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EndReason {
-    /// This app stopped it.
+    /// This app left the room or lost the connection.
     Stopped,
     /// The peer stopped it (or withdrew the request).
     PeerStopped,
@@ -609,7 +609,9 @@ impl Help {
         }
     }
 
-    /// Stops the help in `role`. A waiting proposal is dropped.
+    /// Stops the help in `role`. A waiting proposal is dropped. No event: the
+    /// UI that asked to stop has already cleared the help, and an end that
+    /// reached it later could land on a help it began in the meantime.
     pub fn stop(&mut self, role: Role) -> Result<Vec<Out>, HelpError> {
         let (peer, announce) = match role {
             Role::Helper => (
@@ -629,11 +631,6 @@ impl Help {
         if announce {
             out.push(Out::Broadcast(notice(NoticeEvent::Ended, peer, None)));
         }
-        out.push(Out::Event(HelpEvent::Ended {
-            role,
-            peer,
-            reason: EndReason::Stopped,
-        }));
         Ok(out)
     }
 
@@ -1311,6 +1308,24 @@ mod tests {
             }]
         );
         assert_eq!(helper.propose(buffer(64)), Err(HelpError::NotActive));
+    }
+
+    /// Stopping gives the UI nothing to act on later: it has cleared the help
+    /// itself, and an end delivered on its next poll could clear a help it
+    /// began with the same person in the meantime.
+    ///
+    /// Verifies: REQ-RMT-003
+    #[test]
+    fn stopping_gives_the_ui_no_event_that_could_end_a_help_begun_after_it() {
+        let (mut helper, mut helped, _, _) = active();
+
+        for out in [
+            helper.stop(Role::Helper).unwrap(),
+            helped.stop(Role::Helped).unwrap(),
+        ] {
+            assert!(events(&out).is_empty(), "{:?}", out);
+            assert_eq!(sent(&out).len(), 1, "the other side is still told");
+        }
     }
 
     /// Two participants can help each other at the same time; stopping one

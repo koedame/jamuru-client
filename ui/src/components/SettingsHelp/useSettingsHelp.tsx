@@ -44,13 +44,18 @@ type Giving =
       panelOpen: boolean;
     };
 
-/** Someone helping this app */
+/**
+ * Someone helping this app. `serial` numbers each request this app was
+ * asked, so a question for a new request is a new question even from the
+ * same person.
+ */
 type Receiving =
-  | { status: "asked"; peer: string; name: string }
+  | { status: "asked"; peer: string; name: string; serial: number }
   | {
       status: "active";
       peer: string;
       name: string;
+      serial: number;
       /**
        * The change the user is asked about (the app asks one at a time). Its
        * id is the app's number for it; `deviceName` names the device the
@@ -86,13 +91,12 @@ export function useSettingsHelp(connId: number | null, participants: PeerInfo[])
     (peer: string) => participantsRef.current.find((p) => p.id === peer)?.name ?? "",
     []
   );
-  // The help as last rendered, for an event to check it is about the help
-  // shown now: the end of a help this app stopped arrives on a later poll,
-  // after the user may have started another.
+  // The help as last rendered, for the name of someone who has left the list.
   const givingRef = useRef(giving);
   givingRef.current = giving;
   const receivingRef = useRef(receiving);
   receivingRef.current = receiving;
+  const requests = useRef(0);
 
   useEffect(() => {
     if (notice === null) return;
@@ -104,7 +108,8 @@ export function useSettingsHelp(connId: number | null, participants: PeerInfo[])
     (event: HelpEvent) => {
       switch (event.type) {
         case "requested":
-          setReceiving({ status: "asked", peer: event.peer, name: event.peer_name });
+          requests.current += 1;
+          setReceiving({ status: "asked", peer: event.peer, name: event.peer_name, serial: requests.current });
           break;
         case "started":
           if (event.role === "helper") {
@@ -118,10 +123,12 @@ export function useSettingsHelp(connId: number | null, participants: PeerInfo[])
               panelOpen: true,
             }));
           } else {
+            const serial = ++requests.current;
             setReceiving((prev) => ({
               status: "active",
               peer: event.peer,
               name: prev?.peer === event.peer ? prev.name : nameOf(event.peer),
+              serial: prev?.peer === event.peer ? prev.serial : serial,
               question: null,
             }));
           }
@@ -169,11 +176,12 @@ export function useSettingsHelp(connId: number | null, participants: PeerInfo[])
           );
           break;
         case "ended": {
+          // Every end describes the app's help as it is now (stopping here
+          // clears the help without one), so it ends the help with that peer.
           const current = event.role === "helper" ? givingRef.current : receivingRef.current;
-          if (current?.peer !== event.peer) break;
           if (event.role === "helper") setGiving((prev) => (prev?.peer === event.peer ? null : prev));
           else setReceiving((prev) => (prev?.peer === event.peer ? null : prev));
-          const name = current.name || nameOf(event.peer);
+          const name = (current?.peer === event.peer ? current.name : "") || nameOf(event.peer);
           if (event.reason === "peer_stopped") setNotice(t("settingsHelp.ended.stopped", { name }));
           if (event.reason === "peer_left") setNotice(t("settingsHelp.ended.left", { name }));
           break;
@@ -294,7 +302,7 @@ export function useSettingsHelp(connId: number | null, participants: PeerInfo[])
     <>
       {receiving?.status === "asked" && (
         <SettingsHelpQuestion
-          key={`request-${receiving.peer}`}
+          key={`request-${receiving.serial}`}
           open
           message={t("settingsHelp.request.message", { name: receiving.name })}
           allowLabel={t("settingsHelp.request.allow")}
@@ -305,7 +313,7 @@ export function useSettingsHelp(connId: number | null, participants: PeerInfo[])
       )}
       {receiving?.status === "active" && question && (
         <SettingsHelpQuestion
-          key={`proposal-${question.id}`}
+          key={`proposal-${receiving.serial}-${question.id}`}
           open
           message={t("settingsHelp.proposal.message", {
             name: receiving.name,

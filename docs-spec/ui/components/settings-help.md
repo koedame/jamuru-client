@@ -23,7 +23,7 @@
 
 | 部品 | 種類 | 役割 |
 |------|------|------|
-| `SettingsHelpQuestion` | Pure | 問いかけ。`message` と「許可」「断る」（と、渡されれば「手伝いを止める」）のボタン。最初のフォーカスは「断る」、Escape は断る。外側のクリックでは閉じない（うっかり答えさせない）。新しい問いかけ（`questionKey` が変わる）が出てから `ALLOW_DELAY_MS`（0.5 秒）は「許可」を受け付けない（`aria-disabled`。連打やひとつ前へのクリックで答えさせない）。閉じるとフォーカスを元の場所に戻す。`useSettingsHelp` は問いかけを出すたびに作り直す（`key` 付きで、出ている間だけ描く）ので、新しい問いかけは最初の描画から「許可」を受け付けない |
+| `SettingsHelpQuestion` | Pure | 問いかけ。`message` と「許可」「断る」（と、渡されれば「手伝いを止める」）のボタン。最初のフォーカスは「断る」、Escape は断る。外側のクリックでは閉じない（うっかり答えさせない）。問いかけが出てから `ALLOW_DELAY_MS`（0.5 秒）は「許可」を受け付けない（`aria-disabled`。連打やひとつ前へのクリックで答えさせない）。閉じるとフォーカスを元の場所に戻す。別の問いかけは別のマウントにする: `useSettingsHelp` は問いかけごとに `key`（申請ごとの通し番号と申請の番号）を付けて出ている間だけ描くので、最初の描画から「許可」を受け付けない |
 | `SettingsHelpBar` | Pure | 帯。`message`・`status`・操作ボタンの並び |
 | `SettingsHelpPanel` | Pure | 相手の設定。`useAudioSettingsTab` が作った Devices タブの props をそのまま描く。`waiting` の間は選べない |
 | `useSettingsHelp` | Adapter（hook） | メイン画面のポーリングが届けるイベントから状態を作り、上の部品と入口の判定（`canOffer`）を返す |

@@ -6,7 +6,8 @@
  *
  * Allowing takes effect only once a question has been up for a moment: a
  * double click on Allow, or a click meant for the question before, cannot
- * approve a question that has just appeared.
+ * approve a question that has just appeared. A different question must be a
+ * new mount (give each its own `key`); the hold then starts from its first frame.
  */
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -18,8 +19,6 @@ export const ALLOW_DELAY_MS = 500;
 export interface SettingsHelpQuestionProps {
   /** Whether the question is shown. Renders nothing when false. */
   open: boolean;
-  /** Which question this is. A new one starts over: focus on declining, Allow held back. */
-  questionKey?: string | number;
   /** What is being asked, in the user's words */
   message: string;
   allowLabel: string;
@@ -33,7 +32,6 @@ export interface SettingsHelpQuestionProps {
 
 export function SettingsHelpQuestion({
   open,
-  questionKey,
   message,
   allowLabel,
   declineLabel,
@@ -45,6 +43,8 @@ export function SettingsHelpQuestion({
   const dialogRef = useRef<HTMLDivElement>(null);
   const declineRef = useRef<HTMLButtonElement>(null);
   const [allowReady, setAllowReady] = useState(false);
+  // Closed, it starts over: shown again, Allow is held back from the first frame.
+  if (!open && allowReady) setAllowReady(false);
 
   // Focus goes back where it was when the question closes. Taken before the
   // effect below moves focus into the question.
@@ -57,11 +57,10 @@ export function SettingsHelpQuestion({
   // Focus starts on declining: the safe answer when a key is pressed by accident.
   useEffect(() => {
     if (!open) return;
-    setAllowReady(false);
     declineRef.current?.focus();
     const timer = setTimeout(() => setAllowReady(true), ALLOW_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [open, questionKey]);
+  }, [open]);
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {

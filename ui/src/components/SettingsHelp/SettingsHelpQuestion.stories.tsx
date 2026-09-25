@@ -39,7 +39,6 @@ export const Default: Story = {
 export const Proposal: Story = {
   args: {
     open: true,
-    questionKey: 1,
     message: "Aki wants to change your Input Device to Scarlett 2i2 USB",
     allowLabel: "Allow change",
     declineLabel: "Decline",
@@ -54,7 +53,6 @@ export const Proposal: Story = {
 export const ProposalJapanese: Story = {
   args: {
     open: true,
-    questionKey: 1,
     message: "Akiさんが入力デバイスを「Scarlett 2i2 USB」に変えようとしています",
     allowLabel: "変更を許可",
     declineLabel: "断る",
