@@ -94,4 +94,8 @@ custom-protocol = ["tauri/custom-protocol"]
 # enabling it compiles in a loopback HTTP server that can read the app's
 # rendered DOM. tests/e2e/tests/release_build_guard.rs asserts this stays out
 # of the default set.
-e2e-control = ["dep:axum", "tokio/net", "tokio/rt"]
+e2e-control = ["debug-tools", "dep:axum", "tokio/net", "tokio/rt"]
+# Methods for looking at and driving a running app (`ui.*`, `debug.*`; ADR-044).
+# Used by the E2E control channel and by remote debugging, and absent from every
+# other build for the same reason: they can read what the app shows.
+debug-tools = []

@@ -54,6 +54,26 @@ fn e2e_control_is_not_a_default_feature() {
     );
 }
 
+/// Remote debugging and the methods that read and drive the screen exist only
+/// in beta and E2E builds (ADR-044). A release build must carry none of them,
+/// so none may be in the default set.
+///
+/// Verifies: REQ-RMT-020
+#[test]
+fn the_debug_features_are_not_default_features() {
+    let defaults = default_features(&tauri_manifest());
+
+    for feature in ["e2e-control", "debug-tools", "debug-remote"] {
+        assert!(
+            !defaults.iter().any(|f| f == feature),
+            "{} is enabled by default, so it would ship in release builds. \
+             Default features: {:?}",
+            feature,
+            defaults
+        );
+    }
+}
+
 /// The guard above is only meaningful if it is reading the real list; a
 /// parser that silently returned nothing would let anything through.
 ///
