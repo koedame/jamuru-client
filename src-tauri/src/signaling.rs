@@ -20,9 +20,8 @@ use uuid::Uuid;
 use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
-use crate::settings::{self, AudioSettings, SettingChange};
 use crate::settings_help::{
-    Help, HelpEvent, HelpMessage, NoticeEvent, Out, PeerBody, Refusal, Role,
+    notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
 };
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
@@ -103,11 +102,11 @@ pub struct SignalingState {
     /// Connections whose loss has been logged. The UI polls a dead connection
     /// every tick; without this each poll would repeat the same line.
     lost_logged: std::sync::Mutex<HashSet<u32>>,
-    /// Helping with settings, given and received (ADR-043). Never held across
+    /// Helping with settings, given and received (ADR-044 §5). Never held across
     /// an await: it decides, and the caller then sends.
     help: std::sync::Mutex<Help>,
     /// The connection the help talks over, for a message not prompted by
-    /// the UI (this app's settings changing while someone helps).
+    /// the UI (the relay connection ending, a setting being changed).
     help_conn: std::sync::Mutex<Option<u32>>,
     /// Events from the UI's own help actions, handed over on its next poll
     /// with those that arrived from the room.
@@ -752,8 +751,11 @@ pub enum SignalingEvent {
     /// (network blip, proxy reset, server restart). `conn_id` is dead - the
     /// frontend must disconnect it and reconnect.
     ConnectionLost { reason: String },
-    /// Something about helping with settings the UI shows (ADR-043)
+    /// Something about helping with settings the UI shows (ADR-044 §5)
     SettingsHelp { event: HelpEvent },
+    /// The help this app asked for was accepted: open the helper's end of the
+    /// relay and the window the help is done in.
+    HelpLink { link: Link },
 }
 
 /// Poll for signaling events (peer join/leave, chat messages)
@@ -1053,6 +1055,7 @@ async fn carry_out(
                 events.push(SignalingEvent::ChatMessageReceived { message });
             }
             Out::Event(event) => events.push(SignalingEvent::SettingsHelp { event }),
+            Out::Link(link) => events.push(SignalingEvent::HelpLink { link }),
         }
     }
     events
@@ -1128,6 +1131,26 @@ async fn act_on_help<T>(
     Ok(value)
 }
 
+/// Carries out what the help decided for something no action of the UI
+/// prompted (a relay connection ended, a setting was changed): it goes out on
+/// the connection the help talks over, and its events reach the UI on the next
+/// poll.
+async fn deliver<R: Runtime>(app: &AppHandle<R>, outs: Vec<Out>) {
+    if outs.is_empty() {
+        return;
+    }
+    let state = app.state::<SignalingState>();
+    let Some(conn_id) = *state.help_conn.lock().unwrap_or_else(|e| e.into_inner()) else {
+        return;
+    };
+    let mut connections = state.connections.lock().await;
+    if let Some(conn) = connections.get_mut(&conn_id) {
+        let events = carry_out(conn, &state, outs).await;
+        drop(connections);
+        queue_events(&state, events);
+    }
+}
+
 /// Asks `peer_id` to let this app help with their audio settings.
 #[tauri::command]
 pub async fn settings_help_request(
@@ -1142,8 +1165,10 @@ pub async fn settings_help_request(
     .await
 }
 
-/// Answers `peer_id`'s request to help with this app's settings - the one
-/// the user was shown. On yes, the helper gets the settings as they are now.
+/// Answers `peer_id`'s request to help with this app's audio settings - the
+/// one the user was shown. On yes, this app opens its end of the relay under a
+/// number nobody else knows and gives the helper the number; from then on the
+/// helper operates this app through the help portal.
 #[tauri::command]
 pub async fn settings_help_answer(
     conn_id: u32,
@@ -1153,54 +1178,39 @@ pub async fn settings_help_answer(
     state: tauri::State<'_, SignalingState>,
 ) -> Result<(), String> {
     let peer = Uuid::parse_str(&peer_id).map_err(|e| format!("Invalid peer id: {}", e))?;
-    let current = settings::current(&app).await.map_err(|e| e.to_string())?;
+    if !accept {
+        return act_on_help(&state, conn_id, |help| {
+            Ok(((), help.decline(peer).map_err(|e| e.to_string())?))
+        })
+        .await;
+    }
+    if !lock_help(&state).is_asked_by(peer) {
+        return Err(HelpError::NotActive.to_string());
+    }
+    let session = jamjam::network::new_help_session();
+    let end = match crate::help_link::open_host(&app, &session).await {
+        Ok(end) => end,
+        Err(e) => {
+            // Nothing was started: the helper hears a no rather than waiting.
+            tracing::warn!("Could not open the relay for a settings help: {}", e);
+            let declined = act_on_help(&state, conn_id, |help| {
+                Ok(((), help.decline(peer).map_err(|e| e.to_string())?))
+            })
+            .await;
+            declined?;
+            return Err(e);
+        }
+    };
     act_on_help(&state, conn_id, |help| {
         Ok((
             (),
-            help.answer_request(peer, accept, current)
+            help.accept(peer, session.clone())
                 .map_err(|e| e.to_string())?,
         ))
     })
-    .await
-}
-
-/// Proposes a change to the settings of the participant this app helps.
-/// Returns the proposal's id, which its answer names.
-#[tauri::command]
-pub async fn settings_help_propose(
-    conn_id: u32,
-    change: SettingChange,
-    state: tauri::State<'_, SignalingState>,
-) -> Result<u64, String> {
-    act_on_help(&state, conn_id, |help| {
-        help.propose(change).map_err(|e| e.to_string())
-    })
-    .await
-}
-
-/// Approves or declines the question numbered `id` - the one the user was
-/// shown. An approved change is applied as a change made in the settings
-/// window would be, and the room hears of it.
-#[tauri::command]
-pub async fn settings_help_decide(
-    conn_id: u32,
-    id: u64,
-    approve: bool,
-    app: AppHandle,
-    state: tauri::State<'_, SignalingState>,
-) -> Result<(), String> {
-    let taken = lock_help(&state)
-        .take_proposal(id)
-        .map_err(|e| e.to_string())?;
-    if !approve {
-        return act_on_help(&state, conn_id, |help| Ok(((), help.decline(taken)))).await;
-    }
-    let result = settings::apply(&app, &taken.change).await;
-    if let Err(e) = &result {
-        tracing::warn!("A settings change a helper proposed was refused: {}", e);
-    }
-    let result = result.map_err(|e| Refusal::from(&e));
-    act_on_help(&state, conn_id, |help| Ok(((), help.report(taken, result)))).await
+    .await?;
+    crate::help_link::serve_host(app, session, peer, end);
+    Ok(())
 }
 
 /// Stops helping (`helper`) or being helped (`helped`).
@@ -1208,31 +1218,47 @@ pub async fn settings_help_decide(
 pub async fn settings_help_stop(
     conn_id: u32,
     role: Role,
+    app: AppHandle,
     state: tauri::State<'_, SignalingState>,
 ) -> Result<(), String> {
-    act_on_help(&state, conn_id, |help| {
+    let stopped = act_on_help(&state, conn_id, |help| {
         Ok(((), help.stop(role).map_err(|e| e.to_string())?))
     })
-    .await
+    .await;
+    crate::help_link::end(&app, role);
+    stopped
 }
 
-/// This app's settings changed: whoever helps with them sees them as they
-/// are now. Called for every change, whoever made it.
-pub async fn settings_changed<R: tauri::Runtime>(app: &AppHandle<R>, changed: AudioSettings) {
+/// The window the help is done in was closed: that stops the help, as pressing
+/// Stop does.
+pub async fn stop_helping_from_window<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<SignalingState>();
-    let outs = lock_help(&state).settings_changed(changed);
-    if outs.is_empty() {
-        return;
+    let outs = lock_help(&state).stop(Role::Helper);
+    crate::help_link::end(app, Role::Helper);
+    if let Ok(outs) = outs {
+        deliver(app, outs).await;
     }
-    let Some(conn_id) = *state.help_conn.lock().unwrap_or_else(|e| e.into_inner()) else {
-        return;
-    };
-    let mut connections = state.connections.lock().await;
-    if let Some(conn) = connections.get_mut(&conn_id) {
-        let events = carry_out(conn, &state, outs).await;
-        drop(connections);
-        queue_events(&state, events);
-    }
+}
+
+/// The relay connection of the help numbered `session` ended, whichever side
+/// closed it: the help is over.
+pub async fn help_link_closed<R: Runtime>(app: &AppHandle<R>, role: Role, session: &str) {
+    let outs = lock_help(&app.state::<SignalingState>()).link_closed(role, session);
+    deliver(app, outs).await;
+}
+
+/// A helper changed the audio setting named `setting` of this app: the room
+/// hears of it, in the chat.
+pub async fn announce_change<R: Runtime>(app: &AppHandle<R>, helper: Uuid, setting: String) {
+    deliver(
+        app,
+        vec![Out::Broadcast(notice(
+            NoticeEvent::Changed,
+            helper,
+            Some(setting),
+        ))],
+    )
+    .await;
 }
 
 #[cfg(test)]

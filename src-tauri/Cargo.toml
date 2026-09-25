@@ -63,7 +63,7 @@ tokio-tungstenite = "0.30"
 futures-util = "0.3"
 
 # `#[tokio::test]` for the self-update tests
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "test-util"] }
 
 # tauri::test::mock_app(), for calling a #[tauri::command] directly in a
 # test without a real window.
@@ -108,4 +108,4 @@ debug-tools = ["dep:cairo-rs", "dep:webkit2gtk"]
 # Remote debugging: the beta build asks the server whether this installation is
 # enrolled and, if so, keeps a connection to the relay that lets it be operated
 # (ADR-044). Deliberately absent from `default`, like `e2e-control`.
-debug-remote = ["debug-tools", "jamjam/remote-link"]
+debug-remote = ["debug-tools"]

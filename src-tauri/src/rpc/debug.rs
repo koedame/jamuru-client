@@ -75,7 +75,7 @@ pub const METHODS: &[Method] = &[
         name: "debug.screenshot",
         access: Access::TOOLS,
         kind: Kind::Native,
-        summary: "アプリの画面の PNG（いまは Linux だけ）",
+        summary: "アプリの画面の PNG（`window` でウィンドウを選べる。いまは Linux だけ）",
     },
     Method {
         name: "debug.audio_record",
@@ -103,7 +103,7 @@ pub async fn call<R: Runtime>(
         "debug.crashes" => crashes(app),
         "debug.restart" => Ok(restart(app)),
         "debug.update_apply" => update_apply(app).await,
-        "debug.screenshot" => screenshot(app).await,
+        "debug.screenshot" => screenshot(app, params(&call)?).await,
         "debug.audio_record" => audio_record(params(&call)?).await,
         "debug.audio_tone" => audio_tone(params(&call)?),
         other => Err(RpcError::new(
@@ -240,15 +240,32 @@ async fn update_apply<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError>
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct ScreenshotParams {
+    /// The window's label; the main window when absent.
+    #[serde(default)]
+    window: Option<String>,
+}
+
 /// The window as the user sees it, as a PNG. WebKitGTK can snapshot itself;
 /// the other webviews need their own calls, which are not written yet.
 #[cfg(target_os = "linux")]
-async fn screenshot<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
+async fn screenshot<R: Runtime>(
+    app: &AppHandle<R>,
+    params: ScreenshotParams,
+) -> Result<Value, RpcError> {
     use webkit2gtk::{SnapshotOptions, SnapshotRegion, WebViewExt};
 
-    let window = app
-        .get_webview_window(super::webview::MAIN_WINDOW)
-        .ok_or_else(|| RpcError::new(Code::NoWindow, "the main window is not open"))?;
+    let label = params
+        .window
+        .as_deref()
+        .unwrap_or(super::webview::MAIN_WINDOW);
+    let window = app.get_webview_window(label).ok_or_else(|| {
+        RpcError::new(
+            Code::NoWindow,
+            format!("the window {:?} is not open", label),
+        )
+    })?;
     let (tx, rx) = tokio::sync::oneshot::channel();
     window
         .with_webview(move |webview| {
@@ -284,7 +301,10 @@ fn png_of(surface: cairo::Surface) -> Result<(i32, i32, Vec<u8>), String> {
 }
 
 #[cfg(not(target_os = "linux"))]
-async fn screenshot<R: Runtime>(_app: &AppHandle<R>) -> Result<Value, RpcError> {
+async fn screenshot<R: Runtime>(
+    _app: &AppHandle<R>,
+    _params: ScreenshotParams,
+) -> Result<Value, RpcError> {
     Err(RpcError::failed(
         "screenshots are only taken on Linux so far",
     ))

@@ -6,13 +6,10 @@
 //! portal may call that method. The judgment is made here, by the app being
 //! operated, never by the party operating it.
 //!
-//! The portals that call into this arrive one stage at a time (ADR-044): the
-//! E2E channel first, then remote debugging, then settings help. Until then a
-//! build has rows and columns that only tests and the generated document
-//! read.
 #![allow(dead_code)]
 
 pub mod events;
+pub mod help;
 pub mod link;
 pub mod spec;
 mod webview;
@@ -24,7 +21,7 @@ pub mod ui;
 
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Runtime};
 
@@ -32,13 +29,13 @@ pub use spec::{Kind, Method, Portal};
 
 /// Why a call did not return a value. `code` is what goes on the wire
 /// (ADR-044 §4).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RpcError {
     pub code: Code,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Code {
     /// The portal is not allowed to call this method.
@@ -86,27 +83,30 @@ pub struct Call {
     pub timeout: Duration,
 }
 
-/// Calls `call.method` for `portal`, if the table lets it.
+/// The row for `name` if `portal` may call it.
 ///
 /// A method the table does not know is [`Code::UnknownMethod`]; one it knows
-/// but not for this portal is [`Code::Denied`]. Neither is run.
-pub async fn dispatch<R: Runtime>(
-    app: &AppHandle<R>,
-    portal: Portal,
-    call: Call,
-) -> Result<Value, RpcError> {
-    let method = spec::find(&call.method).ok_or_else(|| {
-        RpcError::new(
-            Code::UnknownMethod,
-            format!("no method named {:?}", call.method),
-        )
-    })?;
+/// but not for this portal is [`Code::Denied`].
+pub fn authorize(portal: Portal, name: &str) -> Result<&'static Method, RpcError> {
+    let method = spec::find(name)
+        .ok_or_else(|| RpcError::new(Code::UnknownMethod, format!("no method named {:?}", name)))?;
     if !method.access.allows(portal) {
         return Err(RpcError::new(
             Code::Denied,
             format!("{:?} may not call {}", portal, method.name),
         ));
     }
+    Ok(method)
+}
+
+/// Calls `call.method` for `portal`, if the table lets it. Neither an unknown
+/// method nor one the portal may not call is run.
+pub async fn dispatch<R: Runtime>(
+    app: &AppHandle<R>,
+    portal: Portal,
+    call: Call,
+) -> Result<Value, RpcError> {
+    let method = authorize(portal, &call.method)?;
     match method.kind {
         Kind::App => webview::invoke(app, &call).await,
         Kind::Native => call_native(app, method.name, call).await,

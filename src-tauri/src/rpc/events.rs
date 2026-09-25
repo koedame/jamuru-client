@@ -21,9 +21,11 @@ pub const EVENTS: &[EventSpec] = &[
         name: "audio:config-changed",
         access: Access::ALL,
     },
+    // The language of the person's own windows: a helper's screen keeps the
+    // helper's.
     EventSpec {
         name: "i18n:language-changed",
-        access: Access::ALL,
+        access: Access::NO_HELP,
     },
     EventSpec {
         name: crate::session::CHANGED_EVENT,

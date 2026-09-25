@@ -22,6 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use uuid::Uuid;
 
 use crate::config::ConfigState;
+use crate::settings_help::HelpEvent;
 use crate::signaling::{self, JoinResult, SignalingEvent};
 use crate::streaming;
 use roster::{Audio, Roster};
@@ -900,10 +901,15 @@ async fn handle_events<R: Runtime>(
     for event in events {
         match event {
             SignalingEvent::SettingsHelp { event } => {
+                // A help that ended takes its relay connection and window with it.
+                if let HelpEvent::Ended { role, .. } = &event {
+                    crate::help_link::end(app, *role);
+                }
                 if let Err(e) = app.emit(HELP_EVENT, &event) {
                     tracing::warn!("Could not pass on a settings help event: {}", e);
                 }
             }
+            SignalingEvent::HelpLink { link } => crate::help_link::open_helper(app.clone(), link),
             // The chat panel reads the chat lines from the backend itself.
             SignalingEvent::ChatMessageReceived { .. } => {}
             SignalingEvent::PeerJoined { peer } => {
