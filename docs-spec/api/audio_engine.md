@@ -862,7 +862,7 @@ pub const BUDGET_SAMPLE_RATE: u32 = 48_000;
 
 ### 14.5 セッション中のプリセット切替
 
-`config_set_preset` はセッション実行中に呼ばれた場合、再生バッファの段数（`set_delay_frames`）を更新する。統計ループがバッファの段数を読み、変わっていれば遅延表示を更新して `jitter_buffer_ms` を `LatencyInfoMessage` で相手に送る。自動調整・再接続による段数の変化も同じ経路で届く（ADR-031）。
+プリセットの切り替え（`settings_change` の `{"setting": "preset"}`。ADR-043）がセッション実行中に行われた場合、再生バッファの段数（`set_delay_frames`）を更新する。統計ループがバッファの段数を読み、変わっていれば遅延表示を更新して `jitter_buffer_ms` を `LatencyInfoMessage` で相手に送る。自動調整・再接続による段数の変化も同じ経路で届く（ADR-031）。
 
 | 項目 | 反映タイミング | 理由 |
 |------|--------------|------|

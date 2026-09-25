@@ -10,8 +10,8 @@ sidebar_position: 8
 ## Overview
 
 `tests/e2e/` が実行中の jamjam アプリを操作・観測するためのループバック HTTP API。
-レンダリング済み DOM の取得、要素のクエリ、クリック、入力を提供する。
-導入判断は [ADR-025](../adr/ADR-025-gui-e2e-control-channel.md)。実装は
+レンダリング済み DOM の取得、要素のクエリ、クリック、入力と、アプリの任意のコマンドの呼び出し（`/e2e/invoke`）を提供する。
+導入判断は [ADR-025](../adr/ADR-025-gui-e2e-control-channel.md)、コマンドの呼び出しは [ADR-043](../adr/ADR-043-remote-operation-rpc.md)。実装は
 `src-tauri/src/e2e_control.rs`、利用側は `tests/e2e/src/pom/`。
 
 **このチャネルは製品機能ではない。** リリースビルドには存在しない（下記「有効化条件」）。
@@ -87,8 +87,9 @@ cargo test --features gui --test gui -- --ignored --test-threads=1 the_release_b
 | POST | `/e2e/query` | `{selector, window?}` | `QueryResult` |
 | POST | `/e2e/click` | `{selector, window?}` | `{performed}` |
 | POST | `/e2e/input` | `{selector, value, window?}` | `{performed}` |
+| POST | `/e2e/invoke` | `{command, args?, window?}` | `InvokeResult` |
 
-`<select>` にも `input` を使う。提供されていない値を渡すと `performed: false` を返す。
+`<select>` にも `input` を使う。提供されていない値・無効化された項目の値を渡すと `performed: false` を返す（利用者が選べない項目は、テストも選べない）。
 `<select>` は持たない値を代入しても選択が変わらないため、成功として返すと「存在しない
 デバイスへの切り替え」が通ってしまう。`query` は `<select>` に対して `options` も返す。
 
@@ -119,7 +120,7 @@ cargo test --features gui --test gui -- --ignored --test-threads=1 the_release_b
 | `value` | `value` プロパティを持つ場合のみ文字列。それ以外は `null` |
 | `visible` | `offsetWidth`/`offsetHeight`/`getClientRects()` のいずれかが非ゼロ |
 | `disabled` | `disabled` プロパティ |
-| `options` | `<select>` の選択肢（`{value, label}` の配列）。それ以外の要素では空 |
+| `options` | `<select>` の選択肢（`{value, label, disabled}` の配列）。それ以外の要素では空。`disabled` は「デバイスを選択」のような見せるだけの項目 |
 
 `visible` と `disabled` を返すのは、「利用者がその要素を操作できるか」を判定するためである。
 `exists` だけでは `display: none` の要素や無効化されたボタンを操作可能と誤判定する。
@@ -134,13 +135,45 @@ HTTP としては 200 であり、呼び出し側が失敗として扱う。無�
 「変化なし」と判断して `onChange` を発火しないため、プロトタイプのネイティブ setter を経由し、
 `input` と `change` イベントをバブリング付きで dispatch する。
 
+### invoke
+
+アプリが登録しているコマンド（`src-tauri/src/lib.rs` の `generate_handler!`）を、画面と同じ経路
+（webview の `__TAURI_INTERNALS__.invoke`）で呼ぶ。**画面の部品を経由せずに、アプリの全機能に届く。**
+コマンドを足せば、このチャネルを直さずにそのまま呼べる。
+
+```json
+{ "command": "settings_change", "args": { "change": { "setting": "buffer_size", "samples": 128 } } }
+```
+
+- `args` は webview が渡す形で書く。**引数名は camelCase**（`conn_id` は `connId`）。構造体の中身は Rust の
+  フィールド名のまま（上の `samples`）。省略すると引数なし
+- 結果は 200 で、どちらかが返る。コマンドのエラーはこのチャネルの失敗ではなく、シナリオが確かめる「答え」である
+
+```json
+{ "outcome": "ok", "value": { "buffer_size": 128, "...": "..." } }
+{ "outcome": "err", "error": "Invalid buffer size: 8. Valid values are [32, 64, 128, 256]" }
+```
+
+- 登録されていないコマンドは `err` になる
+- `eval_with_callback` は Promise を待てないため、1 回目の評価で呼び出しを始め、結果が出るまで 20ms ごとに読み直す。
+  コマンドの実行時間として 60 秒まで待つ（完全診断は回線を測るため数秒かかる）。超えたら 500
+- webview を経由するのは、IPC の検査（引数名・公開ビルドの権限）まで含めて、画面と同じ道を通すためである
+
+ページオブジェクトは `App::invoke(command, args)` と、音声の設定用の `App::audio_settings()` /
+`App::change_audio_setting(change)` を持つ。利用者の操作と見えるものは、これまでどおり画面のページオブジェクトで書く。
+`invoke` は状態を素早く整える・まだページオブジェクトの無い機能に届くために使う。
+
+画面が組み立てている操作（ルームへの参加のように、画面が複数のコマンドを順に呼んで状態を持つもの）は、
+個々のコマンドを呼んでも画面の状態が追従しない。そうした操作は画面のページオブジェクトで行う。
+操作をバックエンドの 1 コマンドに寄せていけば、そのまま呼べるようになる（音声の設定は `settings_change` に寄せた。ADR-043）。
+
 ## Errors
 
 | Status | 条件 |
 |--------|------|
 | 503 | 指定されたウィンドウが存在しない |
 | 504 | webview が 5 秒以内に応答しない |
-| 500 | 評価したスクリプトが例外を投げた、または結果が想定形でない |
+| 500 | 評価したスクリプトが例外を投げた、結果が想定形でない、または `invoke` のコマンドが 60 秒以内に終わらない |
 
 Tauri は Windows で `eval_with_callback` の例外が無視されると文書化している。評価式を
 try/catch で包み例外を戻り値として返すため、スクリプトの誤りは 504 ではなく 500 として現れる。
@@ -151,7 +184,8 @@ try/catch で包み例外を戻り値として返すため、スクリプトの�
 |--------|------|
 | リリースビルドへの混入 | cargo feature が既定で無効。`tests/release_build_guard_test.rs` が常時検証（REQ-GUI-003） |
 | 外部からの到達 | `127.0.0.1` のみにバインド。加えて環境変数未設定では待ち受けない（REQ-GUI-004） |
-| セレクタ経由のスクリプト注入 | セレクタ・入力値を `serde_json` で JS 文字列リテラルへエンコード |
+| セレクタ経由のスクリプト注入 | セレクタ・入力値・コマンド名・引数を `serde_json` で JS のリテラルへエンコード |
+| 同じ端末の別のプロセスがアプリを操作する | `/e2e/invoke` はアプリの全コマンド（接続先の変更・ストリーミングの開始を含む）に届く。認証は無いので、`e2e-control` 付きのビルドを動かす端末では、ループバックに届く全プロセスがアプリを操作できる。そのためこのビルドは配らず、テストの間だけ起動する |
 
 ## Limitations
 
@@ -170,6 +204,7 @@ try/catch で包み例外を戻り値として返すため、スクリプトの�
 ## 関連ドキュメント
 
 - [ADR-025: GUI E2E 制御チャネルの導入](../adr/ADR-025-gui-e2e-control-channel.md)
-- [requirements.md](../requirements.md) — `REQ-GUI-001` 〜 `REQ-GUI-015`
+- [requirements.md](../requirements.md) — `REQ-GUI-001` 〜 `REQ-GUI-015`、`REQ-GUI-025`
+- [ADR-043: 遠隔操作の RPC と、相手の設定を手伝う機能](../adr/ADR-043-remote-operation-rpc.md)
 - [ADR-026: GUI 同士の音声経路](../adr/ADR-026-gui-audio-path.md) — この層が検出した欠陥
 - [ADR-024: 端末アイデンティティによる識別](../adr/ADR-024-device-identity-instead-of-accounts.md)

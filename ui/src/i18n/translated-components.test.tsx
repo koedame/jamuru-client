@@ -23,6 +23,7 @@ import { DeviceSelector } from '../components/DeviceSelector';
 import { MixerPanel, type Channel } from '../components/MixerPanel';
 import { DiagnosticsTab } from '../components/SettingsPanel/tabs/DiagnosticsTab';
 import { SettingsPanelAdapter } from '../components/SettingsPanel';
+import { audioSettings } from '../components/SettingsPanel/audioSettingsFixture';
 import type {
   CompleteDiagnosticsResult,
   DetailedLatency,
@@ -32,6 +33,7 @@ import type {
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 
 type Bundle = typeof en;
 
@@ -216,24 +218,23 @@ const diagnosticsResult: CompleteDiagnosticsResult = {
 
 /** What the backend returns to the settings panel when it loads. */
 const backend: Record<string, unknown> = {
-  audio_list_input_devices: [
-    { id: 'in1', name: 'Mic', supported_sample_rates: [48000], supported_channels: [1, 2, 3], is_default: true, is_asio: false },
-  ],
-  audio_list_output_devices: [
-    { id: 'out1', name: 'Speaker', supported_sample_rates: [48000], supported_channels: [1, 2], is_default: true, is_asio: false },
-  ],
-  audio_get_current_devices: { input_device_id: 'in1', output_device_id: 'out1' },
-  audio_get_buffer_size: 64,
-  audio_get_device_channels: [1, 2, 3],
+  settings_get: audioSettings({
+    input_devices: [
+      { id: 'in1', name: 'Mic', supported_sample_rates: [48000], supported_channels: [1, 2, 3], is_default: true, is_asio: false },
+    ],
+    output_devices: [
+      { id: 'out1', name: 'Speaker', supported_sample_rates: [48000], supported_channels: [1, 2], is_default: true, is_asio: false },
+    ],
+    input_device_id: 'in1',
+    output_device_id: 'out1',
+    input_channel_count: 3,
+    output_channel_count: 2,
+    sample_rates: [
+      { rate: 44100, label: '44.1 kHz', recommended: false },
+      { rate: 48000, label: '48 kHz', recommended: true },
+    ],
+  }),
   config_get_peer_name: 'Taro',
-  config_get_sample_rate: 48000,
-  config_list_sample_rates: [
-    { rate: 44100, label: '44.1 kHz', recommended: false },
-    { rate: 48000, label: '48 kHz', recommended: true },
-  ],
-  config_get_input_channels: { channel_l: 1, channel_r: 2 },
-  config_get_output_channels: { channel_l: 1, channel_r: 2 },
-  config_get_transmit_channels: 2,
 };
 
 describe('components without hard-coded text', () => {

@@ -911,38 +911,88 @@ mod tests {
     const TEST_HTTP_SCHEME: &str = concat!("http", "://");
     const TEST_WS_SCHEME: &str = concat!("ws", "://");
 
-    /// A server that answers the signaling question (`GET /api/v1/signaling`)
-    /// with its own address, then completes the WebSocket handshake there and
-    /// drops the connection without a close frame - the same "reset without
-    /// closing handshake" seen when the signaling connection drops
-    /// unexpectedly in production, as opposed to a graceful `RoomClosed`
-    /// message. It does not check the device-identity headers. Returns the
-    /// server URL to give the client.
-    async fn spawn_reset_server() -> String {
+    /// Answers the signaling question (`GET /api/v1/signaling`) on the first
+    /// connection to `listener` with the listener's own address, then
+    /// completes the WebSocket handshake on the next one. It does not check
+    /// the device-identity headers.
+    async fn answer_question_then_accept(
+        listener: tokio::net::TcpListener,
+    ) -> tokio_tungstenite::WebSocketStream<tokio::net::TcpStream> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let addr = listener.local_addr().unwrap();
+        // The question, on its own connection.
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0u8; 1024];
+        let _ = stream.read(&mut request).await.unwrap();
+        let body = format!(r#"{{"url":"{TEST_WS_SCHEME}{addr}/v1/signaling"}}"#);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+        drop(stream);
+
+        let (stream, _) = listener.accept().await.unwrap();
+        tokio_tungstenite::accept_async(stream).await.unwrap()
+    }
+
+    /// A server that drops the WebSocket right after the handshake, without a
+    /// close frame - the same "reset without closing handshake" seen when the
+    /// signaling connection drops unexpectedly in production, as opposed to a
+    /// graceful `RoomClosed` message. Returns the server URL to give the client.
+    async fn spawn_reset_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let ws = answer_question_then_accept(listener).await;
+            drop(ws);
+        });
+        format!("{TEST_HTTP_SCHEME}{addr}")
+    }
+
+    /// A server that sends `messages` right after the handshake and then keeps
+    /// the connection open. Returns the server URL to give the client.
+    async fn spawn_server_sending(messages: Vec<String>) -> String {
+        use futures_util::SinkExt;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
-            // The question, on its own connection.
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0u8; 1024];
-            let _ = stream.read(&mut request).await.unwrap();
-            let body = format!(r#"{{"url":"{TEST_WS_SCHEME}{addr}/v1/signaling"}}"#);
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream.write_all(response.as_bytes()).await.unwrap();
-            drop(stream);
-
-            // The WebSocket, dropped right after the handshake.
-            let (stream, _) = listener.accept().await.unwrap();
-            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
-            drop(ws);
+            let mut ws = answer_question_then_accept(listener).await;
+            for message in messages {
+                ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                    message.into(),
+                ))
+                .await
+                .unwrap();
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
         });
         format!("{TEST_HTTP_SCHEME}{addr}")
+    }
+
+    /// A mock app holding `conn` as connection 1, with the state
+    /// `signaling_poll_events` needs.
+    fn app_with_connection(conn: SignalingConnection) -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(SignalingState::new());
+        app.manage(UsageState::with_reporter(
+            jamjam::telemetry::UsageReporter::new(
+                None,
+                "test",
+                std::sync::Arc::new(jamjam::telemetry::NoTransport),
+                false,
+            ),
+        ));
+        app.manage(StreamingState::new());
+        app.state::<SignalingState>()
+            .connections
+            .try_lock()
+            .unwrap()
+            .insert(1, conn);
+        app
     }
 
     /// A connection that drops without the server sending `RoomClosed` first
@@ -958,19 +1008,8 @@ mod tests {
             .await
             .unwrap();
 
-        let app = tauri::test::mock_app();
-        app.manage(SignalingState::new());
-        app.manage(UsageState::with_reporter(
-            jamjam::telemetry::UsageReporter::new(
-                None,
-                "test",
-                std::sync::Arc::new(jamjam::telemetry::NoTransport),
-                false,
-            ),
-        ));
-        app.manage(StreamingState::new());
+        let app = app_with_connection(conn);
         let state = app.state::<SignalingState>();
-        state.connections.lock().await.insert(1, conn);
 
         // Give the server task time to accept and drop the socket before we
         // poll - recv() only reports the loss once the reset has happened.
@@ -1002,5 +1041,54 @@ mod tests {
         .await
         .unwrap();
         assert!(events_again.is_empty());
+    }
+
+    /// A message type the server gained after this app was built is skipped:
+    /// the peer update behind it still arrives, and the connection is not
+    /// reported lost (which would make the app leave the room and reconnect).
+    ///
+    /// Verifies: REQ-CON-030
+    #[tokio::test]
+    async fn a_server_message_of_a_type_this_app_does_not_know_is_skipped_not_reported_as_a_lost_connection(
+    ) {
+        let peer_id = Uuid::new_v4();
+        let url = spawn_server_sending(vec![
+            r#"{"type":"SomethingNewer","data":{"anything":[1,{"nested":true}]}}"#.to_string(),
+            format!(r#"{{"type":"PeerLeft","data":{{"peer_id":"{peer_id}"}}}}"#),
+        ])
+        .await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+
+        let mut events = Vec::new();
+        for _ in 0..20 {
+            events.extend(
+                signaling_poll_events(
+                    1,
+                    app.state::<SignalingState>(),
+                    app.state::<UsageState>(),
+                    app.state::<StreamingState>(),
+                )
+                .await
+                .unwrap(),
+            );
+            if !events.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert!(
+            matches!(
+                events.as_slice(),
+                [SignalingEvent::PeerLeft { peer_id: left }] if *left == peer_id.to_string()
+            ),
+            "expected only the PeerLeft behind the unknown message, got {:?}",
+            events
+        );
     }
 }

@@ -109,6 +109,7 @@ src/
 
 src-tauri/              # Tauri デスクトップアプリ
   src/e2e_control.rs    # GUI E2E 制御チャネル（feature = "e2e-control"、既定で無効。ADR-025）
+  src/settings.rs       # 音声の設定の変更を 1 か所で適用する（設定ウィンドウ・E2E・遠隔設定が共有。ADR-043）
 ui/
 ├── src/                # TypeScript ソース
 │   ├── main.ts         # エントリポイント

@@ -796,9 +796,7 @@ fn opening_the_settings_window_does_not_connect_to_the_signaling_server_again() 
     settings.wait_until_open(UI_TIMEOUT).unwrap();
     settings.select_tab(SettingsTab::Devices).unwrap();
     // The settings window has started up once it has listed the devices.
-    let log = wait_for_log(&app, |log| {
-        log.contains("[settings] invoke audio_list_input_devices")
-    });
+    let log = wait_for_log(&app, |log| log.contains("[settings] invoke settings_get"));
 
     assert!(
         !log.contains("[settings] [session]"),
@@ -941,6 +939,127 @@ fn choosing_a_device_that_is_not_offered_fails() {
         devices.input_device_select().value().unwrap(),
         before,
         "a refused choice must leave the selection untouched"
+    );
+}
+
+/// The "Select device" placeholder is shown but is not a device. It once
+/// counted as a second choice, so on a machine with one microphone
+/// `choosing_a_different_input_device_takes_effect` "switched" to it and
+/// passed without switching anything.
+///
+/// Verifies: REQ-GUI-011
+#[test]
+fn the_select_device_placeholder_cannot_be_chosen() {
+    let (_guard, app) = launch();
+    let devices = devices_tab(&app);
+    let before = devices.input_device_select().value().unwrap();
+
+    assert!(
+        !devices
+            .input_device_select()
+            .option_values()
+            .unwrap()
+            .contains(&String::new()),
+        "the placeholder should not be offered as a choice"
+    );
+    assert!(
+        devices.input_device_select().select_value("").is_err(),
+        "choosing the placeholder should fail like any value that is not a device"
+    );
+    assert_eq!(devices.input_device_select().value().unwrap(), before);
+}
+
+// ---------------------------------------------------------------------------
+// Calling the app's commands (ADR-043)
+// ---------------------------------------------------------------------------
+//
+// Every feature is reachable as a command, the same way the UI reaches it.
+// A scenario uses that to set the app up quickly or to reach what no page
+// object covers; a peer helping with the settings uses a few of the same
+// commands.
+
+/// A change made without touching the settings window - here through the
+/// control channel, as a helping peer's would arrive - shows in the window
+/// while it stays open.
+///
+/// Verifies: REQ-GUI-024
+/// Verifies: REQ-GUI-025
+#[test]
+fn a_setting_changed_by_command_shows_in_the_open_settings_window() {
+    let (_guard, app) = launch();
+    let devices = devices_tab(&app);
+    let before = devices.buffer_size_select().value().unwrap();
+    let wanted = if before == "128" { "64" } else { "128" };
+
+    let settings = app
+        .change_audio_setting(serde_json::json!({
+            "setting": "buffer_size",
+            "samples": wanted.parse::<u32>().unwrap(),
+        }))
+        .unwrap()
+        .expect("an offered buffer size should be accepted");
+
+    assert_eq!(settings["buffer_size"].to_string(), wanted);
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        devices.buffer_size_select().value().as_deref() == Ok(wanted)
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "the open settings window should show {} samples, still shows {:?}",
+            wanted,
+            devices.buffer_size_select().value()
+        )
+    });
+    assert_eq!(
+        app.audio_settings().unwrap()["buffer_size"].to_string(),
+        wanted
+    );
+}
+
+/// A change the app refuses comes back as the app's answer and leaves the
+/// settings as they were.
+///
+/// Verifies: REQ-GUI-024
+/// Verifies: REQ-GUI-025
+#[test]
+fn a_refused_setting_change_comes_back_as_the_apps_answer_and_changes_nothing() {
+    let (_guard, app) = launch();
+    let before = app.audio_settings().unwrap()["buffer_size"].clone();
+
+    let answer = app
+        .change_audio_setting(serde_json::json!({ "setting": "buffer_size", "samples": 8 }))
+        .unwrap();
+
+    let error = answer.expect_err("8 samples is not a size the app offers");
+    assert!(error.contains("Invalid buffer size"), "{}", error);
+    assert_eq!(app.audio_settings().unwrap()["buffer_size"], before);
+}
+
+/// Any command the app registers is callable, not only those a page object
+/// wraps; a name the app does not have is an error, not a silent nothing.
+///
+/// Verifies: REQ-GUI-025
+#[test]
+fn any_command_the_app_registers_can_be_called_and_an_unknown_one_is_refused() {
+    let (_guard, app) = launch();
+
+    let name = app
+        .invoke("config_get_peer_name", serde_json::json!({}))
+        .unwrap()
+        .expect("config_get_peer_name should answer");
+    assert!(
+        name.as_str().is_some_and(|n| !n.is_empty()),
+        "the display name should come back as text, got {}",
+        name
+    );
+
+    let unknown = app
+        .invoke("no_such_command", serde_json::json!({}))
+        .unwrap();
+    assert!(
+        unknown.is_err(),
+        "an unknown command should be refused, got {:?}",
+        unknown
     );
 }
 

@@ -2362,6 +2362,7 @@ dependencies = [
  "chrono",
  "data-encoding",
  "directories",
+ "futures-util",
  "jamjam",
  "libc",
  "rtrb",

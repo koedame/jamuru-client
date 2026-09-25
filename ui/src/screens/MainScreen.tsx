@@ -27,14 +27,14 @@ import {
   signalingPublishLocalCandidates,
   streamingPrepare,
   streamingStart,
+  AUDIO_SETTINGS_CHANGED,
+  type AudioSettings,
   peerSortedAddrs,
   streamingStop,
   streamingReconnect,
   streamingStatus,
   streamingSetMute,
   streamingSetMonitoring,
-  audioGetCurrentDevices,
-  audioGetBufferSize,
   streamingSetPeerVolume,
   streamingSetPeerPan,
   streamingSetLocalVolume,
@@ -236,26 +236,20 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     loadConfigAndConnect();
   }, []);
 
-  // The settings window broadcasts this after saving sample rate or transmit
-  // channel count (config.rs's config_set_sample_rate / config_set_transmit_
-  // channels), so the mixer's quality badge reflects the change immediately
-  // instead of only after an app restart. Mirrors the i18n:language-changed
-  // handling in App.tsx.
-  const handleAudioConfigChanged = useCallback(async () => {
-    try {
-      const sampleRate = await configGetSampleRate();
-      setLocalSampleRate(sampleRate);
-    } catch (e) {
-      console.log("Failed to reload sample rate:", e);
-    }
-    try {
-      const channelCount = await configGetTransmitChannels();
-      setLocalChannelCount(channelCount);
-    } catch (e) {
-      console.log("Failed to reload transmit channel count:", e);
-    }
+  // Every audio setting change is announced with this (settings.rs, ADR-043),
+  // whether the settings window, a helping peer or a test made it, so the
+  // mixer's quality badge reflects the change immediately instead of only
+  // after an app restart. Mirrors the i18n:language-changed handling in App.tsx.
+  // The announcement carries the settings now in effect, numbered: an older
+  // one arriving after a newer one is ignored.
+  const shownSettingsRevision = useRef(-1);
+  const handleAudioConfigChanged = useCallback((settings: AudioSettings) => {
+    if (settings.revision < shownSettingsRevision.current) return;
+    shownSettingsRevision.current = settings.revision;
+    setLocalSampleRate(settings.sample_rate);
+    setLocalChannelCount(settings.transmit_channels);
   }, []);
-  useWindowEvent<void>("audio:config-changed", handleAudioConfigChanged);
+  useWindowEvent<AudioSettings>(AUDIO_SETTINGS_CHANGED, handleAudioConfigChanged);
 
   // Auto-connect to signaling server
   const autoConnect = async () => {
@@ -513,17 +507,8 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
 
     streamingPeerIdRef.current = peerWithAddr.id;
     try {
-      const [devices, bufferSize] = await Promise.all([
-        audioGetCurrentDevices(),
-        audioGetBufferSize(),
-      ]);
-      await streamingStart(
-        addr,
-        candidates,
-        devices.input_device_id ?? undefined,
-        devices.output_device_id ?? undefined,
-        bufferSize
-      );
+      // The devices, buffer size and sample rate are the saved settings.
+      await streamingStart(addr, candidates);
       console.log("Streaming started to:", addr, "candidates:", candidates);
     } catch (streamErr) {
       // Allow a later PeerUpdated to retry rather than leaving the session

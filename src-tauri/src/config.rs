@@ -4,22 +4,32 @@
 //! (`jamjam::config`) so the CLI shares one config file with the GUI
 //! (ADR-027). This module is the IPC surface over it.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 pub use jamjam::config::{
-    load_config, save_config, AppConfig, AudioPreset, ConnectionHistoryEntry, DEFAULT_SAMPLE_RATE,
-    DEFAULT_SERVER_URL, MAX_HISTORY_ENTRIES, VALID_SAMPLE_RATES,
+    config_path, load_config, load_config_from, save_config_to, AppConfig, AudioPreset,
+    ConnectionHistoryEntry, DEFAULT_SAMPLE_RATE, DEFAULT_SERVER_URL, MAX_HISTORY_ENTRIES,
+    VALID_SAMPLE_RATES,
 };
 
 /// Called with the new configuration after each successful save
 type SavedHook = Box<dyn Fn(&AppConfig) + Send + Sync>;
 
 /// State for configuration management
+///
+/// The one place the app's configuration is changed: every change is a
+/// read-modify-write under one lock ([`Self::update_with`]), so two made at
+/// once - the user in one window and a helper, say - cannot both start from
+/// the same old config and have the second undo the first.
 pub struct ConfigState {
+    /// Where the configuration is saved; `None` when the platform has no
+    /// config directory, in which case every save fails.
+    path: Option<PathBuf>,
     config: Mutex<AppConfig>,
     on_saved: Mutex<Option<SavedHook>>,
 }
@@ -27,8 +37,24 @@ pub struct ConfigState {
 impl ConfigState {
     /// Create a new ConfigState, loading existing config or using defaults
     pub fn new() -> Self {
-        let config = load_config().unwrap_or_default();
+        let path = config_path();
+        let config = path
+            .as_deref()
+            .and_then(|path| load_config_from(path).ok())
+            .unwrap_or_default();
+        Self::with(path, config)
+    }
+
+    /// A ConfigState saving to the file at `path`, starting from `config`
+    /// (what is in the file is not read).
+    #[cfg(test)]
+    pub fn at(path: PathBuf, config: AppConfig) -> Self {
+        Self::with(Some(path), config)
+    }
+
+    fn with(path: Option<PathBuf>, config: AppConfig) -> Self {
         Self {
+            path,
             config: Mutex::new(config),
             on_saved: Mutex::new(None),
         }
@@ -59,25 +85,48 @@ impl ConfigState {
             .unwrap_or_else(|_| DEFAULT_SERVER_URL.to_string())
     }
 
-    /// Update the configuration and save to disk
-    pub fn update(&self, new_config: AppConfig) -> Result<(), String> {
-        new_config.validate()?;
-
+    /// Changes the configuration and saves it, as one step.
+    ///
+    /// `change` gets the configuration as it is and returns the one to save,
+    /// with a value to hand back. Nothing changes - in memory or on disk - if
+    /// `change` fails, the result does not validate, or it cannot be saved.
+    pub fn update_with<T, E: From<String>>(
+        &self,
+        change: impl FnOnce(&AppConfig) -> Result<(AppConfig, T), E>,
+    ) -> Result<(AppConfig, T), E> {
         let mut config = self
             .config
             .lock()
             .map_err(|e| format!("Failed to lock config: {}", e))?;
+        let (next, value) = change(&config)?;
+        next.validate()?;
+        let path = self
+            .path
+            .as_deref()
+            .ok_or_else(|| "Could not determine config directory".to_string())?;
+        save_config_to(path, &next)?;
+        *config = next.clone();
 
-        *config = new_config.clone();
-        drop(config);
-
-        save_config(&new_config)?;
+        // Still under the lock, so hooks see the saves in the order they
+        // happened (a late hook with an older config would undo a newer one).
+        // A hook must not change the config itself.
         if let Ok(on_saved) = self.on_saved.lock() {
             if let Some(hook) = on_saved.as_ref() {
-                hook(&new_config);
+                hook(&next);
             }
         }
-        Ok(())
+        drop(config);
+        Ok((next, value))
+    }
+
+    /// [`Self::update_with`] for a change that cannot fail by itself.
+    pub fn modify(&self, change: impl FnOnce(&mut AppConfig)) -> Result<AppConfig, String> {
+        self.update_with(|current| {
+            let mut next = current.clone();
+            change(&mut next);
+            Ok::<_, String>((next, ()))
+        })
+        .map(|(config, ())| config)
     }
 }
 
@@ -99,12 +148,14 @@ pub fn config_load(state: tauri::State<'_, ConfigState>) -> Result<AppConfig, St
     state.get()
 }
 
-/// Save configuration to disk
-///
-/// Validates and saves the provided configuration.
+/// Turn usage reporting on or off (ADR-037)
 #[tauri::command]
-pub fn config_save(config: AppConfig, state: tauri::State<'_, ConfigState>) -> Result<(), String> {
-    state.update(config)
+pub fn config_set_usage_reporting(
+    enabled: bool,
+    state: tauri::State<'_, ConfigState>,
+) -> Result<(), String> {
+    state.modify(|config| config.usage_reporting = enabled)?;
+    Ok(())
 }
 
 /// Get the jamjam server URL from configuration
@@ -126,9 +177,8 @@ pub fn config_set_server_url(
     url: Option<String>,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
-    config.server_url = url;
-    state.update(config)
+    state.modify(|config| config.server_url = url)?;
+    Ok(())
 }
 
 /// Get the jamjam server URL the app will actually use.
@@ -157,35 +207,6 @@ pub struct PresetInfo {
 pub fn config_get_preset(state: tauri::State<'_, ConfigState>) -> Result<String, String> {
     let config = state.get()?;
     Ok(config.preset.name().to_string())
-}
-
-/// Set the preset and apply its recommended settings
-#[tauri::command]
-pub async fn config_set_preset(
-    preset_name: String,
-    state: tauri::State<'_, ConfigState>,
-    streaming_state: tauri::State<'_, crate::streaming::StreamingState>,
-) -> Result<PresetInfo, String> {
-    let preset = AudioPreset::from_name(&preset_name)
-        .ok_or_else(|| format!("Unknown preset: {}", preset_name))?;
-
-    let mut config = state.get()?;
-    config.preset = preset.clone();
-    config.buffer_size = preset.frame_size();
-    state.update(config)?;
-
-    // Apply the new jitter buffer depth to a running session (REQ-LAT-106).
-    // The frame size cannot change mid-session - the audio engines own it - so
-    // it takes effect on the next connect.
-    streaming_state
-        .apply_jitter_buffer_frames(preset.jitter_buffer_frames())
-        .await;
-
-    Ok(PresetInfo {
-        id: preset.name().to_string(),
-        buffer_size: preset.frame_size(),
-        jitter_buffer_frames: preset.jitter_buffer_frames(),
-    })
 }
 
 /// List all available presets
@@ -226,27 +247,26 @@ pub fn config_add_connection_history(
     label: Option<String>,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
+    state.modify(|config| {
+        // Remove existing entry with same room code (if any)
+        config
+            .connection_history
+            .retain(|e| e.room_code != room_code);
 
-    // Remove existing entry with same room code (if any)
-    config
-        .connection_history
-        .retain(|e| e.room_code != room_code);
+        // Add new entry at the beginning
+        config.connection_history.insert(
+            0,
+            ConnectionHistoryEntry {
+                room_code,
+                connected_at: Utc::now(),
+                label,
+            },
+        );
 
-    // Add new entry at the beginning
-    config.connection_history.insert(
-        0,
-        ConnectionHistoryEntry {
-            room_code,
-            connected_at: Utc::now(),
-            label,
-        },
-    );
-
-    // Trim to max entries
-    config.connection_history.truncate(MAX_HISTORY_ENTRIES);
-
-    state.update(config)
+        // Trim to max entries
+        config.connection_history.truncate(MAX_HISTORY_ENTRIES);
+    })?;
+    Ok(())
 }
 
 /// Remove a connection from history
@@ -257,19 +277,19 @@ pub fn config_remove_connection_history(
     room_code: String,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
-    config
-        .connection_history
-        .retain(|e| e.room_code != room_code);
-    state.update(config)
+    state.modify(|config| {
+        config
+            .connection_history
+            .retain(|e| e.room_code != room_code)
+    })?;
+    Ok(())
 }
 
 /// Clear all connection history
 #[tauri::command]
 pub fn config_clear_connection_history(state: tauri::State<'_, ConfigState>) -> Result<(), String> {
-    let mut config = state.get()?;
-    config.connection_history.clear();
-    state.update(config)
+    state.modify(|config| config.connection_history.clear())?;
+    Ok(())
 }
 
 /// Update a connection history entry label
@@ -279,17 +299,17 @@ pub fn config_update_connection_history_label(
     label: Option<String>,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
-    if let Some(entry) = config
-        .connection_history
-        .iter_mut()
-        .find(|e| e.room_code == room_code)
-    {
+    state.update_with(|current| {
+        let mut next = current.clone();
+        let entry = next
+            .connection_history
+            .iter_mut()
+            .find(|e| e.room_code == room_code)
+            .ok_or_else(|| format!("Room code not found in history: {}", room_code))?;
         entry.label = label;
-        state.update(config)
-    } else {
-        Err(format!("Room code not found in history: {}", room_code))
-    }
+        Ok::<_, String>((next, ()))
+    })?;
+    Ok(())
 }
 
 // =============================================================================
@@ -321,9 +341,8 @@ pub fn config_set_peer_name(
         return Err("Peer name cannot exceed 32 characters".to_string());
     }
 
-    let mut config = state.get()?;
-    config.peer_name = trimmed.to_string();
-    state.update(config)
+    state.modify(|config| config.peer_name = trimmed.to_string())?;
+    Ok(())
 }
 
 // =============================================================================
@@ -353,9 +372,7 @@ pub fn config_set_language(
     app: AppHandle,
     state: tauri::State<'_, ConfigState>,
 ) -> Result<(), String> {
-    let mut config = state.get()?;
-    config.language = Some(language.clone());
-    state.update(config)?;
+    state.modify(|config| config.language = Some(language.clone()))?;
 
     app.emit("i18n:language-changed", language)
         .map_err(|e| e.to_string())
@@ -374,38 +391,8 @@ pub fn config_get_sample_rate(state: tauri::State<'_, ConfigState>) -> Result<u3
     Ok(config.sample_rate)
 }
 
-/// Set the sample rate
-///
-/// Updates and persists the sample rate, and notifies every open window so
-/// the main window's mixer reflects it without a restart (mirrors
-/// `config_set_language`'s `i18n:language-changed` broadcast).
-///
-/// Valid values: 44100, 48000, 96000. 48000 Hz is recommended per ADR-013.
-#[tauri::command]
-pub fn config_set_sample_rate(
-    sample_rate: u32,
-    app: AppHandle,
-    state: tauri::State<'_, ConfigState>,
-) -> Result<(), String> {
-    if !VALID_SAMPLE_RATES.contains(&sample_rate) {
-        return Err(format!(
-            "Invalid sample rate: {}. Valid values are 44100, 48000, 96000",
-            sample_rate
-        ));
-    }
-
-    let mut config = state.get()?;
-    config.sample_rate = sample_rate;
-    state.update(config)?;
-
-    app.emit("audio:config-changed", ())
-        .map_err(|e| e.to_string())
-}
-
-/// Get available sample rates
-///
-/// Returns the list of valid sample rates with metadata.
-#[derive(Debug, Clone, Serialize)]
+/// A sample rate the app offers (ADR-013)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SampleRateInfo {
     /// Sample rate in Hz
     pub rate: u32,
@@ -415,8 +402,7 @@ pub struct SampleRateInfo {
     pub recommended: bool,
 }
 
-#[tauri::command]
-pub fn config_list_sample_rates() -> Vec<SampleRateInfo> {
+pub fn sample_rates() -> Vec<SampleRateInfo> {
     VALID_SAMPLE_RATES
         .iter()
         .map(|&rate| SampleRateInfo {
@@ -431,103 +417,6 @@ pub fn config_list_sample_rates() -> Vec<SampleRateInfo> {
 // Channel Configuration Commands
 // =============================================================================
 
-/// Channel configuration for input or output
-#[derive(Debug, Clone, Serialize)]
-pub struct ChannelConfig {
-    /// Left (or mono) channel (1-based index)
-    pub channel_l: u32,
-    /// Right channel (1-based index, None for mono)
-    pub channel_r: Option<u32>,
-}
-
-/// Get input channel configuration
-#[tauri::command]
-pub fn config_get_input_channels(
-    state: tauri::State<'_, ConfigState>,
-) -> Result<ChannelConfig, String> {
-    let config = state.get()?;
-    Ok(ChannelConfig {
-        channel_l: config.input_channel_l,
-        channel_r: config.input_channel_r,
-    })
-}
-
-/// Set input channel configuration
-///
-/// channel_l: 1-based index for left/mono channel
-/// channel_r: 1-based index for right channel, or None for mono
-#[tauri::command]
-pub async fn config_set_input_channels(
-    channel_l: u32,
-    channel_r: Option<u32>,
-    state: tauri::State<'_, ConfigState>,
-    streaming_state: tauri::State<'_, crate::streaming::StreamingState>,
-) -> Result<(), String> {
-    if channel_l == 0 {
-        return Err("Channel index must be >= 1".to_string());
-    }
-    if let Some(r) = channel_r {
-        if r == 0 {
-            return Err("Channel index must be >= 1".to_string());
-        }
-    }
-
-    let mut config = state.get()?;
-    config.input_channel_l = channel_l;
-    config.input_channel_r = channel_r;
-    state.update(config)?;
-
-    // A running session follows the setting straight away
-    streaming_state
-        .apply_input_channels(channel_l, channel_r)
-        .await;
-    Ok(())
-}
-
-/// Get output channel configuration
-#[tauri::command]
-pub fn config_get_output_channels(
-    state: tauri::State<'_, ConfigState>,
-) -> Result<ChannelConfig, String> {
-    let config = state.get()?;
-    Ok(ChannelConfig {
-        channel_l: config.output_channel_l,
-        channel_r: config.output_channel_r,
-    })
-}
-
-/// Set output channel configuration
-///
-/// channel_l: 1-based index for left/mono channel
-/// channel_r: 1-based index for right channel, or None for mono
-#[tauri::command]
-pub async fn config_set_output_channels(
-    channel_l: u32,
-    channel_r: Option<u32>,
-    state: tauri::State<'_, ConfigState>,
-    streaming_state: tauri::State<'_, crate::streaming::StreamingState>,
-) -> Result<(), String> {
-    if channel_l == 0 {
-        return Err("Channel index must be >= 1".to_string());
-    }
-    if let Some(r) = channel_r {
-        if r == 0 {
-            return Err("Channel index must be >= 1".to_string());
-        }
-    }
-
-    let mut config = state.get()?;
-    config.output_channel_l = channel_l;
-    config.output_channel_r = channel_r;
-    state.update(config)?;
-
-    // A running session follows the setting straight away
-    streaming_state
-        .apply_output_channels(channel_l, channel_r)
-        .await;
-    Ok(())
-}
-
 /// Get transmit channel count
 ///
 /// Returns 1 for mono, 2 for stereo
@@ -535,27 +424,4 @@ pub async fn config_set_output_channels(
 pub fn config_get_transmit_channels(state: tauri::State<'_, ConfigState>) -> Result<u32, String> {
     let config = state.get()?;
     Ok(config.transmit_channels)
-}
-
-/// Set transmit channel count, and notify every open window so the main
-/// window's mixer reflects it without a restart (mirrors
-/// `config_set_language`'s `i18n:language-changed` broadcast).
-///
-/// count: 1 for mono, 2 for stereo
-#[tauri::command]
-pub fn config_set_transmit_channels(
-    count: u32,
-    app: AppHandle,
-    state: tauri::State<'_, ConfigState>,
-) -> Result<(), String> {
-    if count != 1 && count != 2 {
-        return Err("Transmit channels must be 1 (mono) or 2 (stereo)".to_string());
-    }
-
-    let mut config = state.get()?;
-    config.transmit_channels = count;
-    state.update(config)?;
-
-    app.emit("audio:config-changed", ())
-        .map_err(|e| e.to_string())
 }

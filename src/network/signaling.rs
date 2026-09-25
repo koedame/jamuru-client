@@ -442,14 +442,31 @@ impl SignalingConnection {
     }
 
     /// Receive a message from the server
+    ///
+    /// A message whose `type` this client does not know is skipped: the
+    /// server may have gained a message type after this client was built, and
+    /// failing here would make every such message look like a lost connection
+    /// to an app that is already installed. A known type that does not parse
+    /// is still an error - that is a real incompatibility, not a newer message.
     pub async fn recv(&mut self) -> Result<SignalingMessage, NetworkError> {
         loop {
             match self.ws_stream.next().await {
-                Some(Ok(Message::Text(text))) => {
-                    return serde_json::from_str(&text).map_err(|e| {
-                        NetworkError::SignalingError(format!("Deserialize failed: {}", e))
-                    });
-                }
+                Some(Ok(Message::Text(text))) => match serde_json::from_str(&text) {
+                    Ok(msg) => return Ok(msg),
+                    Err(e) if is_of_unknown_type(&text) => {
+                        debug!(
+                            "Skipping a signaling message this client does not know: {}",
+                            e
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(NetworkError::SignalingError(format!(
+                            "Deserialize failed: {}",
+                            e
+                        )));
+                    }
+                },
                 Some(Ok(Message::Close(_))) | None => {
                     return Err(NetworkError::ConnectionClosed);
                 }
@@ -471,6 +488,26 @@ impl SignalingConnection {
             .await
             .map_err(|e| NetworkError::SignalingError(format!("Close failed: {}", e)))?;
         Ok(())
+    }
+}
+
+/// Whether `text` is a message whose `type` is not one of [`SignalingMessage`]'s.
+///
+/// Decided from the tag alone: the tag is parsed on its own, with no data
+/// beside it, so serde's "unknown variant" can only be about the tag. Parsing
+/// the whole message would give the same wording for an unknown value deep
+/// inside a known message (a candidate type the protocol gained later), which
+/// is an incompatibility to report, not a newer message to skip.
+fn is_of_unknown_type(text: &str) -> bool {
+    let Some(tag) = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(String::from))
+    else {
+        return false;
+    };
+    match serde_json::from_value::<SignalingMessage>(serde_json::json!({ "type": tag })) {
+        Ok(_) => false,
+        Err(e) => e.to_string().starts_with("unknown variant"),
     }
 }
 
@@ -583,6 +620,50 @@ mod tests {
         };
         assert!(rooms[0].test_room);
         assert_eq!(rooms[0].invite_code, "ABC234");
+    }
+
+    /// Verifies: REQ-CON-030
+    #[test]
+    fn a_message_of_a_type_the_protocol_gained_later_is_classified_as_unknown() {
+        assert!(is_of_unknown_type(
+            r#"{"type":"SomethingNewer","data":{"anything":[1,2,{"nested":true}]}}"#
+        ));
+        assert!(is_of_unknown_type(r#"{"data":{},"type":"SomethingNewer"}"#));
+    }
+
+    /// A known type that does not parse is an incompatibility to report, not
+    /// a newer message to skip.
+    ///
+    /// Verifies: REQ-CON-030
+    #[test]
+    fn a_known_message_type_with_a_malformed_field_is_not_classified_as_unknown() {
+        let malformed = r#"{"type":"PeerLeft","data":{"peer_id":"not-a-uuid"}}"#;
+        assert!(serde_json::from_str::<SignalingMessage>(malformed).is_err());
+        assert!(!is_of_unknown_type(malformed));
+    }
+
+    /// An unknown value inside a known message reads, to serde, exactly like an
+    /// unknown message type. It must still be reported: skipping it would drop
+    /// a peer's arrival without a trace.
+    ///
+    /// Verifies: REQ-CON-030
+    #[test]
+    fn a_known_message_carrying_an_unknown_value_deep_inside_is_not_classified_as_unknown() {
+        let peer_id = Uuid::new_v4();
+        let text = format!(
+            r#"{{"type":"PeerJoined","data":{{"peer":{{"id":"{peer_id}","name":"A","candidates":[{{"address":"192.0.2.1:5000","candidate_type":"Relay","priority":1}}]}}}}}}"#
+        );
+        let e = serde_json::from_str::<SignalingMessage>(&text).unwrap_err();
+        assert!(e.to_string().starts_with("unknown variant"), "{}", e);
+
+        assert!(!is_of_unknown_type(&text));
+    }
+
+    #[test]
+    fn text_that_is_not_a_tagged_message_is_not_classified_as_unknown() {
+        for text in ["not json", "[]", r#"{"data":{}}"#, r#"{"type":7}"#] {
+            assert!(!is_of_unknown_type(text), "{}", text);
+        }
     }
 
     #[test]

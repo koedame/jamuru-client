@@ -1,7 +1,8 @@
-//! GUI E2E control channel (ADR-025)
+//! GUI E2E control channel (ADR-025, ADR-043)
 //!
 //! Exposes the running app's rendered DOM over loopback HTTP so
-//! `tests/e2e/` can assert on it. This fills the gap on the right-hand side
+//! `tests/e2e/` can assert on it, and lets a scenario call any of the app's
+//! commands (`/e2e/invoke`) the way the webview does. This fills the gap on the right-hand side
 //! of the V-model: nothing else exercises `src-tauri/` and `ui/` together
 //! (Storybook only covers Pure components, which are not wired to `invoke`).
 //!
@@ -18,8 +19,9 @@
 //! app is displaying (room codes, chat, participant names).
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -47,6 +49,17 @@ const EVAL_TIMEOUT: Duration = Duration::from_secs(5);
 /// Cap on returned element text, so one enormous node can't blow up a
 /// response. Well above anything this UI renders in a single element.
 const MAX_TEXT_LEN: usize = 2000;
+
+/// How long a command called through `/e2e/invoke` may take. Longer than
+/// [`EVAL_TIMEOUT`] because it is the command's own run time - a complete
+/// diagnostics run measures the network - not the webview's responsiveness.
+const INVOKE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How often to look for a called command's result.
+const INVOKE_POLL: Duration = Duration::from_millis(20);
+
+/// Numbers the `/e2e/invoke` calls, so concurrent ones keep their results apart.
+static NEXT_INVOKE_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 struct ControlState {
@@ -82,6 +95,10 @@ struct QueryResult {
 struct SelectOption {
     value: String,
     label: String,
+    /// A disabled option (such as a "Select device" placeholder) is shown
+    /// but cannot be chosen.
+    #[serde(default)]
+    disabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,6 +134,29 @@ struct DomRequest {
     window: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct InvokeRequest {
+    /// A command the app registers (`settings_change`, `streaming_status`, ...)
+    command: String,
+    /// Its arguments as the webview passes them: camelCase names
+    /// (`{"connId": 1}` for `conn_id`). Absent means none.
+    #[serde(default)]
+    args: serde_json::Value,
+    /// Window whose IPC to call through; defaults to [`MAIN_WINDOW`].
+    #[serde(default)]
+    window: Option<String>,
+}
+
+/// What the command returned, or the error it failed with. Either way the
+/// call happened: a command's error is an answer for the scenario to assert
+/// on, not a failure of this channel.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum InvokeResult {
+    Ok { value: serde_json::Value },
+    Err { error: String },
+}
+
 /// Outcome of an operation that acts on a single element.
 #[derive(Debug, Serialize, Deserialize)]
 struct ActionResult {
@@ -130,6 +170,7 @@ struct ErrorBody {
     error: String,
 }
 
+#[derive(Debug)]
 enum ControlError {
     NoWindow(String),
     Eval(String),
@@ -161,6 +202,7 @@ fn build_router(app: AppHandle) -> Router {
         .route("/e2e/query", post(query))
         .route("/e2e/click", post(click))
         .route("/e2e/input", post(input))
+        .route("/e2e/invoke", post(invoke))
         .with_state(ControlState { app })
 }
 
@@ -223,7 +265,11 @@ async fn query(
                 attribute: first && {attribute} ? first.getAttribute({attribute}) : null,
                 options: first && first.tagName === "SELECT"
                     ? Array.prototype.map.call(first.options, function (o) {{
-                        return {{ value: String(o.value), label: String(o.textContent || "") }};
+                        return {{
+                            value: String(o.value),
+                            label: String(o.textContent || ""),
+                            disabled: !!o.disabled,
+                        }};
                     }})
                     : [],
             }};
@@ -285,10 +331,11 @@ async fn input(
                 : window.HTMLInputElement.prototype;
             // A <select> can only hold a value it actually offers; assigning
             // an absent one silently leaves the old selection, which would
-            // look like a successful change.
+            // look like a successful change. A disabled option is offered to
+            // the eye only - a user cannot pick it, so neither can a test.
             if (el instanceof window.HTMLSelectElement) {{
                 const offered = Array.prototype.some.call(el.options, function (o) {{
-                    return String(o.value) === {value};
+                    return String(o.value) === {value} && !o.disabled;
                 }});
                 if (!offered) return {{ performed: false }};
             }}
@@ -304,6 +351,112 @@ async fn input(
     serde_json::from_value(result.clone())
         .map(Json)
         .map_err(|e| ControlError::Eval(format!("unexpected input result {}: {}", result, e)))
+}
+
+/// Calls an app command through the webview's IPC, exactly as the UI calls
+/// it, and returns its result.
+///
+/// This is how a scenario reaches every feature, not only the ones a page
+/// object wraps: any command the app registers is callable, and a new one is
+/// callable without touching this channel. Going through the webview rather
+/// than calling Rust directly also keeps the IPC's own checks (argument
+/// names, the capability ACL of a release build) in the path under test.
+///
+/// `eval_with_callback` cannot wait for a promise, so the call is started in
+/// one eval and its settled result read back by later ones.
+async fn invoke(
+    State(state): State<ControlState>,
+    Json(request): Json<InvokeRequest>,
+) -> Result<Json<InvokeResult>, ControlError> {
+    let id = NEXT_INVOKE_ID.fetch_add(1, Ordering::Relaxed);
+    let window = request.window.as_deref();
+    eval_in(&state.app, window, &start_invoke_js(id, &request)?).await?;
+
+    let deadline = Instant::now() + INVOKE_TIMEOUT;
+    loop {
+        let settled = eval_in(&state.app, window, &settled_invoke_js(id)).await?;
+        if settled.get("done").and_then(|d| d.as_bool()) == Some(true) {
+            return serde_json::from_value(settled.clone())
+                .map(Json)
+                .map_err(|e| {
+                    ControlError::Eval(format!("unexpected invoke result {}: {}", settled, e))
+                });
+        }
+        if Instant::now() >= deadline {
+            // Forget the call, so an answer arriving later is not kept forever.
+            let _ = eval_in(&state.app, window, &forget_invoke_js(id)).await;
+            return Err(ControlError::Eval(format!(
+                "{} did not settle within {:?}",
+                request.command, INVOKE_TIMEOUT
+            )));
+        }
+        tokio::time::sleep(INVOKE_POLL).await;
+    }
+}
+
+/// Starts `request` and parks its outcome under `id` once it settles. Every
+/// value from the request goes in as a JSON literal, so nothing in it can run
+/// as code.
+fn start_invoke_js(id: u64, request: &InvokeRequest) -> Result<String, ControlError> {
+    let command = js_string(&request.command)?;
+    let args = if request.args.is_null() {
+        "{}".to_string()
+    } else {
+        serde_json::to_string(&request.args)
+            .map_err(|e| ControlError::Eval(format!("args are not encodable: {}", e)))?
+    };
+    Ok(format!(
+        r#"(function () {{
+            const results = (window.__jamjamE2eInvoke = window.__jamjamE2eInvoke || {{}});
+            // The call's own slot: once it has been forgotten (timed out), a
+            // late answer finds another value there, or none, and is dropped.
+            const slot = {{ done: false }};
+            results[{id}] = slot;
+            const settle = function (result) {{
+                if (results[{id}] === slot) results[{id}] = result;
+            }};
+            window.__TAURI_INTERNALS__.invoke({command}, {args}).then(
+                function (value) {{
+                    settle({{ done: true, outcome: "ok", value: value === undefined ? null : value }});
+                }},
+                function (error) {{
+                    let text;
+                    if (typeof error === "string") {{
+                        text = error;
+                    }} else {{
+                        // Not every rejection serializes (undefined, a cycle).
+                        try {{ text = JSON.stringify(error); }} catch (e) {{ text = undefined; }}
+                        if (typeof text !== "string") text = String(error);
+                    }}
+                    settle({{ done: true, outcome: "err", error: text }});
+                }}
+            );
+            return {{ started: true }};
+        }})()"#
+    ))
+}
+
+/// Drops whatever is parked under `id`.
+fn forget_invoke_js(id: u64) -> String {
+    format!(
+        r#"(function () {{
+            if (window.__jamjamE2eInvoke) delete window.__jamjamE2eInvoke[{id}];
+            return {{ forgotten: true }};
+        }})()"#
+    )
+}
+
+/// Reads the outcome parked under `id`, removing it once settled.
+fn settled_invoke_js(id: u64) -> String {
+    format!(
+        r#"(function () {{
+            const results = window.__jamjamE2eInvoke || {{}};
+            const result = results[{id}];
+            if (!result || !result.done) return {{ done: false }};
+            delete results[{id}];
+            return result;
+        }})()"#
+    )
 }
 
 /// Encodes a Rust string as a JS string literal. Going through serde_json
@@ -474,6 +627,67 @@ mod tests {
 
             assert_eq!(serde_json::from_str::<String>(&encoded).unwrap(), hostile);
         }
+    }
+
+    /// A command name or argument holding quotes stays a JSON literal and
+    /// cannot close the call it is passed to.
+    #[test]
+    fn test_invoke_request_values_go_in_as_literals() {
+        let request = InvokeRequest {
+            command: r#"x"); window.__pwned = 1; ("#.to_string(),
+            args: serde_json::json!({ "name": "\"); window.__pwned = 2; (\"" }),
+            window: None,
+        };
+        let js = start_invoke_js(7, &request).unwrap();
+
+        let call = js
+            .split("window.__TAURI_INTERNALS__.invoke(")
+            .nth(1)
+            .and_then(|rest| rest.split(").then(").next())
+            .unwrap();
+        let (command, args) = call.split_once(", ").unwrap();
+        assert_eq!(
+            serde_json::from_str::<String>(command).unwrap(),
+            request.command
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(args).unwrap(),
+            request.args
+        );
+    }
+
+    #[test]
+    fn test_invoke_without_args_passes_an_empty_object() {
+        let request: InvokeRequest =
+            serde_json::from_value(serde_json::json!({ "command": "settings_get" })).unwrap();
+        assert!(start_invoke_js(1, &request)
+            .unwrap()
+            .contains(r#"invoke("settings_get", {})"#));
+    }
+
+    #[test]
+    fn test_a_settled_call_reads_back_as_its_outcome() {
+        let ok: InvokeResult = serde_json::from_value(serde_json::json!({
+            "done": true, "outcome": "ok", "value": { "buffer_size": 128 }
+        }))
+        .unwrap();
+        assert_eq!(
+            ok,
+            InvokeResult::Ok {
+                value: serde_json::json!({ "buffer_size": 128 })
+            }
+        );
+
+        let err: InvokeResult = serde_json::from_value(serde_json::json!({
+            "done": true, "outcome": "err", "error": "Device not found: x"
+        }))
+        .unwrap();
+        assert_eq!(
+            err,
+            InvokeResult::Err {
+                error: "Device not found: x".to_string()
+            }
+        );
     }
 
     #[test]

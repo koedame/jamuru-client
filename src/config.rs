@@ -10,7 +10,7 @@
 //! - macOS: ~/Library/Application Support/jamjam/config.toml
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
@@ -27,6 +27,15 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 48000;
 
 /// Valid sample rates per ADR-013
 pub const VALID_SAMPLE_RATES: [u32; 3] = [44100, 48000, 96000];
+
+/// The most channels a device is taken to have, and so the highest channel
+/// number the settings accept. A device can offer many channels, but beyond
+/// this a number is a mistake (the audio backends report at most this many).
+pub const MAX_DEVICE_CHANNELS: u32 = 64;
+
+/// Audio buffer sizes (frame sizes, in samples) the app offers and accepts.
+/// The same set as the presets' frame sizes (`AudioPreset::frame_size`).
+pub const VALID_BUFFER_SIZES: [u32; 4] = [32, 64, 128, 256];
 
 /// jamjam server a development build uses: one running on this machine on the
 /// development port 17890 (ADR-030).
@@ -229,10 +238,10 @@ impl AppConfig {
     /// Returns an error message if any value is invalid.
     pub fn validate(&self) -> Result<(), String> {
         // Validate buffer size
-        if ![32, 64, 128, 256].contains(&self.buffer_size) {
+        if !VALID_BUFFER_SIZES.contains(&self.buffer_size) {
             return Err(format!(
-                "Invalid buffer size: {}. Valid values are 32, 64, 128, 256",
-                self.buffer_size
+                "Invalid buffer size: {}. Valid values are {:?}",
+                self.buffer_size, VALID_BUFFER_SIZES
             ));
         }
 
@@ -280,7 +289,7 @@ pub fn config_dir() -> Option<PathBuf> {
 /// Get the configuration file path
 ///
 /// Returns None if the configuration directory cannot be determined.
-fn config_path() -> Option<PathBuf> {
+pub fn config_path() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("config.toml"))
 }
 
@@ -289,13 +298,16 @@ fn config_path() -> Option<PathBuf> {
 /// Returns the loaded configuration, or an error if loading fails.
 /// If the file doesn't exist, returns an error (use unwrap_or_default for fallback).
 pub fn load_config() -> Result<AppConfig, String> {
-    let path = config_path().ok_or("Could not determine config path")?;
+    load_config_from(&config_path().ok_or("Could not determine config path")?)
+}
 
+/// [`load_config`] from the file at `path`.
+pub fn load_config_from(path: &Path) -> Result<AppConfig, String> {
     if !path.exists() {
         return Err("Config file does not exist".to_string());
     }
 
-    let content = fs::read_to_string(&path)
+    let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read config file at {:?}: {}", path, e))?;
 
     let config: AppConfig =
@@ -324,22 +336,35 @@ pub fn load_config() -> Result<AppConfig, String> {
 ///
 /// Creates the config directory if it doesn't exist.
 pub fn save_config(config: &AppConfig) -> Result<(), String> {
-    let config_dir = config_dir().ok_or("Could not determine config directory")?;
-    let config_path = config_dir.join("config.toml");
+    save_config_to(
+        &config_path().ok_or("Could not determine config directory")?,
+        config,
+    )
+}
 
+/// [`save_config`] to the file at `path`.
+pub fn save_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
     // Create config directory if it doesn't exist
-    if !config_dir.exists() {
-        fs::create_dir_all(&config_dir)
-            .map_err(|e| format!("Failed to create config directory {:?}: {}", config_dir, e))?;
+    if let Some(config_dir) = path.parent() {
+        if !config_dir.exists() {
+            fs::create_dir_all(config_dir).map_err(|e| {
+                format!("Failed to create config directory {:?}: {}", config_dir, e)
+            })?;
+        }
     }
 
     // Serialize config to TOML
     let content =
         toml::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    // Write to file
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config file {:?}: {}", config_path, e))?;
+    // Write beside it and rename over it, so a failure part-way (a full disk,
+    // a crash) leaves the old file whole instead of a truncated one that the
+    // next start could not read.
+    let partial = path.with_extension("toml.partial");
+    fs::write(&partial, content)
+        .map_err(|e| format!("Failed to write config file {:?}: {}", partial, e))?;
+    fs::rename(&partial, path)
+        .map_err(|e| format!("Failed to replace config file {:?}: {}", path, e))?;
 
     Ok(())
 }

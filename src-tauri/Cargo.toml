@@ -58,6 +58,9 @@ tempfile = "3"
 # the client reconnects automatically. Pinned to the same version the
 # jamjam library uses so client and test server agree on the wire protocol.
 tokio-tungstenite = "0.30"
+# Sends the test server's messages (`SinkExt`); already in the tree through
+# the jamjam library's signaling client.
+futures-util = "0.3"
 
 # `#[tokio::test]` for the self-update tests
 tokio = { version = "1", features = ["macros", "rt"] }

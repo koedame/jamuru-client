@@ -30,10 +30,6 @@ use jamjam::network::{
 };
 use jamjam::protocol::LatencyInfoMessage;
 
-/// Default audio sample rate for latency calculations
-/// Per ADR-013: 48kHz is recommended, but user can select 44100/48000/96000
-const DEFAULT_SAMPLE_RATE: u32 = 48000;
-
 /// How long the receive loop waits when it has nothing to hand to playback.
 ///
 /// Short enough to be irrelevant to the latency budget (ADR-008) and long
@@ -270,7 +266,8 @@ impl StreamingState {
             peer_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
             local_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             local_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
-            sample_rate: Arc::new(AtomicU32::new(DEFAULT_SAMPLE_RATE)), // ADR-013
+            // Until a session starts from the saved settings (ADR-013)
+            sample_rate: Arc::new(AtomicU32::new(jamjam::config::DEFAULT_SAMPLE_RATE)),
             peer_latency_info: Arc::new(RwLock::new(None)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
@@ -355,8 +352,25 @@ impl Default for StreamingState {
     }
 }
 
+/// An audio setting a running session can take on without reconnecting
+/// ([`StreamingState::apply_setting`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionSetting {
+    InputDevice(Option<String>),
+    OutputDevice(Option<String>),
+    /// Input device channels to capture from (1-based)
+    InputChannels(u32, Option<u32>),
+    /// Output device channels to play on (1-based)
+    OutputChannels(u32, Option<u32>),
+    /// 1 (mono) or 2 (stereo)
+    TransmitChannels(u32),
+    /// Receive jitter buffer depth (ADR-020)
+    JitterBufferFrames(u32),
+}
+
 /// Commands sent to the audio thread
-enum StreamingCommand {
+#[derive(Debug, PartialEq)]
+pub(crate) enum StreamingCommand {
     Stop,
     SetInputDevice(Option<String>),
     /// Capture 1 (mono) or 2 (stereo) channels from now on
@@ -428,44 +442,52 @@ impl StreamingState {
         self.silence_giveups.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Apply a new jitter buffer depth to a session that is already running
-    ///
-    /// Called when the preset changes mid-session (REQ-LAT-106). Only the depth
-    /// is applied live: the frame size is fixed for the lifetime of the audio
-    /// engines, so a preset's new frame size takes effect on the next connect.
-    ///
-    /// A no-op when no session is active.
-    pub async fn apply_jitter_buffer_frames(&self, frames: u32) {
-        if !self.is_active.load(Ordering::SeqCst) {
-            return;
-        }
-        let tx = self.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetJitterBufferFrames(frames));
-        }
+    /// Stands in for a running session: what it is told arrives on the
+    /// returned receiver instead of an audio thread.
+    #[cfg(test)]
+    pub(crate) async fn attach_session_for_test(&self) -> std_mpsc::Receiver<StreamingCommand> {
+        let rx = self.detached_session_for_test().await;
+        self.is_active.store(true, Ordering::SeqCst);
+        rx
     }
 
-    /// Tells a running session which input device channels to capture from.
-    /// A no-op when no session is active.
-    pub async fn apply_input_channels(&self, left: u32, right: Option<u32>) {
-        if !self.is_active.load(Ordering::SeqCst) {
-            return;
-        }
-        let tx = self.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetInputChannels(left, right));
-        }
+    /// A receiver for commands while no session is running, to show that
+    /// nothing is sent to one.
+    #[cfg(test)]
+    pub(crate) async fn detached_session_for_test(&self) -> std_mpsc::Receiver<StreamingCommand> {
+        let (tx, rx) = std_mpsc::channel();
+        *self.cmd_tx.lock().await = Some(tx);
+        rx
     }
 
-    /// Tells a running session which output device channels to play on.
-    /// A no-op when no session is active.
-    pub async fn apply_output_channels(&self, left: u32, right: Option<u32>) {
+    /// Tells a running session about a changed audio setting, so it follows
+    /// the change straight away. A no-op when no session is active: the next
+    /// session starts from the saved settings.
+    ///
+    /// Only what can change live is here. The frame size is fixed for the
+    /// lifetime of the audio engines, so a new buffer size (or a preset's new
+    /// frame size) takes effect on the next connect (REQ-LAT-106).
+    pub async fn apply_setting(&self, setting: SessionSetting) {
         if !self.is_active.load(Ordering::SeqCst) {
             return;
         }
+        let command = match setting {
+            SessionSetting::InputDevice(id) => StreamingCommand::SetInputDevice(id),
+            SessionSetting::OutputDevice(id) => StreamingCommand::SetOutputDevice(id),
+            SessionSetting::InputChannels(left, right) => {
+                StreamingCommand::SetInputChannels(left, right)
+            }
+            SessionSetting::OutputChannels(left, right) => {
+                StreamingCommand::SetOutputChannels(left, right)
+            }
+            SessionSetting::TransmitChannels(count) => StreamingCommand::SetTransmitChannels(count),
+            SessionSetting::JitterBufferFrames(frames) => {
+                StreamingCommand::SetJitterBufferFrames(frames)
+            }
+        };
         let tx = self.cmd_tx.lock().await;
         if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetOutputChannels(left, right));
+            let _ = sender.send(command);
         }
     }
 }
@@ -651,47 +673,15 @@ pub async fn streaming_start(
     // `remote_addr` so a peer on the same network is reached directly
     // instead of only through its public address (REQ-CON-113).
     remote_candidates: Option<Vec<String>>,
-    input_device_id: Option<String>,
-    output_device_id: Option<String>,
-    buffer_size: u32,
-    sample_rate: Option<u32>,
     state: tauri::State<'_, StreamingState>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
+    settings_state: tauri::State<'_, crate::settings::SettingsState>,
     usage: tauri::State<'_, crate::usage::UsageState>,
 ) -> Result<(), String> {
     // Check if already streaming
     if state.is_active.load(Ordering::SeqCst) {
         return Err("Streaming already active".to_string());
     }
-
-    // Use provided sample rate or default (ADR-013)
-    let sample_rate = sample_rate.unwrap_or(DEFAULT_SAMPLE_RATE);
-
-    // Jitter buffer depth comes from the selected preset (ADR-019/ADR-020).
-    // The frame *duration* comes from the buffer_size actually in use, so the
-    // resulting delay is correct even if the two were configured separately.
-    let preset = config_state
-        .get()
-        .map(|config| config.preset)
-        .unwrap_or_default();
-
-    // Transmit channel count, told to the peer so its mixer can show whether
-    // we're sending mono or stereo.
-    let transmit_channels = config_state
-        .get()
-        .map(|config| config.transmit_channels)
-        .unwrap_or(2);
-
-    // Which channels of a multi-channel interface are read and played on
-    let (input_channels, output_channels) = config_state
-        .get()
-        .map(|config| {
-            (
-                (config.input_channel_l, config.input_channel_r),
-                (config.output_channel_l, config.output_channel_r),
-            )
-        })
-        .unwrap_or(((1, Some(2)), (1, Some(2))));
 
     // Parse remote address
     let addr: SocketAddr = remote_addr
@@ -711,18 +701,6 @@ pub async fn streaming_start(
     }
     let candidate_addrs = merge_candidate_addrs(addr, &parsed_candidates);
 
-    let redact = crate::logging::redaction_enabled();
-    tracing::info!(
-        "Streaming start: remote={} candidates={:?} input={:?} output={:?} buffer={} sample_rate={} preset={:?}",
-        addr,
-        candidate_addrs,
-        crate::logging::redact_device_id(input_device_id.as_deref().unwrap_or("system default"), redact),
-        crate::logging::redact_device_id(output_device_id.as_deref().unwrap_or("system default"), redact),
-        buffer_size,
-        sample_rate,
-        preset
-    );
-
     // Create channel for commands to audio thread
     let (cmd_tx, cmd_rx) = std_mpsc::channel::<StreamingCommand>();
 
@@ -737,15 +715,6 @@ pub async fn streaming_start(
         let mut addr_lock = state.remote_addr.lock().await;
         *addr_lock = Some(remote_addr.clone());
     }
-
-    // Store buffer size for latency display
-    {
-        let mut bs = state.buffer_size.lock().await;
-        *bs = buffer_size;
-    }
-
-    // Store sample rate (ADR-013)
-    state.sample_rate.store(sample_rate, Ordering::SeqCst);
 
     let is_active = state.is_active.clone();
     let is_muted = state.is_muted.clone();
@@ -798,8 +767,57 @@ pub async fn streaming_start(
         *info = None;
     }
 
+    // Read the settings and become active as one step, with changes held
+    // off: a change made before this is in the config read here, and one made
+    // after it finds the session active and is sent to it. Read any earlier -
+    // before the prepared socket, which can wait on STUN - and a change made
+    // meanwhile would be saved and shown but miss this session.
+    let changes_held = settings_state.hold_changes().await;
+    // The session runs with the audio settings as saved: the one store every
+    // change goes through (ADR-043), so what the settings show is what the
+    // session gets - the sample rate once never reached it, because the
+    // caller had to pass it and did not.
+    let config = config_state.get()?;
+    let input_device_id = config.input_device_id.clone();
+    let output_device_id = config.output_device_id.clone();
+    let buffer_size = config.buffer_size;
+    // User-selectable (ADR-013)
+    let sample_rate = config.sample_rate;
+    // Jitter buffer depth comes from the selected preset (ADR-019/ADR-020).
+    // The frame *duration* comes from the buffer_size actually in use, so the
+    // resulting delay is correct even if the two were configured separately.
+    let preset = config.preset.clone();
+    // Transmit channel count, told to the peer so its mixer can show whether
+    // we're sending mono or stereo.
+    let transmit_channels = config.transmit_channels;
+    // Which channels of a multi-channel interface are read and played on
+    let input_channels = (config.input_channel_l, config.input_channel_r);
+    let output_channels = (config.output_channel_l, config.output_channel_r);
+
+    let redact = crate::logging::redaction_enabled();
+    tracing::info!(
+        "Streaming start: remote={} candidates={:?} input={:?} output={:?} buffer={} sample_rate={} preset={:?}",
+        addr,
+        candidate_addrs,
+        crate::logging::redact_device_id(input_device_id.as_deref().unwrap_or("system default"), redact),
+        crate::logging::redact_device_id(output_device_id.as_deref().unwrap_or("system default"), redact),
+        buffer_size,
+        sample_rate,
+        preset
+    );
+
+    // Store buffer size for latency display
+    {
+        let mut bs = state.buffer_size.lock().await;
+        *bs = buffer_size;
+    }
+
+    // Store sample rate (ADR-013)
+    state.sample_rate.store(sample_rate, Ordering::SeqCst);
+
     // Mark as active BEFORE spawning thread to avoid race condition
     state.is_active.store(true, Ordering::SeqCst);
+    drop(changes_held);
 
     // Spawn audio thread with real-time priority
     thread::spawn(move || {
@@ -1059,69 +1077,6 @@ pub async fn streaming_reconnect(state: tauri::State<'_, StreamingState>) -> Res
             .map_err(|e| format!("Failed to request reconnection: {}", e)),
         None => Err("No active session".to_string()),
     }
-}
-
-/// Set input device during streaming
-#[tauri::command]
-pub async fn streaming_set_input_device(
-    device_id: Option<String>,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    if !state.is_active.load(Ordering::SeqCst) {
-        return Err("Streaming is not active".to_string());
-    }
-
-    let tx = state.cmd_tx.lock().await;
-    if let Some(ref sender) = *tx {
-        sender
-            .send(StreamingCommand::SetInputDevice(device_id))
-            .map_err(|e| format!("Failed to send command: {}", e))?;
-    }
-
-    Ok(())
-}
-
-/// Set the transmit channel count (1 = mono, 2 = stereo) during streaming
-#[tauri::command]
-pub async fn streaming_set_transmit_channels(
-    count: u32,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    if count != 1 && count != 2 {
-        return Err("Transmit channels must be 1 (mono) or 2 (stereo)".to_string());
-    }
-    if !state.is_active.load(Ordering::SeqCst) {
-        return Err("Streaming is not active".to_string());
-    }
-
-    let tx = state.cmd_tx.lock().await;
-    if let Some(ref sender) = *tx {
-        sender
-            .send(StreamingCommand::SetTransmitChannels(count))
-            .map_err(|e| format!("Failed to send command: {}", e))?;
-    }
-
-    Ok(())
-}
-
-/// Set output device during streaming
-#[tauri::command]
-pub async fn streaming_set_output_device(
-    device_id: Option<String>,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    if !state.is_active.load(Ordering::SeqCst) {
-        return Err("Streaming is not active".to_string());
-    }
-
-    let tx = state.cmd_tx.lock().await;
-    if let Some(ref sender) = *tx {
-        sender
-            .send(StreamingCommand::SetOutputDevice(device_id))
-            .map_err(|e| format!("Failed to send command: {}", e))?;
-    }
-
-    Ok(())
 }
 
 /// Set mute state
