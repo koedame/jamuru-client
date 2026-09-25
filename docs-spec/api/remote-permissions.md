@@ -10,6 +10,7 @@
 | 操作 | 内容 |
 |------|------|
 | `greet` | 動作確認用のあいさつ |
+| `session_get` | 接続・入室の状態を読む |
 | `signaling_get_chat_messages` | チャットの履歴を読む |
 | `settings_get` | 音声の設定を読む |
 | `settings_change` | 音声の設定を変える |
@@ -51,26 +52,20 @@
 
 | 操作 | 内容 |
 |------|------|
-| `signaling_connect` | シグナリングサーバーに接続する |
-| `signaling_disconnect` | シグナリングサーバーから切断する |
-| `signaling_list_rooms` | ルームの一覧を取る |
-| `signaling_join_room` | ルームに参加する |
-| `signaling_leave_room` | ルームから退室する |
-| `signaling_create_room` | ルームを作る |
+| `session_connect` | サーバーへの接続を最初からやり直す |
+| `session_create` | ルームを作って入る |
+| `session_join` | ルームに参加する |
+| `session_leave` | ルームから退室する |
+| `session_reconnect` | 切れたシグナリングを繋ぎ直して、ルームに入り直す |
 | `signaling_send_chat` | チャットを送る |
 | `signaling_add_reaction` | チャットにリアクションを付ける |
 | `signaling_remove_reaction` | チャットのリアクションを外す |
 | `signaling_toggle_reaction` | チャットのリアクションを付け外しする |
-| `signaling_publish_local_candidates` | 自分の接続先の候補をルームに知らせる |
-| `signaling_poll_events` | ルームの出来事を受け取る |
 | `settings_help_request` | 設定の手伝いを申し出る |
 | `settings_help_answer` | 設定の手伝いの申し出に答える |
 | `settings_help_propose` | 設定の変更を申請する |
 | `settings_help_decide` | 設定の変更の申請に答える |
 | `settings_help_stop` | 設定の手伝いを止める |
-| `streaming_prepare` | 音声の送受信の準備をする |
-| `streaming_start` | 音声の送受信を始める |
-| `streaming_stop` | 音声の送受信を止める |
 | `streaming_reconnect` | 音声の接続を張り直す |
 | `config_load` | 設定ファイルの全体を読む |
 | `config_set_usage_reporting` | 利用状況の送信をオン・オフする |

@@ -110,6 +110,7 @@ src/
 src-tauri/              # Tauri デスクトップアプリ
   src/e2e_control.rs    # GUI E2E 制御チャネル（feature = "e2e-control"、既定で無効。ADR-025）
   src/rpc/              # 口ごとの許可の表（spec.rs）と、口から呼ぶ層（ADR-044）。E2E の制御チャネルはこの層の口の 1 つ
+  src/session/          # 接続・入室の状態機械（接続の段階・ルーム・参加者・音声の相手・繋ぎ直し）。画面は `session_get` と `session:changed` で描く。参加者と音声の判断は入出力の無い roster.rs（ADR-044 §6）
   src/settings.rs       # 音声の設定の変更を 1 か所で適用する（設定ウィンドウ・E2E・遠隔設定が共有。ADR-043）
   src/settings_help.rs  # 参加者の設定の手伝い: 申請・許可・停止の状態遷移（通信なし。signaling.rs が送る。ADR-043）
 ui/
