@@ -23,7 +23,7 @@
 
 | 部品 | 種類 | 役割 |
 |------|------|------|
-| `SettingsHelpQuestion` | Pure | 問いかけ。`message` と「許可」「断る」（と、渡されれば「手伝いを止める」）のボタン。最初のフォーカスは「断る」、Escape は断る。外側のクリックでは閉じない（うっかり答えさせない）。新しい問いかけ（`questionKey` が変わる）が出てから `ALLOW_DELAY_MS`（0.5 秒）は「許可」を受け付けない（`aria-disabled`。連打やひとつ前へのクリックで答えさせない）。閉じるとフォーカスを元の場所に戻す |
+| `SettingsHelpQuestion` | Pure | 問いかけ。`message` と「許可」「断る」（と、渡されれば「手伝いを止める」）のボタン。最初のフォーカスは「断る」、Escape は断る。外側のクリックでは閉じない（うっかり答えさせない）。新しい問いかけ（`questionKey` が変わる）が出てから `ALLOW_DELAY_MS`（0.5 秒）は「許可」を受け付けない（`aria-disabled`。連打やひとつ前へのクリックで答えさせない）。閉じるとフォーカスを元の場所に戻す。`useSettingsHelp` は問いかけを出すたびに作り直す（`key` 付きで、出ている間だけ描く）ので、新しい問いかけは最初の描画から「許可」を受け付けない |
 | `SettingsHelpBar` | Pure | 帯。`message`・`status`・操作ボタンの並び |
 | `SettingsHelpPanel` | Pure | 相手の設定。`useAudioSettingsTab` が作った Devices タブの props をそのまま描く。`waiting` の間は選べない |
 | `useSettingsHelp` | Adapter（hook） | メイン画面のポーリングが届けるイベントから状態を作り、上の部品と入口の判定（`canOffer`）を返す |
@@ -44,14 +44,13 @@
 | `settingsHelp.proposal.message` | {{name}}さんが{{setting}}を「{{value}}」に変えようとしています | {{name}} wants to change your {{setting}} to {{value}} |
 | `settingsHelp.helped.bar` / `.stop` | {{name}}さんが音声の設定を手伝っています / 停止 | {{name}} is helping with your audio settings / Stop |
 | `chat.system.settingsHelpChanged` | {{helper}}さんが{{helped}}さんの{{setting}}設定を変更しました | {{helper}} changed {{helped}}'s {{setting}} setting |
-
 | `settingsHelp.proposal.stop` | 手伝いを止める | Stop help |
 | `settingsHelp.helper.refused.device_gone` | その機器は{{name}}さんのところで接続されていないため、変更できませんでした | {{name}}'s app could not switch: that device is no longer connected |
 | `settingsHelp.helper.refused.invalid_value` | {{name}}さんのところではその値を使えないため、変更できませんでした | {{name}}'s app could not use that value |
 | `settingsHelp.helper.refused.unavailable` | {{name}}さんのところで変更を保存できませんでした | {{name}}'s app could not save the change |
 
-変更の申請で見せる値（`{{value}}`）は、手伝われる人自身のアプリが組み立てる。デバイスは自分のデバイス一覧の名前
-（一覧に無くなった機器は「接続されていない機器」。ID は出さない）、チャンネルは設定ウィンドウと同じ表記（「チャンネル 3」「なし」）。
+変更の申請で見せる値（`{{value}}`）は、手伝われる人自身のアプリが組み立てる。デバイスは手伝う人に見せた一覧での名前
+（アプリが申請と一緒に渡す。名前の無い機器は「接続されていない機器」。ID は出さない）、チャンネルは設定ウィンドウと同じ表記（「チャンネル 3」「なし」）。
 手伝う人のアプリにはデバイス ID を渡さない（REQ-RMT-006）。
 
 ---

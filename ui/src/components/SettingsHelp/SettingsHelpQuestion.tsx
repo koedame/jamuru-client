@@ -46,6 +46,14 @@ export function SettingsHelpQuestion({
   const declineRef = useRef<HTMLButtonElement>(null);
   const [allowReady, setAllowReady] = useState(false);
 
+  // Focus goes back where it was when the question closes. Taken before the
+  // effect below moves focus into the question.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => previous?.focus();
+  }, [open]);
+
   // Focus starts on declining: the safe answer when a key is pressed by accident.
   useEffect(() => {
     if (!open) return;
@@ -54,13 +62,6 @@ export function SettingsHelpQuestion({
     const timer = setTimeout(() => setAllowReady(true), ALLOW_DELAY_MS);
     return () => clearTimeout(timer);
   }, [open, questionKey]);
-
-  // Focus goes back where it was when the question closes.
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    return () => previous?.focus();
-  }, [open]);
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {

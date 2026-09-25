@@ -3,7 +3,7 @@
  * after a helper changed something, and the question the helped side answers.
  */
 import type { TFunction } from "i18next";
-import type { AudioSettings, SettingChange } from "../../lib/tauri";
+import type { SettingChange } from "../../lib/tauri";
 
 /** The i18n key of each setting's name, by the name a settings change carries */
 const SETTING_LABEL_KEYS: Record<SettingChange["setting"], string> = {
@@ -31,22 +31,20 @@ const PRESET_NAME_KEYS: Record<string, string> = {
 };
 
 /**
- * What `change` would set, as the helped side reads it: device names from its
- * own list, channels as the pickers name them.
+ * What `change` would set, as the helped side reads it: a device by the name
+ * it was listed under (`deviceName`), channels as the pickers name them. A
+ * device without a name is not named by its id, which can carry a serial number.
  */
-export function changeValue(change: SettingChange, audio: AudioSettings | null, t: TFunction): string {
-  // A device the app no longer lists is not named by its id: the id can carry a serial number.
-  const deviceName = (devices: AudioSettings["input_devices"] | undefined, id: string) =>
-    devices?.find((d) => d.id === id)?.name ?? t("settingsHelp.value.unknownDevice");
+export function changeValue(change: SettingChange, deviceName: string | null, t: TFunction): string {
+  const device = () => deviceName ?? t("settingsHelp.value.unknownDevice");
   const channel = (n: number | null) =>
     n === null ? t("common.none", "None") : t("settings.devices.channelOption", { channel: n });
   const side = (s: "left" | "right") =>
     s === "left" ? t("settings.devices.channelL", "L/MONO") : t("settings.devices.channelR", "R");
   switch (change.setting) {
     case "input_device":
-      return deviceName(audio?.input_devices, change.device_id);
     case "output_device":
-      return deviceName(audio?.output_devices, change.device_id);
+      return device();
     case "input_channel":
     case "output_channel":
       return `${side(change.side)}: ${channel(change.channel)}`;

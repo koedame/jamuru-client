@@ -160,7 +160,7 @@ export type HelpEvent =
   | { type: "requested"; peer: string; peer_name: string }
   | { type: "started"; role: HelpRole; peer: string; settings: AudioSettings | null }
   | { type: "declined"; peer: string; busy: boolean }
-  | { type: "proposed"; id: number; change: SettingChange }
+  | { type: "proposed"; id: number; change: SettingChange; device_name: string | null }
   | { type: "answered"; id: number; answer: HelpAnswer }
   | { type: "settings"; settings: AudioSettings }
   | { type: "ended"; role: HelpRole; peer: string; reason: HelpEndReason };

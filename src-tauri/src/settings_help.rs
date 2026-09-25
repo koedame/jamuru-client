@@ -16,16 +16,22 @@
 //! The other app is not trusted to follow the protocol. What the helped side
 //! approves is the question it numbered and showed itself, never a number the
 //! helper chose; a proposal that arrives while one waits, or that names a
-//! device this help never showed, is dropped. Nothing a peer sends makes this
-//! app answer more than once per participant without its user acting, so a
-//! peer cannot make it exceed the server's message limit and lose the room.
+//! device this help never showed, is dropped. The only answer a peer can get
+//! without this app's user acting is "busy", at most once per participant in
+//! [`BUSY_REPLY_INTERVAL`], so peers cannot make this app exceed the server's
+//! message limit and lose the room.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::settings::{AudioSettings, SettingChange, SettingsError};
+
+/// A participant asking while this app is already helped hears "busy" at
+/// most once in this time; asking again sooner gets no answer.
+pub const BUSY_REPLY_INTERVAL: Duration = Duration::from_secs(10);
 
 /// What the two apps say to each other. Travels as the body of a peer
 /// message, under [`PeerBody::SettingsHelp`].
@@ -155,8 +161,13 @@ pub enum HelpEvent {
     Declined { peer: Uuid, busy: bool },
     /// The helper proposes `change` (naming this app's own device ids).
     /// `id` is this app's number for the question; decide with
-    /// [`Help::take_proposal`].
-    Proposed { id: u64, change: SettingChange },
+    /// [`Help::take_proposal`]. `device_name` is the name the helper saw for
+    /// the device it proposes, if the change is to a device.
+    Proposed {
+        id: u64,
+        change: SettingChange,
+        device_name: Option<String>,
+    },
     /// The helped side answered this app's proposal `id`.
     Answered { id: u64, answer: Answer },
     /// The helped side's settings, as they are now.
@@ -244,58 +255,90 @@ impl Giving {
 /// numbered apart, so a handle from one list cannot pick a device in the other.
 #[derive(Debug, Default, Clone, PartialEq)]
 struct DeviceHandles {
-    input: Vec<String>,
-    output: Vec<String>,
+    input: Vec<Shown>,
+    output: Vec<Shown>,
+}
+
+/// A device the helper was shown: its id, and the name it was listed under
+/// (none for a chosen device the list did not hold).
+#[derive(Debug, Clone, PartialEq)]
+struct Shown {
+    id: String,
+    name: Option<String>,
 }
 
 impl DeviceHandles {
     const INPUT: &'static str = "input-";
     const OUTPUT: &'static str = "output-";
 
-    fn handle(ids: &mut Vec<String>, prefix: &str, id: &str) -> String {
-        let index = match ids.iter().position(|known| known == id) {
+    fn handle(shown: &mut Vec<Shown>, prefix: &str, id: &str, name: Option<&str>) -> String {
+        let index = match shown.iter().position(|known| known.id == id) {
             Some(index) => index,
             None => {
-                ids.push(id.to_string());
-                ids.len() - 1
+                shown.push(Shown {
+                    id: id.to_string(),
+                    name: None,
+                });
+                shown.len() - 1
             }
         };
+        if let Some(name) = name {
+            shown[index].name = Some(name.to_string());
+        }
         format!("{}{}", prefix, index + 1)
     }
 
-    fn id(ids: &[String], prefix: &str, handle: &str) -> Option<String> {
+    fn find<'s>(shown: &'s [Shown], prefix: &str, handle: &str) -> Option<&'s Shown> {
         let number: usize = handle.strip_prefix(prefix)?.parse().ok()?;
-        ids.get(number.checked_sub(1)?).cloned()
+        shown.get(number.checked_sub(1)?)
     }
 
     /// `settings` as the helper may see them.
     fn hide(&mut self, mut settings: AudioSettings) -> AudioSettings {
         for device in settings.input_devices.iter_mut() {
-            device.id = Self::handle(&mut self.input, Self::INPUT, &device.id);
+            device.id = Self::handle(&mut self.input, Self::INPUT, &device.id, Some(&device.name));
         }
         for device in settings.output_devices.iter_mut() {
-            device.id = Self::handle(&mut self.output, Self::OUTPUT, &device.id);
+            device.id = Self::handle(
+                &mut self.output,
+                Self::OUTPUT,
+                &device.id,
+                Some(&device.name),
+            );
         }
         settings.input_device_id = settings
             .input_device_id
-            .map(|id| Self::handle(&mut self.input, Self::INPUT, &id));
+            .map(|id| Self::handle(&mut self.input, Self::INPUT, &id, None));
         settings.output_device_id = settings
             .output_device_id
-            .map(|id| Self::handle(&mut self.output, Self::OUTPUT, &id));
+            .map(|id| Self::handle(&mut self.output, Self::OUTPUT, &id, None));
         settings
     }
 
-    /// `change` with the device it names turned back into its id; `None` for
-    /// a handle this help never showed in that list.
-    fn reveal(&self, change: SettingChange) -> Option<SettingChange> {
+    /// `change` with the device it names turned back into its id, and that
+    /// device's name as the helper saw it; `None` for a handle this help
+    /// never showed in that list.
+    fn reveal(&self, change: SettingChange) -> Option<(SettingChange, Option<String>)> {
         Some(match change {
-            SettingChange::InputDevice { device_id } => SettingChange::InputDevice {
-                device_id: Self::id(&self.input, Self::INPUT, &device_id)?,
-            },
-            SettingChange::OutputDevice { device_id } => SettingChange::OutputDevice {
-                device_id: Self::id(&self.output, Self::OUTPUT, &device_id)?,
-            },
-            other => other,
+            SettingChange::InputDevice { device_id } => {
+                let shown = Self::find(&self.input, Self::INPUT, &device_id)?;
+                (
+                    SettingChange::InputDevice {
+                        device_id: shown.id.clone(),
+                    },
+                    shown.name.clone(),
+                )
+            }
+            SettingChange::OutputDevice { device_id } => {
+                let shown = Self::find(&self.output, Self::OUTPUT, &device_id)?;
+                (
+                    SettingChange::OutputDevice {
+                        device_id: shown.id.clone(),
+                    },
+                    shown.name.clone(),
+                )
+            }
+            other => (other, None),
         })
     }
 }
@@ -319,6 +362,9 @@ enum Receiving {
     Active {
         peer: Uuid,
         name: String,
+        /// Which help this is (each accepted request gets the next number):
+        /// an answer belongs to the help its question came from
+        help: u64,
         question: Option<Question>,
         /// The number the last question got
         asked: u64,
@@ -343,6 +389,7 @@ impl Receiving {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Taken {
     helper: Uuid,
+    help: u64,
     id: u64,
     pub change: SettingChange,
 }
@@ -354,9 +401,10 @@ pub struct Taken {
 pub struct Help {
     giving: Option<Giving>,
     receiving: Option<Receiving>,
-    /// Participants told this app is busy since it was last free: each hears
-    /// it once, so asking again and again gets no more answers.
-    told_busy: HashSet<Uuid>,
+    /// The number the last accepted request got
+    helps: u64,
+    /// When each participant was last told this app is busy
+    busy_replies: HashMap<Uuid, Instant>,
 }
 
 impl Help {
@@ -398,7 +446,7 @@ impl Help {
             _ => return Err(HelpError::NotActive),
         };
         if !accept {
-            self.end_receiving();
+            self.receiving.take();
             return Ok(vec![Out::Send {
                 to: peer,
                 message: HelpMessage::Declined { busy: false },
@@ -407,9 +455,11 @@ impl Help {
         let mut handles = DeviceHandles::default();
         let shown_revision = settings.revision;
         let settings = handles.hide(settings);
+        self.helps += 1;
         self.receiving = Some(Receiving::Active {
             peer,
             name,
+            help: self.helps,
             question: None,
             asked: 0,
             handles,
@@ -459,7 +509,13 @@ impl Help {
     /// this app to apply or decline. The change it returns names this app's
     /// own device ids; pass it back to [`Self::report`] or [`Self::decline`].
     pub fn take_proposal(&mut self, number: u64) -> Result<Taken, HelpError> {
-        let Some(Receiving::Active { peer, question, .. }) = &mut self.receiving else {
+        let Some(Receiving::Active {
+            peer,
+            help,
+            question,
+            ..
+        }) = &mut self.receiving
+        else {
             return Err(HelpError::NotActive);
         };
         if question.as_ref().map(|q| q.number) != Some(number) {
@@ -468,6 +524,7 @@ impl Help {
         let question = question.take().expect("checked above");
         Ok(Taken {
             helper: *peer,
+            help: *help,
             id: question.id,
             change: question.change,
         })
@@ -475,7 +532,7 @@ impl Help {
 
     /// Declines `taken`. Nothing to say if the help ended meanwhile.
     pub fn decline(&mut self, taken: Taken) -> Vec<Out> {
-        if !self.is_helped_by(taken.helper) {
+        if !self.still_in(&taken) {
             return Vec::new();
         }
         vec![Out::Send {
@@ -489,17 +546,19 @@ impl Help {
 
     /// Reports how applying `taken` went. An applied change is announced to
     /// the room for the chat even if the help ended while it was applied: it
-    /// did change the settings. The helper hears the answer while it helps.
+    /// did change the settings. The helper hears the answer only in the same
+    /// help - not in a later one the two started meanwhile, where the id
+    /// would name another proposal.
     pub fn report(&mut self, taken: Taken, result: Result<AudioSettings, Refusal>) -> Vec<Out> {
         let mut out = Vec::new();
         if let Some(Receiving::Active {
-            peer,
+            help,
             handles,
             shown_revision,
             ..
         }) = &mut self.receiving
         {
-            if *peer == taken.helper {
+            if *help == taken.help {
                 let answer = match &result {
                     Ok(settings) => {
                         *shown_revision = (*shown_revision).max(settings.revision);
@@ -558,7 +617,7 @@ impl Help {
                 false,
             ),
             Role::Helped => {
-                let receiving = self.end_receiving().ok_or(HelpError::NotActive)?;
+                let receiving = self.receiving.take().ok_or(HelpError::NotActive)?;
                 let active = matches!(receiving, Receiving::Active { .. });
                 (receiving.peer(), active)
             }
@@ -584,6 +643,17 @@ impl Help {
     /// Anything that does not fit the current state - an answer to a request
     /// never made, a proposal from someone who is not helping - is dropped.
     pub fn receive(&mut self, from: Uuid, from_name: &str, message: HelpMessage) -> Vec<Out> {
+        self.receive_at(from, from_name, message, Instant::now())
+    }
+
+    /// [`Self::receive`], at `now`.
+    fn receive_at(
+        &mut self,
+        from: Uuid,
+        from_name: &str,
+        message: HelpMessage,
+        now: Instant,
+    ) -> Vec<Out> {
         match message {
             HelpMessage::Request => match &self.receiving {
                 None => {
@@ -597,11 +667,18 @@ impl Help {
                     })]
                 }
                 Some(current) if current.peer() == from => Vec::new(),
-                Some(_) if self.told_busy.insert(from) => vec![Out::Send {
-                    to: from,
-                    message: HelpMessage::Declined { busy: true },
-                }],
-                Some(_) => Vec::new(),
+                Some(_) => {
+                    self.busy_replies
+                        .retain(|_, at| now.duration_since(*at) < BUSY_REPLY_INTERVAL);
+                    if self.busy_replies.contains_key(&from) {
+                        return Vec::new();
+                    }
+                    self.busy_replies.insert(from, now);
+                    vec![Out::Send {
+                        to: from,
+                        message: HelpMessage::Declined { busy: true },
+                    }]
+                }
             },
             HelpMessage::Accepted { settings } => match &self.giving {
                 Some(Giving::Asking { peer }) if *peer == from => {
@@ -633,16 +710,20 @@ impl Help {
                     handles,
                     ..
                 }) if *peer == from => match handles.reveal(change) {
-                    // Asked about as this app's own device, so the question
-                    // can name it.
-                    Some(change) => {
+                    // Asked about as this app's own device, under the name
+                    // the helper saw.
+                    Some((change, device_name)) => {
                         *asked += 1;
                         *question = Some(Question {
                             number: *asked,
                             id,
                             change: change.clone(),
                         });
-                        vec![Out::Event(HelpEvent::Proposed { id: *asked, change })]
+                        vec![Out::Event(HelpEvent::Proposed {
+                            id: *asked,
+                            change,
+                            device_name,
+                        })]
                     }
                     // A handle this help never showed: the helper's app
                     // does not send one, so there is no one to explain to.
@@ -705,7 +786,7 @@ impl Help {
                 reason: EndReason::Stopped,
             }));
         }
-        if let Some(receiving) = self.end_receiving() {
+        if let Some(receiving) = self.receiving.take() {
             out.push(Out::Event(HelpEvent::Ended {
                 role: Role::Helped,
                 peer: receiving.peer(),
@@ -715,14 +796,9 @@ impl Help {
         out
     }
 
-    fn is_helped_by(&self, peer: Uuid) -> bool {
-        matches!(&self.receiving, Some(Receiving::Active { peer: p, .. }) if *p == peer)
-    }
-
-    /// Clears the help this app receives; it is free to be asked again.
-    fn end_receiving(&mut self) -> Option<Receiving> {
-        self.told_busy.clear();
-        self.receiving.take()
+    /// Whether the help `taken` came from is still going on.
+    fn still_in(&self, taken: &Taken) -> bool {
+        matches!(&self.receiving, Some(Receiving::Active { help, .. }) if *help == taken.help)
     }
 
     fn end_giving_with(&mut self, peer: Uuid, reason: EndReason) -> Vec<Out> {
@@ -742,7 +818,7 @@ impl Help {
             return Vec::new();
         }
         let mut out = Vec::new();
-        if let Some(Receiving::Active { .. }) = self.end_receiving() {
+        if let Some(Receiving::Active { .. }) = self.receiving.take() {
             if announce {
                 out.push(Out::Broadcast(notice(NoticeEvent::Ended, peer, None)));
             }
@@ -1331,24 +1407,103 @@ mod tests {
 
     /// Verifies: REQ-RMT-005
     #[test]
-    fn while_someone_is_helping_a_second_request_is_turned_down_as_busy_once() {
+    fn while_someone_is_helping_a_participant_asking_hears_busy_at_most_once_in_the_interval() {
         let (_, mut helped, helper_id, _) = active();
         let other = Uuid::new_v4();
+        let start = Instant::now();
+        let busy = vec![(other, HelpMessage::Declined { busy: true })];
 
-        let out = helped.receive(other, "Cy", HelpMessage::Request);
-        assert_eq!(
-            sent(&out),
-            vec![(other, HelpMessage::Declined { busy: true })]
-        );
+        let out = helped.receive_at(other, "Cy", HelpMessage::Request, start);
+        assert_eq!(sent(&out), busy);
         assert!(events(&out).is_empty(), "the user is not asked about it");
         assert_eq!(helped.helper(), Some(helper_id));
 
-        for _ in 0..50 {
+        for i in 1..50 {
+            let at = start + BUSY_REPLY_INTERVAL * i / 50;
             assert!(
-                helped.receive(other, "Cy", HelpMessage::Request).is_empty(),
-                "asking again gets no more answers"
+                helped
+                    .receive_at(other, "Cy", HelpMessage::Request, at)
+                    .is_empty(),
+                "asking again sooner gets no answer"
             );
         }
+        assert_eq!(
+            sent(&helped.receive_at(
+                other,
+                "Cy",
+                HelpMessage::Request,
+                start + BUSY_REPLY_INTERVAL
+            )),
+            busy,
+            "after the interval, one more"
+        );
+    }
+
+    /// Participants working together cannot earn more answers by one of them
+    /// asking and withdrawing again and again.
+    ///
+    /// Verifies: REQ-RMT-005
+    #[test]
+    fn asking_and_withdrawing_again_and_again_earns_no_more_busy_answers() {
+        let (x, y) = (Uuid::new_v4(), Uuid::new_v4());
+        let mut helped = Help::new();
+        let now = Instant::now();
+        helped.receive_at(x, "X", HelpMessage::Request, now);
+        assert_eq!(
+            sent(&helped.receive_at(y, "Y", HelpMessage::Request, now)).len(),
+            1
+        );
+
+        for _ in 0..20 {
+            helped.receive_at(x, "X", HelpMessage::Stop { role: Role::Helper }, now);
+            helped.receive_at(x, "X", HelpMessage::Request, now);
+            assert!(helped
+                .receive_at(y, "Y", HelpMessage::Request, now)
+                .is_empty());
+        }
+    }
+
+    /// An apply can outlast its help: stopped, asked again and accepted, the
+    /// two are in a new help whose proposal ids start over. The old change's
+    /// answer must not land on the new proposal.
+    ///
+    /// Verifies: REQ-RMT-002
+    #[test]
+    fn a_change_from_an_earlier_help_is_not_answered_into_a_later_one() {
+        let (mut helper, mut helped, helper_id, helped_id) = active();
+        let (_, number) = propose(&mut helper, &mut helped, buffer(128));
+        let taken = helped.take_proposal(number).unwrap();
+
+        let [(_, stop)] = sent(&helper.stop(Role::Helper).unwrap())
+            .try_into()
+            .unwrap();
+        helped.receive(helper_id, HELPER_NAME, stop);
+        let [(_, request)] = sent(&helper.request(helped_id).unwrap())
+            .try_into()
+            .unwrap();
+        helped.receive(helper_id, HELPER_NAME, request);
+        let [(_, accepted)] = sent(
+            &helped
+                .answer_request(helper_id, true, settings(128))
+                .unwrap(),
+        )
+        .try_into()
+        .unwrap();
+        helper.receive(helped_id, HELPED_NAME, accepted);
+        propose(&mut helper, &mut helped, buffer(32));
+
+        let out = helped.report(taken, Ok(at_revision(1, settings(128))));
+
+        assert!(
+            sent(&out).is_empty(),
+            "no answer into the new help: {:?}",
+            out
+        );
+        assert_eq!(
+            broadcast(&out).len(),
+            1,
+            "the room still hears of the change"
+        );
     }
 
     /// Verifies: REQ-RMT-005
@@ -1619,10 +1774,14 @@ mod tests {
         );
 
         let real = SettingChange::InputDevice { device_id: id };
-        assert!(
-            matches!(events(&asked).as_slice(), [HelpEvent::Proposed { change, .. }] if *change == real),
-            "the user is asked about their own device: {:?}",
-            asked
+        assert_eq!(
+            events(&asked),
+            vec![HelpEvent::Proposed {
+                id: 1,
+                change: real.clone(),
+                device_name: Some("Device 2".to_string()),
+            }],
+            "the user is asked about their own device, by the name the helper saw"
         );
         assert_eq!(helped.take_proposal(question(&asked)).unwrap().change, real);
     }
