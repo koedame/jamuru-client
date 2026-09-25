@@ -48,6 +48,7 @@ pub use signaling::{
     is_invite_code_format, parse_invite_url, AddressCandidate, CandidateType, PeerInfo, RoomInfo,
     SignalingClient, SignalingConnection, SignalingMessage, DEVICE_ID_HEADER, DEVICE_PUBKEY_HEADER,
     DEVICE_SIGNATURE_HEADER, DEVICE_TIMESTAMP_HEADER, INVITE_URL_SCHEME, MAX_PEERS_PER_ROOM,
+    PEER_MESSAGE_FEATURE,
 };
 pub use stun::{StunClient, StunResult, DEFAULT_STUN_SERVERS};
 pub use transport::{bind_std, UdpTransport};
