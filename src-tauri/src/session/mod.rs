@@ -159,6 +159,10 @@ struct Inner {
     reconnect: Reconnect,
     reconnect_error: Option<String>,
     roster: Roster,
+    /// What was last announced (its revision left at 0), so a change that
+    /// only undoes a quiet one is still told, and one that changes nothing
+    /// is not.
+    announced: Option<Snapshot>,
 }
 
 impl Inner {
@@ -231,6 +235,18 @@ impl SessionState {
         inner.epoch
     }
 
+    /// [`SessionState::next_epoch`], but only while `conn` is still the
+    /// session's connection: an event of a connection that was let go of
+    /// meanwhile ends nothing.
+    fn next_epoch_of(&self, conn: u32) -> Option<u64> {
+        let mut inner = self.lock();
+        if inner.connection_id != Some(conn) {
+            return None;
+        }
+        inner.epoch += 1;
+        Some(inner.epoch)
+    }
+
     fn connection_id(&self) -> Option<u32> {
         self.lock().connection_id
     }
@@ -247,37 +263,36 @@ impl SessionState {
         })
     }
 
-    /// Changes the session and, if that made a difference, announces it.
+    /// Changes the session and, if that made a difference to what was last
+    /// announced, announces it.
     fn change<R: Runtime, T>(&self, app: &AppHandle<R>, change: impl FnOnce(&mut Inner) -> T) -> T {
         let (value, announce) = {
             let mut inner = self.lock();
-            let before = inner.view();
             let value = change(&mut inner);
-            let mut after = inner.view();
-            if before == after {
+            let mut now = inner.view();
+            now.revision = 0;
+            if inner.announced.as_ref() == Some(&now) {
                 (value, None)
             } else {
+                let before = inner.announced.replace(now.clone());
                 inner.revision += 1;
-                after.revision = inner.revision;
+                now.revision = inner.revision;
                 // Which step the app is at decides which buttons do anything,
                 // so its transitions are the first thing a bug report needs
                 // (ADR-036).
-                if before.phase != after.phase || before.error != after.error {
-                    match (&after.phase, &after.error) {
-                        (Phase::Error, Some(error)) => tracing::info!(
-                            "[session] {} -> {}: {}",
-                            before.phase.name(),
-                            after.phase.name(),
-                            error
-                        ),
-                        _ => tracing::info!(
-                            "[session] {} -> {}",
-                            before.phase.name(),
-                            after.phase.name()
-                        ),
+                let from = before.as_ref().map(|b| b.phase.name()).unwrap_or("(start)");
+                let changed = before
+                    .as_ref()
+                    .is_none_or(|b| b.phase != now.phase || b.error != now.error);
+                if changed {
+                    match &now.error {
+                        Some(error) if now.phase == Phase::Error => {
+                            tracing::info!("[session] {} -> {}: {}", from, now.phase.name(), error)
+                        }
+                        _ => tracing::info!("[session] {} -> {}", from, now.phase.name()),
                     }
                 }
-                (value, Some(after))
+                (value, Some(now))
             }
         };
         if let Some(snapshot) = announce {
@@ -339,11 +354,11 @@ pub async fn session_leave(app: AppHandle) -> Result<Snapshot, String> {
 #[tauri::command]
 pub async fn session_reconnect(app: AppHandle) -> Result<Snapshot, String> {
     let state = app.state::<SessionState>();
-    let Some(code) = state.rejoin_code() else {
+    if state.rejoin_code().is_none() {
         return Err("Not in a room".to_string());
-    };
+    }
     let epoch = state.next_epoch();
-    reconnect(&app, epoch, Some(code)).await
+    reconnect(&app, epoch).await
 }
 
 /// Connects to the server as the app starts.
@@ -640,58 +655,66 @@ async fn join<R: Runtime>(app: &AppHandle<R>, code: String) -> Result<Snapshot, 
 
 async fn leave<R: Runtime>(app: &AppHandle<R>) -> Result<Snapshot, String> {
     let state = app.state::<SessionState>();
-    if state.connection_id().is_none() {
+    if state.connection_id().is_none() || state.lock().reconnect != Reconnect::Idle {
         // The connection is gone and is being got back. The person no longer
         // wants the room: end that, and start from the server.
         let epoch = state.next_epoch();
         return connect(app, epoch).await;
     }
 
-    let _flow = state.flow.lock().await;
+    let flow = state.flow.lock().await;
     let Some(conn) = state.connection_id() else {
-        return Ok(state.snapshot());
+        // Lost while waiting for a turn.
+        drop(flow);
+        let epoch = state.next_epoch();
+        return connect(app, epoch).await;
     };
     if state.lock().room.is_none() {
         return Err("Not in a room".to_string());
     }
 
     stop_audio(app).await;
-    if let Err(e) =
-        signaling::signaling_leave_room(conn, app.state(), app.state(), app.state()).await
-    {
-        return fail(app, e);
-    }
-    match signaling::signaling_list_rooms(conn, app.state()).await {
-        Ok(rooms) => {
-            state.change(app, |session| {
-                session.room = None;
-                session.roster.clear();
-                session.test_room_invite_code = test_room_code_of(&rooms);
+    // Whatever the server answers, the person asked to leave: the app is in no
+    // room after this, and a connection lost from here on is not a reason to
+    // rejoin the one they left.
+    let left = signaling::signaling_leave_room(conn, app.state(), app.state(), app.state()).await;
+    let listed = match left {
+        Ok(()) => signaling::signaling_list_rooms(conn, app.state()).await,
+        Err(e) => Err(e),
+    };
+    state.change(app, |session| {
+        session.room = None;
+        session.roster.clear();
+        match &listed {
+            Ok(rooms) => {
+                session.test_room_invite_code = test_room_code_of(rooms);
                 session.phase = Phase::ServerConnected;
-            });
-            Ok(state.snapshot())
+            }
+            Err(e) => {
+                session.phase = Phase::Error;
+                session.error = Some(e.clone());
+            }
         }
-        Err(e) => fail(app, e),
-    }
+    });
+    listed.map(|_| state.snapshot())
 }
 
 /// Reaches the server again after the connection dropped, and rejoins the room
-/// `rejoin` names if the app was in one.
+/// the app is in, if it is in one.
 ///
 /// Retries with a backoff. While a room is open its screen stays up and
 /// `signaling_reconnect` reports progress; otherwise the phase is
 /// `connecting_server` and, on giving up, `error` - what a failed first
 /// connect looks like.
-async fn reconnect<R: Runtime>(
-    app: &AppHandle<R>,
-    epoch: u64,
-    rejoin: Option<String>,
-) -> Result<Snapshot, String> {
+async fn reconnect<R: Runtime>(app: &AppHandle<R>, epoch: u64) -> Result<Snapshot, String> {
     let state = app.state::<SessionState>();
     let _flow = state.flow.lock().await;
     if state.epoch() != epoch {
         return Ok(state.snapshot());
     }
+    // Read once it is this step's turn: the room the app is in now is the one
+    // to rejoin, not the one it was in when the connection was lost.
+    let rejoin = state.rejoin_code();
 
     drop_connection(app).await;
     let was_in_room = rejoin.is_some();
@@ -842,23 +865,27 @@ fn spawn_pump<R: Runtime>(app: AppHandle<R>, conn: u32) {
     });
 }
 
-/// Ends the connection `conn` and starts over from the server.
-fn start_over<R: Runtime>(app: &AppHandle<R>) {
-    let epoch = app.state::<SessionState>().next_epoch();
+/// Ends the connection `conn` and starts over from the server, unless `conn`
+/// is no longer the session's.
+fn start_over<R: Runtime>(app: &AppHandle<R>, conn: u32) {
+    let Some(epoch) = app.state::<SessionState>().next_epoch_of(conn) else {
+        return;
+    };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let _ = connect(&app, epoch).await;
     });
 }
 
-/// Ends the connection and gets it back, rejoining the room the app was in.
-fn get_connection_back<R: Runtime>(app: &AppHandle<R>) {
-    let state = app.state::<SessionState>();
-    let rejoin = state.rejoin_code();
-    let epoch = state.next_epoch();
+/// Ends the connection `conn` and gets it back, rejoining the room the app is
+/// in, unless `conn` is no longer the session's.
+fn get_connection_back<R: Runtime>(app: &AppHandle<R>, conn: u32) {
+    let Some(epoch) = app.state::<SessionState>().next_epoch_of(conn) else {
+        return;
+    };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = reconnect(&app, epoch, rejoin).await;
+        let _ = reconnect(&app, epoch).await;
     });
 }
 
@@ -917,7 +944,7 @@ async fn handle_events<R: Runtime>(
                 // the connection is dead: it cannot be used to leave, create or
                 // join. Start over with a new one.
                 tracing::info!("Room session ended (room closed): {}", reason);
-                start_over(app);
+                start_over(app, conn);
                 return false;
             }
             SignalingEvent::Kicked { peer_id, reason } => {
@@ -930,7 +957,7 @@ async fn handle_events<R: Runtime>(
                     .is_some_and(|room| room.peer_id == peer_id);
                 if is_self {
                     tracing::info!("Room session ended (removed): {}", reason);
-                    start_over(app);
+                    start_over(app, conn);
                     return false;
                 }
             }
@@ -938,7 +965,7 @@ async fn handle_events<R: Runtime>(
                 // The server did not close the room first (network blip, proxy
                 // reset, server restart): the connection is dead either way.
                 tracing::warn!("Signaling connection lost: {}", reason);
-                get_connection_back(app);
+                get_connection_back(app, conn);
                 return false;
             }
         }
@@ -1054,6 +1081,9 @@ mod tests {
         received: Vec<(usize, String)>,
         /// Ways to talk to each open connection.
         connections: Vec<mpsc::UnboundedSender<Say>>,
+        /// A message type that makes the server drop the connection instead
+        /// of answering.
+        close_on: Option<String>,
     }
 
     enum Say {
@@ -1117,6 +1147,11 @@ mod tests {
             let _ = self.log.lock().unwrap().connections[connection].send(Say::Message(message));
         }
 
+        /// From now on, drop the connection of whoever sends a `kind` message.
+        fn drop_the_connection_when_sent(&self, kind: &str) {
+            self.log.lock().unwrap().close_on = Some(kind.to_string());
+        }
+
         fn reset(&self, connection: usize) {
             let _ = self.log.lock().unwrap().connections[connection].send(Say::Reset);
         }
@@ -1171,7 +1206,14 @@ mod tests {
                     };
                     let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
                     let kind = value["type"].as_str().unwrap_or_default().to_string();
-                    log.lock().unwrap().received.push((me, kind.clone()));
+                    let closing = {
+                        let mut log = log.lock().unwrap();
+                        log.received.push((me, kind.clone()));
+                        log.close_on.as_deref() == Some(kind.as_str())
+                    };
+                    if closing {
+                        return;
+                    }
                     let reply = match kind.as_str() {
                         "ListRooms" => Some(
                             r#"{"type":"RoomList","data":{"rooms":[{"id":"t","name":"Test Room","peer_count":0,"max_peers":10,"has_password":false,"invite_code":"TEST22","test_room":true}]}}"#
@@ -1623,8 +1665,7 @@ mod tests {
             .modify(|config| config.server_url = Some(good_url))
             .unwrap();
         let epoch = app.state::<SessionState>().next_epoch();
-        let code = app.state::<SessionState>().rejoin_code();
-        let snapshot = reconnect(app.handle(), epoch, code).await.unwrap();
+        let snapshot = reconnect(app.handle(), epoch).await.unwrap();
 
         assert_eq!(snapshot.phase, Phase::Connected);
         assert_eq!(snapshot.signaling_reconnect, Reconnect::Idle);
@@ -1736,5 +1777,95 @@ mod tests {
         assert!(heard
             .windows(2)
             .all(|pair| pair[0].revision < pair[1].revision));
+    }
+
+    /// Verifies: REQ-RMT-028
+    #[tokio::test]
+    async fn the_connection_fails_while_leaving_leaves_the_app_in_no_room_and_never_rejoins_it() {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = in_a_room(&server, &dir).await;
+        // The server drops the connection when asked to let the app leave.
+        server.drop_the_connection_when_sent("LeaveRoom");
+
+        let left = leave(app.handle()).await;
+
+        assert!(left.is_err());
+        let snapshot = until(&app, |s| {
+            s.phase == Phase::ServerConnected && s.connection_id.is_some()
+        })
+        .await;
+        assert_eq!(snapshot.room, None);
+        assert_eq!(
+            server.count("JoinRoom"),
+            1,
+            "the room that was left was rejoined"
+        );
+    }
+
+    /// Verifies: REQ-RMT-028
+    #[tokio::test]
+    async fn the_person_leaves_after_the_connection_could_not_be_got_back_starts_from_the_room_list(
+    ) {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = in_a_room(&server, &dir).await;
+        let good_url = server.url.clone();
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let closed_url = format!("{TEST_HTTP_SCHEME}{}", closed.local_addr().unwrap());
+        drop(closed);
+        app.state::<ConfigState>()
+            .modify(|config| config.server_url = Some(closed_url))
+            .unwrap();
+        server.reset(0);
+        until(&app, |s| s.signaling_reconnect == Reconnect::Failed).await;
+        app.state::<ConfigState>()
+            .modify(|config| config.server_url = Some(good_url))
+            .unwrap();
+
+        let snapshot = leave(app.handle()).await.unwrap();
+
+        assert_eq!(snapshot.phase, Phase::ServerConnected);
+        assert_eq!(snapshot.room, None);
+        assert_eq!(snapshot.signaling_reconnect, Reconnect::Idle);
+        assert_eq!(server.count("JoinRoom"), 1);
+    }
+
+    /// Verifies: REQ-RMT-028
+    #[test]
+    fn an_event_of_a_connection_the_session_let_go_of_ends_no_step() {
+        let state = SessionState::new();
+        state.lock().connection_id = Some(2);
+        let epoch = state.epoch();
+
+        assert_eq!(state.next_epoch_of(1), None);
+        assert_eq!(state.epoch(), epoch);
+        assert_eq!(state.next_epoch_of(2), Some(epoch + 1));
+    }
+
+    /// Verifies: REQ-RMT-028
+    #[test]
+    fn the_connection_was_let_go_of_quietly_the_next_change_still_tells_of_it() {
+        let app = tauri::test::mock_app();
+        app.manage(SessionState::new());
+        let state = app.state::<SessionState>();
+        let heard = Arc::new(Mutex::new(Vec::<Snapshot2>::new()));
+        let listener = heard.clone();
+        app.listen(CHANGED_EVENT, move |event| {
+            listener
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(event.payload()).unwrap());
+        });
+        state.change(app.handle(), |session| session.connection_id = Some(1));
+
+        state.lock().connection_id = None;
+        state.change(app.handle(), |_| {});
+
+        // The mock app delivers events on its own thread.
+        std::thread::sleep(Duration::from_millis(200));
+        let heard = heard.lock().unwrap();
+        assert_eq!(heard.len(), 2);
+        assert_eq!(heard[1].connection_id, None);
     }
 }

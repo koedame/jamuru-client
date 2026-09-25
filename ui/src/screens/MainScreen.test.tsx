@@ -168,6 +168,18 @@ describe('MainScreen の接続の表示', () => {
 
     expect(callsTo('session_connect')).toHaveLength(1);
   });
+
+  it('接続中の表示で取り消したとき、接続先の URL を読み直すこと', async () => {
+    current = snapshot({ phase: 'connecting_server', connection_id: null });
+
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-cancel');
+    await waitFor(() => expect(callsTo('config_get_effective_server_url')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('connection-panel-cancel'));
+
+    // Cancelling leaves the phase as it was, so nothing else would read it again.
+    await waitFor(() => expect(callsTo('config_get_effective_server_url')).toHaveLength(2));
+  });
 });
 
 describe('MainScreen のルームの表示', () => {

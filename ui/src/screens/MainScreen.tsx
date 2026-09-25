@@ -690,8 +690,13 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     }));
   };
 
-  // Cancel or retry the connection: drop what there is and connect again
+  // Cancel or retry the connection: drop what there is and connect again. The
+  // URL is read again here as well, because cancelling an attempt that is
+  // already "connecting" leaves the phase as it was.
   const handleCancelConnection = useCallback(() => {
+    configGetEffectiveServerUrl()
+      .then(setServerUrl)
+      .catch((e) => console.log("Failed to load the signaling server URL:", e));
     sessionConnect().catch(() => undefined);
   }, []);
 
