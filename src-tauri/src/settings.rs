@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Mutex;
 
-use jamjam::config::{AppConfig, AudioPreset, VALID_BUFFER_SIZES, VALID_SAMPLE_RATES};
+use jamjam::config::{
+    AppConfig, AudioPreset, MAX_DEVICE_CHANNELS, VALID_BUFFER_SIZES, VALID_SAMPLE_RATES,
+};
 
 use crate::audio::{self, AudioDeviceInfo};
 use crate::config::{self, ConfigState, SampleRateInfo};
@@ -52,14 +54,17 @@ pub enum SettingChange {
     },
     /// One side of the input channel pair (1-based). The other side stays as
     /// it is, so two quick changes cannot undo each other. A right channel of
-    /// `None` is mono; the left one is always a channel.
+    /// `None` is mono; the left one is always a channel. `channel` must be
+    /// present (`null` for none): a misspelt field must not read as mono.
     InputChannel {
         side: ChannelSide,
+        #[serde(deserialize_with = "present")]
         channel: Option<u32>,
     },
     /// One side of the output channel pair, as [`Self::InputChannel`].
     OutputChannel {
         side: ChannelSide,
+        #[serde(deserialize_with = "present")]
         channel: Option<u32>,
     },
     /// 1 (mono) or 2 (stereo)
@@ -78,6 +83,13 @@ pub enum SettingChange {
     Preset {
         preset: AudioPreset,
     },
+}
+
+/// An `Option` field that has to be in the message, as a value or `null`.
+/// (`deserialize_with` turns off serde's reading of a missing `Option` as
+/// `None`.)
+fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u32>, D::Error> {
+    Option::<u32>::deserialize(deserializer)
 }
 
 impl SettingChange {
@@ -376,7 +388,7 @@ fn fit_channels(left: u32, right: Option<u32>, available: Option<u32>) -> (u32, 
 }
 
 /// The pair with `side` set to `channel`, checked against the device in use.
-/// With no device to check against, only the lower bound can be.
+/// With no device to check against, only the bounds any device has apply.
 fn with_side(
     (left, right): (u32, Option<u32>),
     side: ChannelSide,
@@ -384,10 +396,11 @@ fn with_side(
     available: Option<u32>,
 ) -> Result<(u32, Option<u32>), SettingsError> {
     if let Some(channel) = channel {
-        if channel == 0 || available.is_some_and(|available| channel > available) {
+        let upper = available.unwrap_or(MAX_DEVICE_CHANNELS);
+        if channel == 0 || channel > upper {
             return Err(SettingsError::ChannelOutOfRange {
                 channel,
-                available: available.unwrap_or(0),
+                available: upper,
             });
         }
     }
@@ -439,6 +452,13 @@ pub struct SettingsState {
 impl SettingsState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Holds off changes while the guard lives, for a step that must read the
+    /// settings and act on them before any change lands in between (a session
+    /// starting).
+    pub async fn hold_changes(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.changing.lock().await
     }
 }
 
@@ -766,6 +786,48 @@ mod tests {
             result,
             Err(SettingsError::ChannelOutOfRange { channel: 0, .. })
         ));
+    }
+
+    /// A device that does not say how many channels it has still has no more
+    /// than any device can: a huge number would be saved and then offered.
+    ///
+    /// Verifies: REQ-GUI-024
+    #[test]
+    fn a_channel_beyond_what_any_device_has_is_refused_even_when_the_device_does_not_say() {
+        let (mut config, mut devices) = setup();
+        devices.input.push(device("alsa:busy", &[], false));
+        config.input_device_id = Some("alsa:busy".to_string());
+
+        assert_eq!(
+            plan(
+                &config,
+                &devices,
+                &input_channel(ChannelSide::Left, Some(MAX_DEVICE_CHANNELS + 1))
+            ),
+            Err(SettingsError::ChannelOutOfRange {
+                channel: MAX_DEVICE_CHANNELS + 1,
+                available: MAX_DEVICE_CHANNELS
+            })
+        );
+        assert!(plan(
+            &config,
+            &devices,
+            &input_channel(ChannelSide::Left, Some(12))
+        )
+        .is_ok());
+    }
+
+    /// A misspelt field must not quietly mean mono.
+    #[test]
+    fn a_channel_change_without_the_channel_field_does_not_parse() {
+        let missing = serde_json::json!({"setting": "input_channel", "side": "right", "chanel": 3});
+        assert!(serde_json::from_value::<SettingChange>(missing).is_err());
+        let mono =
+            serde_json::json!({"setting": "input_channel", "side": "right", "channel": null});
+        assert_eq!(
+            serde_json::from_value::<SettingChange>(mono).unwrap(),
+            input_channel(ChannelSide::Right, None)
+        );
     }
 
     /// Changing one side keeps the other as it is in the config - not as a

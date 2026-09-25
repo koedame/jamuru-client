@@ -47,12 +47,18 @@ function toDeviceInfo(device: AudioDeviceInfo): DeviceInfo {
   };
 }
 
+/** The most channels any device is taken to have (the backend refuses higher numbers). */
+const MAX_DEVICE_CHANNELS = 64;
+
 /**
- * How many channel choices to offer: what the device in use says it has, or
- * - when it does not say - enough to show the pair chosen now (at least two).
+ * How many channel choices to offer: what the device in use says it has (two
+ * when it does not say), and always enough to show the pair chosen now - a
+ * saved channel the device lacks stays visible instead of the picker showing
+ * another number.
  */
 function channelChoices(count: number | null, pair: ChannelPair | undefined): number {
-  return count ?? Math.max(2, pair?.left ?? 1, pair?.right ?? 1);
+  const wanted = Math.max(count ?? 2, pair?.left ?? 1, pair?.right ?? 1);
+  return Math.min(wanted, MAX_DEVICE_CHANNELS);
 }
 
 /** The device shown as selected: the chosen one, or the system default when none is. */

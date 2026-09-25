@@ -1,7 +1,7 @@
 /**
  * Usage reporting in the settings panel, against a backend that behaves like
- * the app's: the setting is saved with `config_save`, and `usage_preview`
- * returns nothing while it is off.
+ * the app's: the switch sets the one setting with `config_set_usage_reporting`,
+ * and `usage_preview` returns nothing while it is off.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -84,7 +84,6 @@ describe('the usage reporting switch in the settings panel', () => {
     // Only the switch's own setting travels: nothing read earlier is written
     // back over a change made meanwhile.
     expect(calls).toContainEqual({ command: 'config_set_usage_reporting', args: { enabled: true } });
-    expect(calls.some((c) => c.command === 'config_save')).toBe(false);
   });
 
   // Verifies: REQ-TEL-011

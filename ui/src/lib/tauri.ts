@@ -473,14 +473,6 @@ export interface StreamingStatus {
 }
 
 /**
- * Start audio streaming to a remote peer
- * @param remoteAddr Remote address in format "ip:port"
- * @param inputDeviceId Optional input device ID
- * @param outputDeviceId Optional output device ID
- * @param bufferSize Buffer size in samples (32, 64, 128, or 256). Default: 64
- * @param sampleRate Sample rate in Hz (44100, 48000, or 96000). Default: 48000 (ADR-013)
- */
-/**
  * Bind the audio socket and get the address peers should send to.
  *
  * Called on entering a room, before any peer address is known. Idempotent -

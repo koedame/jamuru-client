@@ -28,6 +28,11 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 48000;
 /// Valid sample rates per ADR-013
 pub const VALID_SAMPLE_RATES: [u32; 3] = [44100, 48000, 96000];
 
+/// The most channels a device is taken to have, and so the highest channel
+/// number the settings accept. A device can offer many channels, but beyond
+/// this a number is a mistake (the audio backends report at most this many).
+pub const MAX_DEVICE_CHANNELS: u32 = 64;
+
 /// Audio buffer sizes (frame sizes, in samples) the app offers and accepts.
 /// The same set as the presets' frame sizes (`AudioPreset::frame_size`).
 pub const VALID_BUFFER_SIZES: [u32; 4] = [32, 64, 128, 256];
@@ -352,9 +357,14 @@ pub fn save_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
     let content =
         toml::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    // Write to file
-    fs::write(path, content)
-        .map_err(|e| format!("Failed to write config file {:?}: {}", path, e))?;
+    // Write beside it and rename over it, so a failure part-way (a full disk,
+    // a crash) leaves the old file whole instead of a truncated one that the
+    // next start could not read.
+    let partial = path.with_extension("toml.partial");
+    fs::write(&partial, content)
+        .map_err(|e| format!("Failed to write config file {:?}: {}", partial, e))?;
+    fs::rename(&partial, path)
+        .map_err(|e| format!("Failed to replace config file {:?}: {}", path, e))?;
 
     Ok(())
 }

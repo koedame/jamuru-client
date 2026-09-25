@@ -106,13 +106,16 @@ impl ConfigState {
             .ok_or_else(|| "Could not determine config directory".to_string())?;
         save_config_to(path, &next)?;
         *config = next.clone();
-        drop(config);
 
+        // Still under the lock, so hooks see the saves in the order they
+        // happened (a late hook with an older config would undo a newer one).
+        // A hook must not change the config itself.
         if let Ok(on_saved) = self.on_saved.lock() {
             if let Some(hook) = on_saved.as_ref() {
                 hook(&next);
             }
         }
+        drop(config);
         Ok((next, value))
     }
 

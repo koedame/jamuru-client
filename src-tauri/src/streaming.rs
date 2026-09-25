@@ -30,10 +30,6 @@ use jamjam::network::{
 };
 use jamjam::protocol::LatencyInfoMessage;
 
-/// Default audio sample rate for latency calculations
-/// Per ADR-013: 48kHz is recommended, but user can select 44100/48000/96000
-const DEFAULT_SAMPLE_RATE: u32 = 48000;
-
 /// How long the receive loop waits when it has nothing to hand to playback.
 ///
 /// Short enough to be irrelevant to the latency budget (ADR-008) and long
@@ -270,7 +266,8 @@ impl StreamingState {
             peer_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
             local_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             local_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
-            sample_rate: Arc::new(AtomicU32::new(DEFAULT_SAMPLE_RATE)), // ADR-013
+            // Until a session starts from the saved settings (ADR-013)
+            sample_rate: Arc::new(AtomicU32::new(jamjam::config::DEFAULT_SAMPLE_RATE)),
             peer_latency_info: Arc::new(RwLock::new(None)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
@@ -678,33 +675,13 @@ pub async fn streaming_start(
     remote_candidates: Option<Vec<String>>,
     state: tauri::State<'_, StreamingState>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
+    settings_state: tauri::State<'_, crate::settings::SettingsState>,
     usage: tauri::State<'_, crate::usage::UsageState>,
 ) -> Result<(), String> {
     // Check if already streaming
     if state.is_active.load(Ordering::SeqCst) {
         return Err("Streaming already active".to_string());
     }
-
-    // The session runs with the audio settings as saved: the one store every
-    // change goes through (ADR-043), so what the settings show is what the
-    // session gets - the sample rate once never reached it, because the
-    // caller had to pass it and did not.
-    let config = config_state.get()?;
-    let input_device_id = config.input_device_id.clone();
-    let output_device_id = config.output_device_id.clone();
-    let buffer_size = config.buffer_size;
-    // User-selectable (ADR-013)
-    let sample_rate = config.sample_rate;
-    // Jitter buffer depth comes from the selected preset (ADR-019/ADR-020).
-    // The frame *duration* comes from the buffer_size actually in use, so the
-    // resulting delay is correct even if the two were configured separately.
-    let preset = config.preset.clone();
-    // Transmit channel count, told to the peer so its mixer can show whether
-    // we're sending mono or stereo.
-    let transmit_channels = config.transmit_channels;
-    // Which channels of a multi-channel interface are read and played on
-    let input_channels = (config.input_channel_l, config.input_channel_r);
-    let output_channels = (config.output_channel_l, config.output_channel_r);
 
     // Parse remote address
     let addr: SocketAddr = remote_addr
@@ -724,18 +701,6 @@ pub async fn streaming_start(
     }
     let candidate_addrs = merge_candidate_addrs(addr, &parsed_candidates);
 
-    let redact = crate::logging::redaction_enabled();
-    tracing::info!(
-        "Streaming start: remote={} candidates={:?} input={:?} output={:?} buffer={} sample_rate={} preset={:?}",
-        addr,
-        candidate_addrs,
-        crate::logging::redact_device_id(input_device_id.as_deref().unwrap_or("system default"), redact),
-        crate::logging::redact_device_id(output_device_id.as_deref().unwrap_or("system default"), redact),
-        buffer_size,
-        sample_rate,
-        preset
-    );
-
     // Create channel for commands to audio thread
     let (cmd_tx, cmd_rx) = std_mpsc::channel::<StreamingCommand>();
 
@@ -750,15 +715,6 @@ pub async fn streaming_start(
         let mut addr_lock = state.remote_addr.lock().await;
         *addr_lock = Some(remote_addr.clone());
     }
-
-    // Store buffer size for latency display
-    {
-        let mut bs = state.buffer_size.lock().await;
-        *bs = buffer_size;
-    }
-
-    // Store sample rate (ADR-013)
-    state.sample_rate.store(sample_rate, Ordering::SeqCst);
 
     let is_active = state.is_active.clone();
     let is_muted = state.is_muted.clone();
@@ -811,8 +767,57 @@ pub async fn streaming_start(
         *info = None;
     }
 
+    // Read the settings and become active as one step, with changes held
+    // off: a change made before this is in the config read here, and one made
+    // after it finds the session active and is sent to it. Read any earlier -
+    // before the prepared socket, which can wait on STUN - and a change made
+    // meanwhile would be saved and shown but miss this session.
+    let changes_held = settings_state.hold_changes().await;
+    // The session runs with the audio settings as saved: the one store every
+    // change goes through (ADR-043), so what the settings show is what the
+    // session gets - the sample rate once never reached it, because the
+    // caller had to pass it and did not.
+    let config = config_state.get()?;
+    let input_device_id = config.input_device_id.clone();
+    let output_device_id = config.output_device_id.clone();
+    let buffer_size = config.buffer_size;
+    // User-selectable (ADR-013)
+    let sample_rate = config.sample_rate;
+    // Jitter buffer depth comes from the selected preset (ADR-019/ADR-020).
+    // The frame *duration* comes from the buffer_size actually in use, so the
+    // resulting delay is correct even if the two were configured separately.
+    let preset = config.preset.clone();
+    // Transmit channel count, told to the peer so its mixer can show whether
+    // we're sending mono or stereo.
+    let transmit_channels = config.transmit_channels;
+    // Which channels of a multi-channel interface are read and played on
+    let input_channels = (config.input_channel_l, config.input_channel_r);
+    let output_channels = (config.output_channel_l, config.output_channel_r);
+
+    let redact = crate::logging::redaction_enabled();
+    tracing::info!(
+        "Streaming start: remote={} candidates={:?} input={:?} output={:?} buffer={} sample_rate={} preset={:?}",
+        addr,
+        candidate_addrs,
+        crate::logging::redact_device_id(input_device_id.as_deref().unwrap_or("system default"), redact),
+        crate::logging::redact_device_id(output_device_id.as_deref().unwrap_or("system default"), redact),
+        buffer_size,
+        sample_rate,
+        preset
+    );
+
+    // Store buffer size for latency display
+    {
+        let mut bs = state.buffer_size.lock().await;
+        *bs = buffer_size;
+    }
+
+    // Store sample rate (ADR-013)
+    state.sample_rate.store(sample_rate, Ordering::SeqCst);
+
     // Mark as active BEFORE spawning thread to avoid race condition
     state.is_active.store(true, Ordering::SeqCst);
+    drop(changes_held);
 
     // Spawn audio thread with real-time priority
     thread::spawn(move || {

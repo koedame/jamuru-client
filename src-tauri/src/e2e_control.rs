@@ -408,10 +408,16 @@ fn start_invoke_js(id: u64, request: &InvokeRequest) -> Result<String, ControlEr
     Ok(format!(
         r#"(function () {{
             const results = (window.__jamjamE2eInvoke = window.__jamjamE2eInvoke || {{}});
-            results[{id}] = {{ done: false }};
+            // The call's own slot: once it has been forgotten (timed out), a
+            // late answer finds another value there, or none, and is dropped.
+            const slot = {{ done: false }};
+            results[{id}] = slot;
+            const settle = function (result) {{
+                if (results[{id}] === slot) results[{id}] = result;
+            }};
             window.__TAURI_INTERNALS__.invoke({command}, {args}).then(
                 function (value) {{
-                    results[{id}] = {{ done: true, outcome: "ok", value: value === undefined ? null : value }};
+                    settle({{ done: true, outcome: "ok", value: value === undefined ? null : value }});
                 }},
                 function (error) {{
                     let text;
@@ -422,7 +428,7 @@ fn start_invoke_js(id: u64, request: &InvokeRequest) -> Result<String, ControlEr
                         try {{ text = JSON.stringify(error); }} catch (e) {{ text = undefined; }}
                         if (typeof text !== "string") text = String(error);
                     }}
-                    results[{id}] = {{ done: true, outcome: "err", error: text }};
+                    settle({{ done: true, outcome: "err", error: text }});
                 }}
             );
             return {{ started: true }};
