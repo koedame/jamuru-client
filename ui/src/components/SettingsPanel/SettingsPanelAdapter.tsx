@@ -5,7 +5,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  AudioDeviceInfo,
   AUDIO_SETTINGS_CHANGED,
   settingsGet,
   settingsChange,
@@ -20,50 +19,21 @@ import {
   diagnosticsRunComplete,
   type AudioPresetId,
   type AudioSettings,
-  type ChannelPair,
   type CompleteDiagnosticsResult,
   type RecommendedPreset,
   type SettingChange,
-  type ChannelSide,
   logOpenDir,
   usagePreview as readUsagePreview,
 } from "../../lib/tauri";
 import { useWindowEvent } from "../../hooks/useWindowEvents";
-import { SettingsPanel, type SettingsTabId, type SelectOption, type DeviceInfo, type Language } from "./index";
+import { useAudioSettingsTab } from "./useAudioSettingsTab";
+import { SettingsPanel, type SettingsTabId, type Language } from "./index";
 
 export interface SettingsPanelAdapterProps {
   /** Initial tab to show */
   initialTab?: SettingsTabId;
   /** Callback when settings change */
   onSettingsChange?: () => void;
-}
-
-// Convert Tauri device format to SettingsPanel format
-function toDeviceInfo(device: AudioDeviceInfo): DeviceInfo {
-  return {
-    id: device.id,
-    name: device.name,
-    isDefault: device.is_default,
-  };
-}
-
-/** The most channels any device is taken to have (the backend refuses higher numbers). */
-const MAX_DEVICE_CHANNELS = 64;
-
-/**
- * How many channel choices to offer: what the device in use says it has (two
- * when it does not say), and always enough to show the pair chosen now - a
- * saved channel the device lacks stays visible instead of the picker showing
- * another number.
- */
-function channelChoices(count: number | null, pair: ChannelPair | undefined): number {
-  const wanted = Math.max(count ?? 2, pair?.left ?? 1, pair?.right ?? 1);
-  return Math.min(wanted, MAX_DEVICE_CHANNELS);
-}
-
-/** The device shown as selected: the chosen one, or the system default when none is. */
-function shownDevice(devices: AudioDeviceInfo[], chosen: string | null): string | null {
-  return chosen ?? devices.find((d) => d.is_default)?.id ?? null;
 }
 
 /** The preset each diagnostics recommendation names. */
@@ -74,8 +44,6 @@ const PRESET_OF_RECOMMENDATION: Record<RecommendedPreset, AudioPresetId> = {
   HighQuality: "high-quality",
 };
 
-/** Buffer sizes are labelled with their duration at 48 kHz. */
-const LABEL_SAMPLE_RATE = 48000;
 
 export function SettingsPanelAdapter({
   initialTab = "general",
@@ -139,35 +107,6 @@ export function SettingsPanelAdapter({
     };
   }, []);
 
-  // Option labels are built on render so they follow the UI language.
-  const sampleRateOptions: SelectOption[] =
-    audio && audio.sample_rates.length > 0
-      ? audio.sample_rates.map((sr) => ({
-          value: String(sr.rate),
-          label: sr.recommended ? `${sr.label} (${t("preset.recommended")})` : sr.label,
-        }))
-      : [{ value: "48000", label: "48 kHz" }];
-
-  const bufferSizeOptions: SelectOption[] = (audio?.buffer_sizes ?? []).map((samples) => ({
-    value: String(samples),
-    label: t("settings.devices.bufferOption", {
-      samples,
-      ms: ((samples / LABEL_SAMPLE_RATE) * 1000).toFixed(2),
-    }),
-  }));
-
-  // Transmit channel options
-  const transmitChannelOptions: SelectOption[] = [
-    { value: "1", label: t("settings.devices.mono", "Mono") },
-    { value: "2", label: t("settings.devices.stereo", "Stereo") },
-  ];
-
-  const buildChannelOptions = (maxChannels: number): SelectOption[] =>
-    Array.from({ length: maxChannels }, (_, i) => ({
-      value: String(i + 1),
-      label: t("settings.devices.channelOption", { channel: i + 1 }),
-    }));
-
   // Load settings on mount
   useEffect(() => {
     const loadSettings = async () => {
@@ -211,6 +150,8 @@ export function SettingsPanelAdapter({
     },
     [onSettingsChange, showSettings]
   );
+
+  const devicesTab = useAudioSettingsTab(audio, change);
 
   useEffect(() => {
     configLoad()
@@ -265,51 +206,6 @@ export function SettingsPanelAdapter({
       }
     },
     [onSettingsChange, t]
-  );
-
-  const handleInputDeviceChange = useCallback(
-    (deviceId: string) => change({ setting: "input_device", device_id: deviceId }),
-    [change]
-  );
-
-  const handleOutputDeviceChange = useCallback(
-    (deviceId: string) => change({ setting: "output_device", device_id: deviceId }),
-    [change]
-  );
-
-  const handleBufferSizeChange = useCallback(
-    (value: string) => {
-      const samples = parseInt(value, 10);
-      if (!isNaN(samples)) change({ setting: "buffer_size", samples });
-    },
-    [change]
-  );
-
-  const handleSampleRateChange = useCallback(
-    (value: string) => {
-      const hz = parseInt(value, 10);
-      if (!isNaN(hz)) change({ setting: "sample_rate", hz });
-    },
-    [change]
-  );
-
-  // A channel picker changes one side of the pair; the app keeps the other
-  // side as it is. The right picker's empty choice is mono.
-  const handleChannelChange = useCallback(
-    (direction: "input" | "output", side: ChannelSide, value: string) => {
-      const channel = value === "" ? null : parseInt(value, 10);
-      if (channel !== null && isNaN(channel)) return;
-      change({ setting: direction === "input" ? "input_channel" : "output_channel", side, channel });
-    },
-    [change]
-  );
-
-  const handleTransmitChannelsChange = useCallback(
-    (value: string) => {
-      const count = parseInt(value, 10);
-      if (count === 1 || count === 2) change({ setting: "transmit_channels", count });
-    },
-    [change]
   );
 
   // Run diagnostics handler
@@ -424,39 +320,11 @@ export function SettingsPanelAdapter({
       effectiveServerUrl={effectiveServerUrl}
       displayName={displayName}
       displayNameError={displayNameError}
-      inputDevices={(audio?.input_devices ?? []).map(toDeviceInfo)}
-      outputDevices={(audio?.output_devices ?? []).map(toDeviceInfo)}
-      selectedInputId={audio ? shownDevice(audio.input_devices, audio.input_device_id) : null}
-      selectedOutputId={audio ? shownDevice(audio.output_devices, audio.output_device_id) : null}
-      inputChannelOptions={buildChannelOptions(
-        channelChoices(audio?.input_channel_count ?? null, audio?.input_channels)
-      )}
-      outputChannelOptions={buildChannelOptions(
-        channelChoices(audio?.output_channel_count ?? null, audio?.output_channels)
-      )}
-      selectedInputChannelL={String(audio?.input_channels.left ?? 1)}
-      selectedInputChannelR={audio?.input_channels.right == null ? "" : String(audio.input_channels.right)}
-      selectedOutputChannelL={String(audio?.output_channels.left ?? 1)}
-      selectedOutputChannelR={audio?.output_channels.right == null ? "" : String(audio.output_channels.right)}
-      sampleRateOptions={sampleRateOptions}
-      selectedSampleRate={String(audio?.sample_rate ?? 48000)}
-      bufferSizeOptions={bufferSizeOptions}
-      selectedBufferSize={String(audio?.buffer_size ?? "")}
-      transmitChannelOptions={transmitChannelOptions}
-      selectedTransmitChannels={String(audio?.transmit_channels ?? 2)}
+      {...devicesTab}
       isLoading={isLoading}
       onLanguageChange={handleLanguageChange}
       onServerUrlChange={handleServerUrlChange}
       onDisplayNameChange={handleDisplayNameChange}
-      onInputDeviceChange={handleInputDeviceChange}
-      onOutputDeviceChange={handleOutputDeviceChange}
-      onInputChannelLChange={(value) => handleChannelChange("input", "left", value)}
-      onInputChannelRChange={(value) => handleChannelChange("input", "right", value)}
-      onOutputChannelLChange={(value) => handleChannelChange("output", "left", value)}
-      onOutputChannelRChange={(value) => handleChannelChange("output", "right", value)}
-      onSampleRateChange={handleSampleRateChange}
-      onBufferSizeChange={handleBufferSizeChange}
-      onTransmitChannelsChange={handleTransmitChannelsChange}
       diagnosticsState={diagnosticsState}
       diagnosticsProgress={diagnosticsProgress}
       diagnosticsProgressMessage={diagnosticsProgressMessage}

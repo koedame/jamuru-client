@@ -57,6 +57,8 @@ function convertMessage(msg: TauriChatMessage, myPeerId: string | null): ChatMes
     timestamp: msg.timestamp,
     reactions: msg.reactions?.map((r) => convertReaction(r, myPeerId)),
     systemKind: msg.system_kind,
+    helperName: msg.helper_name,
+    setting: msg.setting,
   };
 }
 

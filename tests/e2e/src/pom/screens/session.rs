@@ -229,6 +229,70 @@ impl<'a> SessionScreen<'a> {
         self.channel_peak(selector)
     }
 
+    // --- helping with settings (ADR-043) ---
+
+    /// The button that offers the other participant help with their audio
+    /// settings. Shown only for a participant whose app can take part.
+    pub fn settings_help_offer_button(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-offer']", "offer help button")
+    }
+
+    /// The question the helped side answers: an offer of help, or a change.
+    pub fn settings_help_question(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-question']", "help question")
+    }
+
+    pub fn settings_help_allow_button(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-allow']", "allow button")
+    }
+
+    pub fn settings_help_decline_button(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-decline']", "decline button")
+    }
+
+    /// The bar that shows help is going on (either side).
+    pub fn settings_help_bar(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-bar']", "help bar")
+    }
+
+    /// Stop, on the helped side.
+    pub fn settings_help_stop_helped_button(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-stop-helped']",
+            "stop being helped",
+        )
+    }
+
+    /// Stop helping, on the helper's side.
+    pub fn settings_help_stop_helper_button(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-stop-helper']", "stop helping")
+    }
+
+    /// The helper's view of the other person's settings.
+    pub fn settings_help_panel(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-panel']",
+            "helper's settings panel",
+        )
+    }
+
+    /// The buffer size picker in the helper's panel.
+    pub fn settings_help_buffer_size_select(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-panel'] #buffer-size",
+            "helper's buffer size dropdown",
+        )
+    }
+
+    /// What the helper's panel says is happening (waiting for an answer, the
+    /// last answer). Absent when there is nothing to say.
+    pub fn settings_help_panel_status(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-panel-status']",
+            "helper's panel status",
+        )
+    }
+
     // --- chat ---
 
     pub fn chat_input(&self) -> Element<'a> {

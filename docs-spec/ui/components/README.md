@@ -45,6 +45,11 @@ jamjam UI
 │   ├── DevicesTab
 │   └── DiagnosticsTab
 │
+├── SettingsHelp             # 設定の手伝い（ADR-043）
+│   ├── SettingsHelpQuestion
+│   ├── SettingsHelpBar
+│   └── SettingsHelpPanel（DevicesTab を再利用）
+│
 ├── SessionStats             # セッション統計（オーバーレイ）
 │   ├── NetworkStats
 │   ├── LatencyBreakdown
@@ -73,6 +78,7 @@ jamjam UI
 | ChatPanel | P0 | 仕様作成済 | [chat-panel.md](./chat-panel.md) |
 | SettingsPanel | P0 | 仕様作成済 | [settings-panel.md](./settings-panel.md) |
 | SessionStats | P1 | 仕様作成済 | [session-stats.md](./session-stats.md) |
+| SettingsHelp | P1 | 仕様作成済 | [settings-help.md](./settings-help.md) |
 
 ### 共通コンポーネント
 

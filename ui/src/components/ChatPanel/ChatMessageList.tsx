@@ -5,6 +5,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Reaction } from "./ReactionBar";
+import type { ChatSystemKind } from "./ChatMessage";
 import "./ChatMessageList.css";
 
 export interface ChatMessageData {
@@ -15,12 +16,16 @@ export interface ChatMessageData {
   timestamp: number;
   reactions?: Reaction[];
   /**
-   * "join"/"leave" for a system message representing that specific room
-   * event, straight from the backend. Undefined for non-system messages and
+   * What a system message is about ("join"/"leave", or help with settings),
+   * straight from the backend. Undefined for non-system messages and
    * for callers (e.g. Storybook mocks) that don't set it - ChatMessage falls
    * back to inferring it from `content` in that case.
    */
-  systemKind?: "join" | "leave" | null;
+  systemKind?: ChatSystemKind | null;
+  /** For a settings help line: who helped */
+  helperName?: string | null;
+  /** For "settings_help_changed": the setting that changed */
+  setting?: string | null;
 }
 
 export interface ChatMessageListProps {

@@ -11,6 +11,7 @@ mod diagnostics;
 mod e2e_control;
 mod logging;
 mod settings;
+mod settings_help;
 mod signaling;
 mod streaming;
 mod updater;
@@ -22,7 +23,7 @@ use device_identity::DeviceIdentityState;
 use settings::SettingsState;
 use signaling::SignalingState;
 use streaming::StreamingState;
-use tauri::Manager;
+use tauri::{Listener, Manager};
 use usage::UsageState;
 
 /// Config used to seed startup state.
@@ -98,6 +99,11 @@ pub fn run() {
             signaling::signaling_toggle_reaction,
             signaling::signaling_publish_local_candidates,
             signaling::signaling_poll_events,
+            signaling::settings_help_request,
+            signaling::settings_help_answer,
+            signaling::settings_help_propose,
+            signaling::settings_help_decide,
+            signaling::settings_help_stop,
             settings::settings_get,
             settings::settings_change,
             streaming::streaming_prepare,
@@ -185,6 +191,19 @@ pub fn run() {
     config_state.on_saved(move |config| saved_usage.settings_saved(config));
     app.manage(config_state);
     app.manage(usage);
+
+    // Whoever changed this app's audio settings, someone helping with them
+    // sees them as they are now (ADR-043).
+    let handle = app.handle().clone();
+    app.listen_any(settings::CHANGED_EVENT, move |event| {
+        let Ok(changed) = serde_json::from_str::<settings::AudioSettings>(event.payload()) else {
+            return;
+        };
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            signaling::settings_changed(&handle, changed).await;
+        });
+    });
 
     logging::log_startup(app.handle(), &log_spec);
 
