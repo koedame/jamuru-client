@@ -338,13 +338,13 @@ function UsageReportingSection({
       <p className="diagnostics-tab__description">
         {t(
           "settings.diagnostics.usageSent",
-          "Sent: app version, OS, CPU and memory, audio device names and what they support, your settings, totals for each session (length, latency, packet loss), the kind of each error, and where a crash happened."
+          "Sent: app version, OS, CPU and memory, audio device names, IDs and what they support, your settings (a custom server URL only as far as its host and port), totals for each session (length, latency, packet loss, what kind of route the audio took and how long it took to connect), your own IP addresses (on your networks and the public one), the kind of each error, and where a crash happened."
         )}
       </p>
       <p className="diagnostics-tab__description">
         {t(
           "settings.diagnostics.usageNotSent",
-          "Never sent: display name, room history, custom server URL, device IDs, machine identifier, audio, chat."
+          "Never sent: display name, room history, machine identifier, anything about the other people in the room (their IP addresses included), audio, chat."
         )}
       </p>
       <p className="diagnostics-tab__description">

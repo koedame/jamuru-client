@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use jamjam::config::AppConfig;
+use jamjam::network::{NetworkError, SignalingFailure};
 use jamjam::telemetry::{
     snapshot, AppStart, AudioEnv, Component, EndReason, ErrorCode, EventBody, HttpTransport,
     NoTransport, SessionMode, Transport, UsageReporter,
@@ -258,6 +259,8 @@ pub fn usage_preview(state: tauri::State<'_, UsageState>) -> String {
 fn read_link(streaming: &StreamingState, reporter: &UsageReporter) {
     let reading = streaming.link_reading();
     let (underruns, reconnects) = (streaming.underruns(), streaming.reconnects());
+    let (link, giveups) = (streaming.link_snapshot(), streaming.silence_giveups());
+    let mut new_giveups = 0;
     reporter.with_session(|tally| {
         if let Some((rtt_ms, loss_rate, fec_recovered)) = reading {
             tally.sample(rtt_ms, loss_rate);
@@ -267,7 +270,12 @@ fn read_link(streaming: &StreamingState, reporter: &UsageReporter) {
         }
         tally.add_xruns_total(underruns);
         tally.add_reconnects_total(reconnects);
+        tally.set_link(link);
+        new_giveups = tally.new_silence_giveups(giveups);
     });
+    for _ in 0..new_giveups {
+        reporter.record_error(Component::Ice, ErrorCode::NoPackets);
+    }
 }
 
 fn spawn_sampler<R: Runtime>(app: AppHandle<R>, session_id: String) {
@@ -296,6 +304,31 @@ fn major_of(version: &str) -> Option<String> {
 pub fn record_streaming_failure(reporter: &UsageReporter, message: &str) {
     if let Some((component, code)) = classify_streaming_error(message) {
         reporter.record_error(component, code);
+    }
+}
+
+/// What kind of failure `error` is, when the app could not reach the
+/// signaling server. Only the kind is kept: the message can carry an address.
+pub fn signaling_connect_failure_code(error: &NetworkError) -> ErrorCode {
+    match error {
+        NetworkError::SignalingUnreachable { failure, .. } => match failure {
+            SignalingFailure::Http4xx => ErrorCode::Http4xx,
+            SignalingFailure::Http5xx => ErrorCode::Http5xx,
+            SignalingFailure::Timeout => ErrorCode::Timeout,
+            SignalingFailure::Tls => ErrorCode::Tls,
+            SignalingFailure::Dns => ErrorCode::Dns,
+            SignalingFailure::Other => ErrorCode::ConnectFailed,
+        },
+        _ => ErrorCode::ConnectFailed,
+    }
+}
+
+/// What kind of failure `error` is, when a signaling connection that was up
+/// stopped delivering: the server closing it is told apart from the rest.
+pub fn signaling_loss_code(error: &NetworkError) -> ErrorCode {
+    match error {
+        NetworkError::ConnectionClosed => ErrorCode::WsClosed,
+        _ => ErrorCode::Disconnected,
     }
 }
 
@@ -393,6 +426,86 @@ mod tests {
         assert_eq!(lines[1]["xrun_count"], 0);
     }
 
+    /// The kind of route and the times the link facts hold reach the line
+    /// that "what is sent" shows, through the same reading the sampler does.
+    ///
+    /// Verifies: REQ-TEL-015
+    #[tokio::test]
+    async fn when_a_link_came_up_the_session_end_in_the_preview_carries_its_route_and_times() {
+        let dir = tempfile::tempdir().unwrap();
+        let reporter = UsageReporter::new(
+            Some(dir.path().to_path_buf()),
+            "test",
+            Arc::new(NoTransport),
+            true,
+        );
+        let app = tauri::test::mock_app();
+        app.manage(UsageState::with_reporter(reporter.clone()));
+        app.manage(StreamingState::new());
+        let usage = app.state::<UsageState>();
+        let streaming = app.state::<StreamingState>();
+        let mut ours = jamjam::network::Connection::new("127.0.0.1:0")
+            .await
+            .unwrap();
+        let mut theirs = jamjam::network::Connection::new("127.0.0.1:0")
+            .await
+            .unwrap();
+        ours.connect(theirs.local_addr()).await.unwrap();
+        theirs.connect(ours.local_addr()).await.unwrap();
+        theirs.send_audio(&[0.0f32; 64], 0).await.unwrap();
+        for _ in 0..50 {
+            if ours.link_facts().snapshot().first_audio_ms.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        streaming.set_link_facts_for_test(ours.link_facts());
+
+        usage.session_started(app.handle(), SessionMode::Join, 2);
+        usage.session_ended(&streaming, EndReason::Left);
+
+        let lines = reported_lines(&reporter);
+        let end = &lines[1];
+        assert_eq!(end["event"], "session_end");
+        assert_eq!(end["route"], "loopback");
+        assert_eq!(end["route_confirmed"], false);
+        assert!(end["connect_ms"].is_u64(), "{end}");
+        assert!(end["first_audio_ms"].is_u64(), "{end}");
+    }
+
+    /// Verifies: REQ-TEL-017
+    #[tokio::test]
+    async fn when_an_established_link_was_given_up_for_silence_one_no_packets_error_is_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        let reporter = UsageReporter::new(
+            Some(dir.path().to_path_buf()),
+            "test",
+            Arc::new(NoTransport),
+            true,
+        );
+        let app = tauri::test::mock_app();
+        app.manage(UsageState::with_reporter(reporter.clone()));
+        app.manage(StreamingState::new());
+        let usage = app.state::<UsageState>();
+        let streaming = app.state::<StreamingState>();
+
+        usage.session_started(app.handle(), SessionMode::Join, 2);
+        streaming.add_silence_giveup_for_test();
+        // Long enough for the sampler to read the total several times: the
+        // one give-up must still be counted once.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        usage.session_ended(&streaming, EndReason::Disconnected);
+
+        let errors: Vec<serde_json::Value> = reported_lines(&reporter)
+            .into_iter()
+            .filter(|line| line["event"] == "error")
+            .collect();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0]["component"], "ice");
+        assert_eq!(errors[0]["code"], "no_packets");
+        assert_eq!(errors[0]["count"], 1);
+    }
+
     /// Verifies: REQ-TEL-001
     #[tokio::test]
     async fn when_reporting_is_off_a_room_records_nothing_and_starts_no_sampler() {
@@ -434,6 +547,8 @@ mod tests {
                 is_default: true,
             }),
             output: None,
+            input_id: None,
+            output_id: None,
         });
         app.manage(usage);
         (app, reporter)
@@ -500,6 +615,25 @@ mod tests {
         let usage = app.state::<UsageState>();
 
         usage.settings_saved(&reporting_config());
+        tokio::time::sleep(CHANGE_SETTLE * 4).await;
+
+        assert_eq!(reporter.preview_ndjson(), "");
+    }
+
+    /// The device IDs travel in `audio_env`, so choosing a device is one line:
+    /// saving the settings for it must not send `app_start` as well.
+    ///
+    /// Verifies: REQ-TEL-014
+    #[tokio::test]
+    async fn when_only_the_chosen_device_ids_change_in_the_settings_no_app_start_is_reported() {
+        let (app, reporter) = launched(true);
+        let usage = app.state::<UsageState>();
+
+        usage.settings_saved(&AppConfig {
+            input_device_id: Some("alsa:hw:CARD=Alice,DEV=0".to_string()),
+            output_device_id: Some("alsa:hw:CARD=Bob,DEV=1".to_string()),
+            ..reporting_config()
+        });
         tokio::time::sleep(CHANGE_SETTLE * 4).await;
 
         assert_eq!(reporter.preview_ndjson(), "");
@@ -615,6 +749,46 @@ mod tests {
         assert_eq!(
             classify_streaming_error("Failed to connect: timed out reaching 10.0.0.5:5000"),
             Some((Component::Ice, ErrorCode::ConnectFailed))
+        );
+    }
+
+    /// Verifies: REQ-TEL-017
+    #[test]
+    fn when_the_signaling_server_could_not_be_reached_the_error_names_how() {
+        let unreachable = |failure| NetworkError::SignalingUnreachable {
+            failure,
+            message: "reaching 10.0.0.5 failed".to_string(),
+        };
+        for (failure, code) in [
+            (SignalingFailure::Http4xx, ErrorCode::Http4xx),
+            (SignalingFailure::Http5xx, ErrorCode::Http5xx),
+            (SignalingFailure::Timeout, ErrorCode::Timeout),
+            (SignalingFailure::Tls, ErrorCode::Tls),
+            (SignalingFailure::Dns, ErrorCode::Dns),
+            (SignalingFailure::Other, ErrorCode::ConnectFailed),
+        ] {
+            assert_eq!(
+                signaling_connect_failure_code(&unreachable(failure)),
+                code,
+                "{failure:?}"
+            );
+        }
+        assert_eq!(
+            signaling_connect_failure_code(&NetworkError::SignalingError("x".into())),
+            ErrorCode::ConnectFailed
+        );
+    }
+
+    /// Verifies: REQ-TEL-017
+    #[test]
+    fn when_the_server_closed_the_signaling_connection_the_error_is_ws_closed() {
+        assert_eq!(
+            signaling_loss_code(&NetworkError::ConnectionClosed),
+            ErrorCode::WsClosed
+        );
+        assert_eq!(
+            signaling_loss_code(&NetworkError::SignalingError("Receive failed".into())),
+            ErrorCode::Disconnected
         );
     }
 

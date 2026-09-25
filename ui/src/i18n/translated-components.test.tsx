@@ -340,7 +340,7 @@ describe('components without hard-coded text', () => {
     expect(screen.getByText(bundle.settings.diagnostics.usagePreviewOff)).toBeInTheDocument();
     if (language === 'ja') {
       const section = container.querySelector<HTMLElement>('[data-testid="diagnostics-usage"]')!;
-      expect(latinWords(section, ['OS', 'CPU', 'ID', 'URL', 'AirPods', 'jamjam'])).toEqual([]);
+      expect(latinWords(section, ['OS', 'CPU', 'ID', 'IP', 'URL', 'AirPods', 'jamjam'])).toEqual([]);
     }
   });
 

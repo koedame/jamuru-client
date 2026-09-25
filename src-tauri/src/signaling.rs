@@ -22,7 +22,7 @@ use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
-use jamjam::telemetry::{Component, EndReason, ErrorCode, SessionMode};
+use jamjam::telemetry::{Component, EndReason, SessionMode};
 
 /// Connection ID counter
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(1);
@@ -137,9 +137,10 @@ pub async fn signaling_connect(
                 started.elapsed().as_millis(),
                 e
             );
-            usage
-                .reporter()
-                .record_error(Component::Signaling, ErrorCode::ConnectFailed);
+            usage.reporter().record_error(
+                Component::Signaling,
+                crate::usage::signaling_connect_failure_code(&e),
+            );
             e.to_string()
         })?;
 
@@ -298,8 +299,12 @@ pub async fn signaling_publish_local_candidates(
     local_port: u16,
     state: tauri::State<'_, SignalingState>,
     streaming: tauri::State<'_, StreamingState>,
+    usage: tauri::State<'_, UsageState>,
 ) -> Result<usize, String> {
     let candidates = local_candidates(&streaming, local_port).await;
+    usage
+        .reporter()
+        .with_session(|tally| tally.set_local_candidates(&candidates));
 
     let mut connections = state.connections.lock().await;
     let conn = connections
@@ -873,7 +878,7 @@ pub async fn signaling_poll_events(
                     tracing::warn!("Signaling connection {} was lost: {}", conn_id, e);
                     usage
                         .reporter()
-                        .record_error(Component::Signaling, ErrorCode::Disconnected);
+                        .record_error(Component::Signaling, crate::usage::signaling_loss_code(&e));
                     usage.session_ended(&streaming, EndReason::Disconnected);
                     let mut room_state = state.room_state.lock().await;
                     *room_state = None;

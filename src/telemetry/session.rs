@@ -1,8 +1,14 @@
 //! Totals for one session, kept while it runs and written as `session_end`.
 
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
+use crate::network::{AddressCandidate, CandidateType, LinkSnapshot};
+
 use super::event::{EndReason, SessionEnd};
+
+/// How many of the user's own addresses one session line carries at most.
+const MAX_LOCAL_IPS: usize = 16;
 
 /// What one session has measured so far. Only totals are kept: nothing per
 /// packet is stored or sent.
@@ -19,9 +25,13 @@ pub struct SessionTally {
     xrun_count: u64,
     last_reconnect_total: u64,
     last_xrun_total: u64,
+    last_giveup_total: u64,
     last_fec_total: u64,
     participants: u32,
     peers_max: u32,
+    link: LinkSnapshot,
+    local_ips: Vec<IpAddr>,
+    public_ip: Option<IpAddr>,
 }
 
 impl SessionTally {
@@ -42,9 +52,13 @@ impl SessionTally {
             xrun_count: 0,
             last_reconnect_total: 0,
             last_xrun_total: 0,
+            last_giveup_total: 0,
             last_fec_total: 0,
             participants: 0,
             peers_max: 0,
+            link: LinkSnapshot::default(),
+            local_ips: Vec::new(),
+            public_ip: None,
         }
     }
 
@@ -71,6 +85,36 @@ impl SessionTally {
         self.fec_samples += 1;
         if recovered > 0 {
             self.fec_active_samples += 1;
+        }
+    }
+
+    /// What is known about how the link to the peer came up. A reading with
+    /// nothing measured (no link yet) leaves the last real one in place, so a
+    /// link that was up and then torn down is still described at the end.
+    pub fn set_link(&mut self, link: LinkSnapshot) {
+        if !link.is_empty() {
+            self.link = link;
+        }
+    }
+
+    /// The addresses the user offered the peer: their own addresses on their
+    /// networks (host candidates) and the public one a STUN server saw
+    /// (server-reflexive). Only the addresses are kept, not the ports.
+    pub fn set_local_candidates(&mut self, candidates: &[AddressCandidate]) {
+        self.local_ips.clear();
+        self.public_ip = None;
+        for candidate in candidates {
+            let ip = candidate.address.ip();
+            match candidate.candidate_type {
+                CandidateType::Host => {
+                    if !self.local_ips.contains(&ip) && self.local_ips.len() < MAX_LOCAL_IPS {
+                        self.local_ips.push(ip);
+                    }
+                }
+                CandidateType::ServerReflexive => {
+                    self.public_ip.get_or_insert(ip);
+                }
+            }
         }
     }
 
@@ -106,6 +150,12 @@ impl SessionTally {
         self.add_reconnects(u32::try_from(new).unwrap_or(u32::MAX));
     }
 
+    /// Like [`Self::add_reconnects_total`], for the times an established link
+    /// was given up for silence. Returns how many are new since the last call.
+    pub fn new_silence_giveups(&mut self, total: u64) -> u64 {
+        counter_growth(&mut self.last_giveup_total, total)
+    }
+
     /// Like [`Self::add_reconnects_total`], for underruns.
     pub fn add_xruns_total(&mut self, total: u64) {
         let new = counter_growth(&mut self.last_xrun_total, total);
@@ -134,6 +184,12 @@ impl SessionTally {
                 round_tenth(self.fec_active_samples as f64 / self.fec_samples as f64 * 100.0)
             }),
             xrun_count: self.xrun_count,
+            route: self.link.route,
+            route_confirmed: self.link.route_confirmed,
+            connect_ms: self.link.connect_ms,
+            first_audio_ms: self.link.first_audio_ms,
+            local_ips: self.local_ips.clone(),
+            public_ip: self.public_ip,
         }
     }
 }

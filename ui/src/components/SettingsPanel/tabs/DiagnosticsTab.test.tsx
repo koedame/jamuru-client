@@ -103,8 +103,9 @@ describe('DiagnosticsTab usage reporting section', () => {
 
     const section = screen.getByTestId('diagnostics-usage');
     expect(section).toHaveTextContent('Sent: app version, OS, CPU and memory, audio device names');
+    expect(section).toHaveTextContent('your own IP addresses');
     expect(section).toHaveTextContent(
-      'Never sent: display name, room history, custom server URL, device IDs, machine identifier, audio, chat.'
+      'Never sent: display name, room history, machine identifier, anything about the other people in the room (their IP addresses included), audio, chat.'
     );
     expect(section).toHaveTextContent("Taro's AirPods");
     expect(section).toHaveTextContent('discards the ID');
