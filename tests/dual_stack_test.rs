@@ -208,14 +208,14 @@ fn test_peer_info_with_candidates_roundtrip() {
         public_addr: Some("203.0.113.50:5000".parse().unwrap()),
         local_addr: Some("192.168.1.100:5000".parse().unwrap()),
         joined_at: 0,
-        // Never crosses the wire (skip_serializing, ADR-024) - a peer's
-        // device identifier is not shared with other participants.
+        features: vec!["peer_message".to_string()],
     };
 
     let json = serde_json::to_string(&original).expect("Should serialize");
     let deserialized: PeerInfo = serde_json::from_str(&json).expect("Should deserialize");
 
     assert_eq!(deserialized.name, original.name);
+    assert_eq!(deserialized.features, original.features);
     assert_eq!(deserialized.candidates.len(), 2);
     assert_eq!(
         deserialized.candidates[0].candidate_type,

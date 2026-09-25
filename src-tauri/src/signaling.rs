@@ -239,6 +239,7 @@ pub async fn signaling_join_room(
         room_id: room_id.clone(),
         password: None,
         peer_name: peer_name.clone(),
+        features: vec![],
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -432,6 +433,7 @@ pub async fn signaling_create_room(
         room_name,
         password: None,
         peer_name: peer_name.clone(),
+        features: vec![],
     })
     .await
     .map_err(|e| e.to_string())?;

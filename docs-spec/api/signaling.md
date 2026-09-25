@@ -124,6 +124,7 @@ CLI 引数・環境変数を持たない。
 /// - room_name: ルーム名
 /// - password: パスワード（オプション）
 /// - peer_name: 参加者名
+/// - features: 受け付ける追加の機能（空なら送らない。5 章）
 ///
 /// 戻り値: SignalingMessage::RoomCreated { room_id, peer_id, invite_code }
 
@@ -165,6 +166,7 @@ struct CreateRoomResult {
 /// - room_id: ルームID
 /// - password: パスワード（オプション）
 /// - peer_name: 参加者名
+/// - features: 受け付ける追加の機能（空なら送らない。5 章）
 ///
 /// 戻り値: SignalingMessage::RoomJoined { room_id, peer_id, invite_code, peers: Vec<PeerInfo> }
 
@@ -342,12 +344,17 @@ enum SignalingMessage {
         room_name: String,
         password: Option<String>,
         peer_name: String,
+        /// このアプリが受け付ける追加の機能（`"peer_message"` = 相手あてのメッセージを受け取れる）。
+        /// 空なら送らない（機能を知らない頃のアプリと同じ形）。他の参加者には `PeerInfo::features` で伝わる
+        features: Vec<String>,
     },
     /// ルームに参加
     JoinRoom {
         room_id: String,
         password: Option<String>,
         peer_name: String,
+        /// `CreateRoom` と同じ
+        features: Vec<String>,
     },
     /// ルームから退出
     LeaveRoom,
@@ -407,6 +414,19 @@ enum SignalingMessage {
         /// Unixタイムスタンプ（秒）
         timestamp: u64,
     },
+    /// 同じルームの参加者あてのメッセージ（両方向。[ADR-043](../adr/ADR-043-remote-operation-rpc.md)）。
+    /// 送るときは `to`（無ければルームの全員。送った本人も、自分が `peer_message` を知らせていれば含む）と
+    /// `body` だけを書く。サーバーは `peer_message` を知らせて入った参加者にだけ届け、`from` / `from_name` に
+    /// 送った接続の参加者を付ける（書かれた値は使わない）。受け取った側は、`from` の無いものを捨てる。
+    /// `body` は JSON のオブジェクトで、中身はアプリどうしの取り決め（サーバーは解釈しない）。
+    /// 宛先がいない・別のルーム・`peer_message` を知らせていないときは、エラーも返さずに捨てられる
+    /// （返事を待つやり取りは、待ち続けない作りにする）
+    PeerMessage {
+        to: Option<Uuid>,
+        from: Option<Uuid>,
+        from_name: Option<String>,
+        body: serde_json::Map<String, serde_json::Value>,
+    },
 }
 
 /// ピア情報（複数アドレス候補対応）
@@ -422,6 +442,10 @@ struct PeerInfo {
     /// このピアがルームに参加したUnixタイムスタンプ（秒）。
     /// `#[serde(default)]` のため、この項目を含まない旧クライアントとの互換性を維持（値は0）。
     joined_at: u64,
+    /// このピアのアプリが知らせた追加の機能のうち、サーバーが知っているもの。
+    /// `#[serde(default)]` のため、無い（機能を知らない頃のサーバー・アプリ）ときは空で、
+    /// 相手あてのメッセージは受け取れないものとして扱う（`PeerInfo::takes_peer_messages`）
+    features: Vec<String>,
 }
 
 /// アドレス候補
@@ -525,6 +549,7 @@ conn.send(SignalingMessage::CreateRoom {
     room_name: "Guitar Session".into(),
     password: None,
     peer_name: "Host".into(),
+    features: vec![], // 受け付ける追加の機能が無ければ空（送られない）
 }).await?;
 
 match conn.recv().await? {
@@ -542,6 +567,7 @@ conn.send(SignalingMessage::JoinRoom {
     room_id: "ABC123".into(),
     password: None,
     peer_name: "Player1".into(),
+    features: vec![],
 }).await?;
 
 match conn.recv().await? {
