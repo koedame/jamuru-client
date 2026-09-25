@@ -261,6 +261,43 @@ mod tests {
         )
     }
 
+    /// The whole table, one column per portal that is not a test harness, for
+    /// the maintainers' own reference. It is written where
+    /// `JAMJAM_PERMISSION_TABLE_OUT` points; it is not a committed document.
+    #[test]
+    #[ignore = "writes the whole table where JAMJAM_PERMISSION_TABLE_OUT points"]
+    fn write_the_whole_permission_table() {
+        let out = std::env::var_os("JAMJAM_PERMISSION_TABLE_OUT")
+            .expect("JAMJAM_PERMISSION_TABLE_OUT names the file to write");
+        let mark = |method: &Method, portal| {
+            if method.access.allows(portal) {
+                "○"
+            } else {
+                "×"
+            }
+        };
+        let mut table = String::new();
+        for (heading, kind) in [
+            ("アプリの操作", Kind::App),
+            ("画面の操作・情報の取得・端末の操作", Kind::Native),
+        ] {
+            table.push_str(&format!(
+                "\n## {heading}\n\n| 操作 | 内容 | 利用者本人 | デバッグモード | 設定の手伝い |\n|---|---|:-:|:-:|:-:|\n"
+            ));
+            for method in all_methods().filter(|m| m.kind == kind) {
+                table.push_str(&format!(
+                    "| `{}` | {} | {} | {} | {} |\n",
+                    method.name,
+                    method.summary,
+                    mark(method, Portal::Screen),
+                    mark(method, Portal::Debug),
+                    mark(method, Portal::Help),
+                ));
+            }
+        }
+        std::fs::write(out, table).unwrap();
+    }
+
     /// Verifies: REQ-RMT-022
     #[test]
     fn a_method_has_one_row() {
