@@ -383,6 +383,8 @@ async fn invoke(
                 });
         }
         if Instant::now() >= deadline {
+            // Forget the call, so an answer arriving later is not kept forever.
+            let _ = eval_in(&state.app, window, &forget_invoke_js(id)).await;
             return Err(ControlError::Eval(format!(
                 "{} did not settle within {:?}",
                 request.command, INVOKE_TIMEOUT
@@ -412,16 +414,30 @@ fn start_invoke_js(id: u64, request: &InvokeRequest) -> Result<String, ControlEr
                     results[{id}] = {{ done: true, outcome: "ok", value: value === undefined ? null : value }};
                 }},
                 function (error) {{
-                    results[{id}] = {{
-                        done: true,
-                        outcome: "err",
-                        error: typeof error === "string" ? error : JSON.stringify(error),
-                    }};
+                    let text;
+                    if (typeof error === "string") {{
+                        text = error;
+                    }} else {{
+                        // Not every rejection serializes (undefined, a cycle).
+                        try {{ text = JSON.stringify(error); }} catch (e) {{ text = undefined; }}
+                        if (typeof text !== "string") text = String(error);
+                    }}
+                    results[{id}] = {{ done: true, outcome: "err", error: text }};
                 }}
             );
             return {{ started: true }};
         }})()"#
     ))
+}
+
+/// Drops whatever is parked under `id`.
+fn forget_invoke_js(id: u64) -> String {
+    format!(
+        r#"(function () {{
+            if (window.__jamjamE2eInvoke) delete window.__jamjamE2eInvoke[{id}];
+            return {{ forgotten: true }};
+        }})()"#
+    )
 }
 
 /// Reads the outcome parked under `id`, removing it once settled.
