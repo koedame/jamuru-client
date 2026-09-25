@@ -1,0 +1,29 @@
+/* The helper's window: the helped app's screen under a line that says whose it is. */
+.helper-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.helper-screen__banner {
+  flex-shrink: 0;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.helper-screen__screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The screen fills what is left under the banner, not the whole window. */
+.helper-screen__screen .main-screen {
+  height: 100%;
+}

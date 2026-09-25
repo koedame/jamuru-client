@@ -9,12 +9,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use jamjam::network::{RemoteReader, RemoteWriter};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::{broadcast, mpsc, Semaphore};
 
 use super::events::{EventHub, EVENTS};
+use super::help::HelpGuard;
 use super::spec::{all_methods, Portal};
 use super::{dispatch, Call, RpcError};
 
@@ -36,9 +38,12 @@ const MAX_IN_FLIGHT: usize = 32;
 #[derive(Clone)]
 pub struct Session {
     pub portal: Portal,
-    /// `beta` or `e2e`: what the build says about itself.
+    /// `beta`, `e2e` or `release`: what the build says about itself.
     pub build: &'static str,
     pub app_version: String,
+    /// What the person being helped is promised beyond the table, for a help
+    /// portal; the other portals have none.
+    pub guard: Option<Arc<HelpGuard>>,
 }
 
 /// The first frame: the protocol, the build, and the methods this portal may
@@ -94,6 +99,55 @@ fn error_frame(id: u64, error: &RpcError) -> String {
     json!({ "id": id, "error": { "code": error.code, "message": error.message } }).to_string()
 }
 
+/// Why [`serve_relay`] stopped.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// The relay closed the connection.
+    ByRelay,
+    /// Reading from the relay failed.
+    ReadFailed(String),
+    /// Sending to the relay failed.
+    SendFailed(String),
+}
+
+/// Serves the relay connection `reader`/`writer` as `session` until it ends:
+/// the relay's frames go to [`run`] and its answers and events go back.
+pub async fn serve_relay<R: Runtime>(
+    app: AppHandle<R>,
+    session: Session,
+    mut reader: RemoteReader,
+    mut writer: RemoteWriter,
+) -> Ended {
+    let (to_app, incoming) = mpsc::channel::<String>(32);
+    let (outgoing, mut from_app) = mpsc::channel::<String>(32);
+    let serving = tauri::async_runtime::spawn(run(app, session, incoming, outgoing));
+
+    let ended = loop {
+        tokio::select! {
+            frame = reader.recv_text() => match frame {
+                Ok(Some(text)) => {
+                    if to_app.send(text).await.is_err() {
+                        break Ended::ByRelay;
+                    }
+                }
+                Ok(None) => break Ended::ByRelay,
+                Err(e) => break Ended::ReadFailed(e.to_string()),
+            },
+            answer = from_app.recv() => match answer {
+                Some(text) => {
+                    if let Err(e) = writer.send_text(text).await {
+                        break Ended::SendFailed(e.to_string());
+                    }
+                }
+                None => break Ended::ByRelay,
+            },
+        }
+    };
+    serving.abort();
+    writer.close().await;
+    ended
+}
+
 /// Serves one relay connection until it ends: `incoming` closing (the relay
 /// hung up) or `outgoing` closing (this end gave up) both end it.
 pub async fn run<R: Runtime>(
@@ -121,8 +175,12 @@ pub async fn run<R: Runtime>(
                 let allowed = EVENTS
                     .iter()
                     .any(|spec| spec.name == event.name && spec.access.allows(session.portal));
-                if allowed {
-                    let frame = json!({ "event": event.name, "payload": event.payload }).to_string();
+                let payload = match &session.guard {
+                    Some(guard) if allowed => guard.event(event.name, event.payload),
+                    _ => Some(event.payload),
+                };
+                if let (true, Some(payload)) = (allowed, payload) {
+                    let frame = json!({ "event": event.name, "payload": payload }).to_string();
                     if frame.len() <= MAX_FRAME_BYTES && outgoing.send(frame).await.is_err() {
                         return;
                     }
@@ -173,20 +231,20 @@ async fn handle_frame<R: Runtime>(
     };
     let app = app.clone();
     let portal = session.portal;
+    let guard = session.guard.clone();
     let outgoing = outgoing.clone();
     tauri::async_runtime::spawn(async move {
         let id = request.id;
-        let result = dispatch(
-            &app,
-            portal,
-            Call {
-                method: request.method,
-                params: request.params,
-                window: request.window,
-                timeout: CALL_TIMEOUT,
-            },
-        )
-        .await;
+        let call = Call {
+            method: request.method,
+            params: request.params,
+            window: request.window,
+            timeout: CALL_TIMEOUT,
+        };
+        let result = match guard {
+            Some(guard) => guard.call(&app, call).await,
+            None => dispatch(&app, portal, call).await,
+        };
         let frame = match result {
             Ok(value) => ok_frame(id, value),
             Err(error) => error_frame(id, &error),
@@ -207,6 +265,7 @@ mod tests {
             portal,
             build: "e2e",
             app_version: "0.0.0".to_string(),
+            guard: (portal == Portal::Help).then(|| Arc::new(HelpGuard::new(|_| {}))),
         }
     }
 
@@ -298,6 +357,46 @@ mod tests {
         let answer = next(&mut from_app).await;
         assert_eq!(answer["id"], 1);
         assert_eq!(answer["error"]["code"], "denied");
+    }
+
+    /// A helper hears the events its portal may hear and no others, and the
+    /// settings one announces name devices by their handles.
+    ///
+    /// Verifies: REQ-RMT-024, REQ-RMT-006
+    #[tokio::test]
+    async fn a_helper_hears_only_the_events_its_portal_may_hear_with_devices_by_handle() {
+        use tauri::Emitter;
+
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        std::mem::forget(app);
+        crate::rpc::events::install(&handle);
+        let (_to_app, incoming) = mpsc::channel(8);
+        let (outgoing, mut from_app) = mpsc::channel(8);
+        tauri::async_runtime::spawn(run(
+            handle.clone(),
+            session(Portal::Help),
+            incoming,
+            outgoing,
+        ));
+        next(&mut from_app).await;
+
+        // The person's own help events and their language are not the helper's.
+        handle
+            .emit(crate::session::HELP_EVENT, json!({"type": "requested"}))
+            .unwrap();
+        handle.emit("i18n:language-changed", "ja").unwrap();
+        handle
+            .emit(
+                "audio:config-changed",
+                crate::rpc::help::settings_with_devices(&["alsa:serial-ABC123"]),
+            )
+            .unwrap();
+
+        let heard = next(&mut from_app).await;
+        assert_eq!(heard["event"], "audio:config-changed", "{}", heard);
+        assert_eq!(heard["payload"]["input_device_id"], "input-1");
+        assert!(!heard.to_string().contains("ABC123"), "{}", heard);
     }
 
     #[tokio::test]

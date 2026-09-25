@@ -13,13 +13,12 @@
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
-use tokio::sync::mpsc;
 
 use jamjam::network::{connect_remote, discover_remote_enrollment};
 
 use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
-use crate::rpc::link::{self, Session};
+use crate::rpc::link::{self, Ended, Session};
 use crate::rpc::Portal;
 
 /// What a beta build's binary contains and a release build's does not
@@ -46,7 +45,6 @@ pub fn spawn(app: AppHandle) {
         MARKER,
         app.state::<DeviceIdentityState>().identity().device_id()
     );
-    crate::rpc::events::install(&app);
     tauri::async_runtime::spawn(async move {
         let mut wait = RETRY_MIN;
         loop {
@@ -106,7 +104,7 @@ async fn round(app: &AppHandle) -> Round {
         return Round::NotEnrolled;
     }
 
-    let (mut writer, mut reader) = match connect_remote(&enrollment.url, &identity).await {
+    let (writer, reader) = match connect_remote(&enrollment.url, &identity).await {
         Ok(halves) => halves,
         Err(e) => {
             tracing::warn!("Remote debugging: the relay could not be reached: {}", e);
@@ -116,44 +114,21 @@ async fn round(app: &AppHandle) -> Round {
     tracing::info!("Remote debugging: connected to the relay");
     let started = Instant::now();
 
-    let (to_app, incoming) = mpsc::channel::<String>(32);
-    let (outgoing, mut from_app) = mpsc::channel::<String>(32);
     let session = Session {
         portal: Portal::Debug,
         build: "beta",
         app_version: app.package_info().version.to_string(),
+        guard: None,
     };
-    let serving = tauri::async_runtime::spawn(link::run(app.clone(), session, incoming, outgoing));
-
-    // The relay's frames go to the link and the link's answers go back, until
-    // either end is gone.
-    loop {
-        tokio::select! {
-            frame = reader.recv_text() => match frame {
-                Ok(Some(text)) => {
-                    if to_app.send(text).await.is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    tracing::warn!("Remote debugging: the relay connection failed: {}", e);
-                    break;
-                }
-            },
-            answer = from_app.recv() => match answer {
-                Some(text) => {
-                    if let Err(e) = writer.send_text(text).await {
-                        tracing::warn!("Remote debugging: sending to the relay failed: {}", e);
-                        break;
-                    }
-                }
-                None => break,
-            },
+    match link::serve_relay(app.clone(), session, reader, writer).await {
+        Ended::ByRelay => {}
+        Ended::ReadFailed(e) => {
+            tracing::warn!("Remote debugging: the relay connection failed: {}", e)
+        }
+        Ended::SendFailed(e) => {
+            tracing::warn!("Remote debugging: sending to the relay failed: {}", e)
         }
     }
-    serving.abort();
-    writer.close().await;
     tracing::info!("Remote debugging: the relay connection ended");
     Round::Connected(started.elapsed())
 }

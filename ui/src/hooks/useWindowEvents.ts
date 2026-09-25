@@ -5,7 +5,9 @@
  */
 
 import { useEffect, useCallback, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listenEvent } from "../lib/backend";
+
+type UnlistenFn = () => void;
 
 /**
  * Session event types
@@ -43,15 +45,15 @@ export function useSessionEvents(
     const unlistenFns: UnlistenFn[] = [];
 
     // Listen for connection event
-    listen<void>("session:connected", () => {
+    listenEvent<void>("session:connected", () => {
       setIsInSession(true);
       onConnect?.();
     }).then((unlisten) => unlistenFns.push(unlisten));
 
     // Listen for disconnection event
-    listen<string>("session:disconnected", (event) => {
+    listenEvent<string>("session:disconnected", (reason) => {
       setIsInSession(false);
-      onDisconnect?.(event.payload);
+      onDisconnect?.(reason);
     }).then((unlisten) => unlistenFns.push(unlisten));
 
     // Cleanup listeners on unmount
@@ -85,9 +87,7 @@ export function useWindowEvent<T = unknown>(
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
 
-    listen<T>(eventName, (event) => {
-      handler(event.payload);
-    }).then((fn) => {
+    listenEvent<T>(eventName, handler).then((fn) => {
       unlisten = fn;
     });
 

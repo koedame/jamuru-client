@@ -45,10 +45,10 @@ jamjam UI
 │   ├── DevicesTab
 │   └── DiagnosticsTab
 │
-├── SettingsHelp             # 設定の手伝い（ADR-043）
+├── SettingsHelp             # 設定の手伝い（ADR-044 §5）
 │   ├── SettingsHelpQuestion
 │   ├── SettingsHelpBar
-│   └── SettingsHelpPanel（DevicesTab を再利用）
+│   └── SettingsHelpPanel（DevicesTab を再利用。手伝う人の窓 HelperScreen が使う）
 │
 ├── SessionStats             # セッション統計（オーバーレイ）
 │   ├── NetworkStats

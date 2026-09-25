@@ -5,6 +5,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import Catalog from "./Catalog";
+import { setBackend } from "./lib/backend";
+import { HELP_HASH, helperBackend } from "./lib/helperBackend";
 
 // Import i18n (must be imported before App)
 import "./i18n";
@@ -18,6 +20,10 @@ import "@fontsource/roboto-mono/700.css";
 
 // Import design tokens
 import "./styles/tokens.css";
+
+// The window someone helping works in draws the helped app's screen from the
+// helped app's state, so it is connected to that app's backend before anything mounts.
+if (window.location.hash === HELP_HASH) setBackend(helperBackend);
 
 // Check if catalog mode is enabled via environment variable
 const isCatalogMode = import.meta.env.VITE_CATALOG_MODE === "true";

@@ -1,5 +1,5 @@
 /**
- * SettingsHelpBar - says that help with settings is going on (ADR-043), on
+ * SettingsHelpBar - says that help with settings is going on (ADR-044 §5), on
  * either side, with the actions for it - above all, stopping it. Shown for
  * as long as the help lasts, so it can be stopped at any time.
  */

@@ -325,14 +325,15 @@ sequenceDiagram
 クライアント↔サーバー間の双方向通信で使用される。
 
 **相手あてのメッセージの中身（`PeerMessage.body`）。** トピックの名前 1 つをキーにしたオブジェクトで、いまあるのは
-`settings_help`（設定の手伝い。[ADR-043](../adr/ADR-043-remote-operation-rpc.md)）だけ。中身は `kind` で区別する:
-`request`（手伝わせて）・`accepted`（いいよ。設定つき）・`declined`（断る。`busy` なら別の人に手伝われている）・
-`propose`（この変更を。`id` と `change`。答えが来るまで次は送らない）・`answered`（その変更の結果。`applied` /
-`refused`（`reason` は `device_gone` / `invalid_value` / `unavailable`）/ `declined`）・
-`settings`（こちらで設定が変わった）・`stop`（手伝いをやめる。`role` は送り手の側 `helper` / `helped`）・
-`notice`（ルーム全員へ。チャットの記録用。手伝う人は `helper` の参加者 ID で、名前は受け取った側が引く）。
-知らないトピックは読まずに捨てる（新しいアプリからのもの）。デバイス ID は仮の名前（入力は `input-N`、出力は `output-N`）に
-置き換えて渡す（REQ-RMT-006）。数値は整数の ID と設定値だけで、±(2^53−1) に収まる。
+`settings_help`（設定の手伝い。[ADR-044](../adr/ADR-044-portals-and-permissions.md) §5）だけ。中身は `kind` で区別する:
+`request`（手伝わせて）・`accepted`（いいよ。`session` は手伝われる側が中継に繋いで待っている手伝いの番号。128 ビットの乱数の
+16 進 32 桁で、手伝う側は同じ番号で中継に繋ぐ）・`declined`（断る。`busy` なら別の人に手伝われている）・
+`stop`（手伝いをやめる。`role` は送り手の側 `helper` / `helped`）・
+`notice`（ルーム全員へ。チャットの記録用。`event` は `started` / `changed` / `ended`、`changed` には変わった設定の名前 `setting` が付く。
+手伝う人は `helper` の参加者 ID で、名前は受け取った側が引く）。
+手伝いの中身（手伝う人の操作と相手の状態）はシグナリングを通らず、サーバーの中継（WebSocket）を通る。
+以前にあった `propose` / `answered` / `settings`（変更を 1 件ずつ申請する形）は無くなり、届いても知らない種類として読み飛ばす。
+知らないトピックは読まずに捨てる（新しいアプリからのもの）。数値は整数の ID と設定値だけで、±(2^53−1) に収まる。
 
 **知らない種類は読み飛ばす（REQ-CON-030）。** `SignalingConnection::recv()` は、`type` がこの列挙に無いメッセージを
 捨てて次のメッセージを待つ。サーバーにメッセージの種類を足しても、配布済みのアプリはルームから落ちない。

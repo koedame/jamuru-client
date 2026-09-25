@@ -20,7 +20,7 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use driver::{Driver, DriverResult};
-use screens::{ConnectionScreen, SessionScreen, SettingsScreen};
+use screens::{ConnectionScreen, HelperScreen, SessionScreen, SettingsScreen};
 
 /// How long to wait for the app to answer its first health check. Generous
 /// because it covers process start plus webview creation on a cold cache.
@@ -264,6 +264,16 @@ impl App {
 
     pub fn settings_screen(&self) -> SettingsScreen<'_> {
         SettingsScreen::new(&self.driver)
+    }
+
+    /// The window someone helping works in (ADR-044 §5), once it is open.
+    /// `None` while no help is going on from this app.
+    pub fn helper_screen(&self) -> DriverResult<Option<HelperScreen<'_>>> {
+        Ok(self
+            .open_windows()?
+            .into_iter()
+            .find(|label| label.starts_with(screens::HELP_WINDOW_PREFIX))
+            .map(|label| HelperScreen::new(&self.driver, label)))
     }
 
     /// Calls one of the app's commands the way its own UI does (ADR-043):

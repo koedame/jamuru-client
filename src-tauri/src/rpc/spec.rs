@@ -123,11 +123,14 @@ app_commands! {
     [Access::NO_HELP] "チャットにリアクションを付ける" crate::signaling::signaling_add_reaction;
     [Access::NO_HELP] "チャットのリアクションを外す" crate::signaling::signaling_remove_reaction;
     [Access::NO_HELP] "チャットのリアクションを付け外しする" crate::signaling::signaling_toggle_reaction;
+    // Starting and stopping a help is the person's own (ADR-044 §3).
     [Access::NO_HELP] "設定の手伝いを申し出る" crate::signaling::settings_help_request;
     [Access::NO_HELP] "設定の手伝いの申し出に答える" crate::signaling::settings_help_answer;
-    [Access::NO_HELP] "設定の変更を申請する" crate::signaling::settings_help_propose;
-    [Access::NO_HELP] "設定の変更の申請に答える" crate::signaling::settings_help_decide;
     [Access::NO_HELP] "設定の手伝いを止める" crate::signaling::settings_help_stop;
+    // The window a helper works in reaches the helped app's methods through
+    // this; a helped app's own help portal may not start a help of its own.
+    [Access::NO_HELP] "手伝いの画面から、手伝っている相手のアプリの操作を呼ぶ" crate::help_link::help_call;
+    [Access::NO_HELP] "手伝いの画面が、いま誰を手伝っているかを読む" crate::help_link::help_window_info;
 
     [Access::ALL] "音声の設定を読む" crate::settings::settings_get;
     [Access::ALL] "音声の設定を変える" crate::settings::settings_change;
@@ -226,7 +229,20 @@ mod tests {
 # 手伝いで相手に何をされうるか
 
 設定の手伝い（[ADR-044](../adr/ADR-044-portals-and-permissions.md)）で、手伝う人が手伝われる人のアプリに対してできる操作の一覧。
-判定は手伝われる人のアプリが行い、この表に無い操作は呼べない。
+
+手伝いは、手伝われる人が申し出に**初めに 1 回**許可すると始まる。許可のあとは、手伝う人の手元に相手のアプリと同じ画面が
+別のウィンドウで開き、そこでの操作が相手のアプリに届く。1 つ 1 つの操作は聞かれない。かわりに、届いた操作を相手のアプリが
+1 件ずつ、この表で判定する。表に無い操作は呼べない。手伝いは、手伝われる人がいつでも止められる。止める・どちらかが退室する・
+接続が切れる・ルームが閉じるのどれかで終わり、アプリを起動し直しても続かない。
+
+手伝いのあいだ、手伝われる人の画面には、手伝っている人の名前と「止める」が出続ける。ルームのチャットには、手伝いの開始と終了、
+音声の設定の変更が記録される（ミュートや音量の変更は記録されない）。
+
+手伝う人には、次のものは渡らない。
+
+- 音声機器のデバイス ID（機器は名前で見え、手伝いのあいだだけの仮の名前で選ぶ）
+- 操作が失敗したときのエラーの文面（音声の設定が変えられなかったときは、機器が無い・値が使えない・保存できない、のどれかだけが伝わる）
+- ほかの参加者のネットワークアドレス
 
 ## できる操作
 
@@ -235,14 +251,19 @@ mod tests {
 ## できない操作
 
 チャットの送信・リアクション、退室とルームの移動、接続先と利用状況の送信の設定、入ったことのあるルームの履歴、
-ウィンドウの操作、ほかの人への手伝いの申し出は、手伝う人にはできない。
+ウィンドウの操作、ほかの人への手伝いの申し出は、手伝う人にはできない。診断ログや画面を読み書きする操作は、
+この手伝いには無い。
 
 ";
+
+    /// Methods that only the app's own screens use to reach one another, which
+    /// say nothing about what a helper may do to the person helped.
+    const INTERNAL: [&str; 3] = ["rpc_settle", "help_call", "help_window_info"];
 
     fn help_permissions_doc() -> String {
         let mut allowed = String::new();
         let mut refused = String::new();
-        for method in APP_METHODS.iter().filter(|m| m.name != "rpc_settle") {
+        for method in APP_METHODS.iter().filter(|m| !INTERNAL.contains(&m.name)) {
             let line = format!("| `{}` | {} |\n", method.name, method.summary);
             if method.access.allows(Portal::Help) {
                 allowed.push_str(&line);
@@ -353,6 +374,11 @@ mod tests {
             "config_set_usage_reporting",
             "config_get_connection_history",
             "settings_help_request",
+            "settings_help_answer",
+            "settings_help_stop",
+            "help_call",
+            "help_window_info",
+            "window_open_settings",
             "log_open_dir",
             "rpc_settle",
         ] {
@@ -363,6 +389,59 @@ mod tests {
                 name
             );
         }
+    }
+
+    /// The whole of what a helper may call, listed here so that a method
+    /// added to the table with more access than it should have is caught by this
+    /// list rather than by nobody. Adding to it is a decision to give every
+    /// helper that power over every person they help.
+    ///
+    /// Verifies: REQ-RMT-025
+    #[test]
+    fn a_helper_may_call_exactly_these_methods() {
+        let mut open: Vec<&str> = all_methods()
+            .filter(|m| m.access.allows(Portal::Help))
+            .map(|m| m.name)
+            .collect();
+        open.sort_unstable();
+        let expected = [
+            "config_get_language",
+            "config_get_peer_name",
+            "config_get_preset",
+            "config_get_sample_rate",
+            "config_get_transmit_channels",
+            "config_list_presets",
+            "config_set_language",
+            "config_set_peer_name",
+            "diagnostics_check_zero_latency",
+            "diagnostics_get_recommended_preset",
+            "diagnostics_run_audio",
+            "diagnostics_run_complete",
+            "diagnostics_run_cpu",
+            "diagnostics_run_network",
+            "greet",
+            "session_get",
+            "settings_change",
+            "settings_get",
+            "signaling_get_chat_messages",
+            "streaming_get_input_level",
+            "streaming_get_local_pan",
+            "streaming_get_local_volume",
+            "streaming_get_master_volume",
+            "streaming_get_mute",
+            "streaming_get_peer_pan",
+            "streaming_get_peer_volume",
+            "streaming_set_local_pan",
+            "streaming_set_local_volume",
+            "streaming_set_master_volume",
+            "streaming_set_monitoring",
+            "streaming_set_mute",
+            "streaming_set_peer_pan",
+            "streaming_set_peer_volume",
+            "streaming_status",
+            "usage_preview",
+        ];
+        assert_eq!(open, expected);
     }
 
     /// Muting and the audio settings are what a helper is there to do.

@@ -13,6 +13,7 @@ mod device_identity;
 mod diagnostics;
 #[cfg(feature = "e2e-control")]
 mod e2e_control;
+mod help_link;
 mod logging;
 mod rpc;
 mod session;
@@ -29,7 +30,7 @@ use device_identity::DeviceIdentityState;
 use settings::SettingsState;
 use signaling::SignalingState;
 use streaming::StreamingState;
-use tauri::{Listener, Manager};
+use tauri::Manager;
 use usage::UsageState;
 
 /// Config used to seed startup state.
@@ -119,19 +120,10 @@ pub fn run() {
     app.manage(config_state);
     app.manage(usage);
     app.manage(session::SessionState::new());
-
-    // Whoever changed this app's audio settings, someone helping with them
-    // sees them as they are now (ADR-043).
-    let handle = app.handle().clone();
-    app.listen_any(settings::CHANGED_EVENT, move |event| {
-        let Ok(changed) = serde_json::from_str::<settings::AudioSettings>(event.payload()) else {
-            return;
-        };
-        let handle = handle.clone();
-        tauri::async_runtime::spawn(async move {
-            signaling::settings_changed(&handle, changed).await;
-        });
-    });
+    app.manage(help_link::HelpLinks::default());
+    // What a portal over the relay hears (a helper, and the debug portal of a
+    // beta build) comes through this.
+    rpc::events::install(app.handle());
 
     logging::log_startup(app.handle(), &log_spec);
 

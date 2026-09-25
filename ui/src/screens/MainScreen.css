@@ -375,3 +375,11 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* ===================================================================
+   A helper's window, before the helped app is in its room
+   =================================================================== */
+.main-helper-waiting {
+  margin: auto;
+  color: var(--color-text-secondary);
+}

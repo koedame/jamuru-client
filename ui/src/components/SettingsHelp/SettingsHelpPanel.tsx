@@ -1,8 +1,8 @@
 /**
  * SettingsHelpPanel - the helped participant's audio settings, as the helper
- * sees and changes them (ADR-043). The same Devices tab as the settings
- * window; every choice is sent as a proposal the other person allows or not,
- * and what is shown is always what their app reports.
+ * sees and changes them in their window (ADR-044 §5). The same Devices tab as the
+ * settings window; every choice is applied to the other person's app, and what
+ * is shown is always what their app reports.
  */
 import { DevicesTab } from "../SettingsPanel/tabs/DevicesTab";
 import type { AudioSettingsTabProps } from "../SettingsPanel/useAudioSettingsTab";
@@ -11,9 +11,9 @@ import "./SettingsHelp.css";
 export interface SettingsHelpPanelProps {
   /** The other person's settings as the Devices tab shows them */
   devicesTab: AudioSettingsTabProps;
-  /** What is happening now (waiting for them to allow a change, the last answer) */
+  /** What is worth saying about the last change (that their app could not apply it) */
   status?: string | null;
-  /** While a change waits for an answer, further choices wait too */
+  /** While a change is on its way, further choices wait */
   waiting?: boolean;
 }
 

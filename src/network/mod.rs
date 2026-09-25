@@ -12,7 +12,6 @@ mod fec;
 mod latency;
 mod link_facts;
 mod quality;
-#[cfg(feature = "remote-link")]
 mod remote;
 mod sequence_tracker;
 mod session;
@@ -42,10 +41,9 @@ pub use latency::{
 };
 pub use link_facts::{LinkFacts, LinkRoute, LinkSnapshot};
 pub use quality::{ConnectionQuality, QualityChange, QualityMonitor};
-#[cfg(feature = "remote-link")]
 pub use remote::{
-    connect_remote, discover_remote_enrollment, RemoteEnrollment, RemoteReader, RemoteWriter,
-    REMOTE_ENROLLMENT_PATH,
+    connect_remote, discover_remote_enrollment, help_relay_url, is_help_session, new_help_session,
+    HelpEnd, RemoteEnrollment, RemoteReader, RemoteWriter, REMOTE_ENROLLMENT_PATH,
 };
 pub use sequence_tracker::SequenceTracker;
 pub use session::{Session, SessionConfig};

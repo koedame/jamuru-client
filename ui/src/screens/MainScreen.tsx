@@ -9,10 +9,15 @@
  * snapshot it reads with `session_get` and hears with `session:changed`, and
  * acts with one command per operation. What stays here is what only the
  * screen has: dialogs, the code being typed, the mixer's faders.
+ *
+ * A helper's window draws this same screen from the helped app's state, through
+ * the relay (`helper`, ADR-044 §5). The screen is the same code; it just does not
+ * offer what the helped app would refuse a helper - speaking for them, leaving
+ * the room - and does not ask for what is the helped person's own: their history
+ * of rooms, the server they use.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { listen } from "@tauri-apps/api/event";
 import { ConnectionPanel, type ConnectionState, type ConnectionErrorKind, type ConnectionHistoryEntry as ConnectionPanelHistoryEntry } from "../components/ConnectionPanel";
 import { MixerPanel, MasterSection, type Channel } from "../components/MixerPanel";
 import { ChatPanelAdapter } from "../components/ChatPanel";
@@ -22,6 +27,7 @@ import { LeaveDialog } from "../components/LeaveDialog";
 import { useSettingsHelp } from "../components/SettingsHelp";
 import { formatErrorForDisplay } from "../lib/errorMessages";
 import { registerInviteLinkHandler } from "../lib/deepLink";
+import { listenEvent } from "../lib/backend";
 import { useWindowEvent } from "../hooks/useWindowEvents";
 import {
   sessionGet,
@@ -64,6 +70,8 @@ const DELAY_NOTICE_MS = 5000;
 
 export interface MainScreenProps {
   onSettingsClick?: () => void;
+  /** Set in the window of someone helping: who they are helping */
+  helper?: { name: string };
 }
 
 interface ChannelState {
@@ -85,8 +93,9 @@ function withPeerChannelPatch(
   return next;
 }
 
-export function MainScreen({ onSettingsClick }: MainScreenProps) {
+export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const { t, i18n } = useTranslation();
+  const helping = helper !== undefined;
   // Null until the backend has answered; the app starts by connecting.
   const [session, setSession] = useState<SessionSnapshot | null>(null);
   // The link in the OS could not be read. Shown where a failed step of the
@@ -138,7 +147,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listen<SessionSnapshot>(SESSION_CHANGED, (event) => showSession(event.payload))
+    listenEvent<SessionSnapshot>(SESSION_CHANGED, showSession)
       .then((stop) => {
         if (cancelled) {
           stop();
@@ -176,6 +185,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   const isConnected = phase === "connected";
   const wasConnectedRef = useRef(isConnected);
   useEffect(() => {
+    if (helping) return;
     if (wasConnectedRef.current === isConnected) return;
     wasConnectedRef.current = isConnected;
     const target = isConnected ? MIXER_WINDOW_SIZE : JOIN_WINDOW_SIZE;
@@ -183,7 +193,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     windowResizeMain(target.width, target.height, minSize.width, minSize.height).catch((e) =>
       console.error("Failed to resize window:", e)
     );
-  }, [isConnected]);
+  }, [isConnected, helping]);
 
   // Which step the app is at decides which buttons do anything, so its
   // transitions are the first thing a bug report needs (ADR-036). The backend
@@ -208,9 +218,12 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   // starts as the app does (ADR-024 - the device identity is created and
   // presented by the Rust side without any user interaction).
   useEffect(() => {
-    configGetConnectionHistory()
-      .then(setConnectionHistory)
-      .catch((e) => console.log("Failed to load connection history:", e));
+    // The rooms a person has been in are theirs: a helper is not shown them.
+    if (!helping) {
+      configGetConnectionHistory()
+        .then(setConnectionHistory)
+        .catch((e) => console.log("Failed to load connection history:", e));
+    }
     // Load sample rate (ADR-013)
     configGetSampleRate()
       .then(setLocalSampleRate)
@@ -219,26 +232,26 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     configGetTransmitChannels()
       .then(setLocalChannelCount)
       .catch((e) => console.log("Failed to load transmit channel count, using default:", e));
-  }, []);
+  }, [helping]);
 
   // The backend saves a room to the history when it is joined.
   const roomId = room?.room_id;
   useEffect(() => {
-    if (roomId === undefined) return;
+    if (roomId === undefined || helping) return;
     configGetConnectionHistory()
       .then(setConnectionHistory)
       .catch((e) => console.log("Failed to load connection history:", e));
-  }, [roomId]);
+  }, [roomId, helping]);
 
   // Read the URL fresh on every attempt (not just at mount): a retry after
   // changing it in the Settings window must show what it is now dialing, not
   // what it dialed the first time.
   useEffect(() => {
-    if (phase !== "connecting_server") return;
+    if (phase !== "connecting_server" || helping) return;
     configGetEffectiveServerUrl()
       .then(setServerUrl)
       .catch((e) => console.log("Failed to load the signaling server URL:", e));
-  }, [phase]);
+  }, [phase, helping]);
 
   // Every audio setting change is announced with this (settings.rs, ADR-043),
   // whether the settings window, a helping peer or a test made it, so the
@@ -293,7 +306,8 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   const handleJoinRoomRef = useRef(handleJoinRoom);
   handleJoinRoomRef.current = handleJoinRoom;
   useEffect(() => {
-    if (!hasConnection) {
+    // A link opened on the helper's machine is not for the helped app to join.
+    if (!hasConnection || helping) {
       return;
     }
 
@@ -327,7 +341,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
       cancelled = true;
       cleanup?.();
     };
-  }, [hasConnection]);
+  }, [hasConnection, helping]);
 
   // Helping with settings (ADR-043). Its events come from the backend as the
   // room's events are read.
@@ -416,7 +430,15 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
       return;
     }
 
+    // A reading is asked for only once the last has come back: across the relay
+    // a reading takes as long as it takes, and asking again meanwhile would only
+    // queue readings behind it.
+    let reading = false;
     const pollStats = async () => {
+      // A helper's window reads the helped app's meters across the relay, so it
+      // does so only while it can be seen.
+      if (reading || (helping && document.visibilityState === "hidden")) return;
+      reading = true;
       try {
         const status = await streamingStatus();
         if (status.is_active) {
@@ -434,6 +456,8 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
         }
       } catch (e) {
         console.error("Failed to get streaming status:", e);
+      } finally {
+        reading = false;
       }
     };
 
@@ -444,7 +468,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     const interval = setInterval(pollStats, 100);
 
     return () => clearInterval(interval);
-  }, [phase]);
+  }, [phase, helping]);
 
   // Handle settings click
   const handleSettingsClick = () => {
@@ -828,7 +852,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
                       </span>
                       <span className="participant__name">{participant.name}</span>
                     </span>
-                    {settingsHelp.canOffer(participant) && (
+                    {!helping && settingsHelp.canOffer(participant) && (
                       <button
                         type="button"
                         className="participant__help"
@@ -862,15 +886,18 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
 
             <MasterSection levelL={outputLevel} levelR={outputLevel} />
 
-            <button
-              type="button"
-              className="room-sidebar__leave"
-              data-testid="leave-room"
-              onClick={() => setShowLeaveDialog(true)}
-            >
-              <span>{t("session.leave.button")}</span>
-              <LogOutIcon />
-            </button>
+            {/* Leaving is the helped person's own (ADR-044 §3). */}
+            {!helping && (
+              <button
+                type="button"
+                className="room-sidebar__leave"
+                data-testid="leave-room"
+                onClick={() => setShowLeaveDialog(true)}
+              >
+                <span>{t("session.leave.button")}</span>
+                <LogOutIcon />
+              </button>
+            )}
           </aside>
 
           {/* Mixer */}
@@ -885,10 +912,12 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
             />
           </div>
 
-          {/* Chat (docked column) */}
-          <div className="main-chat-column">
-            <ChatPanelAdapter connId={connectionId} myPeerId={room?.peer_id ?? null} />
-          </div>
+          {/* Chat (docked column). Speaking is the helped person's own (ADR-044 §3). */}
+          {!helping && (
+            <div className="main-chat-column">
+              <ChatPanelAdapter connId={connectionId} myPeerId={room?.peer_id ?? null} />
+            </div>
+          )}
         </div>
 
         <footer className="main-footer">
@@ -974,6 +1003,20 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
 
   // Check if we should show connection panel (not connected to a room)
   const showConnectionPanel = phase !== "connected";
+
+  // A helper has nothing to join or create: until the helped app is in its room
+  // there is only this.
+  if (helping && showConnectionPanel) {
+    return (
+      <div className="main-screen">
+        <main className="main-content main-content--flush">
+          <p className="main-helper-waiting" role="status" data-testid="settings-help-window-waiting">
+            {t("settingsHelp.window.waiting", { name: helper.name })}
+          </p>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="main-screen">
