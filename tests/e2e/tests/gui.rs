@@ -497,8 +497,10 @@ fn jamjam_log_overrides_the_levels_the_file_is_written_at() {
 fn a_failed_start_up_connection_is_written_to_the_log_file_from_both_sides() {
     let (_guard, app) = launch();
 
+    // The backend writes its line as it happens; the screen's comes once it
+    // has loaded and read the session.
     let log = wait_for_log(&app, |log| {
-        log.contains("[session] connecting_server -> error")
+        log.contains("[session] connecting_server -> error") && log.contains("[main] [session] ")
     });
 
     assert!(
@@ -507,7 +509,7 @@ fn a_failed_start_up_connection_is_written_to_the_log_file_from_both_sides() {
         log
     );
     assert!(
-        log.contains("[main] [session] ") && log.contains("-> error"),
+        log.contains("-> error"),
         "the screen's line for the failed connection is missing:\n{}",
         log
     );
