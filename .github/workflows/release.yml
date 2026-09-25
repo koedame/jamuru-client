@@ -43,6 +43,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.os }})
+    needs: prepare
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -129,13 +130,19 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.os, 'macos') && '-' || '' }}
         # The updater settings (public key, where to look) are given to the
         # release build only, so a build from source never replaces itself.
-        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json
+        # A beta (a tag with a `-`) also gets remote debugging (ADR-044); a
+        # release and a rehearsal (no tag) do not.
+        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json ${{ contains(needs.prepare.outputs.tag, '-') && '--features debug-remote' || '' }}
 
       - name: Check the app dials the production signaling server
         shell: bash
         env:
           JAMJAM_SERVER_URL: ${{ secrets.JAMJAM_SERVER_URL }}
         run: scripts/check-release-server-url.sh "src-tauri/target/${{ matrix.target }}/release/jamjam-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" ui/dist
+
+      - name: Check remote debugging is in a beta and only in a beta
+        shell: bash
+        run: scripts/check-debug-remote.sh "src-tauri/target/${{ matrix.target }}/release/jamjam-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" ${{ contains(needs.prepare.outputs.tag, '-') && 'present' || 'absent' }}
 
       # Both macOS jobs build `jamjam.app.tar.gz`. A release keeps one file per
       # name, so the architecture goes into it.

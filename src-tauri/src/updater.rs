@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::config;
@@ -87,9 +87,35 @@ pub(crate) fn spawn(app: AppHandle) {
 }
 
 async fn update_once(app: &AppHandle) -> tauri_plugin_updater::Result<()> {
+    if let Some(version) = install_newer(app, true).await? {
+        tracing::info!("Installed {}; restarting", version);
+        // Windows: the installer has already ended this process. Elsewhere the
+        // new version runs from the next start.
+        app.restart();
+    }
+    Ok(())
+}
+
+/// Installs a newer release now, without waiting for the user to leave a
+/// session: for someone debugging the app remotely (ADR-044), who restarts it
+/// afterwards. Returns the version installed, or `None` when there was none.
+#[cfg(feature = "debug-tools")]
+pub(crate) async fn install_now<R: Runtime>(
+    app: &AppHandle<R>,
+) -> tauri_plugin_updater::Result<Option<String>> {
+    install_newer(app, false).await
+}
+
+/// Downloads and installs a release newer than the running one, and returns
+/// its version. With `wait_for_session` it holds back the install until the
+/// user is out of a session, since the install ends in a restart.
+async fn install_newer<R: Runtime>(
+    app: &AppHandle<R>,
+    wait_for_session: bool,
+) -> tauri_plugin_updater::Result<Option<String>> {
     let Some(update) = app.updater()?.check().await? else {
         tracing::debug!("No newer release");
-        return Ok(());
+        return Ok(None);
     };
     tracing::info!(
         "Release {} is out (running {}); downloading",
@@ -100,17 +126,16 @@ async fn update_once(app: &AppHandle) -> tauri_plugin_updater::Result<()> {
     // the app was built with.
     let bytes = update.download(|_, _| {}, || {}).await?;
 
-    wait_until_no_session(windows::is_in_session, SESSION_POLL_INTERVAL).await;
-    if !config::load_config().unwrap_or_default().auto_update {
-        tracing::info!("Self-update was turned off while downloading; not installing");
-        return Ok(());
+    if wait_for_session {
+        wait_until_no_session(windows::is_in_session, SESSION_POLL_INTERVAL).await;
+        if !config::load_config().unwrap_or_default().auto_update {
+            tracing::info!("Self-update was turned off while downloading; not installing");
+            return Ok(None);
+        }
     }
 
     update.install(bytes)?;
-    tracing::info!("Installed {}; restarting", update.version);
-    // Windows: the installer has already ended this process. Elsewhere the new
-    // version runs from the next start.
-    app.restart();
+    Ok(Some(update.version.clone()))
 }
 
 /// Returns once `in_session` is false. The install ends in a restart, so it

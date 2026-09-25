@@ -76,6 +76,12 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Threading"] }
 
+# `debug.screenshot` on Linux asks WebKitGTK for a snapshot of the window and
+# writes it as a PNG. The same versions Tauri's own webview uses.
+[target.'cfg(target_os = "linux")'.dependencies]
+cairo-rs = { version = "0.18", features = ["png"], optional = true }
+webkit2gtk = { version = "2.0", optional = true }
+
 [workspace]
 
 [workspace.lints.rust]
@@ -98,4 +104,8 @@ e2e-control = ["debug-tools", "dep:axum", "tokio/net", "tokio/rt"]
 # Methods for looking at and driving a running app (`ui.*`, `debug.*`; ADR-044).
 # Used by the E2E control channel and by remote debugging, and absent from every
 # other build for the same reason: they can read what the app shows.
-debug-tools = []
+debug-tools = ["dep:cairo-rs", "dep:webkit2gtk"]
+# Remote debugging: the beta build asks the server whether this installation is
+# enrolled and, if so, keeps a connection to the relay that lets it be operated
+# (ADR-044). Deliberately absent from `default`, like `e2e-control`.
+debug-remote = ["debug-tools", "jamjam/remote-link"]

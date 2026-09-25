@@ -12,6 +12,8 @@ mod fec;
 mod latency;
 mod link_facts;
 mod quality;
+#[cfg(feature = "remote-link")]
+mod remote;
 mod sequence_tracker;
 mod session;
 mod signaling;
@@ -40,6 +42,11 @@ pub use latency::{
 };
 pub use link_facts::{LinkFacts, LinkRoute, LinkSnapshot};
 pub use quality::{ConnectionQuality, QualityChange, QualityMonitor};
+#[cfg(feature = "remote-link")]
+pub use remote::{
+    connect_remote, discover_remote_enrollment, RemoteEnrollment, RemoteReader, RemoteWriter,
+    REMOTE_ENROLLMENT_PATH,
+};
 pub use sequence_tracker::SequenceTracker;
 pub use session::{Session, SessionConfig};
 pub use signaling::{

@@ -96,6 +96,10 @@ jobs:
           JAMJAM_SERVER_URL: ${{ secrets.JAMJAM_SERVER_URL }}
         run: scripts/check-release-server-url.sh "src-tauri/target/release/jamjam-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" ui/dist
 
+      - name: Check the app carries no remote debugging
+        shell: bash
+        run: scripts/check-debug-remote.sh "src-tauri/target/release/jamjam-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" absent
+
       - name: Upload artifacts (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v7

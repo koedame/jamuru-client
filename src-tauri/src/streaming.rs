@@ -814,6 +814,8 @@ pub async fn streaming_start(
 
     // Store sample rate (ADR-013)
     state.sample_rate.store(sample_rate, Ordering::SeqCst);
+    #[cfg(feature = "debug-tools")]
+    crate::audio_tap::set_sample_rate(sample_rate);
 
     // Mark as active BEFORE spawning thread to avoid race condition
     state.is_active.store(true, Ordering::SeqCst);
@@ -1305,6 +1307,12 @@ fn playout_source(
         // Added after the peers, whatever they did this frame: hearing yourself
         // must not wait for, or depend on, anyone being connected (ADR-033).
         monitor.mix_into(&mut out[..samples]);
+        #[cfg(feature = "debug-tools")]
+        {
+            use crate::audio_tap::{inject, observe, Point};
+            inject(Point::Output, &mut out[..samples], WIRE_CHANNELS);
+            observe(Point::Output, &out[..samples], WIRE_CHANNELS);
+        }
         samples
     }
 }
@@ -1432,6 +1440,8 @@ fn start_capture_ring(
         // Zero-allocation: write directly to the rtrb producer (FnMut, no Sync needed)
         let started = engine.start_capture(device_id, move |samples, _timestamp| {
             monitor_tap.push_interleaved(samples, channels as usize);
+            #[cfg(feature = "debug-tools")]
+            crate::audio_tap::observe(crate::audio_tap::Point::Input, samples, channels as usize);
             // Calculate RMS level (0-100)
             if !samples.is_empty() {
                 level.store(rms_level(samples), Ordering::SeqCst);
@@ -1827,6 +1837,12 @@ async fn run_audio_streaming(
                         pan,
                         &mut stereo_send_buffer,
                     );
+                    #[cfg(feature = "debug-tools")]
+                    {
+                        use crate::audio_tap::{inject, observe, Point};
+                        inject(Point::Sent, &mut stereo_send_buffer, WIRE_CHANNELS);
+                        observe(Point::Sent, &stereo_send_buffer, WIRE_CHANNELS);
+                    }
 
                     rt.block_on(async {
                         let conn = connection_for_send.lock().await;
