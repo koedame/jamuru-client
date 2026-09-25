@@ -22,7 +22,6 @@ const LOG_COMMAND = "log_frontend";
 const POLLED_COMMANDS = new Set([
   "streaming_status",
   "streaming_get_input_level",
-  "signaling_poll_events",
   "signaling_get_chat_messages",
 ]);
 

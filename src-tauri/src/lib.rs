@@ -15,6 +15,7 @@ mod diagnostics;
 mod e2e_control;
 mod logging;
 mod rpc;
+mod session;
 mod settings;
 mod settings_help;
 mod signaling;
@@ -117,6 +118,7 @@ pub fn run() {
     config_state.on_saved(move |config| saved_usage.settings_saved(config));
     app.manage(config_state);
     app.manage(usage);
+    app.manage(session::SessionState::new());
 
     // Whoever changed this app's audio settings, someone helping with them
     // sees them as they are now (ADR-043).
@@ -136,6 +138,10 @@ pub fn run() {
     if self_updating {
         updater::spawn(app.handle().clone());
     }
+
+    // After the state above is managed: the connection is made as soon as it
+    // starts, and the screen finds the session as it is when it asks.
+    session::spawn(app.handle().clone());
 
     // After the state above is managed: the loop reads it as soon as it starts.
     #[cfg(feature = "debug-remote")]

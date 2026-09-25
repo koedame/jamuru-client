@@ -3,9 +3,16 @@
  *
  * Entry point for session creation and joining.
  * Displays connection status and provides room management UI.
+ *
+ * The session - connecting, the room, who is in it, the audio link, getting
+ * the connection back - is the backend's (ADR-044 §6). This draws the
+ * snapshot it reads with `session_get` and hears with `session:changed`, and
+ * acts with one command per operation. What stays here is what only the
+ * screen has: dialogs, the code being typed, the mixer's faders.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import { ConnectionPanel, type ConnectionState, type ConnectionErrorKind, type ConnectionHistoryEntry as ConnectionPanelHistoryEntry } from "../components/ConnectionPanel";
 import { MixerPanel, MasterSection, type Channel } from "../components/MixerPanel";
 import { ChatPanelAdapter } from "../components/ChatPanel";
@@ -15,23 +22,19 @@ import { LeaveDialog } from "../components/LeaveDialog";
 import { useSettingsHelp } from "../components/SettingsHelp";
 import { formatErrorForDisplay } from "../lib/errorMessages";
 import { registerInviteLinkHandler } from "../lib/deepLink";
-import { testRoomCodeOf } from "../lib/inviteCode";
 import { useWindowEvent } from "../hooks/useWindowEvents";
 import {
-  signalingConnect,
-  signalingDisconnect,
-  signalingListRooms,
-  signalingJoinRoom,
-  signalingLeaveRoom,
-  signalingCreateRoom,
-  signalingPollEvents,
-  signalingPublishLocalCandidates,
-  streamingPrepare,
-  streamingStart,
+  sessionGet,
+  sessionConnect,
+  sessionCreate,
+  sessionJoin,
+  sessionLeave,
+  sessionReconnect,
+  SESSION_CHANGED,
+  SESSION_SETTINGS_HELP,
+  type SessionSnapshot,
   AUDIO_SETTINGS_CHANGED,
   type AudioSettings,
-  peerSortedAddrs,
-  streamingStop,
   streamingReconnect,
   streamingStatus,
   streamingSetMute,
@@ -41,16 +44,13 @@ import {
   streamingSetLocalVolume,
   streamingSetLocalPan,
   configGetConnectionHistory,
-  configAddConnectionHistory,
   configRemoveConnectionHistory,
-  configGetPeerName,
   configGetSampleRate,
   configGetTransmitChannels,
   configGetEffectiveServerUrl,
   windowResizeMain,
-  type RoomInfo,
+  type HelpEvent,
   type NetworkStats,
-  type PeerInfo,
   type DetailedLatency,
   type ConnectionHistoryEntry,
   type PeerAudioInfo,
@@ -61,22 +61,6 @@ import "./MainScreen.css";
 
 /** How long the "buffer size adjusted" notice stays up. */
 const DELAY_NOTICE_MS = 5000;
-
-/** How many times to retry the signaling connection before giving up and
- * asking the user to retry manually. */
-const MAX_SIGNALING_RECONNECT_ATTEMPTS = 5;
-/** Delay before retry N: N * this value, so attempts back off (2s, 4s, 6s...). */
-const SIGNALING_RECONNECT_BASE_DELAY_MS = 2000;
-
-// Session state type
-type SessionState =
-  | { status: "idle" }
-  | { status: "connecting_server" }
-  | { status: "server_connected"; rooms: RoomInfo[] }
-  | { status: "creating" }
-  | { status: "joining"; code: string }
-  | { status: "connected"; roomCode: string; participants: PeerInfo[] }
-  | { status: "error"; message: string };
 
 export interface MainScreenProps {
   onSettingsClick?: () => void;
@@ -103,17 +87,14 @@ function withPeerChannelPatch(
 
 export function MainScreen({ onSettingsClick }: MainScreenProps) {
   const { t, i18n } = useTranslation();
-  const [sessionState, setSessionState] = useState<SessionState>({ status: "connecting_server" });
-  const [connectionId, setConnectionId] = useState<number | null>(null);
-  // The server says which room to offer as the test room, and to whom; null
-  // hides the shortcut.
-  const [testRoomCode, setTestRoomCode] = useState<string | null>(null);
-  const [peerName, setPeerName] = useState("User");
+  // Null until the backend has answered; the app starts by connecting.
+  const [session, setSession] = useState<SessionSnapshot | null>(null);
+  // The link in the OS could not be read. Shown where a failed step of the
+  // session is, until the session changes.
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState("");
-  const hasAutoConnected = useRef(false);
-  const previousStatus = useRef<SessionState["status"] | null>(null);
+  const previousPhase = useRef<SessionSnapshot["phase"] | null>(null);
   const [inviteCode, setInviteCode] = useState("");
-  const [currentInviteCode, setCurrentInviteCode] = useState("");
   const [detailedLatency, setDetailedLatency] = useState<DetailedLatency | null>(null);
   const [networkStats, setNetworkStats] = useState<NetworkStats | null>(null);
   const [connectionState, setConnectionState] = useState<string | null>(null);
@@ -128,20 +109,11 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   const [inputLevel, setInputLevel] = useState(0);
   const [outputLevel, setOutputLevel] = useState(0);
   const [connectionHistory, setConnectionHistory] = useState<ConnectionHistoryEntry[]>([]);
-  const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [peerAudio, setPeerAudio] = useState<PeerAudioInfo | null>(null);
   const [localSampleRate, setLocalSampleRate] = useState<number>(48000);
   const [localChannelCount, setLocalChannelCount] = useState<number>(2);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [leavePending, setLeavePending] = useState(false);
-  // Reconnecting to the signaling server after an unexpected WebSocket
-  // disconnect, shown while in a room. Distinct from
-  // `reconnectPending`/`handleReconnect` below, which re-establishes the P2P
-  // audio link (ADR-022/REQ-CON-110) rather than the signaling connection.
-  const [signalingReconnectState, setSignalingReconnectState] = useState<
-    "idle" | "reconnecting" | "failed"
-  >("idle");
-  const [signalingReconnectError, setSignalingReconnectError] = useState<string | null>(null);
 
   // Mixer channel states for MixerPanel
   const [localChannelState, setLocalChannelState] = useState<ChannelState>({
@@ -154,6 +126,42 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   // session (the backend resets it) - a monitored microphone can feed back.
   const [isMonitoring, setIsMonitoring] = useState(false);
 
+  // The session as the backend has it. An announcement is numbered: an older
+  // one arriving after a newer one (or after the first read) is ignored.
+  const shownRevision = useRef(-1);
+  const showSession = useCallback((next: SessionSnapshot) => {
+    if (next.revision < shownRevision.current) return;
+    shownRevision.current = next.revision;
+    setSession(next);
+  }, []);
+  // Listen first, then read: a change between the two would be lost the other way round.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen<SessionSnapshot>(SESSION_CHANGED, (event) => showSession(event.payload))
+      .then((stop) => {
+        if (cancelled) {
+          stop();
+          return;
+        }
+        unlisten = stop;
+        return sessionGet().then(showSession);
+      })
+      .catch((e) => console.error("Failed to read the session:", e));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [showSession]);
+
+  const phase = session?.phase ?? "connecting_server";
+  const room = session?.room ?? null;
+  const participants = useMemo(() => room?.participants ?? [], [room]);
+  const connectionId = session?.connection_id ?? null;
+  const peerName = room?.peer_name ?? "";
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+
   // Update html lang attribute when language changes
   useEffect(() => {
     document.documentElement.lang = i18n.language;
@@ -161,11 +169,11 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
 
   // Resize the main window to match ui.pen's JoinRoom frame (600x700) while
   // disconnected, and to ui.pen's Screens/Main (1134 wide) once connected.
-  // Gated on the derived boolean (not sessionState.status directly) so the
-  // handful of non-connected statuses a single connect attempt passes
-  // through (connecting_server -> server_connected -> creating/joining)
-  // don't each re-fire an identical, redundant resize.
-  const isConnected = sessionState.status === "connected";
+  // Gated on the derived boolean (not the phase directly) so the handful of
+  // non-connected phases a single connect attempt passes through
+  // (connecting_server -> server_connected -> creating/joining) don't each
+  // re-fire an identical, redundant resize.
+  const isConnected = phase === "connected";
   const wasConnectedRef = useRef(isConnected);
   useEffect(() => {
     if (wasConnectedRef.current === isConnected) return;
@@ -177,65 +185,60 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     );
   }, [isConnected]);
 
-  // Which state the screen is in decides which buttons do anything, so its
-  // transitions are the first thing a bug report needs (ADR-036).
+  // Which step the app is at decides which buttons do anything, so its
+  // transitions are the first thing a bug report needs (ADR-036). The backend
+  // logs them too; this is what the screen saw.
   useEffect(() => {
-    const from = previousStatus.current;
-    const to = sessionState.status;
-    previousStatus.current = to;
+    if (session === null) return;
+    const from = previousPhase.current;
+    const to = session.phase;
+    previousPhase.current = to;
     if (from === to && to !== "error") return;
-    const detail = sessionState.status === "error" ? `: ${sessionState.message}` : "";
+    const detail = to === "error" ? `: ${session.error}` : "";
     console.info(`[session] ${from ?? "(start)"} -> ${to}${detail}`);
-  }, [sessionState]);
+  }, [session]);
 
-  // Load saved configuration and auto-connect to the signaling server.
-  // Runs straight from the mount effect below: there is no sign-in step
-  // (ADR-024 - the device identity is created and presented by the Rust
-  // side without any user interaction).
-  const loadConfigAndConnect = async () => {
-    // Load peer name from settings
-    try {
-      const savedPeerName = await configGetPeerName();
-      setPeerName(savedPeerName);
-    } catch (e) {
-      console.log("Failed to load peer name, using default:", e);
-    }
-
-    // Load connection history
-    try {
-      const history = await configGetConnectionHistory();
-      setConnectionHistory(history);
-    } catch (e) {
-      console.log("Failed to load connection history:", e);
-    }
-
-    // Load sample rate (ADR-013)
-    try {
-      const sampleRate = await configGetSampleRate();
-      setLocalSampleRate(sampleRate);
-    } catch (e) {
-      console.log("Failed to load sample rate, using default:", e);
-    }
-
-    // Load transmit channel count (mono/stereo)
-    try {
-      const channelCount = await configGetTransmitChannels();
-      setLocalChannelCount(channelCount);
-    } catch (e) {
-      console.log("Failed to load transmit channel count, using default:", e);
-    }
-
-    // Auto-connect to signaling server (only once)
-    if (!hasAutoConnected.current) {
-      hasAutoConnected.current = true;
-      await autoConnect();
-    }
-  };
-
-  // On mount: load settings and connect immediately. No account gate.
+  // Any change of the session ends a link error's stay: what the session
+  // reports now is newer.
   useEffect(() => {
-    loadConfigAndConnect();
+    setLinkError(null);
+  }, [session?.revision]);
+
+  // Load saved configuration. The connection itself is the backend's: it
+  // starts as the app does (ADR-024 - the device identity is created and
+  // presented by the Rust side without any user interaction).
+  useEffect(() => {
+    configGetConnectionHistory()
+      .then(setConnectionHistory)
+      .catch((e) => console.log("Failed to load connection history:", e));
+    // Load sample rate (ADR-013)
+    configGetSampleRate()
+      .then(setLocalSampleRate)
+      .catch((e) => console.log("Failed to load sample rate, using default:", e));
+    // Load transmit channel count (mono/stereo)
+    configGetTransmitChannels()
+      .then(setLocalChannelCount)
+      .catch((e) => console.log("Failed to load transmit channel count, using default:", e));
   }, []);
+
+  // The backend saves a room to the history when it is joined.
+  const roomId = room?.room_id;
+  useEffect(() => {
+    if (roomId === undefined) return;
+    configGetConnectionHistory()
+      .then(setConnectionHistory)
+      .catch((e) => console.log("Failed to load connection history:", e));
+  }, [roomId]);
+
+  // Read the URL fresh on every attempt (not just at mount): a retry after
+  // changing it in the Settings window must show what it is now dialing, not
+  // what it dialed the first time.
+  useEffect(() => {
+    if (phase !== "connecting_server") return;
+    configGetEffectiveServerUrl()
+      .then(setServerUrl)
+      .catch((e) => console.log("Failed to load the signaling server URL:", e));
+  }, [phase]);
 
   // Every audio setting change is announced with this (settings.rs, ADR-043),
   // whether the settings window, a helping peer or a test made it, so the
@@ -251,45 +254,6 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     setLocalChannelCount(settings.transmit_channels);
   }, []);
   useWindowEvent<AudioSettings>(AUDIO_SETTINGS_CHANGED, handleAudioConfigChanged);
-
-  // Auto-connect to signaling server
-  const autoConnect = async () => {
-    setSessionState({ status: "connecting_server" });
-    // The shortcut belongs to the server that listed it; until a list comes
-    // back from the one being dialed now, there is none to offer.
-    setTestRoomCode(null);
-
-    // Read the URL fresh on every attempt (not just at mount): a retry after
-    // changing it in the Settings window must show what it is now dialing,
-    // not what it dialed the first time.
-    try {
-      setServerUrl(await configGetEffectiveServerUrl());
-    } catch (e) {
-      console.log("Failed to load the signaling server URL:", e);
-    }
-
-    try {
-      const connId = await signalingConnect();
-      setConnectionId(connId);
-      const rooms = await signalingListRooms(connId);
-      setTestRoomCode(testRoomCodeOf(rooms));
-      setSessionState({ status: "server_connected", rooms });
-    } catch (e) {
-      setSessionState({
-        status: "error",
-        message: String(e),
-      });
-    }
-  };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (connectionId !== null) {
-        signalingDisconnect(connectionId).catch(console.error);
-      }
-    };
-  }, [connectionId]);
 
   const [reconnectPending, setReconnectPending] = useState(false);
 
@@ -307,15 +271,29 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     }
   }, []);
 
+  // The failure of any of these is the session's `error` phase, which is drawn,
+  // and the failed call is in the log; there is nothing more for the screen to do.
+  const handleCreateRoom = useCallback(() => {
+    sessionCreate().catch(() => undefined);
+  }, []);
+  const handleJoinRoom = useCallback((code: string) => {
+    sessionJoin(code).catch(() => undefined);
+  }, []);
+  const handleReconnectSignaling = useCallback(() => {
+    sessionReconnect().catch(() => undefined);
+  }, []);
+
   // An invite link from the OS joins the room it names (REQ-CON-103). A link
   // with a malformed code surfaces as a room-level error instead of being
   // dropped silently, whether it arrived at launch or while running.
   //
-  // Depends on connectionId, because joining needs a signaling connection: a
-  // link clicked before the app finished connecting is handled once it has.
-  const handleJoinRoomRef = useRef<(roomId: string) => void>(() => {});
+  // Depends on there being a connection, because joining needs one: a link
+  // clicked before the app finished connecting is handled once it has.
+  const hasConnection = connectionId !== null;
+  const handleJoinRoomRef = useRef(handleJoinRoom);
+  handleJoinRoomRef.current = handleJoinRoom;
   useEffect(() => {
-    if (connectionId === null) {
+    if (!hasConnection) {
       return;
     }
 
@@ -327,7 +305,9 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
         handleJoinRoomRef.current(code);
       },
       () => {
-        setSessionState({ status: "error", message: "invalid invite link" });
+        if (phaseRef.current !== "connected") {
+          setLinkError("invalid invite link");
+        }
       }
     )
       .then((unlisten) => {
@@ -347,17 +327,28 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
       cancelled = true;
       cleanup?.();
     };
-  }, [connectionId]);
+  }, [hasConnection]);
+
+  // Helping with settings (ADR-043). Its events come from the backend as the
+  // room's events are read.
+  const settingsHelp = useSettingsHelp(connectionId, participants);
+  const settingsHelpEventRef = useRef(settingsHelp.onEvent);
+  settingsHelpEventRef.current = settingsHelp.onEvent;
+  const handleSettingsHelpEvent = useCallback(
+    (event: HelpEvent) => settingsHelpEventRef.current(event),
+    []
+  );
+  useWindowEvent<HelpEvent>(SESSION_SETTINGS_HELP, handleSettingsHelpEvent);
 
   // Footer indicator inputs. The quality band comes from the core library
   // (REQ-LAT-121); nothing here re-derives it from RTT and loss.
   const indicatorStatus: ConnectionStatus = useMemo(() => {
     if (connectionState === "failed") return "error";
     if (connectionState === "reconnecting") return "unstable";
-    if (sessionState.status === "connected") return "connected";
-    if (sessionState.status === "connecting_server") return "connecting";
+    if (phase === "connected") return "connected";
+    if (phase === "connecting_server") return "connecting";
     return "disconnected";
-  }, [connectionState, sessionState.status]);
+  }, [connectionState, phase]);
 
   // Device input/output latency, taken from the breakdown rather than recomputed
   // (REQ-LAT-122).
@@ -411,7 +402,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
 
   // Poll streaming status for latency and audio level when connected
   useEffect(() => {
-    if (sessionState.status !== "connected") {
+    if (phase !== "connected") {
       setDetailedLatency(null);
       setNetworkStats(null);
       setConnectionState(null);
@@ -453,353 +444,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     const interval = setInterval(pollStats, 100);
 
     return () => clearInterval(interval);
-  }, [sessionState.status]);
-
-  // The peer streamingStart was called for, or null while not streaming. Set
-  // so the peer watcher below does not start a second audio thread when
-  // further PeerUpdated events arrive, and so a PeerLeft can tell whether the
-  // audio session is with the peer that left.
-  const streamingPeerIdRef = useRef<string | null>(null);
-  // The room's participants, kept in step with `sessionState` for the event
-  // poller, which outlives the render it was created in and handles several
-  // events per poll before React re-renders.
-  const participantsRef = useRef<PeerInfo[]>([]);
-  participantsRef.current = sessionState.status === "connected" ? sessionState.participants : [];
-
-  // Helping with settings (ADR-043). Its events arrive with the room's.
-  const settingsHelp = useSettingsHelp(connectionId, participantsRef.current);
-  const settingsHelpEventRef = useRef(settingsHelp.onEvent);
-  settingsHelpEventRef.current = settingsHelp.onEvent;
-  const updateParticipants = (update: (peers: PeerInfo[]) => PeerInfo[]) => {
-    participantsRef.current = update(participantsRef.current);
-    setSessionState((prev) =>
-      prev.status === "connected" ? { ...prev, participants: update(prev.participants) } : prev
-    );
-  };
-
-  /// Advertise our audio address to the room.
-  ///
-  /// Nothing can send us audio until we do: our port is chosen when the socket
-  /// is bound, and peers learn it only from this (ADR-026). Runs right after
-  /// entering a room, for both the creator and the joiner.
-  const publishOwnAddress = async (connId: number) => {
-    try {
-      const localAddr = await streamingPrepare();
-      const port = Number(localAddr.split(":").pop());
-      if (!Number.isFinite(port) || port === 0) {
-        throw new Error(`unexpected local audio address: ${localAddr}`);
-      }
-      await signalingPublishLocalCandidates(connId, port);
-    } catch (e) {
-      // Not fatal for chat or the participant list, which go through the
-      // signaling server; only audio depends on this.
-      console.error("Failed to publish our audio address:", e);
-    }
-  };
-
-  /// Start streaming to `peers` if any of them has published an address.
-  ///
-  /// Called both on entering a room (a peer may already have published) and
-  /// from the PeerUpdated handler (a peer publishing later), because whichever
-  /// side joins first will only learn the other's address afterwards.
-  const startStreamingToPeer = async (peers: PeerInfo[]) => {
-    if (streamingPeerIdRef.current !== null) return;
-
-    const peerWithAddr = peers.find((p) => p.public_addr || p.local_addr || p.candidates.length > 0);
-    if (!peerWithAddr) return;
-    const candidates = peerSortedAddrs(peerWithAddr);
-    const addr = candidates[0];
-    if (!addr) return;
-
-    streamingPeerIdRef.current = peerWithAddr.id;
-    try {
-      // The devices, buffer size and sample rate are the saved settings.
-      await streamingStart(addr, candidates);
-      console.log("Streaming started to:", addr, "candidates:", candidates);
-    } catch (streamErr) {
-      // Allow a later PeerUpdated to retry rather than leaving the session
-      // permanently silent.
-      streamingPeerIdRef.current = null;
-      console.error("Failed to start streaming:", streamErr);
-    }
-  };
-
-  // Reconnect the signaling WebSocket after it drops unexpectedly.
-  // `roomToRejoin` is the invite code of the room we were in when the
-  // connection was lost, or "" if we had not joined one yet.
-  //
-  // Retries with a backoff up to MAX_SIGNALING_RECONNECT_ATTEMPTS. While a
-  // room is open the room UI stays up and a footer banner reports progress
-  // (renderConnectedState below); otherwise the connection screen shows the
-  // ordinary "connecting" state and, on giving up, the same server-error
-  // screen shown for an initial connect failure.
-  const attemptSignalingReconnect = useCallback(
-    async (roomToRejoin: string) => {
-      const wasInRoom = roomToRejoin !== "";
-      setTestRoomCode(null);
-      if (wasInRoom) {
-        setSignalingReconnectState("reconnecting");
-        setSignalingReconnectError(null);
-      } else {
-        setSessionState({ status: "connecting_server" });
-      }
-
-      for (let attempt = 1; attempt <= MAX_SIGNALING_RECONNECT_ATTEMPTS; attempt++) {
-        try {
-          setServerUrl(await configGetEffectiveServerUrl());
-        } catch (e) {
-          console.log("Failed to reload the signaling server URL:", e);
-        }
-
-        try {
-          const newConnId = await signalingConnect();
-          if (wasInRoom) {
-            const result = await signalingJoinRoom(newConnId, roomToRejoin, peerName);
-            setCurrentInviteCode(result.invite_code || roomToRejoin);
-            setMyPeerId(result.peer_id);
-            setConnectionId(newConnId);
-            setSessionState({
-              status: "connected",
-              roomCode: result.room_id,
-              participants: result.peers,
-            });
-            streamingPeerIdRef.current = null;
-            await publishOwnAddress(newConnId);
-            await startStreamingToPeer(result.peers);
-            setSignalingReconnectState("idle");
-          } else {
-            const rooms = await signalingListRooms(newConnId);
-            setConnectionId(newConnId);
-            setTestRoomCode(testRoomCodeOf(rooms));
-            setSessionState({ status: "server_connected", rooms });
-          }
-          return;
-        } catch (e) {
-          console.warn(
-            `Signaling reconnect attempt ${attempt}/${MAX_SIGNALING_RECONNECT_ATTEMPTS} failed:`,
-            e
-          );
-          if (attempt === MAX_SIGNALING_RECONNECT_ATTEMPTS) {
-            if (wasInRoom) {
-              setSignalingReconnectState("failed");
-              setSignalingReconnectError(String(e));
-            } else {
-              setSessionState({ status: "error", message: String(e) });
-            }
-            return;
-          }
-          await new Promise((resolve) =>
-            setTimeout(resolve, SIGNALING_RECONNECT_BASE_DELAY_MS * attempt)
-          );
-        }
-      }
-    },
-    [peerName]
-  );
-
-  // Poll signaling events (for peer join/leave, chat, and connection loss).
-  // Runs whenever we hold a connection, not only while in a room: a drop
-  // while merely connected to the server (browsing the room list) needs the
-  // same detection.
-  useEffect(() => {
-    if (connectionId === null) {
-      return;
-    }
-
-    const pollEvents = async () => {
-      try {
-        const events = await signalingPollEvents(connectionId);
-        for (const event of events) {
-          if (event.type === "PeerJoined") {
-            // Avoid duplicate
-            updateParticipants((peers) =>
-              peers.some((p) => p.id === event.peer.id) ? peers : [...peers, event.peer]
-            );
-          } else if (event.type === "PeerUpdated") {
-            // A peer published (or changed) its audio address. This is what
-            // lets whichever side joined first start streaming - at join time
-            // the other peer had no address yet (ADR-026).
-            updateParticipants((peers) =>
-              peers.map((p) => (p.id === event.peer.id ? event.peer : p))
-            );
-            await startStreamingToPeer([event.peer]);
-          } else if (event.type === "PeerLeft") {
-            updateParticipants((peers) => peers.filter((p) => p.id !== event.peer_id));
-            if (streamingPeerIdRef.current === event.peer_id) {
-              // The audio session was with the peer that left: end it rather
-              // than let it report a lost connection, and free the slot for
-              // whoever is still here or joins next. Starting audio used up the
-              // advertised socket, so advertise a fresh one first.
-              try {
-                await streamingStop();
-              } catch (streamErr) {
-                console.error("Failed to stop streaming after the peer left:", streamErr);
-              }
-              streamingPeerIdRef.current = null;
-              await publishOwnAddress(connectionId);
-              await startStreamingToPeer(participantsRef.current);
-            }
-          } else if (event.type === "RoomClosed" || (event.type === "Kicked" && event.peer_id === myPeerId)) {
-            // The signaling server closes this connection right after
-            // sending either message, so `connectionId` is now dead - reusing it for
-            // leave/create/join would just fail. Tear it down and get a
-            // fresh connection instead of only resetting local UI state.
-            console.log(`Room session ended (${event.type}): ${event.reason}`);
-            try {
-              await streamingStop();
-            } catch (streamErr) {
-              console.error("Failed to stop streaming after room ended:", streamErr);
-            }
-            await signalingDisconnect(connectionId).catch(console.error);
-            setCurrentInviteCode("");
-            setMyPeerId(null);
-            setConnectionId(null);
-            await autoConnect();
-            return;
-          } else if (event.type === "ConnectionLost") {
-            // The server didn't close the room first (network blip, proxy
-            // reset, server restart) - this conn_id is dead either way.
-            // Disconnect it and reconnect, rejoining the room we were in.
-            console.warn(`Signaling connection lost: ${event.reason}`);
-            const roomToRejoin = currentInviteCode;
-            try {
-              await streamingStop();
-            } catch (streamErr) {
-              console.error("Failed to stop streaming after connection loss:", streamErr);
-            }
-            await signalingDisconnect(connectionId).catch(console.error);
-            setConnectionId(null);
-            void attemptSignalingReconnect(roomToRejoin);
-            return;
-          } else if (event.type === "SettingsHelp") {
-            settingsHelpEventRef.current(event.event);
-          }
-          // ChatMessageReceived events are handled by ChatPanel's own polling
-        }
-      } catch (e) {
-        console.error("Failed to poll signaling events:", e);
-      }
-    };
-
-    // Poll every 500ms
-    const interval = setInterval(pollEvents, 500);
-
-    return () => clearInterval(interval);
-  }, [connectionId, myPeerId, currentInviteCode, attemptSignalingReconnect]);
-
-  // Handle room creation
-  const handleCreateRoom = async () => {
-    if (connectionId === null) {
-      setSessionState({ status: "error", message: "Not connected to the signaling server" });
-      return;
-    }
-
-    setSessionState({ status: "creating" });
-
-    try {
-      const result = await signalingCreateRoom(
-        connectionId,
-        "My Room",
-        peerName
-      );
-      setCurrentInviteCode(result.invite_code);
-      setMyPeerId(result.peer_id);
-      setSessionState({
-        status: "connected",
-        roomCode: result.room_id,
-        participants: result.peers,
-      });
-      streamingPeerIdRef.current = null;
-      await publishOwnAddress(connectionId);
-      await startStreamingToPeer(result.peers);
-    } catch (e) {
-      setSessionState({
-        status: "error",
-        message: String(e),
-      });
-    }
-  };
-
-  // Handle room join
-  // Held in a ref so the deep-link listener does not need re-registering every
-  // time the handler identity changes.
-  const handleJoinRoom = async (roomId: string) => {
-    if (connectionId === null) {
-      setSessionState({ status: "error", message: "Not connected to the signaling server" });
-      return;
-    }
-
-    setSessionState({ status: "joining", code: roomId });
-
-    try {
-      const result = await signalingJoinRoom(connectionId, roomId, peerName);
-      setCurrentInviteCode(result.invite_code || "");
-      setMyPeerId(result.peer_id);
-      setSessionState({
-        status: "connected",
-        roomCode: result.room_id,
-        participants: result.peers,
-      });
-
-      // Save to connection history under the code the user could join with
-      // again. `roomId` is what they typed, which is either that code already
-      // or a room UUID from a deep link.
-      const historyCode = result.invite_code || roomId;
-      try {
-        await configAddConnectionHistory(historyCode);
-        // Reload history to show updated list
-        const history = await configGetConnectionHistory();
-        setConnectionHistory(history);
-      } catch (historyErr) {
-        console.error("Failed to save to history:", historyErr);
-      }
-
-      // Advertise where we can be reached, then start streaming if a peer has
-      // already advertised theirs. A peer that publishes later is picked up by
-      // the PeerUpdated handler (ADR-026).
-      streamingPeerIdRef.current = null;
-      await publishOwnAddress(connectionId);
-      await startStreamingToPeer(result.peers);
-    } catch (e) {
-      setSessionState({
-        status: "error",
-        message: String(e),
-      });
-    }
-  };
-
-  handleJoinRoomRef.current = handleJoinRoom;
-
-  // Handle leave room
-  const handleLeaveRoom = async () => {
-    if (connectionId === null) {
-      setSessionState({ status: "error", message: "Not connected to the signaling server" });
-      return;
-    }
-
-    try {
-      // Stop streaming first
-      try {
-        await streamingStop();
-        console.log("Streaming stopped");
-      } catch (streamErr) {
-        console.error("Failed to stop streaming:", streamErr);
-      }
-
-      await signalingLeaveRoom(connectionId);
-      setCurrentInviteCode("");
-      setInviteCode("");
-      setMyPeerId(null);
-      const rooms = await signalingListRooms(connectionId);
-      setTestRoomCode(testRoomCodeOf(rooms));
-      setSessionState({ status: "server_connected", rooms });
-    } catch (e) {
-      setSessionState({
-        status: "error",
-        message: String(e),
-      });
-    }
-  };
+  }, [phase]);
 
   // Handle settings click
   const handleSettingsClick = () => {
@@ -816,12 +461,18 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   // Confirm leaving from the leave dialog. Keeps the dialog open in its
   // "pending" (ui.pen Dialog/LeaveConfirm Loading) state until the leave
   // completes - the connected screen (and this dialog with it) then
-  // unmounts naturally once sessionState flips away from "connected".
+  // unmounts naturally once the phase flips away from "connected".
   const handleConfirmLeave = async () => {
     setLeavePending(true);
-    await handleLeaveRoom();
-    setLeavePending(false);
-    setShowLeaveDialog(false);
+    try {
+      await sessionLeave();
+      setInviteCode("");
+    } catch {
+      // What the screen shows is the session's `error` phase.
+    } finally {
+      setLeavePending(false);
+      setShowLeaveDialog(false);
+    }
   };
 
   // Handle selecting from connection history
@@ -955,8 +606,8 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     });
 
     // Peer channels
-    if (sessionState.status === "connected") {
-      sessionState.participants.forEach((peer) => {
+    if (phase === "connected") {
+      participants.forEach((peer) => {
         const peerState = peerChannelStates.get(peer.id) || {
           volume: 80,
           pan: 0,
@@ -978,19 +629,19 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     }
 
     return channels;
-  }, [localChannelState, isMonitoring, peerName, localSampleRate, localChannelCount, inputLevel, sessionState, peerChannelStates, peerAudio, outputLevel]);
+  }, [localChannelState, isMonitoring, peerName, localSampleRate, localChannelCount, inputLevel, phase, participants, peerChannelStates, peerAudio, outputLevel]);
 
   // Initialize peer channel states when participants change, and prune any
   // state left behind for a peer who has since left.
   useEffect(() => {
-    if (sessionState.status !== "connected") return;
-    const currentIds = new Set(sessionState.participants.map((p) => p.id));
+    if (phase !== "connected") return;
+    const currentIds = new Set(participants.map((p) => p.id));
     setPeerChannelStates((prevStates) => {
       const newStates = new Map(prevStates);
       for (const key of newStates.keys()) {
         if (!currentIds.has(key)) newStates.delete(key);
       }
-      sessionState.participants.forEach((peer) => {
+      participants.forEach((peer) => {
         if (!newStates.has(peer.id)) {
           newStates.set(peer.id, {
             volume: 80,
@@ -1001,11 +652,12 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
       });
       return newStates;
     });
-  }, [sessionState]);
+  }, [phase, participants]);
 
-  // Map SessionState to ConnectionPanel state
+  // Map the session to ConnectionPanel state
   const getConnectionPanelState = (): ConnectionState => {
-    switch (sessionState.status) {
+    if (linkError !== null) return "error";
+    switch (phase) {
       case "connecting_server":
       case "creating":
       case "joining":
@@ -1017,10 +669,13 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     }
   };
 
+  // What went wrong, for the ConnectionPanel
+  const failure = linkError ?? (phase === "error" ? (session?.error ?? "") : null);
+
   // Get error message for ConnectionPanel
   const getErrorMessage = (): string | undefined => {
-    if (sessionState.status === "error") {
-      const formatted = formatErrorForDisplay(sessionState.message, t);
+    if (failure !== null) {
+      const formatted = formatErrorForDisplay(failure, t);
       return `${formatted.title}: ${formatted.message}`;
     }
     return undefined;
@@ -1035,20 +690,15 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
     }));
   };
 
-  // Handle cancel during connection
-  const handleCancelConnection = useCallback(async () => {
-    if (connectionId !== null) {
-      try {
-        await signalingDisconnect(connectionId);
-      } catch (e) {
-        console.error("Failed to disconnect:", e);
-      }
-      setConnectionId(null);
-    }
-    setSessionState({ status: "idle" });
-    // Re-attempt connection to server
-    await autoConnect();
-  }, [connectionId]);
+  // Cancel or retry the connection: drop what there is and connect again. The
+  // URL is read again here as well, because cancelling an attempt that is
+  // already "connecting" leaves the phase as it was.
+  const handleCancelConnection = useCallback(() => {
+    configGetEffectiveServerUrl()
+      .then(setServerUrl)
+      .catch((e) => console.log("Failed to load the signaling server URL:", e));
+    sessionConnect().catch(() => undefined);
+  }, []);
 
   // Render connection panel for non-connected states
   const renderConnectionPanel = () => {
@@ -1066,12 +716,12 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
           code={inviteCode}
           errorMessage={errorMessage}
           errorKind={errorKind}
-          rawErrorMessage={sessionState.status === "error" ? sessionState.message : undefined}
+          rawErrorMessage={failure ?? undefined}
           serverUrl={serverUrl}
           connected={connectionId !== null}
           notConnectedReason={t("session.notConnected.reason", "Not connected to the server yet")}
           onCreateRoom={handleCreateRoom}
-          onJoinRoom={(code) => handleJoinRoom(code)}
+          onJoinRoom={handleJoinRoom}
           onCodeChange={setInviteCode}
           onCancel={handleCancelConnection}
           onRetry={handleCancelConnection}
@@ -1088,15 +738,15 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
           codePlaceholder={t("session.join.placeholder")}
           joinText={t("session.join.button")}
           connectingText={
-            sessionState.status === "connecting_server"
+            phase === "connecting_server"
               ? t("signaling.connecting", "Connecting to server...")
-              : sessionState.status === "creating"
+              : phase === "creating"
                 ? t("session.create.loading")
                 : t("session.join.loading")
           }
           cancelText={t("common.button.cancel", "Cancel")}
           historyTitle={t("connectionHistory.title")}
-          testRoomCode={testRoomCode ?? undefined}
+          testRoomCode={session?.test_room_invite_code ?? undefined}
           testRoomTitle={t("session.testRoom.title")}
           testRoomDescription={t("session.testRoom.description")}
         />
@@ -1108,14 +758,14 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   // (room sidebar | mixer | chat) with a header and status footer,
   // matching ui.pen Screens/Main.
   const renderConnectedState = () => {
-    if (sessionState.status !== "connected") return null;
+    if (phase !== "connected") return null;
 
     // The invite code as the server reported it. No fallback derived from the
     // room's UUID: those six characters look exactly like an invite code but
     // no room can be joined with them, so a participant who copied it could
     // not invite anyone (ADR-026).
-    const roomCode = currentInviteCode;
-    const participantCount = sessionState.participants.length + 1;
+    const roomCode = room?.invite_code ?? "";
+    const participantCount = participants.length + 1;
     const upMs = detailedLatency ? Math.round(detailedLatency.upstream_total_ms) : null;
     const downMs = detailedLatency ? Math.round(detailedLatency.downstream_total_ms) : null;
 
@@ -1170,7 +820,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
                     <span className="participant__name">{peerName}</span>
                   </span>
                 </li>
-                {sessionState.participants.map((participant) => (
+                {participants.map((participant) => (
                   <li key={participant.id} className="participant">
                     <span className="participant__info">
                       <span className="participant__icon">
@@ -1237,7 +887,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
 
           {/* Chat (docked column) */}
           <div className="main-chat-column">
-            <ChatPanelAdapter connId={connectionId} myPeerId={myPeerId} />
+            <ChatPanelAdapter connId={connectionId} myPeerId={room?.peer_id ?? null} />
           </div>
         </div>
 
@@ -1282,23 +932,23 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
               </button>
             </div>
           )}
-          {signalingReconnectState === "reconnecting" && (
+          {session?.signaling_reconnect === "reconnecting" && (
             <div className="main-footer__warning">
               <Toast type="warning" message={t("session.signalingReconnect.inProgress")} />
             </div>
           )}
-          {signalingReconnectState === "failed" && (
+          {session?.signaling_reconnect === "failed" && (
             <div className="main-footer__warning">
               <Toast
                 type="error"
                 message={t("session.signalingReconnect.failed", {
-                  reason: signalingReconnectError ?? "",
+                  reason: session.signaling_reconnect_error ?? "",
                 })}
               />
               <button
                 type="button"
                 className="main-footer__reconnect"
-                onClick={() => attemptSignalingReconnect(currentInviteCode)}
+                onClick={handleReconnectSignaling}
               >
                 {t("session.reconnect.retry")}
               </button>
@@ -1323,7 +973,7 @@ export function MainScreen({ onSettingsClick }: MainScreenProps) {
   };
 
   // Check if we should show connection panel (not connected to a room)
-  const showConnectionPanel = sessionState.status !== "connected";
+  const showConnectionPanel = phase !== "connected";
 
   return (
     <div className="main-screen">

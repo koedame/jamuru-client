@@ -7,71 +7,17 @@
 import { invoke } from "./invoke";
 
 /**
- * Room information from signaling server
+ * Someone else in the room. Their addresses stay in the backend.
  */
-export interface RoomInfo {
+export interface Participant {
   id: string;
   name: string;
-  peer_count: number;
-  max_peers: number;
-  has_password: boolean;
-  invite_code: string;
-  /** The room the server offers for trying a connection (absent from older servers) */
-  test_room?: boolean;
-}
-
-/**
- * A single address candidate for connection (host/LAN or server reflexive/public)
- */
-export interface AddressCandidate {
-  address: string;
-  candidate_type: "Host" | "ServerReflexive";
-  priority: number;
-}
-
-/**
- * Peer information
- */
-export interface PeerInfo {
-  id: string;
-  name: string;
-  candidates: AddressCandidate[];
-  public_addr: string | null;
-  local_addr: string | null;
   /**
-   * What the peer's app can do beyond the base protocol ("peer_message":
-   * it takes messages from other apps). Empty for an app or server that
-   * predates it (ADR-043).
+   * What their app can do beyond the base protocol ("peer_message": it takes
+   * messages from other apps). Empty for an app or server that predates it
+   * (ADR-043).
    */
   features?: string[];
-}
-
-/**
- * All addresses a peer can be reached at, highest priority first: its
- * gathered candidates (LAN/host ranked above public/server-reflexive), then
- * its legacy `public_addr`/`local_addr` if not already among them.
- *
- * Mirrors `PeerInfo::get_sorted_candidates` (src/network/signaling.rs) so a
- * peer on the same network is tried directly instead of only through its
- * public address (REQ-CON-113).
- */
-export function peerSortedAddrs(peer: PeerInfo): string[] {
-  const sorted = [...peer.candidates].sort((a, b) => b.priority - a.priority);
-  const addrs = sorted.map((c) => c.address);
-  for (const addr of [peer.public_addr, peer.local_addr]) {
-    if (addr && !addrs.includes(addr)) addrs.push(addr);
-  }
-  return addrs;
-}
-
-/**
- * Result of joining or creating a room
- */
-export interface JoinResult {
-  room_id: string;
-  peer_id: string;
-  invite_code: string;
-  peers: PeerInfo[];
 }
 
 /**
@@ -117,19 +63,6 @@ export type SystemKind =
   | "settings_help_started"
   | "settings_help_changed"
   | "settings_help_ended";
-
-/**
- * Signaling event types
- */
-export type SignalingEvent =
-  | { type: "PeerJoined"; peer: PeerInfo }
-  | { type: "PeerLeft"; peer_id: string }
-  | { type: "PeerUpdated"; peer: PeerInfo }
-  | { type: "ChatMessageReceived"; message: ChatMessage }
-  | { type: "RoomClosed"; reason: string }
-  | { type: "Kicked"; peer_id: string; reason: string }
-  | { type: "ConnectionLost"; reason: string }
-  | { type: "SettingsHelp"; event: HelpEvent };
 
 // ============================================================================
 // Helping with settings (ADR-043)
@@ -196,79 +129,92 @@ export async function settingsHelpStop(connId: number, role: HelpRole): Promise<
   return invoke("settings_help_stop", { connId, role });
 }
 
-/**
- * Connect to the signaling server. The backend picks the server: the one in
- * the config file, otherwise the build's default (ADR-030)
- * @returns Connection ID for subsequent operations
- */
-export async function signalingConnect(): Promise<number> {
-  return invoke("signaling_connect");
+// ============================================================================
+// The session: connecting, entering and leaving a room (ADR-044 §6)
+// ============================================================================
+
+/** How far the app has got. */
+export type SessionPhase =
+  | "connecting_server"
+  | "server_connected"
+  | "creating"
+  | "joining"
+  | "connected"
+  | "error";
+
+/** The room this app is in. */
+export interface SessionRoom {
+  room_id: string;
+  /** The code others can join with. Empty from a server that reports none. */
+  invite_code: string;
+  /** This app's id in the room */
+  peer_id: string;
+  /** The name this app joined with */
+  peer_name: string;
+  participants: Participant[];
+}
+
+/** The whole session at one moment. The backend owns it; the screen draws it. */
+export interface SessionSnapshot {
+  /** Rises with every change, so an old snapshot heard after a newer one can be told */
+  revision: number;
+  phase: SessionPhase;
+  /** The connection the room's commands (chat, help) are addressed to; null with no server connection */
+  connection_id: number | null;
+  /** The invite code of the room the server offers for trying a connection, or null when it offers none */
+  test_room_invite_code: string | null;
+  joining_code: string | null;
+  /** Why `phase` is "error" */
+  error: string | null;
+  room: SessionRoom | null;
+  /** Getting the signaling connection back after it dropped in a room */
+  signaling_reconnect: "idle" | "reconnecting" | "failed";
+  signaling_reconnect_error: string | null;
+  /** The participant the audio goes to, if it does */
+  streaming_peer_id: string | null;
+}
+
+/** Event the backend sends with the new snapshot whenever the session changes */
+export const SESSION_CHANGED = "session:changed";
+
+/** Event carrying something about helping with settings that the screen shows (ADR-043) */
+export const SESSION_SETTINGS_HELP = "session:settings-help";
+
+/** The session as it is */
+export async function sessionGet(): Promise<SessionSnapshot> {
+  return invoke("session_get");
 }
 
 /**
- * Disconnect from a signaling server
- * @param connId Connection ID from signalingConnect
+ * Drop the connection there is and connect to the server again from scratch.
+ * The server is the one in the config file, otherwise the build's default
+ * (ADR-030). Returns when the connection is made or has failed.
  */
-export async function signalingDisconnect(connId: number): Promise<void> {
-  return invoke("signaling_disconnect", { connId });
+export async function sessionConnect(): Promise<SessionSnapshot> {
+  return invoke("session_connect");
+}
+
+/** Create a room and enter it */
+export async function sessionCreate(): Promise<SessionSnapshot> {
+  return invoke("session_create");
 }
 
 /**
- * List available rooms on the signaling server
- * @param connId Connection ID from signalingConnect
- * @returns Array of room information
+ * Join the room `code` names: an invite code, or a room id from a link.
+ * The name is the one in the settings.
  */
-export async function signalingListRooms(connId: number): Promise<RoomInfo[]> {
-  return invoke("signaling_list_rooms", { connId });
+export async function sessionJoin(code: string): Promise<SessionSnapshot> {
+  return invoke("session_join", { code });
 }
 
-/**
- * Join an existing room
- * @param connId Connection ID from signalingConnect
- * @param roomId Room ID to join
- * @param peerName Display name for this peer
- * @returns Join result with room info and peer list
- */
-export async function signalingJoinRoom(
-  connId: number,
-  roomId: string,
-  peerName: string
-): Promise<JoinResult> {
-  return invoke("signaling_join_room", { connId, roomId, peerName });
+/** Leave the room and go back to the room list */
+export async function sessionLeave(): Promise<SessionSnapshot> {
+  return invoke("session_leave");
 }
 
-/**
- * Leave the current room
- * @param connId Connection ID from signalingConnect
- */
-export async function signalingLeaveRoom(connId: number): Promise<void> {
-  return invoke("signaling_leave_room", { connId });
-}
-
-/**
- * Create a new room
- * @param connId Connection ID from signalingConnect
- * @param roomName Name for the new room
- * @param peerName Display name for this peer (room creator)
- * @returns Join result with the new room info
- */
-export async function signalingCreateRoom(
-  connId: number,
-  roomName: string,
-  peerName: string
-): Promise<JoinResult> {
-  return invoke("signaling_create_room", { connId, roomName, peerName });
-}
-
-/**
- * Poll for signaling events (peer join/leave, chat messages)
- * @param connId Connection ID from signalingConnect
- * @returns Array of signaling events
- */
-export async function signalingPollEvents(
-  connId: number
-): Promise<SignalingEvent[]> {
-  return invoke("signaling_poll_events", { connId });
+/** Try again to get the signaling connection back and rejoin the room, after every attempt failed */
+export async function sessionReconnect(): Promise<SessionSnapshot> {
+  return invoke("session_reconnect");
 }
 
 /**
@@ -554,58 +500,6 @@ export interface StreamingStatus {
   connection_state: string | null;
   /** Why the connection failed, when connection_state is "failed" */
   connection_error: string | null;
-}
-
-/**
- * Bind the audio socket and get the address peers should send to.
- *
- * Called on entering a room, before any peer address is known. Idempotent -
- * repeated calls return the same address (ADR-026).
- *
- * @returns The local audio address as "0.0.0.0:port"
- */
-export async function streamingPrepare(): Promise<string> {
-  return invoke("streaming_prepare");
-}
-
-/**
- * Advertise this app's audio address to everyone in the room.
- *
- * Two GUI instances cannot start streaming to each other without this: each
- * waits to see a peer address and neither publishes one (ADR-026).
- *
- * @param connId Signaling connection id
- * @param localPort Port from streamingPrepare
- * @returns How many address candidates were published
- */
-export async function signalingPublishLocalCandidates(
-  connId: number,
-  localPort: number
-): Promise<number> {
-  return invoke("signaling_publish_local_candidates", { connId, localPort });
-}
-
-/**
- * Start streaming to a peer. The devices, buffer size and sample rate are the
- * saved settings (ADR-043), so the session runs with what the settings show.
- * @param remoteAddr The peer's preferred address
- * @param remoteCandidates The peer's other addresses, tried alongside it
- */
-export async function streamingStart(
-  remoteAddr: string,
-  remoteCandidates?: string[]
-): Promise<void> {
-  return invoke("streaming_start", {
-    remoteAddr,
-    remoteCandidates: remoteCandidates ?? null,
-  });
-}
-
-/**
- * Stop audio streaming
- */
-export async function streamingStop(): Promise<void> {
-  return invoke("streaming_stop");
 }
 
 /**

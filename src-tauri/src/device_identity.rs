@@ -26,6 +26,14 @@ impl DeviceIdentityState {
         }
     }
 
+    /// A fresh identity that is not stored, for tests.
+    #[cfg(test)]
+    pub fn generated() -> Self {
+        Self {
+            identity: Arc::new(DeviceIdentity::generate()),
+        }
+    }
+
     /// Shared handle for `SignalingClient::new`.
     pub fn identity(&self) -> Arc<DeviceIdentity> {
         self.identity.clone()

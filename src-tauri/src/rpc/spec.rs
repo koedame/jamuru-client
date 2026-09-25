@@ -108,24 +108,21 @@ macro_rules! app_commands {
 app_commands! {
     [Access::ALL] "動作確認用のあいさつ" crate::greet;
 
-    // Reaching the signaling server and rooms. A helper works inside the
-    // room the helped person is already in: they may not move or speak for
-    // them (ADR-044 §3).
-    [Access::NO_HELP] "シグナリングサーバーに接続する" crate::signaling::signaling_connect;
-    [Access::NO_HELP] "シグナリングサーバーから切断する" crate::signaling::signaling_disconnect;
-    [Access::NO_HELP] "ルームの一覧を取る" crate::signaling::signaling_list_rooms;
-    [Access::NO_HELP] "ルームに参加する" crate::signaling::signaling_join_room;
-    [Access::NO_HELP] "ルームから退室する" crate::signaling::signaling_leave_room;
-    [Access::NO_HELP] "ルームを作る" crate::signaling::signaling_create_room;
+    // Getting into a room is the session's, one command per step (ADR-044
+    // §6). Reading it is open to a helper - the room is theirs to see - but
+    // they may not move or speak for the person (ADR-044 §3).
+    [Access::ALL] "接続・入室の状態を読む" crate::session::session_get;
+    [Access::NO_HELP] "サーバーへの接続を最初からやり直す" crate::session::session_connect;
+    [Access::NO_HELP] "ルームを作って入る" crate::session::session_create;
+    [Access::NO_HELP] "ルームに参加する" crate::session::session_join;
+    [Access::NO_HELP] "ルームから退室する" crate::session::session_leave;
+    [Access::NO_HELP] "切れたシグナリングを繋ぎ直して、ルームに入り直す" crate::session::session_reconnect;
+
     [Access::NO_HELP] "チャットを送る" crate::signaling::signaling_send_chat;
     [Access::ALL] "チャットの履歴を読む" crate::signaling::signaling_get_chat_messages;
     [Access::NO_HELP] "チャットにリアクションを付ける" crate::signaling::signaling_add_reaction;
     [Access::NO_HELP] "チャットのリアクションを外す" crate::signaling::signaling_remove_reaction;
     [Access::NO_HELP] "チャットのリアクションを付け外しする" crate::signaling::signaling_toggle_reaction;
-    [Access::NO_HELP] "自分の接続先の候補をルームに知らせる" crate::signaling::signaling_publish_local_candidates;
-    // A read that takes the events off the queue: a second reader would
-    // steal them from the person's own screen.
-    [Access::NO_HELP] "ルームの出来事を受け取る" crate::signaling::signaling_poll_events;
     [Access::NO_HELP] "設定の手伝いを申し出る" crate::signaling::settings_help_request;
     [Access::NO_HELP] "設定の手伝いの申し出に答える" crate::signaling::settings_help_answer;
     [Access::NO_HELP] "設定の変更を申請する" crate::signaling::settings_help_propose;
@@ -135,9 +132,6 @@ app_commands! {
     [Access::ALL] "音声の設定を読む" crate::settings::settings_get;
     [Access::ALL] "音声の設定を変える" crate::settings::settings_change;
 
-    [Access::NO_HELP] "音声の送受信の準備をする" crate::streaming::streaming_prepare;
-    [Access::NO_HELP] "音声の送受信を始める" crate::streaming::streaming_start;
-    [Access::NO_HELP] "音声の送受信を止める" crate::streaming::streaming_stop;
     [Access::ALL] "音声の状態（レベル・遅延・統計）を読む" crate::streaming::streaming_status;
     [Access::NO_HELP] "音声の接続を張り直す" crate::streaming::streaming_reconnect;
     [Access::ALL] "自分のマイクをミュートする・戻す" crate::streaming::streaming_set_mute;
@@ -350,11 +344,11 @@ mod tests {
             "signaling_add_reaction",
             "signaling_remove_reaction",
             "signaling_toggle_reaction",
-            "signaling_leave_room",
-            "signaling_disconnect",
-            "signaling_join_room",
-            "signaling_create_room",
-            "streaming_stop",
+            "session_leave",
+            "session_connect",
+            "session_join",
+            "session_create",
+            "session_reconnect",
             "config_set_server_url",
             "config_set_usage_reporting",
             "config_get_connection_history",

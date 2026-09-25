@@ -1,92 +1,103 @@
 /**
- * MainScreen: what happens to the audio when the peer we are streaming to
- * leaves the room.
+ * MainScreen: draws the session the backend owns (ADR-044 §6).
  *
- * The bug this guards: after B left, the app kept its audio session to B
- * (which then reported the connection as lost) and, because it still counted
- * as "streaming", never started audio to the next person who joined.
+ * Which step the app is at, the room and who is in it, and the audio link are
+ * the backend's - its own tests cover the rules (`src-tauri/src/session`).
+ * What the screen does is draw the snapshot it reads and hears, and ask for
+ * one operation at a time.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 
+import i18n from '../i18n';
 import { MainScreen } from './MainScreen';
-import type { PeerInfo, SignalingEvent } from '../lib/tauri';
+import type { SessionSnapshot } from '../lib/tauri';
 
 const invoke = vi.hoisted(() => vi.fn());
+/** What the screen listens for, by event name. */
+const listeners = vi.hoisted(() => new Map<string, (event: { payload: unknown }) => void>());
+/** The handler the deep-link plugin was given, for a link that arrives while running. */
+const openUrl = vi.hoisted(() => ({ handler: null as null | ((urls: string[]) => void) }));
+
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(() => Promise.resolve(() => {})),
+  listen: vi.fn((name: string, handler: (event: { payload: unknown }) => void) => {
+    listeners.set(name, handler);
+    return Promise.resolve(() => listeners.delete(name));
+  }),
   emit: vi.fn(),
   emitTo: vi.fn(),
 }));
 vi.mock('@tauri-apps/plugin-deep-link', () => ({
   getCurrent: vi.fn(() => Promise.resolve(null)),
-  onOpenUrl: vi.fn(() => Promise.resolve(() => {})),
+  onOpenUrl: vi.fn((handler: (urls: string[]) => void) => {
+    openUrl.handler = handler;
+    return Promise.resolve(() => {});
+  }),
 }));
 
-function peer(id: string, addr: string | null): PeerInfo {
+function snapshot(changes: Partial<SessionSnapshot> = {}): SessionSnapshot {
   return {
-    id,
-    name: id,
-    candidates: addr ? [{ address: addr, candidate_type: 'Host', priority: 100 }] : [],
-    public_addr: null,
-    local_addr: null,
+    revision: 1,
+    phase: 'server_connected',
+    connection_id: 1,
+    test_room_invite_code: null,
+    joining_code: null,
+    error: null,
+    room: null,
+    signaling_reconnect: 'idle',
+    signaling_reconnect_error: null,
+    streaming_peer_id: null,
+    ...changes,
   };
 }
 
-/** Commands the app sent to the backend, in order, with their arguments. */
+function inRoom(changes: Partial<SessionSnapshot> = {}): SessionSnapshot {
+  return snapshot({
+    phase: 'connected',
+    room: {
+      room_id: 'room-1',
+      invite_code: 'ABC234',
+      peer_id: 'me',
+      peer_name: 'Me',
+      participants: [{ id: 'b', name: 'Aki', features: ['peer_message'] }],
+    },
+    ...changes,
+  });
+}
+
+/** What the backend says the session is, for `session_get`. */
+let current: SessionSnapshot | Promise<SessionSnapshot>;
+/** Commands the screen sent to the backend, in order, with their arguments. */
 let calls: Array<{ cmd: string; args: Record<string, unknown> | undefined }>;
-/** Events the signaling server has queued for the app's next poll. */
-let queuedEvents: SignalingEvent[];
-/** Peers already in the room when the app creates it. */
-let peersAtCreate: PeerInfo[];
 
-function commandNames(): string[] {
-  return calls.map((c) => c.cmd);
+function callsTo(cmd: string) {
+  return calls.filter((c) => c.cmd === cmd);
 }
 
-function streamingStartTargets(): unknown[] {
-  return calls.filter((c) => c.cmd === 'streaming_start').map((c) => c.args?.remoteAddr);
+/** The backend announces a new state of the session. */
+function announce(next: SessionSnapshot) {
+  act(() => listeners.get('session:changed')!({ payload: next }));
 }
 
-function callCount(cmd: string): number {
-  return calls.filter((c) => c.cmd === cmd).length;
-}
-
-const POLL_WAIT = { timeout: 3000 };
-
-async function enterRoom() {
-  render(<MainScreen />);
-  fireEvent.click(await screen.findByTestId('connection-panel-create-room'));
-  await waitFor(() => expect(callCount('signaling_publish_local_candidates')).toBe(1), POLL_WAIT);
-}
+beforeAll(async () => {
+  await i18n.changeLanguage('en');
+});
 
 beforeEach(() => {
   calls = [];
-  queuedEvents = [];
-  peersAtCreate = [];
+  current = snapshot();
+  openUrl.handler = null;
+  listeners.clear();
   invoke.mockReset();
   invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
     calls.push({ cmd, args });
     switch (cmd) {
-      case 'signaling_connect':
-        return 1;
-      case 'signaling_list_rooms':
-        return [];
-      case 'signaling_create_room':
-        return { room_id: 'room-1', peer_id: 'me', invite_code: 'ABC123', peers: peersAtCreate };
-      case 'signaling_poll_events': {
-        const events = queuedEvents;
-        queuedEvents = [];
-        return events;
-      }
-      case 'streaming_prepare':
-        return '0.0.0.0:40000';
+      case 'session_get':
+        return current;
       case 'streaming_status':
         return { is_active: false };
-      case 'config_get_peer_name':
-        return 'Me';
       case 'config_get_connection_history':
         return [];
       case 'config_get_sample_rate':
@@ -103,82 +114,190 @@ beforeEach(() => {
   });
 });
 
-describe('MainScreen when the peer being streamed to leaves', () => {
-  it('その相手に音声を流しているとき、退室を受けたらストリーミングを止めること', async () => {
-    peersAtCreate = [peer('b', '192.0.2.2:5000')];
-    await enterRoom();
-    await waitFor(() => expect(streamingStartTargets()).toEqual(['192.0.2.2:5000']), POLL_WAIT);
+describe('MainScreen の接続の表示', () => {
+  it('バックエンドがまだ答えていないとき、サーバーに接続中の表示であること', async () => {
+    current = new Promise(() => {});
 
-    queuedEvents.push({ type: 'PeerLeft', peer_id: 'b' });
+    render(<MainScreen />);
 
-    await waitFor(() => expect(callCount('streaming_stop')).toBe(1), POLL_WAIT);
+    expect(await screen.findByTestId('connection-panel-loading')).toBeInTheDocument();
   });
 
-  it('退室のあとに次の人がアドレスを公開したとき、その人に音声を流し始めること', async () => {
-    peersAtCreate = [peer('b', '192.0.2.2:5000')];
-    await enterRoom();
-    await waitFor(() => expect(streamingStartTargets()).toHaveLength(1), POLL_WAIT);
+  it('サーバーに繋がっているとき、ルームを作るボタンで session_create を呼ぶこと', async () => {
+    render(<MainScreen />);
 
-    queuedEvents.push({ type: 'PeerLeft', peer_id: 'b' });
-    await waitFor(() => expect(callCount('streaming_stop')).toBe(1), POLL_WAIT);
+    fireEvent.click(await screen.findByTestId('connection-panel-create-room'));
 
-    queuedEvents.push({ type: 'PeerJoined', peer: peer('c', null) });
-    queuedEvents.push({ type: 'PeerUpdated', peer: peer('c', '192.0.2.3:6000') });
-
-    await waitFor(
-      () => expect(streamingStartTargets()).toEqual(['192.0.2.2:5000', '192.0.2.3:6000']),
-      POLL_WAIT
-    );
+    expect(callsTo('session_create')).toHaveLength(1);
   });
 
-  it('退室した時点で次の人がすでにアドレスを持っているとき、自分のアドレスを公開し直してその人へ繋ぎ直すこと', async () => {
-    peersAtCreate = [peer('b', '192.0.2.2:5000')];
-    await enterRoom();
-    await waitFor(() => expect(streamingStartTargets()).toHaveLength(1), POLL_WAIT);
+  it('招待コードを入れて参加するとき、そのコードで session_join を呼ぶこと', async () => {
+    render(<MainScreen />);
 
-    // C joined while A and B were talking; A did not stream to C then.
-    queuedEvents.push({ type: 'PeerJoined', peer: peer('c', '192.0.2.3:6000') });
-    queuedEvents.push({ type: 'PeerLeft', peer_id: 'b' });
+    fireEvent.change(await screen.findByTestId('connection-panel-invite-code'), {
+      target: { value: 'ABC234' },
+    });
+    fireEvent.click(screen.getByTestId('connection-panel-join'));
 
-    await waitFor(
-      () => expect(streamingStartTargets()).toEqual(['192.0.2.2:5000', '192.0.2.3:6000']),
-      POLL_WAIT
-    );
-    // Starting audio consumes the advertised socket, so the address has to be
-    // advertised again (a fresh port) before anyone can send to us.
-    const afterLeave = commandNames().slice(commandNames().indexOf('streaming_stop'));
-    expect(afterLeave.slice(0, 3)).toEqual([
-      'streaming_stop',
-      'streaming_prepare',
-      'signaling_publish_local_candidates',
-    ]);
+    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234' }]);
   });
 
-  it('音声を流していない相手が退室したとき、ストリーミングを止めないこと', async () => {
-    peersAtCreate = [peer('b', '192.0.2.2:5000')];
-    await enterRoom();
-    await waitFor(() => expect(streamingStartTargets()).toHaveLength(1), POLL_WAIT);
+  it('サーバーがテストルームを示しているとき、そのコードへのショートカットを出すこと', async () => {
+    current = snapshot({ test_room_invite_code: 'TEST22' });
 
-    queuedEvents.push({ type: 'PeerJoined', peer: peer('c', '192.0.2.3:6000') });
-    queuedEvents.push({ type: 'PeerLeft', peer_id: 'c' });
-    // Let the events be polled and handled before asserting nothing happened.
-    await waitFor(() => expect(queuedEvents).toHaveLength(0), POLL_WAIT);
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    render(<MainScreen />);
 
-    expect(callCount('streaming_stop')).toBe(0);
-    expect(streamingStartTargets()).toEqual(['192.0.2.2:5000']);
+    expect(await screen.findByTestId('connection-panel-test-room')).toBeInTheDocument();
+  });
+
+  it('接続に失敗したとき、理由を出し、やり直しで session_connect を呼ぶこと', async () => {
+    current = snapshot({ phase: 'error', connection_id: null, error: 'connection refused' });
+
+    render(<MainScreen />);
+    fireEvent.click(await screen.findByTestId('connection-panel-retry'));
+
+    expect(callsTo('session_connect')).toHaveLength(1);
+    expect(screen.getByTestId('connection-panel-server-error')).toBeInTheDocument();
+  });
+
+  it('接続中の表示で取り消したとき、session_connect を呼ぶこと', async () => {
+    current = snapshot({ phase: 'connecting_server', connection_id: null });
+
+    render(<MainScreen />);
+    fireEvent.click(await screen.findByTestId('connection-panel-cancel'));
+
+    expect(callsTo('session_connect')).toHaveLength(1);
+  });
+
+  it('接続中の表示で取り消したとき、接続先の URL を読み直すこと', async () => {
+    current = snapshot({ phase: 'connecting_server', connection_id: null });
+
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-cancel');
+    await waitFor(() => expect(callsTo('config_get_effective_server_url')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('connection-panel-cancel'));
+
+    // Cancelling leaves the phase as it was, so nothing else would read it again.
+    await waitFor(() => expect(callsTo('config_get_effective_server_url')).toHaveLength(2));
   });
 });
 
-describe('MainScreen の参加者一覧', () => {
+describe('MainScreen のルームの表示', () => {
+  it('バックエンドがルームに入ったと伝えたとき、招待コードと参加者を出すこと', async () => {
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-create-room');
+
+    announce(inRoom({ revision: 2 }));
+
+    expect(await screen.findByTestId('room-code')).toHaveTextContent('ABC234');
+    expect(screen.getByTestId('participant-list')).toHaveTextContent('Aki');
+    expect(screen.getByTestId('participant-list')).toHaveTextContent('Me');
+  });
+
   // Verifies: REQ-GUI-023
   it('相手の名前が HTML を含むとき、要素にならず文字として表示されること', async () => {
     const payload = '<img src=x onerror=alert(1)>';
-    peersAtCreate = [{ ...peer('b', null), name: payload }];
-    await enterRoom();
+    current = inRoom();
+    current.room!.participants = [{ id: 'b', name: payload, features: [] }];
+
+    render(<MainScreen />);
 
     const list = await screen.findByTestId('participant-list');
-    await waitFor(() => expect(list).toHaveTextContent(payload), POLL_WAIT);
+    expect(list).toHaveTextContent(payload);
     expect(list.querySelector('img')).toBeNull();
+  });
+
+  it('古い通知があとから届いたとき、新しい状態のままであること', async () => {
+    current = inRoom({ revision: 5 });
+    render(<MainScreen />);
+    await screen.findByTestId('room-code');
+
+    announce(snapshot({ revision: 4 }));
+
+    expect(screen.getByTestId('room-code')).toBeInTheDocument();
+  });
+
+  it('参加者が増えたと伝えられたとき、一覧に加わること', async () => {
+    current = inRoom({ revision: 2 });
+    render(<MainScreen />);
+    await screen.findByTestId('room-code');
+
+    const next = inRoom({ revision: 3 });
+    next.room!.participants.push({ id: 'c', name: 'Bo', features: [] });
+    announce(next);
+
+    await waitFor(() => expect(screen.getByTestId('participant-list')).toHaveTextContent('Bo'));
+  });
+
+  it('退室を確かめたとき、session_leave を呼ぶこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+
+    fireEvent.click(await screen.findByTestId('leave-room'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('session.leave.confirmButton') }));
+
+    await waitFor(() => expect(callsTo('session_leave')).toHaveLength(1));
+  });
+
+  it('シグナリングが切れて繋ぎ直しているとき、ルームの画面のまま知らせること', async () => {
+    current = inRoom({
+      connection_id: null,
+      signaling_reconnect: 'reconnecting',
+    });
+
+    render(<MainScreen />);
+
+    expect(await screen.findByTestId('room-code')).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('session.signalingReconnect.inProgress'))).toBeInTheDocument();
+  });
+
+  it('繋ぎ直しに失敗したとき、理由を出し、再試行で session_reconnect を呼ぶこと', async () => {
+    current = inRoom({
+      connection_id: null,
+      signaling_reconnect: 'failed',
+      signaling_reconnect_error: 'no route to host',
+    });
+
+    render(<MainScreen />);
+    fireEvent.click(await screen.findByRole('button', { name: i18n.t('session.reconnect.retry') }));
+
+    expect(callsTo('session_reconnect')).toHaveLength(1);
+    expect(screen.getByText(/no route to host/)).toBeInTheDocument();
+  });
+});
+
+describe('MainScreen の招待リンク', () => {
+  async function withConnection() {
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-create-room');
+    await waitFor(() => expect(openUrl.handler).not.toBeNull());
+  }
+
+  it('招待リンクが届いたとき、そのコードで session_join を呼ぶこと', async () => {
+    await withConnection();
+
+    act(() => openUrl.handler!(['jamjam://join/abc234']));
+
+    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234' }]);
+  });
+
+  it('コードが壊れた招待リンクが届いたとき、エラーを出して参加しないこと', async () => {
+    await withConnection();
+
+    act(() => openUrl.handler!(['jamjam://join/nope']));
+
+    expect(await screen.findByTestId('connection-panel-error')).toBeInTheDocument();
+    expect(callsTo('session_join')).toHaveLength(0);
+  });
+
+  it('サーバーに繋がっていないとき、リンクの受け取りを登録しないこと', async () => {
+    current = snapshot({ phase: 'connecting_server', connection_id: null });
+
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-loading');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(openUrl.handler).toBeNull();
   });
 });

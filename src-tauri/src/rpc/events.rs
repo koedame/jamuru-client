@@ -25,6 +25,15 @@ pub const EVENTS: &[EventSpec] = &[
         name: "i18n:language-changed",
         access: Access::ALL,
     },
+    EventSpec {
+        name: crate::session::CHANGED_EVENT,
+        access: Access::ALL,
+    },
+    // The person's own settings help, drawn on their own screen.
+    EventSpec {
+        name: crate::session::HELP_EVENT,
+        access: Access::NO_HELP,
+    },
 ];
 
 /// One event as it was emitted.

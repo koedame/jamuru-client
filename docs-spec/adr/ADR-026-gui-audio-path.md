@@ -28,7 +28,7 @@ flowchart LR
 
 ### ① GUI は自分の音声アドレスを publish していなかった
 
-`ui/src/screens/MainScreen.tsx` はルーム参加時に「アドレスを持つピア」を探し、見つかったときだけ
+`ui/src/screens/MainScreen.tsx`（[ADR-044](./ADR-044-portals-and-permissions.md) §6 のあとはバックエンドの `src-tauri/src/session/`）はルーム参加時に「アドレスを持つピア」を探し、見つかったときだけ
 `streaming_start` を呼ぶ。しかし `UpdatePeerInfo` の送信は CLI（`src/main.rs`）にしか実装がなく、
 GUI には存在しなかった。
 
@@ -89,7 +89,10 @@ Storybook・UI 単体テスト・シグナリングの結合テスト・2 ピア
 - `signaling_publish_local_candidates(conn_id, local_port)`（`src-tauri/src/signaling.rs`）が
   `gather_candidates()` の結果を `UpdatePeerInfo` で送る
 - UI は作成・参加の直後に上記を呼び、`PeerUpdated` イベントでアドレスを知った時点で
-  `streaming_start` する（従来は参加時の一覧にアドレスがある場合しか開始しなかった）
+  `streaming_start` する（従来は参加時の一覧にアドレスがある場合しか開始しなかった）。
+  [ADR-044](./ADR-044-portals-and-permissions.md) §6 のあとは、これらの呼び出しを UI ではなくバックエンドの
+  `src-tauri/src/session/` が行い、`streaming_prepare` / `streaming_start` / `streaming_stop` と
+  `signaling_publish_local_candidates` はコマンドではなくバックエンドの内側の関数である。以降の「UI は」も同じ
 
 ソケットは `std::net::UdpSocket` として保持し、`Connection::from_std` でオーディオスレッドの
 ランタイムに登録する。Tokio のソケットは登録したランタイムでしか wakeup を受け取れないため、
