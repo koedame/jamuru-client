@@ -38,6 +38,12 @@ export interface PeerInfo {
   candidates: AddressCandidate[];
   public_addr: string | null;
   local_addr: string | null;
+  /**
+   * What the peer's app can do beyond the base protocol ("peer_message":
+   * it takes messages from other apps). Empty for an app or server that
+   * predates it (ADR-043).
+   */
+  features?: string[];
 }
 
 /**

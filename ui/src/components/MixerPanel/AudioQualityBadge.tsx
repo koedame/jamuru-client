@@ -30,7 +30,8 @@ export function AudioQualityBadge({
   const displayRate = formatSampleRate(sampleRate);
 
   return (
-    <div className="audio-quality-badge">
+    // data-sample-rate carries the rate in Hz next to the rounded kHz text.
+    <div className="audio-quality-badge" data-testid="audio-quality-badge" data-sample-rate={sampleRate}>
       <span className="audio-quality-badge__rate">{displayRate}kHz</span>
       <span className="audio-quality-badge__separator">/</span>
       <span className="audio-quality-badge__channels">{channels}ch</span>

@@ -5,6 +5,10 @@ use crate::pom::driver::{Driver, DriverResult};
 use crate::pom::element::Element;
 
 const ROOT: &str = "[data-testid='session']";
+const PEER_QUALITY_BADGE: &str = concat!(
+    "[data-testid='channel-strip'][data-channel-type='remote']",
+    " [data-testid='audio-quality-badge']"
+);
 
 /// Strips are addressed by whose audio they carry, not by position: the
 /// user's own channel and a peer's look alike in the DOM but mean opposite
@@ -152,6 +156,19 @@ impl<'a> SessionScreen<'a> {
     /// single packet ever left the machine.
     pub fn peer_channel_peak(&self) -> DriverResult<f32> {
         self.channel_peak(PEER_PEAK)
+    }
+
+    /// Sample rate (Hz) the remote peer's channel says the peer sends at.
+    /// It comes from the peer's app over the connection, so it says what the
+    /// peer's session actually runs at - not what this app is set to.
+    pub fn peer_channel_sample_rate(&self) -> DriverResult<u32> {
+        let raw = self
+            .element(PEER_QUALITY_BADGE, "peer quality badge")
+            .attribute("data-sample-rate")?
+            .ok_or_else(|| format!("no quality badge matched {}", PEER_QUALITY_BADGE))?;
+        raw.trim()
+            .parse::<u32>()
+            .map_err(|e| format!("data-sample-rate {:?} is not a number: {}", raw, e))
     }
 
     fn channel_peak(&self, selector: &'static str) -> DriverResult<f32> {

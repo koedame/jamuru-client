@@ -210,6 +210,7 @@ fn test_peer_info_with_candidates_roundtrip() {
         joined_at: 0,
         // Never crosses the wire (skip_serializing, ADR-024) - a peer's
         // device identifier is not shared with other participants.
+        features: vec![],
     };
 
     let json = serde_json::to_string(&original).expect("Should serialize");

@@ -29,6 +29,12 @@ fn now_unix_secs() -> u64 {
 /// Maximum peers per room
 pub const MAX_PEERS_PER_ROOM: usize = 10;
 
+/// The feature an app announces when it creates or joins a room to say it
+/// takes [`SignalingMessage::PeerMessage`]s (ADR-043). The server relays peer
+/// messages only to apps that announced it, so an older app never receives
+/// one, and lists each participant's features in its [`PeerInfo`].
+pub const PEER_MESSAGE_FEATURE: &str = "peer_message";
+
 /// WebSocket handshake headers carrying a client's device identity
 /// (ADR-024). [`SignalingClient::connect`] always sends all four: the server
 /// refuses a connection without them.
@@ -106,6 +112,18 @@ pub struct PeerInfo {
     /// Defaults to 0 for older clients/fixtures that predate this field.
     #[serde(default)]
     pub joined_at: u64,
+    /// What the peer's app announced it can do beyond the base protocol
+    /// (such as [`PEER_MESSAGE_FEATURE`]). Empty from a server or an app that
+    /// predates features.
+    #[serde(default)]
+    pub features: Vec<String>,
+}
+
+impl PeerInfo {
+    /// Whether the peer's app takes peer messages.
+    pub fn takes_peer_messages(&self) -> bool {
+        self.features.iter().any(|f| f == PEER_MESSAGE_FEATURE)
+    }
 }
 
 impl PeerInfo {
@@ -161,11 +179,18 @@ pub enum SignalingMessage {
         room_name: String,
         password: Option<String>,
         peer_name: String,
+        /// What this app can do beyond the base protocol, told to the others
+        /// in its [`PeerInfo`]. Left out when empty, as an older app does.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        features: Vec<String>,
     },
     JoinRoom {
         room_id: String,
         password: Option<String>,
         peer_name: String,
+        /// As [`SignalingMessage::CreateRoom`]'s.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        features: Vec<String>,
     },
     LeaveRoom,
     /// Update peer connection information with multiple candidates
@@ -238,6 +263,22 @@ pub enum SignalingMessage {
         sender_name: String,
         content: String,
         timestamp: u64,
+    },
+
+    /// A message from one app to another in the same room, relayed by the
+    /// server (ADR-043). Sent with `to` naming one participant, or without it
+    /// for everyone in the room who takes peer messages - the sender
+    /// included. It arrives with `from` and `from_name` set by the server to
+    /// the sending participant, whatever the sender wrote there. The server
+    /// does not read `body`: what it means is between the apps.
+    PeerMessage {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_name: Option<String>,
+        body: serde_json::Value,
     },
 }
 
@@ -666,12 +707,99 @@ mod tests {
         }
     }
 
+    /// An app with nothing to announce sends the message as an app from
+    /// before features did, so an older server reads it unchanged.
+    ///
+    /// Verifies: REQ-CON-031
+    #[test]
+    fn an_app_that_announces_no_features_sends_no_features_field() {
+        let json = serde_json::to_value(SignalingMessage::JoinRoom {
+            room_id: "ABC234".to_string(),
+            password: None,
+            peer_name: "Bob".to_string(),
+            features: vec![],
+        })
+        .unwrap();
+        assert!(json["data"].get("features").is_none(), "{}", json);
+
+        let json = serde_json::to_value(SignalingMessage::CreateRoom {
+            room_name: "Jam".to_string(),
+            password: None,
+            peer_name: "Alice".to_string(),
+            features: vec![PEER_MESSAGE_FEATURE.to_string()],
+        })
+        .unwrap();
+        assert_eq!(
+            json["data"]["features"],
+            serde_json::json!(["peer_message"])
+        );
+    }
+
+    /// A participant listed by a server, or joined from an app, that predates
+    /// features takes no peer messages - so none is offered to it.
+    ///
+    /// Verifies: REQ-CON-031
+    #[test]
+    fn a_participant_listed_without_features_takes_no_peer_messages() {
+        let id = Uuid::new_v4();
+        let older: PeerInfo =
+            serde_json::from_str(&format!(r#"{{"id":"{id}","name":"Old"}}"#)).unwrap();
+        assert!(!older.takes_peer_messages());
+
+        let newer: PeerInfo = serde_json::from_str(&format!(
+            r#"{{"id":"{id}","name":"New","features":["something_else","peer_message"]}}"#
+        ))
+        .unwrap();
+        assert!(newer.takes_peer_messages());
+    }
+
+    /// Sent, a peer message carries only the addressee and the body; relayed,
+    /// it arrives with the sender the server stamped.
+    ///
+    /// Verifies: REQ-CON-031
+    #[test]
+    fn a_peer_message_is_sent_without_a_sender_and_arrives_with_the_one_the_server_stamped() {
+        let to = Uuid::new_v4();
+        let sent = serde_json::to_value(SignalingMessage::PeerMessage {
+            to: Some(to),
+            from: None,
+            from_name: None,
+            body: serde_json::json!({"settings_help": {"kind": "request"}}),
+        })
+        .unwrap();
+        assert_eq!(
+            sent,
+            serde_json::json!({"type": "PeerMessage", "data": {"to": to, "body": {"settings_help": {"kind": "request"}}}})
+        );
+
+        let from = Uuid::new_v4();
+        let relayed: SignalingMessage = serde_json::from_value(serde_json::json!({
+            "type": "PeerMessage",
+            "data": {"from": from, "from_name": "Aki", "to": null, "body": {"any": 1}}
+        }))
+        .unwrap();
+        let SignalingMessage::PeerMessage {
+            to,
+            from: stamped,
+            from_name,
+            body,
+        } = relayed
+        else {
+            panic!("not a PeerMessage");
+        };
+        assert_eq!(to, None, "to everyone in the room");
+        assert_eq!(stamped, Some(from));
+        assert_eq!(from_name.as_deref(), Some("Aki"));
+        assert_eq!(body, serde_json::json!({"any": 1}));
+    }
+
     #[test]
     fn test_signaling_message_serialize() {
         let msg = SignalingMessage::CreateRoom {
             room_name: "Test Room".to_string(),
             password: None,
             peer_name: "Alice".to_string(),
+            features: vec![],
         };
 
         let json = serde_json::to_string(&msg).unwrap();
@@ -682,6 +810,7 @@ mod tests {
                 room_name,
                 password,
                 peer_name,
+                ..
             } => {
                 assert_eq!(room_name, "Test Room");
                 assert!(password.is_none());
@@ -862,6 +991,7 @@ mod tests {
             public_addr: None,
             local_addr: None,
             joined_at: 0,
+            features: vec![],
         };
 
         assert_eq!(peer.candidates.len(), 1);

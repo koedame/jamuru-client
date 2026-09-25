@@ -890,16 +890,19 @@ async fn run_room_session(
     let client = signaling_client(&server);
     let mut conn = client.connect().await?;
 
+    // The CLI takes no peer messages, so it announces no features.
     let request = match &entry {
         RoomEntry::Create { room_name } => SignalingMessage::CreateRoom {
             room_name: room_name.clone(),
             password: None,
             peer_name: peer_name.clone(),
+            features: vec![],
         },
         RoomEntry::Join { room_id } => SignalingMessage::JoinRoom {
             room_id: room_id.clone(),
             password: None,
             peer_name: peer_name.clone(),
+            features: vec![],
         },
     };
     conn.send(request).await?;
