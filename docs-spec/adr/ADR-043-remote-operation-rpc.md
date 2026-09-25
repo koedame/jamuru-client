@@ -7,7 +7,8 @@ sidebar_position: 43
 
 ## Status
 
-Accepted
+Accepted。1 節（呼び出し口の表）・3 節（設定の手伝い）・4 節（中継）は [ADR-044](./ADR-044-portals-and-permissions.md) が置き換える
+（手伝いの作り直しが入るまでは、この ADR の 3・4 節が実装の姿）。2 節と 5 節は有効。
 
 ## Context
 

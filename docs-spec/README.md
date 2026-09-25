@@ -68,6 +68,7 @@ sidebar_position: 1
 | [ADR-041](./adr/ADR-041-self-update.md) | 新しい正式版は、利用者の操作なしにアプリ自身が入れる |
 | [ADR-042](./adr/ADR-042-usage-reporting-includes-investigation-data.md) | 利用状況の送信に、不具合の調査に役立つ項目（自分の IP アドレス・デバイス ID・接続先）を含める |
 | [ADR-043](./adr/ADR-043-remote-operation-rpc.md) | アプリの操作は名前付きのコマンド（RPC）。E2E は全部を、相手の設定の手伝いは音声の設定だけを、許可された間に 1 件ずつ呼ぶ |
+| [ADR-044](./adr/ADR-044-portals-and-permissions.md) | アプリの操作は「口」ごとに呼べる範囲を 1 つの表で決める。遠隔の口は WebSocket の中継に載せ、権限はデバッグモード（ベータ版だけ）と手伝いの 2 段 |
 
 ---
 
