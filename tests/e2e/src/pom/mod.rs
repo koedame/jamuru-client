@@ -10,6 +10,7 @@
 
 pub mod driver;
 pub mod element;
+pub mod fake_relay;
 pub mod loopback_audio;
 pub mod screens;
 

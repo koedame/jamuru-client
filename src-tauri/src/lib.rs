@@ -5,6 +5,8 @@
 
 mod audio;
 mod config;
+#[cfg(feature = "debug-remote")]
+mod debug_remote;
 mod device_identity;
 mod diagnostics;
 #[cfg(feature = "e2e-control")]
@@ -132,6 +134,10 @@ pub fn run() {
     if self_updating {
         updater::spawn(app.handle().clone());
     }
+
+    // After the state above is managed: the loop reads it as soon as it starts.
+    #[cfg(feature = "debug-remote")]
+    debug_remote::spawn(app.handle().clone());
 
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {

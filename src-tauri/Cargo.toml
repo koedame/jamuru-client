@@ -99,3 +99,7 @@ e2e-control = ["debug-tools", "dep:axum", "tokio/net", "tokio/rt"]
 # Used by the E2E control channel and by remote debugging, and absent from every
 # other build for the same reason: they can read what the app shows.
 debug-tools = []
+# Remote debugging: the beta build asks the server whether this installation is
+# enrolled and, if so, keeps a connection to the relay that lets it be operated
+# (ADR-044). Deliberately absent from `default`, like `e2e-control`.
+debug-remote = ["debug-tools", "jamjam/remote-link"]

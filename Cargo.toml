@@ -9,6 +9,9 @@ repository = "https://github.com/koedame/jamjam-client"
 [features]
 default = []
 opus-codec = ["dep:opus"]
+# Opening the relay connection that lets a running app be operated remotely
+# (ADR-044). Only beta builds turn it on.
+remote-link = []
 
 # E2E testing features
 e2e-loopback = []        # Audio loopback tests (no network)

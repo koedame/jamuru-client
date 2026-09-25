@@ -26,6 +26,18 @@ fn now_unix_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// The four `X-Device-*` handshake headers proving `identity` to a server
+/// (ADR-024), signed for the current time.
+pub(super) fn signed_device_headers(identity: &DeviceIdentity) -> [(&'static str, String); 4] {
+    let timestamp = now_unix_secs() as i64;
+    [
+        (DEVICE_ID_HEADER, identity.device_id().to_string()),
+        (DEVICE_PUBKEY_HEADER, identity.public_key_b64()),
+        (DEVICE_SIGNATURE_HEADER, identity.sign_timestamp(timestamp)),
+        (DEVICE_TIMESTAMP_HEADER, timestamp.to_string()),
+    ]
+}
+
 /// Maximum peers per room
 pub const MAX_PEERS_PER_ROOM: usize = 10;
 
@@ -417,15 +429,7 @@ impl SignalingClient {
             .as_str()
             .into_client_request()
             .map_err(|e| NetworkError::SignalingError(format!("Invalid signaling URL: {}", e)))?;
-        let identity = &self.device_identity;
-        let timestamp = now_unix_secs() as i64;
-        let headers = [
-            (DEVICE_ID_HEADER, identity.device_id().to_string()),
-            (DEVICE_PUBKEY_HEADER, identity.public_key_b64()),
-            (DEVICE_SIGNATURE_HEADER, identity.sign_timestamp(timestamp)),
-            (DEVICE_TIMESTAMP_HEADER, timestamp.to_string()),
-        ];
-        for (name, value) in headers {
+        for (name, value) in signed_device_headers(&self.device_identity) {
             let header_value = value.parse().map_err(|e| {
                 NetworkError::SignalingError(format!("Invalid {} header: {}", name, e))
             })?;

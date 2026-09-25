@@ -12,9 +12,13 @@
 //! read.
 #![allow(dead_code)]
 
+pub mod events;
+pub mod link;
 pub mod spec;
 mod webview;
 
+#[cfg(feature = "debug-tools")]
+pub mod debug;
 #[cfg(feature = "debug-tools")]
 pub mod ui;
 
@@ -115,7 +119,11 @@ async fn call_native<R: Runtime>(
     name: &str,
     call: Call,
 ) -> Result<Value, RpcError> {
-    ui::call(app, name, call).await
+    if name.starts_with("debug.") {
+        debug::call(app, name, call).await
+    } else {
+        ui::call(app, name, call).await
+    }
 }
 
 #[cfg(not(feature = "debug-tools"))]
@@ -130,11 +138,11 @@ async fn call_native<R: Runtime>(
     ))
 }
 
-/// Methods implemented in Rust rather than as commands.
-pub fn native_methods() -> &'static [Method] {
+/// The methods implemented in Rust rather than as commands, by module.
+pub fn native_groups() -> &'static [&'static [Method]] {
     #[cfg(feature = "debug-tools")]
     {
-        ui::METHODS
+        &[ui::METHODS, debug::METHODS]
     }
     #[cfg(not(feature = "debug-tools"))]
     {

@@ -19,6 +19,7 @@
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
+use jamjam_e2e_tests::pom::fake_relay::{FakeRelay, Target};
 use jamjam_e2e_tests::pom::loopback_audio;
 use jamjam_e2e_tests::pom::screens::{ConnectionState, SettingsTab};
 use jamjam_e2e_tests::pom::{App, UI_TIMEOUT};
@@ -1064,6 +1065,257 @@ fn any_command_the_app_registers_can_be_called_and_an_unknown_one_is_refused() {
         "an unknown command should be refused, got {:?}",
         unknown
     );
+}
+
+// ---------------------------------------------------------------------------
+// Remote debugging through the relay (ADR-044)
+// ---------------------------------------------------------------------------
+//
+// The app is built with `debug-remote` as well as `e2e-control`. The relay is
+// a stand-in on loopback that plays the operator; how the real server pairs and
+// authenticates is that server's own tests.
+
+/// How long the app may take to ask about enrollment and connect. It asks as
+/// soon as it starts, so this is process start-up, not a timer.
+const RELAY_CONNECT: Duration = Duration::from_secs(30);
+
+/// Launches an app whose server says it is enrolled, and returns the
+/// operator's end of the relay connection it opens.
+fn launch_enrolled() -> (MutexGuard<'static, ()>, FakeRelay, App, Target) {
+    let guard = exclusive();
+    let relay = FakeRelay::start(true).expect("the fake relay should start");
+    let app = App::launch_with_server_url(&relay.server_url())
+        .expect("app should launch with the e2e-control feature");
+    // The screen has to be up before a call reaches it; the relay connection
+    // is independent of it.
+    app.connection_screen()
+        .wait_until_interactive(LAUNCH_SETTLE)
+        .expect("connection screen should settle into an operable state");
+    let target = relay
+        .wait_for_target(RELAY_CONNECT)
+        .expect("an enrolled app should open the relay connection");
+    (guard, relay, app, target)
+}
+
+/// An enrolled app connects by itself, proves which device it is, and speaks
+/// first: what it is and which methods this portal may call.
+///
+/// Verifies: REQ-RMT-021
+/// Verifies: REQ-RMT-024
+#[test]
+fn an_enrolled_app_opens_the_relay_and_says_who_it_is() {
+    let (_guard, relay, _app, target) = launch_enrolled();
+
+    let hello = target.recv(Duration::from_secs(10)).unwrap();
+
+    assert_eq!(hello["hello"]["protocol"], "jamjam-rpc/1");
+    assert_eq!(hello["hello"]["portal"], "debug");
+    assert_eq!(hello["hello"]["build"], "beta");
+    let methods: Vec<&str> = hello["hello"]["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m.as_str())
+        .collect();
+    for expected in ["debug.info", "debug.logs", "ui.query", "settings_change"] {
+        assert!(
+            methods.contains(&expected),
+            "{} is not offered: {:?}",
+            expected,
+            methods
+        );
+    }
+    assert_eq!(
+        relay.device_ids().first().map(String::len),
+        Some(26),
+        "the app should present its 26-character device id on the handshake"
+    );
+}
+
+/// An installation the server does not know opens nothing: enrolling is the
+/// server's decision, and the app only asks.
+///
+/// Verifies: REQ-RMT-021
+#[test]
+fn an_app_that_is_not_enrolled_never_opens_the_relay() {
+    let _guard = exclusive();
+    let relay = FakeRelay::start(false).expect("the fake relay should start");
+    let _app = App::launch_with_server_url(&relay.server_url())
+        .expect("app should launch with the e2e-control feature");
+
+    jamjam_e2e_tests::pom::wait_until(RELAY_CONNECT, || relay.enrollment_requests() >= 1)
+        .expect("the app should ask whether it is enrolled");
+    std::thread::sleep(Duration::from_secs(3));
+
+    assert_eq!(relay.connections(), 0, "a relay connection was opened");
+}
+
+/// After the relay drops the connection the app opens a new one by itself.
+///
+/// Verifies: REQ-RMT-021
+#[test]
+fn an_app_reopens_the_relay_connection_after_it_drops() {
+    let (_guard, relay, _app, target) = launch_enrolled();
+
+    target.hang_up();
+
+    relay
+        .wait_for_target(RELAY_CONNECT)
+        .expect("the app should reconnect after the relay hung up");
+    assert!(relay.connections() >= 2);
+}
+
+/// The operator learns what the app is: version, build, OS, devices and the
+/// audio settings in effect, and where it logs.
+///
+/// Verifies: REQ-RMT-026
+#[test]
+fn the_operator_reads_what_the_app_is() {
+    let (_guard, _relay, _app, target) = launch_enrolled();
+
+    let info = target
+        .call(1, "debug.info", serde_json::json!({}))
+        .unwrap()
+        .expect("debug.info should answer");
+
+    assert!(info["app_version"].as_str().is_some_and(|v| !v.is_empty()));
+    assert_eq!(info["build"], "e2e");
+    assert!(info["os"].as_str().is_some_and(|v| !v.is_empty()));
+    assert!(info["audio"]["buffer_size"].is_number(), "{}", info);
+    assert!(info["log_file"]
+        .as_str()
+        .is_some_and(|p| p.ends_with("jamjam.log")));
+    assert_eq!(info["device_id"].as_str().map(str::len), Some(26));
+}
+
+/// The operator reads the app's log, and can follow it from where the last
+/// read ended.
+///
+/// Verifies: REQ-RMT-026
+#[test]
+fn the_operator_reads_the_log_and_follows_it() {
+    let (_guard, _relay, _app, target) = launch_enrolled();
+
+    let tail = target
+        .call(1, "debug.logs", serde_json::json!({}))
+        .unwrap()
+        .expect("debug.logs should answer");
+    assert!(
+        tail["text"]
+            .as_str()
+            .unwrap()
+            .contains("Remote debugging: connected to the relay"),
+        "the log should say the relay connected: {}",
+        tail["text"]
+    );
+
+    let next = tail["next_offset"].as_u64().unwrap();
+    let more = target
+        .call(2, "debug.logs", serde_json::json!({ "offset": next }))
+        .unwrap()
+        .unwrap();
+    assert_eq!(more["offset"].as_u64(), Some(next));
+    assert!(more["next_offset"].as_u64().unwrap() >= next);
+
+    let few = target
+        .call(
+            3,
+            "debug.logs",
+            serde_json::json!({ "offset": 0, "bytes": 10 }),
+        )
+        .unwrap()
+        .unwrap();
+    assert!(few["text"].as_str().unwrap().len() <= 10);
+}
+
+/// The crash record and the panics the log holds come back in a fixed shape,
+/// empty when nothing crashed.
+///
+/// Verifies: REQ-RMT-026
+#[test]
+fn the_operator_asks_for_crashes_and_gets_none_from_a_healthy_app() {
+    let (_guard, _relay, _app, target) = launch_enrolled();
+
+    let crashes = target
+        .call(1, "debug.crashes", serde_json::json!({}))
+        .unwrap()
+        .expect("debug.crashes should answer");
+
+    assert!(crashes["record"].is_null());
+    assert_eq!(crashes["panics_in_log"], serde_json::json!([]));
+}
+
+/// The operator sees and drives the screen the way the E2E channel does.
+///
+/// Verifies: REQ-RMT-026
+#[test]
+fn the_operator_looks_at_the_screen_through_ui_methods() {
+    let (_guard, _relay, _app, target) = launch_enrolled();
+
+    let windows = target
+        .call(1, "ui.windows", serde_json::json!({}))
+        .unwrap()
+        .unwrap();
+    assert_eq!(windows, serde_json::json!(["main"]));
+
+    let body = target
+        .call(2, "ui.query", serde_json::json!({ "selector": "body" }))
+        .unwrap()
+        .unwrap();
+    assert_eq!(body["exists"], true);
+    assert_eq!(body["visible"], true);
+
+    let missing = target
+        .call(
+            3,
+            "ui.click",
+            serde_json::json!({ "selector": "#nothing-here" }),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(missing["performed"], false);
+}
+
+/// An app command called over the relay does what the same call from the screen
+/// does: the change is saved and the settings in effect are the new ones.
+///
+/// Verifies: REQ-RMT-026
+#[test]
+fn the_operator_changes_a_setting_the_way_the_screen_does() {
+    let (_guard, _relay, app, target) = launch_enrolled();
+    let before = app.audio_settings().unwrap()["buffer_size"]
+        .as_u64()
+        .unwrap();
+    let wanted = if before == 128 { 64 } else { 128 };
+
+    let answer = target
+        .call(
+            1,
+            "settings_change",
+            serde_json::json!({ "change": { "setting": "buffer_size", "samples": wanted } }),
+        )
+        .unwrap()
+        .expect("settings_change should be accepted");
+
+    assert_eq!(answer["buffer_size"], wanted);
+    assert_eq!(app.audio_settings().unwrap()["buffer_size"], wanted);
+}
+
+/// A method the table does not list is refused over the relay, with a
+/// code the operator can act on, and nothing runs.
+///
+/// Verifies: REQ-RMT-022
+/// Verifies: REQ-RMT-024
+#[test]
+fn a_method_that_is_not_listed_is_refused_over_the_relay() {
+    let (_guard, _relay, _app, target) = launch_enrolled();
+
+    let refused = target
+        .call(1, "no_such_command", serde_json::json!({}))
+        .unwrap()
+        .expect_err("an unlisted method should be refused");
+
+    assert!(refused.contains("unknown_method"), "{}", refused);
 }
 
 // ---------------------------------------------------------------------------

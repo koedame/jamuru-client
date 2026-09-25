@@ -92,7 +92,7 @@ flowchart LR
 | `app.invoke` | アプリの任意のコマンドを、画面と同じ IPC で呼ぶ |
 | `ui.dom` / `ui.query` / `ui.click` / `ui.input` / `ui.windows` | 画面の観測と操作（E2E の制御チャネルと同じもの） |
 | `debug.info` | バージョン・ビルド・OS・音声デバイスの一覧（デバイス ID を含む）・設定・セッションの状態 |
-| `debug.logs` | 診断ログ（`jamjam.log`）の末尾または続き。1 回の返事は 512 KiB まで |
+| `debug.logs` | 診断ログ（`jamjam.log`）の末尾または続き。1 回の返事は 256 KiB まで（`next_offset` から続きを読む） |
 | `debug.crashes` | 直近のクラッシュ記録（panic の場所）。ログにある panic の行も `debug.logs` で読める |
 | `debug.restart` / `debug.update_apply` | アプリの再起動・更新の適用（セッション中でも待たずに行う）。再起動後は自動で繋ぎ直す |
 | `debug.screenshot` | 画面の PNG |
@@ -154,7 +154,7 @@ JSON のテキストフレーム。1 フレームは 1 MiB まで。
 - 要求は同時に何本でも送れる。返事は `id` で対応させ、順序は保証しない
 - 操作する側は、返事が 30 秒来なければ諦める。操作される側は、1 つのメソッドを 25 秒で切って `timeout` を返す
 - 1 MiB を超えうる結果は、メソッドが自分で分ける（ログは「続きの位置」を返す、録音は時間に上限を付ける、画面は縮小する）
-- イベントは、口ごとに決めた名前のものだけを流す。デバッグの口は `debug.subscribe` で名前を選ぶ
+- イベントは、口ごとに許した名前のものだけを、選ばせずに流す（表 `EVENTS`）。いまは `audio:config-changed` と `i18n:language-changed`
 
 #### 端末の登録の確かめ方（デバッグの口）
 

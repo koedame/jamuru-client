@@ -206,7 +206,9 @@ app_commands! {
 
 /// Every method in the table, app commands first.
 pub fn all_methods() -> impl Iterator<Item = &'static Method> {
-    APP_METHODS.iter().chain(super::native_methods().iter())
+    APP_METHODS
+        .iter()
+        .chain(super::native_groups().iter().flat_map(|group| group.iter()))
 }
 
 /// The row for `name`, if there is one.

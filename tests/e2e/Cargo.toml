@@ -46,6 +46,10 @@ tempfile = "3"
 # Writing a known device identity into the throwaway $HOME, in the app's own
 # file format (base64 key). Same crate and version the app uses for it.
 data-encoding = "2"
+# A stand-in for the server's relay, for the remote-operation scenarios
+# (ADR-044): it speaks the app's WebSocket protocol on loopback.
+tokio-tungstenite = "0.30"
+futures-util = "0.3"
 
 # SSH for remote node control (optional)
 # ssh2 = { version = "0.9", optional = true }
