@@ -45,10 +45,15 @@ import {
   streamingStatus,
   streamingSetMute,
   streamingSetMonitoring,
-  streamingSetPeerVolume,
-  streamingSetPeerPan,
-  streamingSetLocalVolume,
-  streamingSetLocalPan,
+  mixerGet,
+  mixerSetLocalVolume,
+  mixerSetLocalPan,
+  mixerSetPeerVolume,
+  mixerSetPeerPan,
+  mixerSetPeerMuted,
+  MIXER_CHANGED,
+  type MixerPeerStrip,
+  type MixerSnapshot,
   configGetConnectionHistory,
   configRemoveConnectionHistory,
   configGetSampleRate,
@@ -74,23 +79,19 @@ export interface MainScreenProps {
   helper?: { name: string };
 }
 
-interface ChannelState {
-  volume: number;
-  pan: number;
-  isMuted: boolean;
-}
+/** A participant's strip until the backend has told of it. */
+const DEFAULT_PEER_STRIP: MixerPeerStrip = { volume: 80, pan: 0, muted: false };
+const DEFAULT_LOCAL_STRIP = { volume: 80, pan: 0 };
 
-/** Clone-and-patch one peer's channel state; no-op if the peer isn't tracked yet. */
-function withPeerChannelPatch(
-  prev: Map<string, ChannelState>,
-  channelId: string,
-  patch: Partial<ChannelState>
-): Map<string, ChannelState> {
-  const current = prev.get(channelId);
-  if (!current) return prev;
-  const next = new Map(prev);
-  next.set(channelId, { ...current, ...patch });
-  return next;
+/** `mixer` with `patch` applied to a participant's strip, if they have one. */
+function withPeer(
+  mixer: MixerSnapshot,
+  peerId: string,
+  patch: Partial<MixerPeerStrip>
+): MixerSnapshot {
+  const current = mixer.peers[peerId];
+  if (!current) return mixer;
+  return { ...mixer, peers: { ...mixer.peers, [peerId]: { ...current, ...patch } } };
 }
 
 export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
@@ -124,13 +125,10 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [leavePending, setLeavePending] = useState(false);
 
-  // Mixer channel states for MixerPanel
-  const [localChannelState, setLocalChannelState] = useState<ChannelState>({
-    volume: 80,
-    pan: 0,
-    isMuted: false,
-  });
-  const [peerChannelStates, setPeerChannelStates] = useState<Map<string, ChannelState>>(new Map());
+  // Where the faders stand, as the backend has them (null until it has
+  // answered). The microphone's mute is the audio's, read with its status.
+  const [mixer, setMixer] = useState<MixerSnapshot | null>(null);
+  const [isLocalMuted, setIsLocalMuted] = useState(false);
   // Whether the user hears their own input directly. Off at the start of every
   // session (the backend resets it) - a monitored microphone can feed back.
   const [isMonitoring, setIsMonitoring] = useState(false);
@@ -162,6 +160,32 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       unlisten?.();
     };
   }, [showSession]);
+
+  // The faders, the same way: an announcement is numbered, and listening comes first.
+  const shownMixerRevision = useRef(-1);
+  const showMixer = useCallback((next: MixerSnapshot) => {
+    if (next.revision < shownMixerRevision.current) return;
+    shownMixerRevision.current = next.revision;
+    setMixer(next);
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listenEvent<MixerSnapshot>(MIXER_CHANGED, showMixer)
+      .then((stop) => {
+        if (cancelled) {
+          stop();
+          return;
+        }
+        unlisten = stop;
+        return mixerGet().then(showMixer);
+      })
+      .catch((e) => console.error("Failed to read the mixer:", e));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [showMixer]);
 
   const phase = session?.phase ?? "connecting_server";
   const room = session?.room ?? null;
@@ -447,7 +471,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
           setConnectionState(status.connection_state);
           setConnectionError(status.connection_error);
           setDelayAdjustments(status.audio_quality?.delay_adjustments ?? 0);
-          setLocalChannelState((prev) => ({ ...prev, isMuted: status.is_muted }));
+          setIsLocalMuted(status.is_muted);
           setIsMonitoring(status.is_monitoring);
           setInputLevel(status.input_level);
           setOutputLevel(status.output_level);
@@ -514,87 +538,64 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     }
   }, []);
 
-  // Handle channel volume change from MixerPanel
+  // Handle channel volume change from MixerPanel. The fader moves at once; the
+  // backend's announcement then says where it stands.
   const handleChannelVolumeChange = useCallback(async (channelId: string, volume: number) => {
-    if (channelId === "local") {
-      setLocalChannelState((prev) => ({ ...prev, volume }));
-      try {
-        // Convert 0-100 fader range to 0-200 backend range (100 = unity)
-        const backendVolume = Math.round(volume * 2);
-        await streamingSetLocalVolume(backendVolume);
-      } catch (e) {
-        console.error("Failed to set local volume:", e);
-      }
-    } else {
-      // Peer channel. Peer mute is implemented as backend volume 0 (there is
-      // no separate mute flag on the wire), so while muted keep sending 0 —
-      // otherwise dragging the fader would audibly un-mute it even though
-      // the UI still shows "muted". The stored volume still updates so it
-      // takes effect immediately once un-muted.
-      let effectiveVolume = volume;
-      setPeerChannelStates((prev) => {
-        const current = prev.get(channelId);
-        if (!current) return prev;
-        effectiveVolume = current.isMuted ? 0 : volume;
-        return withPeerChannelPatch(prev, channelId, { volume });
-      });
-      try {
-        // Convert 0-100 fader range to 0-200 backend range (100 = unity)
-        const backendVolume = Math.round(effectiveVolume * 2);
-        await streamingSetPeerVolume(backendVolume);
-      } catch (e) {
-        console.error("Failed to set peer volume:", e);
-      }
+    setMixer((prev) =>
+      prev &&
+      (channelId === "local"
+        ? { ...prev, local: { ...prev.local, volume } }
+        : withPeer(prev, channelId, { volume }))
+    );
+    try {
+      showMixer(
+        channelId === "local"
+          ? await mixerSetLocalVolume(volume)
+          : await mixerSetPeerVolume(channelId, volume)
+      );
+    } catch (e) {
+      console.error("Failed to set the volume:", e);
     }
-  }, []);
+  }, [showMixer]);
 
   // Handle channel pan change from MixerPanel
   const handleChannelPanChange = useCallback(async (channelId: string, pan: number) => {
-    if (channelId === "local") {
-      setLocalChannelState((prev) => ({ ...prev, pan }));
-      try {
-        await streamingSetLocalPan(pan);
-      } catch (e) {
-        console.error("Failed to set local pan:", e);
-      }
-    } else {
-      setPeerChannelStates((prev) => withPeerChannelPatch(prev, channelId, { pan }));
-      try {
-        await streamingSetPeerPan(pan);
-      } catch (e) {
-        console.error("Failed to set peer pan:", e);
-      }
+    setMixer((prev) =>
+      prev &&
+      (channelId === "local"
+        ? { ...prev, local: { ...prev.local, pan } }
+        : withPeer(prev, channelId, { pan }))
+    );
+    try {
+      showMixer(
+        channelId === "local"
+          ? await mixerSetLocalPan(pan)
+          : await mixerSetPeerPan(channelId, pan)
+      );
+    } catch (e) {
+      console.error("Failed to set the pan:", e);
     }
-  }, []);
+  }, [showMixer]);
 
   // Handle channel mute toggle from MixerPanel
   const handleChannelMuteToggle = useCallback(async (channelId: string) => {
     if (channelId === "local") {
-      // Toggle local mute through backend
       try {
-        const newMuteState = !localChannelState.isMuted;
+        const newMuteState = !isLocalMuted;
         await streamingSetMute(newMuteState);
-        setLocalChannelState((prev) => ({ ...prev, isMuted: newMuteState }));
+        setIsLocalMuted(newMuteState);
       } catch (e) {
         console.error("Failed to toggle mute:", e);
       }
     } else {
-      // Peer mute - update local state (mute is done by setting volume to 0).
-      // The IPC call happens after setState returns, not inside the updater:
-      // updaters must stay pure (React invokes them twice in StrictMode/dev).
-      let effectiveVolume: number | null = null;
-      setPeerChannelStates((prev) => {
-        const current = prev.get(channelId);
-        if (!current) return prev;
-        const newMuted = !current.isMuted;
-        effectiveVolume = newMuted ? 0 : current.volume;
-        return withPeerChannelPatch(prev, channelId, { isMuted: newMuted });
-      });
-      if (effectiveVolume !== null) {
-        streamingSetPeerVolume(Math.round(effectiveVolume * 2)).catch(console.error);
+      try {
+        const muted = !(mixer?.peers[channelId] ?? DEFAULT_PEER_STRIP).muted;
+        showMixer(await mixerSetPeerMuted(channelId, muted));
+      } catch (e) {
+        console.error("Failed to toggle mute:", e);
       }
     }
-  }, [localChannelState.isMuted]);
+  }, [isLocalMuted, mixer, showMixer]);
 
   // Handle monitor toggle from the local channel strip
   const handleChannelMonitorToggle = useCallback(async () => {
@@ -611,6 +612,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // consumed as a value (`channels={mixerChannels}`), never called as a
   // function — a useCallback here would memoize a function reference that's
   // immediately invoked, which achieves nothing.
+  const local = mixer?.local ?? DEFAULT_LOCAL_STRIP;
   const mixerChannels = useMemo((): Channel[] => {
     const channels: Channel[] = [];
 
@@ -621,62 +623,35 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       type: "local",
       sampleRate: localSampleRate,
       channelCount: localChannelCount,
-      levelL: localChannelState.isMuted ? 0 : inputLevel,
-      levelR: localChannelState.isMuted ? 0 : inputLevel, // Mono input shown as dual
-      volume: localChannelState.volume,
-      pan: localChannelState.pan,
-      isMuted: localChannelState.isMuted,
+      levelL: isLocalMuted ? 0 : inputLevel,
+      levelR: isLocalMuted ? 0 : inputLevel, // Mono input shown as dual
+      volume: local.volume,
+      pan: local.pan,
+      isMuted: isLocalMuted,
       isMonitoring,
     });
 
     // Peer channels
     if (phase === "connected") {
       participants.forEach((peer) => {
-        const peerState = peerChannelStates.get(peer.id) || {
-          volume: 80,
-          pan: 0,
-          isMuted: false,
-        };
+        const peerState = mixer?.peers[peer.id] ?? DEFAULT_PEER_STRIP;
         channels.push({
           id: peer.id,
           name: peer.name,
           type: "remote",
           sampleRate: peerAudio?.sample_rate ?? 48000,
           channelCount: peerAudio?.channel_count ?? 2,
-          levelL: peerState.isMuted ? 0 : outputLevel,
-          levelR: peerState.isMuted ? 0 : outputLevel,
+          levelL: peerState.muted ? 0 : outputLevel,
+          levelR: peerState.muted ? 0 : outputLevel,
           volume: peerState.volume,
           pan: peerState.pan,
-          isMuted: peerState.isMuted,
+          isMuted: peerState.muted,
         });
       });
     }
 
     return channels;
-  }, [localChannelState, isMonitoring, peerName, localSampleRate, localChannelCount, inputLevel, phase, participants, peerChannelStates, peerAudio, outputLevel]);
-
-  // Initialize peer channel states when participants change, and prune any
-  // state left behind for a peer who has since left.
-  useEffect(() => {
-    if (phase !== "connected") return;
-    const currentIds = new Set(participants.map((p) => p.id));
-    setPeerChannelStates((prevStates) => {
-      const newStates = new Map(prevStates);
-      for (const key of newStates.keys()) {
-        if (!currentIds.has(key)) newStates.delete(key);
-      }
-      participants.forEach((peer) => {
-        if (!newStates.has(peer.id)) {
-          newStates.set(peer.id, {
-            volume: 80,
-            pan: 0,
-            isMuted: false,
-          });
-        }
-      });
-      return newStates;
-    });
-  }, [phase, participants]);
+  }, [local, isLocalMuted, isMonitoring, peerName, localSampleRate, localChannelCount, inputLevel, phase, participants, mixer, peerAudio, outputLevel]);
 
   // Map the session to ConnectionPanel state
   const getConnectionPanelState = (): ConnectionState => {

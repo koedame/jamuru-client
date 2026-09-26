@@ -141,16 +141,16 @@ app_commands! {
     [Access::ALL] "自分のマイクのミュートの状態を読む" crate::streaming::streaming_get_mute;
     [Access::ALL] "自分の音のモニターを切り替える" crate::streaming::streaming_set_monitoring;
     [Access::ALL] "入力のレベルを読む" crate::streaming::streaming_get_input_level;
-    [Access::ALL] "相手ごとの音量を変える" crate::streaming::streaming_set_peer_volume;
-    [Access::ALL] "相手ごとの音量を読む" crate::streaming::streaming_get_peer_volume;
+    // Where the faders stand is the mixer's: a helper's screen draws the same
+    // mixer as the person's own and moves the same faders.
+    [Access::ALL] "ミキサーのフェーダーの位置を読む" crate::mixer::mixer_get;
+    [Access::ALL] "自分のマイクの音量を変える" crate::mixer::mixer_set_local_volume;
+    [Access::ALL] "自分のマイクの左右の位置を変える" crate::mixer::mixer_set_local_pan;
+    [Access::ALL] "相手ごとの音量を変える" crate::mixer::mixer_set_peer_volume;
+    [Access::ALL] "相手ごとの左右の位置を変える" crate::mixer::mixer_set_peer_pan;
+    [Access::ALL] "相手ごとの音を消す・戻す" crate::mixer::mixer_set_peer_muted;
     [Access::ALL] "全体の音量を変える" crate::streaming::streaming_set_master_volume;
     [Access::ALL] "全体の音量を読む" crate::streaming::streaming_get_master_volume;
-    [Access::ALL] "相手ごとの左右の位置を変える" crate::streaming::streaming_set_peer_pan;
-    [Access::ALL] "相手ごとの左右の位置を読む" crate::streaming::streaming_get_peer_pan;
-    [Access::ALL] "自分の音量を変える" crate::streaming::streaming_set_local_volume;
-    [Access::ALL] "自分の音量を読む" crate::streaming::streaming_get_local_volume;
-    [Access::ALL] "自分の左右の位置を変える" crate::streaming::streaming_set_local_pan;
-    [Access::ALL] "自分の左右の位置を読む" crate::streaming::streaming_get_local_pan;
 
     // The whole config includes the server address and the rooms visited.
     [Access::NO_HELP] "設定ファイルの全体を読む" crate::config::config_load;
@@ -420,24 +420,22 @@ mod tests {
             "diagnostics_run_cpu",
             "diagnostics_run_network",
             "greet",
+            "mixer_get",
+            "mixer_set_local_pan",
+            "mixer_set_local_volume",
+            "mixer_set_peer_muted",
+            "mixer_set_peer_pan",
+            "mixer_set_peer_volume",
             "session_get",
             "settings_change",
             "settings_get",
             "signaling_get_chat_messages",
             "streaming_get_input_level",
-            "streaming_get_local_pan",
-            "streaming_get_local_volume",
             "streaming_get_master_volume",
             "streaming_get_mute",
-            "streaming_get_peer_pan",
-            "streaming_get_peer_volume",
-            "streaming_set_local_pan",
-            "streaming_set_local_volume",
             "streaming_set_master_volume",
             "streaming_set_monitoring",
             "streaming_set_mute",
-            "streaming_set_peer_pan",
-            "streaming_set_peer_volume",
             "streaming_status",
             "usage_preview",
         ];

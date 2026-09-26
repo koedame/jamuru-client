@@ -100,6 +100,7 @@ export function StereoFader({
         onKeyDown={handleKeyDown}
         disabled={disabled}
         className="stereo-fader__input"
+        data-testid="channel-fader"
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={100}

@@ -12,7 +12,7 @@ import { act, render, screen, waitFor, fireEvent, within } from '@testing-librar
 
 import i18n from '../i18n';
 import { MainScreen } from './MainScreen';
-import type { SessionSnapshot } from '../lib/tauri';
+import type { MixerSnapshot, SessionSnapshot } from '../lib/tauri';
 
 const invoke = vi.hoisted(() => vi.fn());
 /** What the screen listens for, by event name. */
@@ -69,8 +69,19 @@ function inRoom(changes: Partial<SessionSnapshot> = {}): SessionSnapshot {
 
 /** What the backend says the session is, for `session_get`. */
 let current: SessionSnapshot | Promise<SessionSnapshot>;
+/** Where the backend says the faders stand, for `mixer_get`. */
+let mixerNow: MixerSnapshot;
 /** Commands the screen sent to the backend, in order, with their arguments. */
 let calls: Array<{ cmd: string; args: Record<string, unknown> | undefined }>;
+
+function faders(changes: Partial<MixerSnapshot> = {}): MixerSnapshot {
+  return {
+    revision: 1,
+    local: { volume: 80, pan: 0 },
+    peers: { b: { volume: 80, pan: 0, muted: false } },
+    ...changes,
+  };
+}
 
 function callsTo(cmd: string) {
   return calls.filter((c) => c.cmd === cmd);
@@ -88,6 +99,7 @@ beforeAll(async () => {
 beforeEach(() => {
   calls = [];
   current = snapshot();
+  mixerNow = faders();
   openUrl.handler = null;
   listeners.clear();
   invoke.mockReset();
@@ -96,6 +108,8 @@ beforeEach(() => {
     switch (cmd) {
       case 'session_get':
         return current;
+      case 'mixer_get':
+        return mixerNow;
       case 'streaming_status':
         return { is_active: false };
       case 'config_get_connection_history':
@@ -264,6 +278,99 @@ describe('MainScreen のルームの表示', () => {
 
     expect(callsTo('session_reconnect')).toHaveLength(1);
     expect(screen.getByText(/no route to host/)).toBeInTheDocument();
+  });
+});
+
+describe('MainScreen のミキサー', () => {
+  const peerFader = () => screen.findByLabelText(i18n.t('mixer.channel.volumeLabel', { name: 'Aki' }));
+
+  // Verifies: REQ-RMT-031
+  it('バックエンドのフェーダーの位置が相手の音量 30 のとき、その相手のフェーダーが 30 を示すこと', async () => {
+    current = inRoom();
+    mixerNow = faders({ peers: { b: { volume: 30, pan: 0, muted: false } } });
+
+    render(<MainScreen />);
+
+    expect(await peerFader()).toHaveValue('30');
+  });
+
+  // Verifies: REQ-RMT-031
+  it('バックエンドが相手の音量が変わったと伝えたとき、フェーダーがその位置に動くこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await waitFor(() => expect(listeners.has('mixer:changed')).toBe(true));
+    expect(await peerFader()).toHaveValue('80');
+
+    act(() =>
+      listeners.get('mixer:changed')!({
+        payload: faders({ revision: 2, peers: { b: { volume: 45, pan: 0, muted: false } } }),
+      })
+    );
+
+    await waitFor(async () => expect(await peerFader()).toHaveValue('45'));
+  });
+
+  // Verifies: REQ-RMT-031
+  it('古いフェーダーの通知があとから届いたとき、新しい位置のままであること', async () => {
+    current = inRoom();
+    mixerNow = faders({ revision: 5, peers: { b: { volume: 45, pan: 0, muted: false } } });
+    render(<MainScreen />);
+    expect(await peerFader()).toHaveValue('45');
+
+    act(() =>
+      listeners.get('mixer:changed')!({
+        payload: faders({ revision: 4, peers: { b: { volume: 10, pan: 0, muted: false } } }),
+      })
+    );
+
+    expect(await peerFader()).toHaveValue('45');
+  });
+
+  // Verifies: REQ-RMT-031
+  it('相手のフェーダーを動かしたとき、その参加者の ID と値で mixer_set_peer_volume を呼ぶこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+
+    fireEvent.change(await peerFader(), { target: { value: '30' } });
+
+    await waitFor(() =>
+      expect(callsTo('mixer_set_peer_volume')).toEqual([
+        { cmd: 'mixer_set_peer_volume', args: { peerId: 'b', volume: 30 } },
+      ])
+    );
+  });
+
+  // Verifies: REQ-RMT-031
+  it('自分のフェーダーを動かしたとき、mixer_set_local_volume を呼ぶこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+
+    fireEvent.change(await screen.findByLabelText(i18n.t('mixer.channel.volumeLabel', { name: i18n.t('mixer.self') })), {
+      target: { value: '55' },
+    });
+
+    await waitFor(() =>
+      expect(callsTo('mixer_set_local_volume')).toEqual([
+        { cmd: 'mixer_set_local_volume', args: { volume: 55 } },
+      ])
+    );
+  });
+
+  // Verifies: REQ-RMT-031
+  it('相手のミュートを押したとき、mixer_set_peer_muted をミュートにして呼び、戻すと外すこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    const strip = (await screen.findAllByTestId('channel-strip')).find(
+      (el) => el.getAttribute('data-channel-id') === 'b'
+    )!;
+
+    fireEvent.click(within(strip).getByTestId('channel-mute'));
+
+    await waitFor(() =>
+      expect(callsTo('mixer_set_peer_muted')).toEqual([
+        { cmd: 'mixer_set_peer_muted', args: { peerId: 'b', muted: true } },
+      ])
+    );
   });
 });
 

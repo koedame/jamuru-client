@@ -26,6 +26,19 @@ const OWN_MUTE: &str = concat!(
     " [data-testid='channel-mute']"
 );
 
+const PEER_FADER: &str = concat!(
+    "[data-testid='channel-strip'][data-channel-type='remote']",
+    " [data-testid='channel-fader']"
+);
+const PEER_PAN: &str = concat!(
+    "[data-testid='channel-strip'][data-channel-type='remote']",
+    " [data-testid='channel-pan']"
+);
+const PEER_MUTE: &str = concat!(
+    "[data-testid='channel-strip'][data-channel-type='remote']",
+    " [data-testid='channel-mute']"
+);
+
 pub struct SessionScreen<'a> {
     driver: &'a Driver,
 }
@@ -123,6 +136,22 @@ impl<'a> SessionScreen<'a> {
                 )
             },
         )
+    }
+
+    /// The volume fader of the other participant's channel, 0 to 100. Set it
+    /// with `select_value`, as a person drags it.
+    pub fn peer_fader(&self) -> Element<'a> {
+        self.element(PEER_FADER, "peer volume fader")
+    }
+
+    /// The pan of the other participant's channel, -100 to 100.
+    pub fn peer_pan(&self) -> Element<'a> {
+        self.element(PEER_PAN, "peer pan")
+    }
+
+    /// Mute of the other participant's channel.
+    pub fn peer_mute_button(&self) -> Element<'a> {
+        self.element(PEER_MUTE, "peer mute button")
     }
 
     /// Mute toggle of the user's own channel. `aria-pressed` reflects the

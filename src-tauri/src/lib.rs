@@ -15,6 +15,7 @@ mod diagnostics;
 mod e2e_control;
 mod help_link;
 mod logging;
+mod mixer;
 mod rpc;
 mod session;
 mod settings;
@@ -119,6 +120,7 @@ pub fn run() {
     config_state.on_saved(move |config| saved_usage.settings_saved(config));
     app.manage(config_state);
     app.manage(usage);
+    app.manage(mixer::MixerState::new());
     app.manage(session::SessionState::new());
     app.manage(help_link::HelpLinks::default());
     // What a portal over the relay hears (a helper, and the debug portal of a
