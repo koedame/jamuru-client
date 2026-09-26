@@ -11,6 +11,11 @@ pub enum AudioError {
     #[error("Failed to open device: {0}")]
     DeviceOpenFailed(String),
 
+    /// The driver did not answer in time. The call may still be running: the
+    /// device is stuck, not necessarily gone.
+    #[error("Device is not responding: {0}")]
+    DeviceUnresponsive(String),
+
     #[error("Unsupported configuration: {0}")]
     UnsupportedConfig(String),
 

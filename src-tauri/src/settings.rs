@@ -219,6 +219,9 @@ impl Devices {
     /// The devices the system lists. A direction that cannot be listed counts
     /// as offering none: that refuses choosing one of its devices, but leaves
     /// every other setting (buffer size, sample rate, ...) changeable.
+    ///
+    /// Both directions are listed at once, so a driver that does not answer
+    /// costs one wait, not two.
     pub(crate) fn list() -> Self {
         let or_none = |listed: Result<Vec<AudioDeviceInfo>, String>, kind: &str| {
             listed.unwrap_or_else(|e| {
@@ -226,10 +229,17 @@ impl Devices {
                 Vec::new()
             })
         };
-        Self {
-            input: or_none(audio::input_devices(), "input"),
-            output: or_none(audio::output_devices(), "output"),
-        }
+        std::thread::scope(|scope| {
+            let output = scope.spawn(audio::output_devices);
+            let input = audio::input_devices();
+            Self {
+                input: or_none(input, "input"),
+                output: or_none(
+                    output.join().unwrap_or_else(|_| Err("panicked".into())),
+                    "output",
+                ),
+            }
+        })
     }
 }
 
@@ -452,9 +462,13 @@ pub fn snapshot(config: &AppConfig, devices: Devices, revision: u64) -> AudioSet
     }
 }
 
-/// Orders the changes: one at a time from reading the devices to announcing
-/// the result, each numbered, so the settings windows can tell a newer
-/// announcement from an older one.
+/// Orders the changes: one at a time from planning to announcing the result,
+/// each numbered, so the settings windows can tell a newer announcement from
+/// an older one.
+///
+/// The devices are listed before a change takes its turn, never while it
+/// holds it: a driver that does not answer must not make every other setting
+/// wait behind the listing.
 #[derive(Default)]
 pub struct SettingsState {
     changing: Mutex<()>,
@@ -474,14 +488,27 @@ impl SettingsState {
     }
 }
 
+/// The devices on offer, listed off the async runtime's threads: the listing
+/// waits for the driver.
+async fn devices_on_offer() -> Devices {
+    match tauri::async_runtime::spawn_blocking(Devices::list).await {
+        Ok(devices) => devices,
+        Err(e) => {
+            tracing::warn!("Listing the devices failed: {}", e);
+            Devices::default()
+        }
+    }
+}
+
 /// The audio settings in effect.
 pub async fn current<R: Runtime>(app: &AppHandle<R>) -> Result<AudioSettings, SettingsError> {
+    let devices = devices_on_offer().await;
     let settings_state = app.state::<SettingsState>();
     let _changing = settings_state.changing.lock().await;
     let config = app.state::<ConfigState>().get()?;
     Ok(snapshot(
         &config,
-        Devices::list(),
+        devices,
         settings_state.revision.load(Ordering::SeqCst),
     ))
 }
@@ -492,10 +519,10 @@ pub async fn apply<R: Runtime>(
     app: &AppHandle<R>,
     change: &SettingChange,
 ) -> Result<AudioSettings, SettingsError> {
+    let devices = devices_on_offer().await;
     let settings_state = app.state::<SettingsState>();
     let _changing = settings_state.changing.lock().await;
 
-    let devices = Devices::list();
     let (config, session) = app.state::<ConfigState>().update_with(|current| {
         plan(current, &devices, change).map(|plan| (plan.config, plan.session))
     })?;
@@ -651,7 +678,11 @@ mod tests {
             "the session reopens the device and fits the pair itself"
         );
         assert_eq!(
-            pair_in_use(&devices.input, &to_builtin.config.input_device_id, (5, Some(6))),
+            pair_in_use(
+                &devices.input,
+                &to_builtin.config.input_device_id,
+                (5, Some(6))
+            ),
             (1, Some(2)),
             "the stereo device is opened with its first two channels"
         );
@@ -665,10 +696,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            pair_in_use(&devices.input, &back.config.input_device_id, (
-                back.config.input_channel_l,
-                back.config.input_channel_r
-            )),
+            pair_in_use(
+                &devices.input,
+                &back.config.input_device_id,
+                (back.config.input_channel_l, back.config.input_channel_r)
+            ),
             (5, Some(6)),
             "back on the interface, the chosen channels are in use again"
         );
@@ -734,8 +766,14 @@ mod tests {
 
         let shown = snapshot(&config, devices, 1);
 
-        assert_eq!((shown.input_channels.left, shown.input_channels.right), (1, Some(2)));
-        assert_eq!((shown.output_channels.left, shown.output_channels.right), (1, Some(2)));
+        assert_eq!(
+            (shown.input_channels.left, shown.input_channels.right),
+            (1, Some(2))
+        );
+        assert_eq!(
+            (shown.output_channels.left, shown.output_channels.right),
+            (1, Some(2))
+        );
         assert_eq!(
             (config.input_channel_l, config.input_channel_r),
             (5, Some(6)),
@@ -752,7 +790,12 @@ mod tests {
         let (mut config, devices) = setup();
         config.input_device_id = Some("alsa:builtin".to_string());
 
-        let plan = plan(&config, &devices, &input_channel(ChannelSide::Left, Some(2))).unwrap();
+        let plan = plan(
+            &config,
+            &devices,
+            &input_channel(ChannelSide::Left, Some(2)),
+        )
+        .unwrap();
 
         assert_eq!(
             (plan.config.input_channel_l, plan.config.input_channel_r),
@@ -1214,6 +1257,42 @@ mod tests {
                 StreamingCommand::SetTransmitChannels(1)
             );
             assert_eq!(*announced.lock().unwrap(), vec![settings]);
+        }
+
+        /// The failure of the ticket: the driver stops answering, and every
+        /// read and change of the settings waited for it, one listing at a time.
+        ///
+        /// Verifies: REQ-AUD-123
+        #[tokio::test]
+        async fn when_the_audio_driver_hangs_the_settings_still_read_and_change_within_the_limit() {
+            use jamjam::audio::fault::{self, Call};
+            use std::time::{Duration, Instant};
+
+            let dir = tempfile::tempdir().unwrap();
+            let app = app(&dir, AppConfig::default());
+            // The listing the settings fall back on once the driver hangs
+            let before = current(app.handle()).await.unwrap();
+            fault::stall(Call::ListInputs, Duration::from_secs(10));
+            fault::stall(Call::ListOutputs, Duration::from_secs(10));
+            let started = Instant::now();
+
+            let hung = current(app.handle()).await.unwrap();
+            let changed = apply(app.handle(), &SettingChange::TransmitChannels { count: 1 })
+                .await
+                .unwrap();
+            let read_again = current(app.handle()).await.unwrap();
+
+            fault::stall(Call::ListInputs, Duration::ZERO);
+            fault::stall(Call::ListOutputs, Duration::ZERO);
+            assert_eq!(hung.input_devices, before.input_devices);
+            assert_eq!(changed.transmit_channels, 1);
+            assert_eq!(saved(&dir).transmit_channels, 1);
+            assert_eq!(read_again.transmit_channels, 1);
+            assert!(
+                started.elapsed() < Duration::from_secs(6),
+                "the settings waited {:?} for a driver that hangs for 10 s",
+                started.elapsed()
+            );
         }
 
         /// Verifies: REQ-AUD-107

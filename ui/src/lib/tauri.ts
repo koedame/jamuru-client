@@ -492,6 +492,21 @@ export interface StreamingStatus {
   connection_state: string | null;
   /** Why the connection failed, when connection_state is "failed" */
   connection_error: string | null;
+  /**
+   * Devices the audio thread could not open, one per side at most (ADR-050).
+   * Read whether or not a session is active: one that could not open its
+   * device never became active.
+   */
+  device_problems: DeviceProblem[];
+}
+
+/** A device the audio thread could not open */
+export interface DeviceProblem {
+  side: "input" | "output";
+  /** "unresponsive": the driver did not answer in time. "failed": it refused. */
+  trouble: "unresponsive" | "failed";
+  /** The device's name, when the system's list has one for it */
+  device: string | null;
 }
 
 /**

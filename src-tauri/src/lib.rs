@@ -4,6 +4,7 @@
 //! and multi-window management.
 
 mod audio;
+mod audio_slot;
 #[cfg(feature = "debug-tools")]
 mod audio_tap;
 mod config;

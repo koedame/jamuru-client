@@ -1073,6 +1073,51 @@ fn any_command_the_app_registers_can_be_called_and_an_unknown_one_is_refused() {
     );
 }
 
+/// A driver that has stopped answering (macOS's `coreaudiod`, an interface's
+/// driver) hangs every call that lists or opens a device. The settings must not
+/// wait for it: each read and change answers within the limit on a listing,
+/// not once per listing that hangs.
+///
+/// Verifies: REQ-AUD-123
+#[test]
+fn when_the_audio_driver_hangs_the_settings_still_answer_within_seconds() {
+    let (_guard, app) = launch();
+    let devices_before = app.audio_settings().unwrap()["input_devices"].clone();
+    for call in ["list_inputs", "list_outputs", "open_input", "open_output"] {
+        app.invoke(
+            "debug.device_hang",
+            serde_json::json!({ "call": call, "seconds": 60 }),
+        )
+        .unwrap()
+        .unwrap_or_else(|e| panic!("debug.device_hang {} should answer: {}", call, e));
+    }
+    let started = std::time::Instant::now();
+
+    let read = app.audio_settings().unwrap();
+    let changed = app
+        .change_audio_setting(serde_json::json!({ "setting": "buffer_size", "samples": 128 }))
+        .unwrap();
+    let read_again = app.audio_settings().unwrap();
+
+    for call in ["list_inputs", "list_outputs", "open_input", "open_output"] {
+        let _ = app.invoke(
+            "debug.device_hang",
+            serde_json::json!({ "call": call, "seconds": 0 }),
+        );
+    }
+    assert_eq!(
+        read["input_devices"], devices_before,
+        "the devices shown while the driver hangs are the ones last listed"
+    );
+    assert_eq!(changed.unwrap()["buffer_size"], 128);
+    assert_eq!(read_again["buffer_size"], 128);
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "three settings calls took {:?} against a driver that hangs for 60 s",
+        started.elapsed()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Remote debugging through the relay (ADR-044)
 // ---------------------------------------------------------------------------

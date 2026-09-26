@@ -555,7 +555,18 @@
     "connected": "接続しました",
     "disconnected": "切断しました",
     "bandwidthRecovered": "帯域が回復しました",
-    "delayAdjusted": "バッファサイズを調整しました"
+    "delayAdjusted": "バッファサイズを調整しました",
+    "deviceProblem": {
+      "named": "（{{device}}）",
+      "unresponsive": {
+        "input": "入力デバイスが応答しません{{name}}",
+        "output": "出力デバイスが応答しません{{name}}"
+      },
+      "failed": {
+        "input": "入力デバイスを開けませんでした{{name}}",
+        "output": "出力デバイスを開けませんでした{{name}}"
+      }
+    }
   },
   "connectionHistory": {
     "title": "最近の接続",

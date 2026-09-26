@@ -557,7 +557,18 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "bandwidthRecovered": "Bandwidth recovered",
-    "delayAdjusted": "Buffer size adjusted"
+    "delayAdjusted": "Buffer size adjusted",
+    "deviceProblem": {
+      "named": " ({{device}})",
+      "unresponsive": {
+        "input": "Input device isn't responding{{name}}",
+        "output": "Output device isn't responding{{name}}"
+      },
+      "failed": {
+        "input": "Couldn't open the input device{{name}}",
+        "output": "Couldn't open the output device{{name}}"
+      }
+    }
   },
   "connectionHistory": {
     "title": "Recent Connections",

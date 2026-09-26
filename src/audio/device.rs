@@ -47,6 +47,7 @@ pub struct AudioDevice {
 /// # Errors
 /// Returns `AudioError::DeviceOpenFailed` if device enumeration fails.
 pub fn list_input_devices() -> Result<Vec<AudioDevice>, AudioError> {
+    super::fault::point(super::fault::Call::ListInputs);
     let host = cpal::default_host();
     let default_device = host.default_input_device();
     let default_id = default_device.as_ref().and_then(stable_device_id);
@@ -83,6 +84,7 @@ pub fn list_input_devices() -> Result<Vec<AudioDevice>, AudioError> {
 /// # Errors
 /// Returns `AudioError::DeviceOpenFailed` if device enumeration fails.
 pub fn list_output_devices() -> Result<Vec<AudioDevice>, AudioError> {
+    super::fault::point(super::fault::Call::ListOutputs);
     let host = cpal::default_host();
     let default_device = host.default_output_device();
     let default_id = default_device.as_ref().and_then(stable_device_id);

@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 211 |
-| うち must | 205 |
+| 要求 総数 | 212 |
+| うち must | 206 |
 | うち should | 6 |
-| 検証済み | 182 |
+| 検証済み | 183 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -53,6 +53,7 @@
 | REQ-AUD-120 | must | 受信側のパンは、届いた音がステレオかモノラルかで意味が変わる | `docs-spec/behavior/audio-quality.feature` | `src/audio/stream.rs`::a_centred_pan_leaves_the_sides_of_a_stereo_peer_alone<br/>`src/audio/stream.rs`::a_left_only_signal_from_a_stereo_peer_plays_on_the_left_only<br/>`src/audio/stream.rs`::panning_a_stereo_peer_turns_down_only_the_side_away_from_the_pan<br/>`src/audio/stream.rs`::the_pan_of_a_mono_peer_keeps_the_constant_power_law<br/>`tests/audio_quality_test.rs`::test_stereo_input_is_played_back_in_stereo |
 | REQ-AUD-121 | must | 左右に同じチャンネルを選んだ入力は、モノラルとして取り込む | `docs-spec/behavior/audio-quality.feature` | `src/audio/channels.rs`::test_a_stereo_transmit_with_no_right_channel_captures_the_left_as_one_channel<br/>`src/audio/channels.rs`::test_a_stereo_transmit_with_the_same_channel_on_both_sides_captures_it_once |
 | REQ-AUD-122 | must | デバイスに合わせた入出力チャンネルの当てはめは、デバイスを開くときだけに行い、保存した組を書き換えない | `docs-spec/behavior/audio-quality.feature` | `src-tauri/src/settings.rs`::a_mono_microphone_is_used_as_one_channel_without_changing_the_saved_stereo_pair<br/>`src-tauri/src/settings.rs`::changing_one_channel_on_a_device_that_lacks_the_saved_pair_starts_from_the_pair_in_use<br/>`src-tauri/src/settings.rs`::switching_to_a_mono_output_device_keeps_the_saved_pair_and_plays_its_only_channel<br/>`src-tauri/src/settings.rs`::switching_to_an_input_device_without_the_chosen_channels_keeps_the_saved_pair<br/>`src-tauri/src/settings.rs`::the_settings_show_the_channels_in_use_while_the_saved_pair_stays<br/>`src-tauri/src/settings.rs`::when_only_one_channel_of_the_pair_is_missing_the_whole_pair_falls_back |
+| REQ-AUD-123 | must | デバイスのドライバが固まっても、設定の読み書きと別のデバイスへの切り替えは待たされない | `docs-spec/behavior/audio-quality.feature` | `src-tauri/src/audio.rs`::when_the_driver_hangs_before_any_listing_it_says_so_instead_of_showing_no_devices<br/>`src-tauri/src/audio.rs`::when_the_driver_hangs_the_devices_are_shown_as_last_listed_and_not_asked_again<br/>`src-tauri/src/audio_slot.rs`::a_failed_open_is_reported_and_the_next_switch_still_works<br/>`src-tauri/src/audio_slot.rs`::switching_returns_at_once_and_the_result_comes_when_the_open_finishes<br/>`src-tauri/src/audio_slot.rs`::switching_to_another_device_while_one_hangs_does_not_wait_for_the_hung_open<br/>`src-tauri/src/audio_slot.rs`::what_a_given_up_open_returns_when_it_finally_does_is_not_reported<br/>`src-tauri/src/rpc/debug.rs`::a_call_into_the_driver_is_hung_by_name_and_lifted_with_zero_seconds<br/>`src-tauri/src/settings.rs`::when_the_audio_driver_hangs_the_settings_still_read_and_change_within_the_limit<br/>`src/audio/driver.rs`::a_call_that_never_returns_is_given_up_on_at_the_limit<br/>`src/audio/driver.rs`::a_call_that_returns_in_time_gives_its_result<br/>`src/audio/engine.rs`::opening_capture_on_a_driver_that_hangs_gives_up_at_the_limit_and_says_so<br/>`src/audio/engine.rs`::opening_playback_on_a_driver_that_hangs_gives_up_at_the_limit_and_says_so<br/>`tests/e2e/tests/gui.rs`::when_the_audio_driver_hangs_the_settings_still_answer_within_seconds |
 | REQ-CLI-001 | must | CLI でルームを作成でき、招待コードが表示される。他の参加者はそのコードで参加し、チャットが双方に届く | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CLI-002 | must | セッション中のコマンド（`/mute` `/unmute` `/stats` `/help` `/quit`）が解釈され、ミュート状態が切り替わる。コマンド以外はチャットとして送られる | `docs-spec/requirements.md` | `src/main.rs`::muting_without_audio_reports_that_there_is_nothing_to_mute<br/>`src/main.rs`::only_commands_are_intercepted<br/>`src/main.rs`::session_commands_are_recognised_and_act |
 | REQ-CLI-003 | must | プリセットの選択を保存でき、GUI と同じ設定ファイルに書かれる。未知のプリセット名は拒否される | `docs-spec/requirements.md` | `tests/cli_test.rs`::preset_use_refuses_a_name_that_is_not_a_preset<br/>`tests/cli_test.rs`::preset_use_saves_the_choice_where_the_app_reads_it |
