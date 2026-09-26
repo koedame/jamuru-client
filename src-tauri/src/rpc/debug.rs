@@ -281,7 +281,7 @@ struct ScreenshotParams {
 }
 
 /// The window as the user sees it, as a PNG. WebKitGTK can snapshot itself;
-/// the other webviews need their own calls, which are not written yet.
+/// WebView2 (Windows) needs its own call, which is not written yet.
 #[cfg(target_os = "linux")]
 async fn screenshot<R: Runtime>(
     app: &AppHandle<R>,
@@ -333,13 +333,97 @@ fn png_of(surface: cairo::Surface) -> Result<(i32, i32, Vec<u8>), String> {
     Ok((image.width(), image.height(), png))
 }
 
-#[cfg(not(target_os = "linux"))]
+/// The window as the user sees it, as a PNG. WKWebView takes its own snapshot
+/// (the image is the view's size in points).
+#[cfg(target_os = "macos")]
+async fn screenshot<R: Runtime>(
+    app: &AppHandle<R>,
+    params: ScreenshotParams,
+) -> Result<Value, RpcError> {
+    use block2::RcBlock;
+    use objc2_app_kit::NSImage;
+    use objc2_foundation::{MainThreadMarker, NSError};
+    use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
+
+    let label = params
+        .window
+        .as_deref()
+        .unwrap_or(super::webview::MAIN_WINDOW);
+    let window = app.get_webview_window(label).ok_or_else(|| {
+        RpcError::new(
+            Code::NoWindow,
+            format!("the window {:?} is not open", label),
+        )
+    })?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    window
+        .with_webview(move |webview| {
+            // `with_webview` runs on the main thread, where WKWebView may be used.
+            let Some(mtm) = MainThreadMarker::new() else {
+                let _ = tx.send(Err("not on the main thread".to_string()));
+                return;
+            };
+            let view = unsafe { &*webview.inner().cast::<WKWebView>() };
+            let configuration = unsafe { WKSnapshotConfiguration::new(mtm) };
+            let tx = std::cell::Cell::new(Some(tx));
+            let done = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
+                let Some(tx) = tx.take() else { return };
+                let result = match unsafe { image.as_ref() } {
+                    Some(image) => png_of(image),
+                    None => Err(match unsafe { error.as_ref() } {
+                        Some(error) => error.localizedDescription().to_string(),
+                        None => "WKWebView returned no image".to_string(),
+                    }),
+                };
+                let _ = tx.send(result);
+            });
+            unsafe {
+                view.takeSnapshotWithConfiguration_completionHandler(Some(&configuration), &done)
+            };
+        })
+        .map_err(|e| RpcError::failed(format!("the webview could not be reached: {}", e)))?;
+    let (width, height, png) = tokio::time::timeout(Duration::from_secs(10), rx)
+        .await
+        .map_err(|_| RpcError::new(Code::Timeout, "the webview did not answer the snapshot"))?
+        .map_err(|_| RpcError::failed("the snapshot was dropped"))?
+        .map_err(|e| RpcError::failed(format!("the snapshot failed: {}", e)))?;
+    Ok(json!({
+        "width": width,
+        "height": height,
+        "png_base64": data_encoding::BASE64.encode(&png),
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn png_of(image: &objc2_app_kit::NSImage) -> Result<(i32, i32, Vec<u8>), String> {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep};
+    use objc2_foundation::{NSDictionary, NSString};
+
+    let tiff = image
+        .TIFFRepresentation()
+        .ok_or("the snapshot has no bitmap")?;
+    let bitmap = NSBitmapImageRep::imageRepWithData(&tiff).ok_or("the snapshot is not an image")?;
+    let properties: Retained<NSDictionary<NSString, AnyObject>> = NSDictionary::new();
+    let png = unsafe {
+        bitmap.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)
+    }
+    .ok_or("the snapshot could not be written as a PNG")?;
+    Ok((
+        bitmap.pixelsWide() as i32,
+        bitmap.pixelsHigh() as i32,
+        png.to_vec(),
+    ))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 async fn screenshot<R: Runtime>(
     _app: &AppHandle<R>,
     _params: ScreenshotParams,
 ) -> Result<Value, RpcError> {
     Err(RpcError::failed(
-        "screenshots are only taken on Linux so far",
+        "screenshots are only taken on Linux and macOS so far",
     ))
 }
 
