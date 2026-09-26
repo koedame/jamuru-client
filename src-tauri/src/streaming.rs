@@ -1835,6 +1835,7 @@ async fn run_audio_streaming(
     let stall_after = std::time::Duration::from_micros(2 * receive.frame_us());
 
     loop {
+        let pass_started = jamjam::perf::start();
         let turn_started = std::time::Instant::now();
         let away = turn_started.duration_since(last_turn);
         if away > stall_after {
@@ -2171,6 +2172,7 @@ async fn run_audio_streaming(
         // Nothing to do here for audio: the output callback takes frames
         // from the play-out buffer itself, at the device's clock (ADR-028).
         // This loop only carries commands and statistics, so it waits.
+        jamjam::perf::RECEIVE_LOOP.stop(pass_started);
         tokio::time::sleep(POP_IDLE).await;
     }
 

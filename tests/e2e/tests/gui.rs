@@ -1194,6 +1194,83 @@ fn the_operator_reads_what_the_app_is() {
     assert_eq!(info["device_id"].as_str().map(str::len), Some(26));
 }
 
+/// The operator measures what the app costs the machine over a stretch of
+/// time: the process's CPU and memory, and how long the audio callbacks and
+/// the streaming loop took. With no call running the audio counts are zero,
+/// but the process is measured.
+///
+/// Verifies: REQ-RMT-032
+#[test]
+fn the_operator_measures_what_the_app_costs_the_machine() {
+    let (_guard, _relay, _app, target) = launch_enrolled();
+
+    let info = target
+        .call(1, "debug.info", serde_json::json!({}))
+        .unwrap()
+        .expect("debug.info should answer");
+    let perf = target
+        .call(2, "debug.perf", serde_json::json!({ "seconds": 1 }))
+        .unwrap()
+        .expect("debug.perf should answer");
+
+    assert!(
+        info["cpu_threads"].as_u64().is_some_and(|n| n >= 1),
+        "{}",
+        info
+    );
+    assert_eq!(perf["seconds"], 1.0);
+    assert!(
+        perf["process"]["memory_mb"]
+            .as_f64()
+            .is_some_and(|m| m > 1.0),
+        "{}",
+        perf
+    );
+    assert!(
+        perf["process"]["cpu_cores"]
+            .as_u64()
+            .is_some_and(|n| n >= 1),
+        "{}",
+        perf
+    );
+    for pass in ["input_callback", "output_callback", "receive_loop"] {
+        assert!(
+            perf["audio"][pass]["count"].is_number(),
+            "{}: {}",
+            pass,
+            perf
+        );
+        assert!(
+            perf["audio"][pass]["max_us"].is_number(),
+            "{}: {}",
+            pass,
+            perf
+        );
+    }
+    assert_eq!(perf["audio"]["input_xruns"], 0);
+    assert_eq!(perf["audio"]["output_xruns"], 0);
+}
+
+/// A window shorter than a second, or longer than a minute, is refused.
+///
+/// Verifies: REQ-RMT-032
+#[test]
+fn the_operator_is_refused_a_perf_window_that_is_too_short_or_too_long() {
+    let (_guard, _relay, _app, target) = launch_enrolled();
+
+    for (id, seconds) in [(1, 0.2), (2, 61.0)] {
+        let answer = target
+            .call(id, "debug.perf", serde_json::json!({ "seconds": seconds }))
+            .unwrap();
+        assert!(
+            answer.is_err(),
+            "{} seconds was accepted: {:?}",
+            seconds,
+            answer
+        );
+    }
+}
+
 /// The operator reads the app's log, and can follow it from where the last
 /// read ended.
 ///
