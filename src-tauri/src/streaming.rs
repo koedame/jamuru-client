@@ -1806,6 +1806,7 @@ async fn run_audio_streaming(
     // Receive buffer is stereo (frame_size * 2) since sender transmits stereo with local_pan applied
 
     loop {
+        let pass_started = jamjam::perf::start();
         // Set by a command that has capture start over: a new device, or a new
         // channel count on the current one.
         let mut reopen_capture: Option<Option<DeviceId>> = None;
@@ -2129,6 +2130,7 @@ async fn run_audio_streaming(
         // Nothing to do here for audio: the output callback takes frames
         // from the play-out buffer itself, at the device's clock (ADR-028).
         // This loop only carries commands and statistics, so it waits.
+        jamjam::perf::RECEIVE_LOOP.stop(pass_started);
         tokio::time::sleep(POP_IDLE).await;
     }
 
