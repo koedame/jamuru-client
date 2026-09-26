@@ -14,8 +14,11 @@ version: 2
 # major opens one PR per directory that uses the dependency. The `*-major`
 # groups with `group-by: dependency-name` keep a major at one PR per
 # dependency covering every directory.
+# Every ecosystem opens its pull requests against `develop`, the branch
+# development goes through (`main` only holds released versions).
 updates:
   - package-ecosystem: "github-actions"
+    target-branch: "develop"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -26,6 +29,7 @@ updates:
   # The three Cargo workspaces have separate lockfiles: the root crate,
   # the Tauri app and the e2e test crate.
   - package-ecosystem: "cargo"
+    target-branch: "develop"
     directories:
       - "/"
       - "/src-tauri"
@@ -46,6 +50,7 @@ updates:
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
+    target-branch: "develop"
     directories:
       - "/ui"
       - "/docs-site"

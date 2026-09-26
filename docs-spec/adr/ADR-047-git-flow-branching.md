@@ -34,6 +34,8 @@ Git-Flow に近い形にする。
   変更の無い側は 1 つのコミットに複数のタグが付いてよい。版ごとに、どのコミットどうしが前提だったかを
   タグから読めるようにするため
 
+Dependabot の PR も develop へ向ける（`.github/dependabot.yml` の `target-branch`）。
+
 CI（`ci.yml` `build.yml` `e2e-pr.yml`）は main と develop への push と、それぞれへの PR で回る。
 ドキュメントとストーリーブックの公開は、これまでどおり main への push（＝正式版）で行う。
 
