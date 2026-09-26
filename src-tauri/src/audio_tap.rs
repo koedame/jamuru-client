@@ -44,7 +44,11 @@ pub const MAX_RECORD_SECONDS: f32 = 20.0;
 pub const MAX_WAV_BYTES: usize = 600_000;
 
 /// A run of near-silence at least this long, between signal, is a dropout.
-const DROPOUT_SECONDS: f32 = 0.002;
+///
+/// Shorter than one packet of the smallest frame size (32 samples, 0.67 ms at
+/// 48 kHz): a lost or late packet leaves a gap of exactly one frame, and the
+/// longer limit this replaced (2 ms) counted a run of 64-sample gaps as none.
+const DROPOUT_SECONDS: f32 = 0.0005;
 
 /// Below this a sample counts as silence.
 const SILENCE: f32 = 1e-4;
@@ -386,6 +390,38 @@ mod tests {
         signal[10_000..10_500].fill(0.0);
 
         assert_eq!(dropouts(&signal, 48_000.0), 1);
+    }
+
+    #[test]
+    fn a_gap_of_one_packet_inside_a_tone_is_one_dropout() {
+        for frame in [32usize, 64, 128] {
+            let mut signal = sine(700.0, 48_000.0, 48_000);
+            signal[10_000..10_000 + frame].fill(0.0);
+
+            assert_eq!(dropouts(&signal, 48_000.0), 1, "a gap of {} samples", frame);
+        }
+    }
+
+    #[test]
+    fn several_gaps_one_packet_long_are_counted_one_by_one() {
+        let mut signal = sine(700.0, 48_000.0, 48_000);
+        for start in [4_000usize, 4_128, 20_000] {
+            signal[start..start + 64].fill(0.0);
+        }
+
+        assert_eq!(dropouts(&signal, 48_000.0), 3);
+    }
+
+    #[test]
+    fn the_zero_crossings_of_a_tone_are_not_dropouts() {
+        for hz in [50.0, 700.0, 4_000.0] {
+            assert_eq!(
+                dropouts(&sine(hz, 48_000.0, 48_000), 48_000.0),
+                0,
+                "{} Hz",
+                hz
+            );
+        }
     }
 
     #[test]
