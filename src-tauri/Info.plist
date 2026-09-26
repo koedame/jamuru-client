@@ -4,5 +4,7 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>jamjam uses the microphone to send your instrument and voice to the other participants in the session.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>jamjam connects directly to other participants on your local network for the lowest delay.</string>
 </dict>
 </plist>

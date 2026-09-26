@@ -350,6 +350,19 @@ mod tests {
 
     /// Verifies: REQ-CON-113
     #[test]
+    fn a_peer_that_published_its_bind_address_as_the_legacy_local_one_is_not_sent_to_it() {
+        let mut roster = Roster::default();
+        let mut peer = peer(2, None);
+        peer.candidates = vec![AddressCandidate::host(addr("192.168.1.20:5000"))];
+        peer.local_addr = Some(addr("0.0.0.0:5000"));
+
+        let candidates = started_with(&mut roster, peer);
+
+        assert_eq!(candidates, vec![addr("192.168.1.20:5000")]);
+    }
+
+    /// Verifies: REQ-CON-113
+    #[test]
     fn a_peer_with_only_a_legacy_public_address_is_reached_on_it() {
         let mut roster = Roster::default();
         let mut peer = peer(2, None);
