@@ -4,7 +4,8 @@
  * Tests for converting technical error messages to user-friendly messages.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
+import i18n from "../i18n";
 import {
   formatClockGap,
   formatErrorForDisplay,
@@ -136,7 +137,7 @@ describe("clock skew", () => {
 
   it("names the gap in minutes when it is minutes", () => {
     expect(formatClockGap(375, "en")).toBe("6 minutes");
-    expect(formatClockGap(375, "ja")).toBe("6 分");
+    expect(formatClockGap(375, "ja")).toBe("6分");
   });
 
   it("names the gap in seconds when it is under a minute and a half, and in hours when it is hours", () => {
@@ -151,6 +152,28 @@ describe("clock skew", () => {
     expect(formatErrorForDisplay(ahead, t, "en")).toEqual({
       title: "error.connection.clockSkew.title",
       message: "error.connection.clockSkew.message|6 minutes",
+    });
+  });
+
+  describe("with the shipped translations", () => {
+    afterAll(async () => {
+      await i18n.changeLanguage("en");
+    });
+
+    it("tells an English reader how far off the clock is", async () => {
+      await i18n.changeLanguage("en");
+
+      expect(formatErrorForDisplay(ahead, i18n.t.bind(i18n), i18n.language).message).toBe(
+        "The clock is about 6 minutes off from the server's. Set the time correctly and jamjam connects again by itself."
+      );
+    });
+
+    it("tells a Japanese reader how far off the clock is", async () => {
+      await i18n.changeLanguage("ja");
+
+      expect(formatErrorForDisplay(ahead, i18n.t.bind(i18n), i18n.language).message).toBe(
+        "サーバーの時刻と約6分ずれています。時刻を合わせると、自動でつなぎ直します。"
+      );
     });
   });
 });
