@@ -58,7 +58,7 @@ brew install --cask koedame/tap/jamjam@beta
 - 起動の少しあとと、その後 6 時間おきに、新しい版が出ていないかを GitHub から確かめます。あれば、ダウンロードして署名を確かめ、入れて、再起動します。
 - **セッションの途中では入れません。** セッションを抜けたあとに入れます。
 - ベータ版も自動更新されます。次のベータ版が出るとそれに、同じ版の正式版が出たときは正式版に更新されます。beta.17 までのベータ版は自動更新の取得先が正しくなかったので、一度だけ `brew upgrade --cask jamjam@beta` などで入れ替えてください。
-- 対応するのは、Windows（`.msi`・`.exe`）、macOS、Linux の AppImage です。Linux の `.deb` で入れた場合は、パッケージ管理（`apt`）で更新してください。
+- 対応するのは、Windows の `.exe`（`-setup.exe`）、macOS、Linux の AppImage です。Windows の `.msi` は全ユーザー向けで、管理者権限なしには入れ替えられないので自動更新しません（新しい版の `.msi` を管理者権限で入れてください）。Linux の `.deb` で入れた場合は、パッケージ管理（`apt`）で更新してください。
 - 自分でビルドしたアプリは、自動更新しません。
 
 止めるときは、設定ファイル `config.toml` に次の 1 行を足します。設定画面には出しません。
@@ -73,7 +73,7 @@ auto_update = false
 
 1. [GitHub Releases](https://github.com/koedame/jamjam-client/releases) から最新版をダウンロード
 2. 各プラットフォーム用のインストーラを実行:
-   - Windows: `.msi` または `.exe`
+   - Windows: `.exe`（自動更新する）または `.msi`（全ユーザー向け・自動更新しない）
    - macOS: `.dmg`
    - Linux: `.AppImage` または `.deb`
 

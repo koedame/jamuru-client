@@ -47,17 +47,23 @@ fn is_development_build() -> bool {
     cfg!(debug_assertions) || cfg!(feature = "e2e-control")
 }
 
-/// Only an AppImage can replace itself on Linux. A `.deb` install would need
-/// `sudo` and a password prompt, which is not "without the user doing
-/// anything", so it stays with the package manager.
-fn package_updates_itself() -> bool {
-    if cfg!(target_os = "linux") {
-        matches!(
-            tauri::utils::platform::bundle_type(),
-            Some(tauri::utils::config::BundleType::AppImage)
-        )
-    } else {
-        true
+/// Only an AppImage can replace itself on Linux, and an `.msi` cannot on
+/// Windows. A `.deb` install would need `sudo` and a password prompt, and the
+/// `.msi` is always per-machine: run without elevation, `msiexec` fails with
+/// Error 1730 after the app has already exited, and nothing starts it again.
+/// Neither is "without the user doing anything", so they stay with the package
+/// manager and with whoever installed them. The per-user `-setup.exe` (NSIS)
+/// updates itself.
+pub(crate) fn package_updates_itself() -> bool {
+    bundle_updates_itself(std::env::consts::OS, tauri::utils::platform::bundle_type())
+}
+
+fn bundle_updates_itself(os: &str, bundle: Option<tauri::utils::config::BundleType>) -> bool {
+    use tauri::utils::config::BundleType;
+    match os {
+        "linux" => matches!(bundle, Some(BundleType::AppImage)),
+        "windows" => !matches!(bundle, Some(BundleType::Msi)),
+        _ => true,
     }
 }
 
@@ -173,6 +179,28 @@ mod tests {
     #[test]
     fn when_the_package_cannot_replace_itself_the_app_does_not_try() {
         assert!(skip_reason(true, false, false).is_some());
+    }
+
+    /// Verifies: REQ-UPD-004
+    #[test]
+    fn when_it_is_a_windows_msi_the_package_cannot_replace_itself() {
+        use tauri::utils::config::BundleType;
+        assert!(!bundle_updates_itself("windows", Some(BundleType::Msi)));
+    }
+
+    /// Verifies: REQ-UPD-004
+    #[test]
+    fn when_it_is_a_windows_nsis_installer_the_package_replaces_itself() {
+        use tauri::utils::config::BundleType;
+        assert!(bundle_updates_itself("windows", Some(BundleType::Nsis)));
+    }
+
+    /// Verifies: REQ-UPD-004
+    #[test]
+    fn when_it_is_a_linux_deb_the_package_cannot_replace_itself() {
+        use tauri::utils::config::BundleType;
+        assert!(!bundle_updates_itself("linux", Some(BundleType::Deb)));
+        assert!(bundle_updates_itself("linux", Some(BundleType::AppImage)));
     }
 
     /// Verifies: REQ-UPD-005

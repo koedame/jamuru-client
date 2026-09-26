@@ -261,6 +261,11 @@ fn restart<R: Runtime>(app: &AppHandle<R>) -> Value {
 }
 
 async fn update_apply<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
+    if !crate::updater::package_updates_itself() {
+        return Err(RpcError::failed(
+            "this package cannot replace itself; install the new version by hand",
+        ));
+    }
     let installed = crate::updater::install_now(app)
         .await
         .map_err(|e| RpcError::failed(format!("the update did not finish: {}", e)))?;
