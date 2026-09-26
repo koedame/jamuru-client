@@ -274,7 +274,10 @@ pub async fn mixer_set_peer_volume(
     volume: u32,
     app: AppHandle,
 ) -> Result<Snapshot, String> {
-    set_peer(&app, &peer_id, |strip| strip.volume = volume.min(MAX_VOLUME)).await
+    set_peer(&app, &peer_id, |strip| {
+        strip.volume = volume.min(MAX_VOLUME)
+    })
+    .await
 }
 
 /// Moves the pan of the participant `peer_id`.
