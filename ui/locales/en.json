@@ -579,6 +579,10 @@
       "failed": {
         "input": "Couldn't open the input device{{name}}",
         "output": "Couldn't open the output device{{name}}"
+      },
+      "unsupported_format": {
+        "input": "Couldn't open the input device{{name}} at {{rate}} Hz. In your sound settings, set this device's format to {{rate}} Hz",
+        "output": "Couldn't open the output device{{name}} at {{rate}} Hz. In your sound settings, set this device's format to {{rate}} Hz"
       }
     }
   },

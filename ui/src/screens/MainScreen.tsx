@@ -932,6 +932,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                   name: problem.device
                     ? t("notification.deviceProblem.named", { device: problem.device })
                     : "",
+                  rate: problem.sample_rate,
                 })}
               />
             </div>

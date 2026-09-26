@@ -11,11 +11,13 @@ use tracing::{debug, error, info, warn};
 
 use super::channels::{pick_channels, place_stereo, smallest_channel_count, OutputRoute};
 use super::device::{
-    display_name, offered_channel_counts, resolve_input_device, resolve_output_device, DeviceId,
+    display_name, input_open_rate, offered_channel_counts, resolve_input_device,
+    resolve_output_device, DeviceId,
 };
 use super::driver::{StreamHost, OPEN_TIMEOUT};
 use super::error::AudioError;
 use super::fault::{self, Call};
+use super::resampler::CaptureResampler;
 
 /// Events that can occur during audio streaming
 #[derive(Debug, Clone)]
@@ -298,14 +300,30 @@ impl AudioEngine {
                 "Capture device: {}",
                 display_name(&device).unwrap_or_default()
             );
-            let device_channels = open_channel_count(&device, true, sample_rate, needed) as usize;
+            // A device that does not open at the session's rate is opened at
+            // the rate it offers, and converted below
+            let device_rate = input_open_rate(&device, sample_rate, needed);
+            let device_channels = open_channel_count(&device, true, device_rate, needed) as usize;
             let stream_config = StreamConfig {
                 channels: device_channels as u16,
-                sample_rate,
+                sample_rate: device_rate,
                 buffer_size: cpal::BufferSize::Fixed(frame_size),
             };
+            let mut resampler = if device_rate == sample_rate {
+                None
+            } else {
+                let resampler = CaptureResampler::new(device_rate, sample_rate, picks.len())
+                    .map_err(|e| AudioError::UnsupportedConfig(e.to_string()))?;
+                info!(
+                    "Capture opens at {} Hz and is converted to the session's {} Hz ({} frames of delay)",
+                    device_rate,
+                    sample_rate,
+                    resampler.delay_frames()
+                );
+                Some(resampler)
+            };
             // A device frame that is already the frame wanted goes through as is
-            let whole_frame = picks.iter().copied().eq(0..device_channels);
+            let whole_frame = resampler.is_none() && picks.iter().copied().eq(0..device_channels);
             let mut picked = Vec::with_capacity(frame_size as usize * picks.len().max(1) * 4);
             let sample_count = std::sync::atomic::AtomicU64::new(0);
 
@@ -321,16 +339,25 @@ impl AudioEngine {
                             callback(data, timestamp);
                         } else {
                             pick_channels(data, device_channels, &picks, &mut picked);
-                            let timestamp =
-                                sample_count.fetch_add(picked.len() as u64, Ordering::Relaxed);
-                            callback(&picked, timestamp);
+                            match resampler.as_mut() {
+                                None => {
+                                    let timestamp = sample_count
+                                        .fetch_add(picked.len() as u64, Ordering::Relaxed);
+                                    callback(&picked, timestamp);
+                                }
+                                Some(resampler) => resampler.process(&picked, |converted| {
+                                    let timestamp = sample_count
+                                        .fetch_add(converted.len() as u64, Ordering::Relaxed);
+                                    callback(converted, timestamp);
+                                }),
+                            }
                         }
                         crate::perf::INPUT_CALLBACK.stop(started);
                     },
                     err_fn,
                     None,
                 )
-                .map_err(|e| AudioError::StreamError(e.to_string()))?;
+                .map_err(stream_open_error)?;
 
             stream
                 .play()
@@ -442,7 +469,7 @@ impl AudioEngine {
                     err_fn,
                     None,
                 )
-                .map_err(|e| AudioError::StreamError(e.to_string()))?;
+                .map_err(stream_open_error)?;
 
             stream
                 .play()
@@ -508,6 +535,16 @@ impl AudioEngine {
     /// Check if playback is currently running
     pub fn is_playback_running(&self) -> bool {
         self.playback_stream.is_some()
+    }
+}
+
+/// What a device refusing to build a stream means to the caller: a format it
+/// will not open in (`UnsupportedConfig`) is told apart, because the user can
+/// change it, from a stream that failed for any other reason.
+fn stream_open_error(error: cpal::Error) -> AudioError {
+    match error.kind() {
+        cpal::ErrorKind::UnsupportedConfig => AudioError::UnsupportedConfig(error.to_string()),
+        _ => AudioError::StreamError(error.to_string()),
     }
 }
 

@@ -503,10 +503,15 @@ export interface StreamingStatus {
 /** A device the audio thread could not open */
 export interface DeviceProblem {
   side: "input" | "output";
-  /** "unresponsive": the driver did not answer in time. "failed": it refused. */
-  trouble: "unresponsive" | "failed";
+  /**
+   * "unresponsive": the driver did not answer in time. "failed": it refused.
+   * "unsupported_format": it does not open at the session's sample rate.
+   */
+  trouble: "unresponsive" | "failed" | "unsupported_format";
   /** The device's name, when the system's list has one for it */
   device: string | null;
+  /** The sample rate the session asked the device to open at */
+  sample_rate: number;
 }
 
 /**

@@ -177,6 +177,44 @@ pub(crate) fn offered_channel_counts(
     counts
 }
 
+/// The sample rate to open `input` devices at: `wanted` when the device offers
+/// it with at least `needed` channels, otherwise the offered rate nearest to
+/// it (the higher one when two are equally near). A device that does not say
+/// what it offers gets `wanted` and is left to refuse.
+///
+/// Windows opens a capture stream in shared mode only in the format the
+/// system's sound settings give the device, which cheap interfaces often set
+/// to 44100 Hz, so the session's rate is not always one the device opens at.
+pub(crate) fn input_open_rate(device: &cpal::Device, wanted: u32, needed: usize) -> u32 {
+    rate_to_open(
+        device.supported_input_configs().into_iter().flatten(),
+        needed,
+        wanted,
+    )
+}
+
+fn rate_to_open(
+    configs: impl IntoIterator<Item = cpal::SupportedStreamConfigRange>,
+    needed: usize,
+    wanted: u32,
+) -> u32 {
+    let mut nearest: Option<u32> = None;
+    for config in configs
+        .into_iter()
+        .filter(|config| config.channels() as usize >= needed)
+    {
+        let rate = wanted.clamp(config.min_sample_rate(), config.max_sample_rate());
+        if rate == wanted {
+            return wanted;
+        }
+        nearest = nearest
+            .into_iter()
+            .chain([rate])
+            .min_by_key(|rate| (rate.abs_diff(wanted), u32::MAX - rate));
+    }
+    nearest.unwrap_or(wanted)
+}
+
 /// Sample rates and channel counts offered by `configs`, the stream
 /// configurations of one direction of a device.
 ///
@@ -278,6 +316,48 @@ mod tests {
     fn a_device_that_reports_no_configs_has_unknown_channel_counts() {
         let (_, channels) = capabilities([]);
         assert!(channels.is_empty());
+    }
+
+    fn config_at(channels: u16, min: u32, max: u32) -> cpal::SupportedStreamConfigRange {
+        cpal::SupportedStreamConfigRange::new(
+            channels,
+            min,
+            max,
+            cpal::SupportedBufferSize::Unknown,
+            cpal::SampleFormat::F32,
+        )
+    }
+
+    /// Verifies: REQ-AUD-124
+    #[test]
+    fn when_the_device_offers_the_wanted_rate_it_is_opened_at_that_rate() {
+        assert_eq!(rate_to_open([config_at(2, 44100, 96000)], 2, 48000), 48000);
+    }
+
+    /// Verifies: REQ-AUD-124
+    #[test]
+    fn when_the_device_offers_only_44100_it_is_opened_at_44100() {
+        assert_eq!(rate_to_open([config_at(2, 44100, 44100)], 2, 48000), 44100);
+    }
+
+    /// Verifies: REQ-AUD-124
+    #[test]
+    fn when_two_offered_rates_are_equally_near_the_higher_one_is_used() {
+        let configs = [config_at(2, 44000, 44000), config_at(2, 52000, 52000)];
+        assert_eq!(rate_to_open(configs, 2, 48000), 52000);
+    }
+
+    /// Verifies: REQ-AUD-124
+    #[test]
+    fn a_rate_offered_only_with_too_few_channels_is_not_chosen() {
+        let configs = [config_at(2, 48000, 48000), config_at(8, 44100, 44100)];
+        assert_eq!(rate_to_open(configs, 6, 48000), 44100);
+    }
+
+    /// Verifies: REQ-AUD-124
+    #[test]
+    fn a_device_that_offers_nothing_is_asked_for_the_wanted_rate() {
+        assert_eq!(rate_to_open([], 2, 48000), 48000);
     }
 
     /// A device id that no longer exists must be an error, not a silent
