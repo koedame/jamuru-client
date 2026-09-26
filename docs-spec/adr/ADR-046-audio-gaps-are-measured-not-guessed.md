@@ -49,7 +49,7 @@ Mac（M4 Max・AG06・バッファ 64・`ultra-low-latency`）で、LAN 内の�
 | `late_arrival` | 受け取ったフレームの間隔が 2 フレームを超えた（値: 間隔） | ネットワーク側 |
 | `thread_stall` | 受信のタスクを運ぶスレッドが、自分のループの 1 周に 2 フレーム超かかった（値: 長さ） | 統計のループ |
 | `read_gap` / `read_burst` | デバイスの読み出しが 2 フレーム超遅れた・4 分の 1 フレーム以内にまた来た（コールバックがフレームより大きい） | 出力コールバック |
-| `trimmed` | 再生バッファが目標より深く溜め込み続けたので、余分を 1 回の飛びで捨てた（値: 捨てたフレーム数。[ADR-048](./ADR-048-playout-gives-back-piled-up-frames.md)） | ネットワーク側のフレームを読む出力コールバック |
+| `trimmed` | 再生バッファが目標より深く溜め込み続けたので、余分を 1 回の飛びで捨てた（値: 捨てたフレーム数。[ADR-048](./ADR-048-playout-gives-back-piled-up-frames.md)） | 出力コールバック |
 
 `debug.audio_timing`（デバッグの口だけ）が、回数・直近の時刻・読み出しと書き込みの数を返す。読み方: `starved` の時刻が `late_arrival` の直前にあり、それが `thread_stall` と同時なら、スレッドが止まって受信が遅れている（受信ループの統計処理・ログ・ロックが疑わしい）。`late_arrival` だけなら回線。`late_arrival` も `thread_stall` も無いのに `starved` が出るなら、デバイス側（`read_gap` / `read_burst`）か、読み出しが書き込みより多い（`reads` / `writes`）。
 
