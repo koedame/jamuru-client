@@ -93,7 +93,7 @@ docs-site/           # Docusaurus 開発者向けドキュメント（解説資�
 
 | ルール | 内容 | 対象 |
 |--------|------|------|
-| `git-workflow.md` | コミット・プッシュ規約 | 常時 |
+| `git-workflow.md` | コミット・プッシュ規約・ブランチ運用（Git-Flow） | 常時 |
 | `defect-response.md` | 本質的な欠陥はスコープ外でも即対応する基準・記録に留める基準 | 常時 |
 | `traceability.md` | 要求ID付与・検証宣言・対応表更新 | 仕様・コード・テスト編集時 |
 | `source-available.md` | Source Available ライセンス・秘匿情報ポリシー | 常時 |
