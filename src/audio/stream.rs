@@ -142,6 +142,22 @@ impl ReceivePath {
         frame_size: u32,
         target_delay_frames: u32,
     ) -> Result<Self, CodecError> {
+        Self::with_flight(
+            codec_type,
+            sample_rate,
+            frame_size,
+            target_delay_frames,
+            FlightRecorder::new(),
+        )
+    }
+
+    fn with_flight(
+        codec_type: CodecType,
+        sample_rate: u32,
+        frame_size: u32,
+        target_delay_frames: u32,
+        flight: Arc<FlightRecorder>,
+    ) -> Result<Self, CodecError> {
         let codec = create_codec(&CodecConfig {
             codec_type,
             sample_rate,
@@ -175,7 +191,7 @@ impl ReceivePath {
             peer_rate: Arc::new(AtomicU32::new(0)),
             sample_rate,
             frame_size,
-            flight: FlightRecorder::new(),
+            flight,
             last_arrival_us: Arc::new(AtomicU64::new(0)),
             started: Arc::new(AtomicBool::new(false)),
             last_read_us: Arc::new(AtomicU64::new(0)),
@@ -714,20 +730,22 @@ mod tests {
     #[test]
     fn a_gap_of_more_than_two_frames_between_received_frames_is_recorded() {
         // 64 samples at 48 kHz: a frame is 1.33 ms, two are 2.67 ms.
-        let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 1).expect("PCM is always available");
+        let path = ReceivePath::with_flight(CodecType::Pcm, 48000, 64, 1, FlightRecorder::manual())
+            .expect("PCM is always available");
 
         path.receive(0, &pcm(&stereo_frame(64, 0.1)));
+        path.flight().advance_us(1_300);
         path.receive(1, &pcm(&stereo_frame(64, 0.1)));
-        assert_eq!(path.flight().count(Kind::LateArrival), 0, "back to back");
+        assert_eq!(path.flight().count(Kind::LateArrival), 0, "on time");
 
-        std::thread::sleep(std::time::Duration::from_millis(8));
+        path.flight().advance_us(8_000);
         path.receive(2, &pcm(&stereo_frame(64, 0.1)));
 
         let report = path.flight().report();
         assert_eq!(path.flight().count(Kind::LateArrival), 1);
         let gap = report.events.iter().find(|e| e.kind == Kind::LateArrival);
         assert!(
-            gap.is_some_and(|e| e.value_us >= 8_000),
+            gap.is_some_and(|e| e.value_us == 8_000),
             "the gap is what was waited: {:?}",
             gap
         );
@@ -827,11 +845,12 @@ mod tests {
     #[test]
     fn a_device_that_asks_at_once_or_late_is_recorded() {
         // 64 samples at 48 kHz: a frame is 1.33 ms.
-        let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 0).expect("PCM is always available");
+        let path = ReceivePath::with_flight(CodecType::Pcm, 48000, 64, 0, FlightRecorder::manual())
+            .expect("PCM is always available");
         let mut out = stereo_frame(64, 0.0);
 
         path.read_into(&mut out);
-        std::thread::sleep(std::time::Duration::from_micros(1_300));
+        path.flight().advance_us(1_300);
         path.read_into(&mut out);
         assert_eq!(path.flight().count(Kind::ReadGap), 0, "on time");
         assert_eq!(path.flight().count(Kind::ReadBurst), 0, "on time");
@@ -843,7 +862,7 @@ mod tests {
             "asked again at once"
         );
 
-        std::thread::sleep(std::time::Duration::from_millis(8));
+        path.flight().advance_us(8_000);
         path.read_into(&mut out);
         assert_eq!(path.flight().count(Kind::ReadGap), 1, "asked 8 ms later");
     }

@@ -129,7 +129,7 @@ pub struct Report {
 /// The recorder. Shared by the network side, the output callback and the loop
 /// that carries the network task.
 pub struct FlightRecorder {
-    started: Instant,
+    clock: Clock,
     next: AtomicUsize,
     ring: Box<[AtomicU64]>,
     counts: [AtomicU64; Kind::ALL.len()],
@@ -137,10 +137,39 @@ pub struct FlightRecorder {
     writes: AtomicU64,
 }
 
+/// Where the recorder reads the time from. Tests use a clock that only moves
+/// when they move it, so a loaded machine cannot stretch the gaps they set up.
+enum Clock {
+    Real(Instant),
+    #[cfg(test)]
+    Manual(AtomicU64),
+}
+
 impl FlightRecorder {
     pub fn new() -> Arc<Self> {
+        Self::with_clock(Clock::Real(Instant::now()))
+    }
+
+    /// A recorder whose time stays at 0 until [`FlightRecorder::advance_us`].
+    #[cfg(test)]
+    pub(crate) fn manual() -> Arc<Self> {
+        Self::with_clock(Clock::Manual(AtomicU64::new(0)))
+    }
+
+    /// Moves a manual recorder's time forward.
+    #[cfg(test)]
+    pub(crate) fn advance_us(&self, us: u64) {
+        match &self.clock {
+            Clock::Manual(now) => {
+                now.fetch_add(us, Ordering::Relaxed);
+            }
+            Clock::Real(_) => panic!("only a manual recorder's time can be moved"),
+        }
+    }
+
+    fn with_clock(clock: Clock) -> Arc<Self> {
         Arc::new(Self {
-            started: Instant::now(),
+            clock,
             next: AtomicUsize::new(0),
             ring: (0..CAPACITY).map(|_| AtomicU64::new(0)).collect(),
             counts: Default::default(),
@@ -151,7 +180,12 @@ impl FlightRecorder {
 
     /// Microseconds since the recorder was made.
     pub fn now_us(&self) -> u64 {
-        self.started.elapsed().as_micros() as u64 & AT_MASK
+        let us = match &self.clock {
+            Clock::Real(started) => started.elapsed().as_micros() as u64,
+            #[cfg(test)]
+            Clock::Manual(now) => now.load(Ordering::Relaxed),
+        };
+        us & AT_MASK
     }
 
     /// Records that `kind` happened now. `value_us` is what the kind says it
