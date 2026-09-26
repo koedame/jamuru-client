@@ -346,7 +346,9 @@ mod tests {
 
     #[test]
     fn the_threads_of_this_process_are_not_counted_as_children() {
-        let _turn = CHILD_PROCESS_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let _turn = CHILD_PROCESS_TESTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let (stop, wait) = std::sync::mpsc::channel::<()>();
         let worker = std::thread::spawn(move || {
             let _ = wait.recv();
@@ -364,7 +366,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_child_process_is_counted_with_what_it_used() {
-        let _turn = CHILD_PROCESS_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let _turn = CHILD_PROCESS_TESTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut child = std::process::Command::new("sleep")
             .arg("3")
             .spawn()
