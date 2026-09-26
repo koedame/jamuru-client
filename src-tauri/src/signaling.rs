@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use tokio::time::Duration;
 
 use jamjam::network::{
-    gather_host_candidates, AddressCandidate, PeerInfo, RoomInfo, SignalingClient,
+    gather_host_candidates, AddressCandidate, NetworkError, PeerInfo, RoomInfo, SignalingClient,
     SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
 };
 use uuid::Uuid;
@@ -154,7 +154,7 @@ pub async fn signaling_connect<R: Runtime>(
     identity_state: tauri::State<'_, DeviceIdentityState>,
     config_state: tauri::State<'_, ConfigState>,
     usage: tauri::State<'_, UsageState>,
-) -> Result<u32, String> {
+) -> Result<u32, NetworkError> {
     let url = config_state.server_url();
     let shown_url = strip_userinfo(&url);
     tracing::info!("Signaling connect: {}", shown_url);
@@ -174,7 +174,7 @@ pub async fn signaling_connect<R: Runtime>(
                 Component::Signaling,
                 crate::usage::signaling_connect_failure_code(&e),
             );
-            e.to_string()
+            e
         })?;
 
     let conn_id = NEXT_CONN_ID.fetch_add(1, Ordering::SeqCst);
