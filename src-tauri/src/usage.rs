@@ -32,6 +32,18 @@ const CHANGE_SETTLE: Duration = Duration::from_secs(2);
 #[cfg(test)]
 const CHANGE_SETTLE: Duration = Duration::from_millis(50);
 
+/// Runs a task that waits out `CHANGE_SETTLE` before it reports. In tests it
+/// runs on the test's own runtime, so a test with a paused clock decides when
+/// the wait is over instead of racing a real timer on another runtime.
+#[cfg(not(test))]
+fn spawn_settling(task: impl std::future::Future<Output = ()> + Send + 'static) {
+    tauri::async_runtime::spawn(task);
+}
+#[cfg(test)]
+fn spawn_settling(task: impl std::future::Future<Output = ()> + Send + 'static) {
+    tokio::spawn(task);
+}
+
 /// The longest the app waits to send the last events when it is closed.
 const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -110,7 +122,7 @@ impl UsageState {
         let seen = self.changes.settings_seen.fetch_add(1, Ordering::SeqCst) + 1;
         let (reporter, changes, config) =
             (self.reporter.clone(), self.changes.clone(), config.clone());
-        tauri::async_runtime::spawn(async move {
+        spawn_settling(async move {
             tokio::time::sleep(CHANGE_SETTLE).await;
             if changes.settings_seen.load(Ordering::SeqCst) != seen {
                 return;
@@ -137,7 +149,7 @@ impl UsageState {
         }
         let seen = self.changes.devices_seen.fetch_add(1, Ordering::SeqCst) + 1;
         let (reporter, changes) = (self.reporter.clone(), self.changes.clone());
-        tauri::async_runtime::spawn(async move {
+        spawn_settling(async move {
             tokio::time::sleep(CHANGE_SETTLE).await;
             if changes.devices_seen.load(Ordering::SeqCst) != seen {
                 return;
@@ -578,7 +590,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-014
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_the_settings_change_after_launch_the_new_settings_are_reported() {
         let (app, reporter) = launched(true);
         let usage = app.state::<UsageState>();
@@ -593,7 +605,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-014
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_the_settings_change_several_times_in_a_row_only_the_last_state_is_reported() {
         let (app, reporter) = launched(true);
         let usage = app.state::<UsageState>();
@@ -609,7 +621,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-014
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_the_settings_are_saved_unchanged_nothing_is_reported() {
         let (app, reporter) = launched(true);
         let usage = app.state::<UsageState>();
@@ -624,7 +636,7 @@ mod tests {
     /// saving the settings for it must not send `app_start` as well.
     ///
     /// Verifies: REQ-TEL-014
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_only_the_chosen_device_ids_change_in_the_settings_no_app_start_is_reported() {
         let (app, reporter) = launched(true);
         let usage = app.state::<UsageState>();
@@ -640,7 +652,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-014
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_the_settings_change_and_change_back_within_the_wait_nothing_is_reported() {
         let (app, reporter) = launched(true);
         let usage = app.state::<UsageState>();
@@ -653,7 +665,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-001
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_reporting_is_off_a_change_of_settings_or_devices_reports_nothing() {
         let (app, reporter) = launched(false);
         let usage = app.state::<UsageState>();
@@ -670,7 +682,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-014
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_another_device_is_chosen_the_devices_in_use_are_reported() {
         let (app, reporter) = launched(true);
         let usage = app.state::<UsageState>();
@@ -687,7 +699,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-014
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_devices_are_chosen_several_times_in_a_row_they_are_reported_once() {
         let (app, reporter) = launched(true);
         let usage = app.state::<UsageState>();
@@ -701,7 +713,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-014
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn when_the_devices_in_use_are_the_ones_already_reported_nothing_is_reported() {
         let (app, reporter) = launched(true);
         let usage = app.state::<UsageState>();
