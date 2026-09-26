@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use tokio::time::interval;
 use tracing::{debug, info, trace, warn};
 
@@ -77,6 +77,79 @@ impl ConnectionStats {
         self.rtt_ms
             .map(|rtt_ms| ConnectionQuality::classify(rtt_ms, self.packet_loss_rate))
     }
+}
+
+/// Where outgoing packets go, and the peer's other addresses
+///
+/// The address picked while connecting only shows that the peer's packets
+/// reach us from there. Whether ours reach the peer is known only once it
+/// answers a ping, so the route can move to an address the peer is heard
+/// from when it has not answered (REQ-CON-114).
+#[derive(Debug)]
+struct Route {
+    current: SocketAddr,
+    /// The peer's other addresses, in the order they were offered, with
+    /// whether the last send to each went out
+    others: Vec<(SocketAddr, bool)>,
+    /// When `current` was taken up, or the peer last answered a ping
+    answered_at: Instant,
+}
+
+impl Route {
+    fn new(current: SocketAddr, others: Vec<(SocketAddr, bool)>) -> Self {
+        Self {
+            current,
+            others,
+            answered_at: Instant::now(),
+        }
+    }
+
+    /// The peer answered a ping, so what we send reaches it
+    fn answered(&mut self) {
+        self.answered_at = Instant::now();
+    }
+
+    /// Moves to `from` when a packet arrived from there, we can send to it,
+    /// and the peer has not answered for `after`. Returns the address left.
+    fn follow(&mut self, from: SocketAddr, after: Duration) -> Option<SocketAddr> {
+        if from == self.current || self.answered_at.elapsed() < after {
+            return None;
+        }
+        let index = self
+            .others
+            .iter()
+            .position(|&(addr, sendable)| addr == from && sendable)?;
+        let left = std::mem::replace(&mut self.current, from);
+        self.others[index] = (left, true);
+        self.answered_at = Instant::now();
+        Some(left)
+    }
+
+    /// Notes whether the last send to `addr` went out
+    fn note_send(&mut self, addr: SocketAddr, sent: bool) {
+        if let Some(entry) = self.others.iter_mut().find(|(other, _)| *other == addr) {
+            entry.1 = sent;
+        }
+    }
+}
+
+/// Whether `bytes`, received from `from`, answer a probe sent to `candidates`
+///
+/// `sendable[i]` says whether the probe to `candidates[i]` went out. A packet
+/// that reaches us from an address we cannot send to shows a one-way path, and
+/// choosing it leaves the peer hearing nothing from us (REQ-CON-114).
+fn is_probe_answer(
+    candidates: &[SocketAddr],
+    sendable: &[bool],
+    from: SocketAddr,
+    bytes: &[u8],
+) -> bool {
+    let Some(index) = candidates.iter().position(|&addr| addr == from) else {
+        return false;
+    };
+    sendable[index]
+        && Packet::from_bytes(bytes)
+            .is_some_and(|packet| matches!(packet.packet_type, PacketType::KeepAlive))
 }
 
 /// RTT measurement state
@@ -409,7 +482,7 @@ pub type LatencyInfoCallback = Box<dyn Fn(PeerLatencyInfo) + Send + Sync + 'stat
 /// A P2P connection to a remote peer
 pub struct Connection {
     transport: Arc<UdpTransport>,
-    remote_addr: SocketAddr,
+    route: Arc<Mutex<Route>>,
     state: Arc<AtomicU8>,
     /// Last error message that caused connection failure (if any)
     last_error: Arc<std::sync::Mutex<Option<String>>>,
@@ -477,7 +550,10 @@ impl Connection {
     fn from_transport(transport: UdpTransport) -> Result<Self, NetworkError> {
         Ok(Self {
             transport: Arc::new(transport),
-            remote_addr: "0.0.0.0:0".parse().unwrap(),
+            route: Arc::new(Mutex::new(Route::new(
+                "0.0.0.0:0".parse().unwrap(),
+                Vec::new(),
+            ))),
             state: Arc::new(AtomicU8::new(ConnectionState::Disconnected as u8)),
             last_error: Arc::new(std::sync::Mutex::new(None)),
             sequence: AtomicU32::new(0),
@@ -516,7 +592,7 @@ impl Connection {
     /// [`Self::connect_with_candidates`] selected, or the single address
     /// [`Self::connect`] was given.
     pub fn remote_addr(&self) -> SocketAddr {
-        self.remote_addr
+        self.route.lock().current
     }
 
     /// How the link came up (route, connect time, first audio). Stays valid
@@ -538,7 +614,7 @@ impl Connection {
         }
 
         let started = Instant::now();
-        self.remote_addr = remote_addr;
+        *self.route.lock() = Route::new(remote_addr, Vec::new());
         self.set_state(ConnectionState::Connecting);
         info!("Connecting to {}", remote_addr);
 
@@ -608,13 +684,17 @@ impl Connection {
         const PROBE_TIMEOUT: Duration = Duration::from_millis(1000);
         const CANDIDATE_DELAY: Duration = Duration::from_millis(50);
 
-        // Send probes to all candidates with small delays between each
+        // Send probes to all candidates with small delays between each. Which
+        // ones went out is kept: a candidate we cannot send to is not a route,
+        // however its packets reach us (REQ-CON-114).
+        let mut sendable = vec![false; candidates.len()];
         for (i, &addr) in candidates.iter().enumerate() {
             let packet = Packet::keep_alive(self.next_sequence());
             if let Err(e) = self.transport.send_to(&packet, addr).await {
                 debug!("Failed to send probe to candidate {}: {}", addr, e);
                 continue;
             }
+            sendable[i] = true;
             debug!("Sent connectivity probe to candidate {} ({})", i, addr);
 
             // Small delay before next candidate (Happy Eyeballs style)
@@ -623,19 +703,23 @@ impl Connection {
             }
         }
 
+        let other_candidates = |selected: SocketAddr| -> Vec<(SocketAddr, bool)> {
+            candidates
+                .iter()
+                .zip(&sendable)
+                .filter(|(&addr, _)| addr != selected)
+                .map(|(&addr, &sendable)| (addr, sendable))
+                .collect()
+        };
+
         // Wait for first response
         let transport = self.transport.clone();
         let timeout = tokio::time::timeout(PROBE_TIMEOUT, async {
             loop {
                 match transport.recv_raw().await {
                     Ok((buf, from_addr)) => {
-                        // Check if response is from one of our candidates
-                        if candidates.contains(&from_addr) {
-                            if let Some(packet) = Packet::from_bytes(&buf) {
-                                if matches!(packet.packet_type, PacketType::KeepAlive) {
-                                    return Some(from_addr);
-                                }
-                            }
+                        if is_probe_answer(candidates, &sendable, from_addr, &buf) {
+                            return Some(from_addr);
                         }
                     }
                     Err(e) => {
@@ -650,7 +734,7 @@ impl Connection {
         match timeout {
             Ok(Some(selected_addr)) => {
                 info!("Selected candidate: {} (first to respond)", selected_addr);
-                self.remote_addr = selected_addr;
+                *self.route.lock() = Route::new(selected_addr, other_candidates(selected_addr));
 
                 // Record connection start time
                 if let Ok(mut start) = self.connection_start.lock() {
@@ -672,17 +756,22 @@ impl Connection {
                 ))
             }
             Err(_) => {
-                // Timeout - try fallback to first candidate
+                // Timeout - fall back to the first candidate we could send to
                 warn!("No candidate responded in time, falling back to first candidate");
                 self.set_state(ConnectionState::Connecting);
-                self.remote_addr = candidates[0];
+                let fallback = candidates
+                    .iter()
+                    .zip(&sendable)
+                    .find_map(|(&addr, &sendable)| sendable.then_some(addr))
+                    .unwrap_or(candidates[0]);
+                *self.route.lock() = Route::new(fallback, other_candidates(fallback));
 
                 // Record connection start time
                 if let Ok(mut start) = self.connection_start.lock() {
                     *start = Some(Instant::now());
                 }
 
-                self.link_facts.link_up(candidates[0], false, started);
+                self.link_facts.link_up(fallback, false, started);
                 self.set_state(ConnectionState::Connected);
                 self.start_receive_loop();
                 self.start_keepalive_loop();
@@ -707,7 +796,7 @@ impl Connection {
             handle.abort();
         }
 
-        info!("Disconnected from {}", self.remote_addr);
+        info!("Disconnected from {}", self.remote_addr());
     }
 
     /// Check if connected
@@ -885,9 +974,10 @@ impl Connection {
         }
 
         let packet = Packet::latency_info(self.next_sequence(), info);
-        self.transport.send_to(&packet, self.remote_addr).await?;
+        let remote_addr = self.remote_addr();
+        self.transport.send_to(&packet, remote_addr).await?;
 
-        debug!("Sent latency info to {}", self.remote_addr);
+        debug!("Sent latency info to {}", remote_addr);
         Ok(())
     }
 
@@ -947,7 +1037,8 @@ impl Connection {
         let packet_bytes = packet.to_bytes();
         let len = packet_bytes.len() as u64;
 
-        self.transport.send_to(&packet, self.remote_addr).await?;
+        let remote_addr = self.remote_addr();
+        self.transport.send_to(&packet, remote_addr).await?;
 
         self.packets_sent.fetch_add(1, Ordering::Relaxed);
         self.bytes_sent.fetch_add(len, Ordering::Relaxed);
@@ -956,9 +1047,7 @@ impl Connection {
         if let Some(fec) = generated {
             let fec_packet = Packet::fec(sequence, timestamp, fec.to_bytes());
             let fec_len = fec_packet.to_bytes().len() as u64;
-            self.transport
-                .send_to(&fec_packet, self.remote_addr)
-                .await?;
+            self.transport.send_to(&fec_packet, remote_addr).await?;
             self.bytes_sent.fetch_add(fec_len, Ordering::Relaxed);
             trace!("Sent FEC packet for group {}", fec.group_sequence);
         }
@@ -1038,16 +1127,28 @@ impl Connection {
         let peer_latency_info = self.peer_latency_info.clone();
         let latency_info_callback = self.latency_info_callback.clone();
         let link_facts = self.link_facts.clone();
-        let remote_addr = self.remote_addr;
+        let route = self.route.clone();
+        let follow_after = self.reconnect_config.detect_after;
         let sequence = Arc::new(AtomicU32::new(1_000_000)); // Separate sequence for pong responses
 
         let handle = tokio::spawn(async move {
             let (mut rx, _recv_handle) = transport.clone().start_receive_loop();
 
-            while let Some((packet, _addr)) = rx.recv().await {
+            while let Some((packet, addr)) = rx.recv().await {
                 let current_state = ConnectionState::from_u8(state.load(Ordering::SeqCst));
                 if !current_state.can_transmit() {
                     break;
+                }
+
+                // The peer is heard from an address other than the one we send
+                // to, and has not answered us there: send to where it is heard.
+                let followed = route.lock().follow(addr, follow_after);
+                if let Some(left) = followed {
+                    info!(
+                        "The peer answers nothing on {}; sending to {} instead",
+                        left, addr
+                    );
+                    link_facts.route_moved(addr);
                 }
 
                 *last_received.lock().unwrap() = Instant::now();
@@ -1127,6 +1228,7 @@ impl Connection {
                                 sequence.fetch_add(1, Ordering::Relaxed),
                                 &pong,
                             );
+                            let remote_addr = route.lock().current;
                             if let Err(e) = transport.send_to(&pong_packet, remote_addr).await {
                                 warn!("Failed to send latency pong: {}", e);
                             }
@@ -1134,6 +1236,7 @@ impl Connection {
                         }
                     }
                     PacketType::LatencyPong => {
+                        route.lock().answered();
                         // Update RTT measurement
                         if let Some(pong) = LatencyPong::from_bytes(&packet.payload) {
                             rtt_measurement.write().process_pong(&pong);
@@ -1181,7 +1284,7 @@ impl Connection {
         let sequence_tracker_for_monitor = self.sequence_tracker.clone();
         let state_change_callback = self.state_change_callback.clone();
         let last_error = self.last_error.clone();
-        let remote_addr = self.remote_addr;
+        let route = self.route.clone();
 
         let handle = tokio::spawn(async move {
             let mut ticker = interval(config.check_interval);
@@ -1201,6 +1304,7 @@ impl Connection {
                     Ok(last) => last.elapsed(),
                     Err(_) => continue,
                 };
+                let remote_addr = route.lock().current;
 
                 let next = if silence >= config.give_up_after {
                     // Automatic recovery has had long enough. Hand the decision
@@ -1269,10 +1373,11 @@ impl Connection {
     fn start_keepalive_loop(&mut self) {
         let transport = self.transport.clone();
         let state = self.state.clone();
-        let remote_addr = self.remote_addr;
+        let route = self.route.clone();
         let sequence = AtomicU32::new(0);
         let rtt_measurement = self.rtt_measurement.clone();
         let keep_alive_interval = self.reconnect_config.keep_alive_interval;
+        let probe_others_after = self.reconnect_config.detect_after;
 
         let handle = tokio::spawn(async move {
             let mut interval = interval(keep_alive_interval);
@@ -1284,6 +1389,8 @@ impl Connection {
                 if !current_state.can_transmit() {
                     break;
                 }
+
+                let remote_addr = route.lock().current;
 
                 // Send keep-alive
                 let packet = Packet::keep_alive(sequence.fetch_add(1, Ordering::Relaxed));
@@ -1299,6 +1406,23 @@ impl Connection {
                     warn!("Failed to send latency ping: {}", e);
                 }
                 trace!("Sent latency ping seq={}", ping.ping_sequence);
+
+                // No answer to our pings: the peer may not be reached on this
+                // address. Let it hear from us on its other ones too, so that
+                // it is heard from there and the route can follow (REQ-CON-114).
+                let others = {
+                    let route = route.lock();
+                    if route.answered_at.elapsed() >= probe_others_after {
+                        route.others.iter().map(|&(addr, _)| addr).collect()
+                    } else {
+                        Vec::new()
+                    }
+                };
+                for addr in others {
+                    let packet = Packet::keep_alive(sequence.fetch_add(1, Ordering::Relaxed));
+                    let sent = transport.send_to(&packet, addr).await.is_ok();
+                    route.lock().note_send(addr, sent);
+                }
             }
         });
 
@@ -1430,6 +1554,163 @@ mod tests {
             snapshot.connect_ms.is_some_and(|ms| ms >= 900),
             "the fallback waits out the probe timeout: {snapshot:?}"
         );
+    }
+
+    fn addr(text: &str) -> SocketAddr {
+        text.parse().unwrap()
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_a_candidate_we_could_not_send_to_answers_the_answer_is_not_taken() {
+        let candidates = [addr("192.168.1.10:5000"), addr("100.64.0.2:5000")];
+        let keep_alive = Packet::keep_alive(0).to_bytes();
+
+        assert!(!is_probe_answer(
+            &candidates,
+            &[false, true],
+            candidates[0],
+            &keep_alive
+        ));
+        assert!(is_probe_answer(
+            &candidates,
+            &[false, true],
+            candidates[1],
+            &keep_alive
+        ));
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_the_answer_comes_from_no_candidate_it_is_not_taken() {
+        let candidates = [addr("192.168.1.10:5000")];
+        let keep_alive = Packet::keep_alive(0).to_bytes();
+
+        assert!(!is_probe_answer(
+            &candidates,
+            &[true],
+            addr("192.168.1.10:5001"),
+            &keep_alive
+        ));
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_the_packet_from_a_candidate_is_not_a_keep_alive_it_is_not_an_answer() {
+        let candidates = [addr("192.168.1.10:5000")];
+        let audio = Packet::audio(0, 0, vec![0; 4]).to_bytes();
+
+        assert!(!is_probe_answer(
+            &candidates,
+            &[true],
+            candidates[0],
+            &audio
+        ));
+        assert!(!is_probe_answer(
+            &candidates,
+            &[true],
+            candidates[0],
+            &[0xff; 3]
+        ));
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_the_peer_has_not_answered_a_packet_from_another_address_moves_the_route_there() {
+        let lan = addr("192.168.1.10:5000");
+        let vpn = addr("100.64.0.2:5000");
+        let mut route = Route::new(lan, vec![(vpn, true)]);
+
+        assert_eq!(route.follow(vpn, Duration::ZERO), Some(lan));
+
+        assert_eq!(route.current, vpn);
+        assert_eq!(route.others, vec![(lan, true)]);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_the_peer_answered_recently_the_route_stays_where_it_is() {
+        let lan = addr("192.168.1.10:5000");
+        let vpn = addr("100.64.0.2:5000");
+        let mut route = Route::new(lan, vec![(vpn, true)]);
+        route.answered();
+
+        assert_eq!(route.follow(vpn, Duration::from_secs(60)), None);
+
+        assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_we_could_not_send_to_the_address_the_peer_is_heard_from_the_route_stays_where_it_is() {
+        let lan = addr("192.168.1.10:5000");
+        let vpn = addr("100.64.0.2:5000");
+        let mut route = Route::new(lan, vec![(vpn, false)]);
+
+        assert_eq!(route.follow(vpn, Duration::ZERO), None);
+
+        assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_a_packet_comes_from_an_address_that_is_not_the_peers_the_route_stays_where_it_is() {
+        let lan = addr("192.168.1.10:5000");
+        let mut route = Route::new(lan, vec![(addr("100.64.0.2:5000"), true)]);
+
+        assert_eq!(route.follow(addr("203.0.113.9:5000"), Duration::ZERO), None);
+
+        assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[tokio::test]
+    async fn when_no_candidate_answers_the_first_one_we_could_send_to_is_used() {
+        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        // An IPv6 address cannot be sent to from the IPv4 audio socket.
+        let unreachable = addr("[::1]:59997");
+        let silent = addr("127.0.0.1:59998");
+
+        conn.connect_with_candidates(&[unreachable, silent])
+            .await
+            .unwrap();
+
+        assert_eq!(conn.remote_addr(), silent);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[tokio::test]
+    async fn when_the_peer_answers_nothing_on_the_chosen_address_but_is_heard_elsewhere_sends_go_there(
+    ) {
+        let quick = ReconnectConfig {
+            keep_alive_interval: Duration::from_millis(100),
+            detect_after: Duration::from_millis(300),
+            give_up_after: Duration::from_secs(30),
+            check_interval: Duration::from_millis(50),
+        };
+        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        conn1.set_reconnect_config(quick);
+        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        conn2.set_reconnect_config(quick);
+        let silent = addr("127.0.0.1:59999");
+        // Nobody answers the probes yet, so the first candidate is taken.
+        conn1
+            .connect_with_candidates(&[silent, conn2.local_addr()])
+            .await
+            .unwrap();
+        assert_eq!(conn1.remote_addr(), silent);
+
+        // The peer comes up afterwards and is heard from its own address.
+        conn2.connect(conn1.local_addr()).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while conn1.remote_addr() != conn2.local_addr() || conn1.rtt_ms().is_none() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("sends should move to the address the peer is heard from, and be answered");
+        assert_eq!(conn1.state(), ConnectionState::Connected);
     }
 
     /// Verifies: REQ-TEL-015

@@ -119,6 +119,14 @@ impl LinkFacts {
         *self.up_at.lock().unwrap() = Some(now);
     }
 
+    /// The route moved to `addr` after the link went up. Nothing has answered
+    /// there yet, and the connect time and first audio stay as they were.
+    pub(crate) fn route_moved(&self, addr: SocketAddr) {
+        self.route
+            .store(LinkRoute::of(addr).to_u8(), Ordering::Relaxed);
+        self.route_confirmed.store(false, Ordering::Relaxed);
+    }
+
     /// An audio packet arrived. Only the first one since the link went up counts.
     pub(crate) fn audio_received(&self) {
         if self.first_audio_ms.load(Ordering::Relaxed) != NOT_MEASURED {
@@ -202,6 +210,20 @@ mod tests {
         assert_eq!(snapshot.route_confirmed, Some(true));
         assert!(snapshot.connect_ms.is_some());
         assert_eq!(snapshot.first_audio_ms, None);
+    }
+
+    #[test]
+    fn when_the_route_moves_the_route_changes_and_connect_time_stays() {
+        let facts = LinkFacts::new();
+        facts.link_up(addr("192.168.1.20:5000"), true, Instant::now());
+        let connect_ms = facts.snapshot().connect_ms;
+
+        facts.route_moved(addr("203.0.113.7:5000"));
+
+        let snapshot = facts.snapshot();
+        assert_eq!(snapshot.route, Some(LinkRoute::Public));
+        assert_eq!(snapshot.route_confirmed, Some(false));
+        assert_eq!(snapshot.connect_ms, connect_ms);
     }
 
     #[test]
