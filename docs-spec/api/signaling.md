@@ -328,7 +328,7 @@ sequenceDiagram
 `settings_help`（設定の手伝い。[ADR-044](../adr/ADR-044-portals-and-permissions.md) §5）だけ。中身は `kind` で区別する:
 `request`（手伝わせて）・`accepted`（いいよ。`session` は手伝われる側が中継に繋いで待っている手伝いの番号。128 ビットの乱数の
 16 進 32 桁で、手伝う側は同じ番号で中継に繋ぐ）・`declined`（断る。`busy` なら別の人に手伝われている）・
-`stop`（手伝いをやめる。`role` は送り手の側 `helper` / `helped`）・
+`stop`（手伝いをやめる。`role` は送り手の側 `helper` / `helped`。`session` は終わった手伝いの番号で、許可の前の申し出には付かない。番号があるときは、その番号の手伝いだけを終える。同じ相手と手伝いをやり直したあとに前の手伝いの `stop` が遅れて届いても、やり直した手伝いを終えないため。番号が無いときは、送り手との手伝いを終える）・
 `notice`（ルーム全員へ。チャットの記録用。`event` は `started` / `changed` / `ended`、`changed` には変わった設定の名前 `setting` が付く。
 手伝う人は `helper` の参加者 ID で、名前は受け取った側が引く）。
 手伝いの中身（手伝う人の操作と相手の状態）はシグナリングを通らず、サーバーの中継（WebSocket）を通る。
