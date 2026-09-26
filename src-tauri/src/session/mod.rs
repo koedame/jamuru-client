@@ -16,7 +16,7 @@ mod roster;
 use std::sync::MutexGuard;
 use std::time::Duration;
 
-use jamjam::network::RoomInfo;
+use jamjam::network::{server_clock_offset_secs, NetworkError, RoomInfo, CLOCK_SKEW_NOTICE_SECS};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use uuid::Uuid;
@@ -42,6 +42,13 @@ const RECONNECT_BASE_DELAY: Duration = if cfg!(test) {
     Duration::from_millis(10)
 } else {
     Duration::from_secs(2)
+};
+/// How often the server's time is looked at again while the computer's clock
+/// is what keeps the app from connecting.
+const CLOCK_RECHECK_INTERVAL: Duration = if cfg!(test) {
+    Duration::from_millis(100)
+} else {
+    Duration::from_secs(10)
 };
 /// How often the room's events are read.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -522,7 +529,14 @@ async fn connect<R: Runtime>(app: &AppHandle<R>, epoch: u64) -> Result<Snapshot,
     let conn = match connected {
         None => return Ok(state.snapshot()),
         Some(Ok(conn)) => conn,
-        Some(Err(e)) => return fail_unless_ended(app, epoch, e),
+        Some(Err(e)) => {
+            let clock_is_off = matches!(e, NetworkError::ClockSkew { .. });
+            let failed = fail_unless_ended(app, epoch, e.to_string());
+            if clock_is_off && state.epoch() == epoch {
+                connect_again_when_the_clock_is_right(app.clone(), epoch);
+            }
+            return failed;
+        }
     };
     if state.epoch() != epoch {
         disconnect(app, conn).await;
@@ -550,6 +564,28 @@ async fn connect<R: Runtime>(app: &AppHandle<R>, epoch: u64) -> Result<Snapshot,
         }
         Some(Err(e)) => fail_unless_ended(app, epoch, e),
     }
+}
+
+/// After the server refused the connection because this computer's clock is
+/// off, connects again once the clock agrees with the server's, so putting the
+/// clock right is all the person has to do. Ends when the step is ended
+/// (the person connected again by hand, or left), as `epoch` says.
+fn connect_again_when_the_clock_is_right<R: Runtime>(app: AppHandle<R>, epoch: u64) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<SessionState>();
+        loop {
+            pause(&state, epoch, CLOCK_RECHECK_INTERVAL).await;
+            if state.epoch() != epoch {
+                return;
+            }
+            let server_url = app.state::<ConfigState>().server_url();
+            match server_clock_offset_secs(&server_url).await {
+                Some(offset) if offset.abs() < CLOCK_SKEW_NOTICE_SECS => break,
+                _ => {}
+            }
+        }
+        let _ = connect(&app, epoch).await;
+    });
 }
 
 /// What entering a room changes: the room, and the audio it starts.
@@ -793,7 +829,7 @@ async fn try_reconnect<R: Runtime>(
     .await;
     let conn = match connected {
         None => return Ok(()),
-        Some(conn) => conn?,
+        Some(conn) => conn.map_err(|e| e.to_string())?,
     };
     if state.epoch() != epoch {
         disconnect(app, conn).await;
@@ -1101,6 +1137,10 @@ mod tests {
         /// A message type that makes the server drop the connection instead
         /// of answering.
         close_on: Option<String>,
+        /// When set, the server's clock is this many seconds behind the real
+        /// time, and it refuses every WebSocket handshake with a 401, as it
+        /// does a device whose clock differs from its own.
+        clock_behind_secs: Option<i64>,
     }
 
     enum Say {
@@ -1169,6 +1209,12 @@ mod tests {
             self.log.lock().unwrap().close_on = Some(kind.to_string());
         }
 
+        /// From now on the server's clock is `secs` behind the real time (`None`:
+        /// right) and it refuses the connection of any device while it is.
+        fn set_clock_behind(&self, secs: Option<i64>) {
+            self.log.lock().unwrap().clock_behind_secs = secs;
+        }
+
         fn reset(&self, connection: usize) {
             let _ = self.log.lock().unwrap().connections[connection].send(Say::Reset);
         }
@@ -1182,17 +1228,31 @@ mod tests {
         let mut probe = [0u8; 2048];
         let read = stream.peek(&mut probe).await.unwrap_or(0);
         let head = String::from_utf8_lossy(&probe[..read]).to_lowercase();
-        if !head.contains("upgrade: websocket") {
-            // The question: where is the signaling?
+        let clock_behind_secs = log.lock().unwrap().clock_behind_secs;
+        let date = chrono::DateTime::from_timestamp(
+            chrono::Utc::now().timestamp() - clock_behind_secs.unwrap_or(0),
+            0,
+        )
+        .unwrap()
+        .format("%a, %d %b %Y %H:%M:%S GMT");
+        let upgrade = head.contains("upgrade: websocket");
+        if !upgrade || clock_behind_secs.is_some() {
             let mut stream = stream;
             let mut request = [0u8; 2048];
             let _ = stream.read(&mut request).await;
-            let body = format!(r#"{{"url":"{TEST_WS_SCHEME}{addr}/v1/signaling"}}"#);
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
+            let response = if upgrade {
+                format!(
+                    "HTTP/1.1 401 Unauthorized\r\nDate: {date}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+            } else {
+                // The question: where is the signaling?
+                let body = format!(r#"{{"url":"{TEST_WS_SCHEME}{addr}/v1/signaling"}}"#);
+                format!(
+                    "HTTP/1.1 200 OK\r\nDate: {date}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+            };
             let _ = stream.write_all(response.as_bytes()).await;
             return;
         }
@@ -1355,6 +1415,85 @@ mod tests {
         assert_eq!(snapshot.phase, Phase::Error);
         assert_eq!(snapshot.error, result.err());
         assert_eq!(snapshot.connection_id, None);
+    }
+
+    /// Verifies: REQ-IDT-009
+    #[tokio::test]
+    async fn the_server_refuses_the_identity_because_the_clock_is_off_ends_in_an_error_that_names_the_gap(
+    ) {
+        let server = FakeServer::start().await;
+        server.set_clock_behind(Some(375));
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_for(&server, &dir);
+
+        let result = session_connect_for_test(&app).await;
+
+        let snapshot = app.state::<SessionState>().snapshot();
+        let error = result.expect_err("the connection is refused");
+        assert!(
+            error.contains("clock is ahead of the server's by 37"),
+            "{error}"
+        );
+        assert_eq!(snapshot.phase, Phase::Error);
+        assert_eq!(snapshot.error, Some(error));
+        assert_eq!(snapshot.connection_id, None);
+    }
+
+    /// Verifies: REQ-IDT-010
+    #[tokio::test]
+    async fn the_clock_is_put_right_after_the_refusal_connects_again_without_being_asked() {
+        let server = FakeServer::start().await;
+        server.set_clock_behind(Some(375));
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_for(&server, &dir);
+        spawn(app.handle().clone());
+        until(&app, |s| s.phase == Phase::Error).await;
+
+        server.set_clock_behind(None);
+        let snapshot = until(&app, |s| s.phase == Phase::ServerConnected).await;
+
+        assert!(snapshot.connection_id.is_some());
+        assert_eq!(snapshot.error, None);
+        assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("TEST22"));
+    }
+
+    /// Verifies: REQ-IDT-010
+    #[tokio::test]
+    async fn the_clock_is_still_off_after_a_wait_stays_in_the_error_and_does_not_flicker_to_connecting(
+    ) {
+        let server = FakeServer::start().await;
+        server.set_clock_behind(Some(375));
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_for(&server, &dir);
+        spawn(app.handle().clone());
+        until(&app, |s| s.phase == Phase::Error).await;
+        let revision = app.state::<SessionState>().snapshot().revision;
+
+        tokio::time::sleep(CLOCK_RECHECK_INTERVAL * 4).await;
+
+        let snapshot = app.state::<SessionState>().snapshot();
+        assert_eq!(snapshot.phase, Phase::Error);
+        assert_eq!(snapshot.revision, revision);
+    }
+
+    /// Verifies: REQ-IDT-010
+    #[tokio::test]
+    async fn the_person_connects_by_hand_while_the_clock_is_off_the_wait_for_the_clock_ends() {
+        let server = FakeServer::start().await;
+        server.set_clock_behind(Some(375));
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_for(&server, &dir);
+        spawn(app.handle().clone());
+        until(&app, |s| s.phase == Phase::Error).await;
+
+        // The hand attempt is refused again and starts its own wait; the first
+        // one, whose step was ended, must not connect once the clock is right.
+        let _ = session_connect_for_test(&app).await;
+        server.set_clock_behind(None);
+        until(&app, |s| s.phase == Phase::ServerConnected).await;
+        tokio::time::sleep(CLOCK_RECHECK_INTERVAL * 4).await;
+
+        assert_eq!(server.connections(), 1);
     }
 
     async fn session_connect_for_test(app: &tauri::App<MockRuntime>) -> Result<Snapshot, String> {

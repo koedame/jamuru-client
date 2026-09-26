@@ -47,6 +47,11 @@ pub enum NetworkError {
         message: String,
     },
 
+    /// The server refused the device's identity, and its own time shows this
+    /// computer's clock to be `offset_secs` ahead of it (negative: behind).
+    #[error("{}", super::clock::clock_skew_message(*offset_secs))]
+    ClockSkew { offset_secs: i64 },
+
     /// The signaling server closed the WebSocket (or it dropped)
     #[error("Connection closed")]
     ConnectionClosed,

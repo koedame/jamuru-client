@@ -368,6 +368,7 @@ pub fn signaling_connect_failure_code(error: &NetworkError) -> ErrorCode {
             SignalingFailure::Dns => ErrorCode::Dns,
             SignalingFailure::Other => ErrorCode::ConnectFailed,
         },
+        NetworkError::ClockSkew { .. } => ErrorCode::Http4xx,
         _ => ErrorCode::ConnectFailed,
     }
 }
@@ -916,6 +917,10 @@ mod tests {
         assert_eq!(
             signaling_connect_failure_code(&NetworkError::SignalingError("x".into())),
             ErrorCode::ConnectFailed
+        );
+        assert_eq!(
+            signaling_connect_failure_code(&NetworkError::ClockSkew { offset_secs: 375 }),
+            ErrorCode::Http4xx
         );
     }
 
