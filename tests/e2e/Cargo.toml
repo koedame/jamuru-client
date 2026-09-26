@@ -41,7 +41,7 @@ which = "8"
 # Generating a known signal into the loopback audio device (ADR-025).
 # Same version the app uses, so device naming matches what it sees.
 cpal = "0.18"
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 tempfile = "3"
 # Writing a known device identity into the throwaway $HOME, in the app's own
 # file format (base64 key). Same crate and version the app uses for it.
