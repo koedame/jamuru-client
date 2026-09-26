@@ -66,6 +66,8 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let log_spec = logging::LogSpec::from_env();
+    #[cfg(feature = "debug-tools")]
+    jamjam::perf::enable();
 
     let context = tauri::generate_context!();
     // Only the release build is given updater settings (`tauri.updater.conf.json`,

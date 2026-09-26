@@ -2,8 +2,6 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -13,10 +11,11 @@ permissions:
 
 jobs:
   # Decides which tag this run publishes under. A `v*` tag push publishes
-  # that tag. A push to main publishes a beta of the version in
-  # `src-tauri/tauri.conf.json` (`v0.2.0-beta.<run number>`; the run number
-  # keeps the tag unique, and a re-run of the same run reuses its tag). A run
-  # started by hand is a rehearsal and publishes nothing, so the tag is empty.
+  # that tag, from whichever branch it was made on: `vX.Y.Z` on main is a
+  # release, `vX.Y.Z-beta.N` is a beta (on develop, or on a feature branch to
+  # try a change before it is merged). No push to a branch publishes anything.
+  # A run started by hand is a rehearsal and publishes nothing, so the tag is
+  # empty.
   prepare:
     name: Decide the release tag
     runs-on: ubuntu-latest
@@ -32,9 +31,6 @@ jobs:
           set -euo pipefail
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tag="${GITHUB_REF_NAME}"
-          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            version=$(jq -r .version src-tauri/tauri.conf.json)
-            tag="v${version}-beta.${GITHUB_RUN_NUMBER}"
           else
             tag=""
           fi
@@ -205,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [prepare, build]
     # A run started by hand is a rehearsal: it stops after the artifacts are
-    # uploaded. A `v*` tag or a push to main publishes a release.
+    # uploaded. A `v*` tag publishes a release.
     if: needs.prepare.outputs.tag != ''
     steps:
       - uses: actions/checkout@v7
@@ -263,7 +259,6 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          # A push to main has no tag yet; this creates it on that commit.
           tag_name: ${{ needs.prepare.outputs.tag }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
@@ -316,8 +311,7 @@ jobs:
     needs: [prepare, release]
     # Writes a cask in `koedame/homebrew-tap`. A plain `vX.Y.Z` tag
     # updates `Casks/jamjam.rb` (`brew install --cask koedame/tap/jamjam`,
-    # what everyone gets). A prerelease tag (`v0.2.0-beta.7`, made by every
-    # push to main) updates
+    # what everyone gets). A prerelease tag (`v0.2.0-beta.7`) updates
     # `Casks/jamjam@beta.rb` instead (`brew install --cask
     # koedame/tap/jamjam@beta`), so a prerelease reaches only the people
     # who opted in and `brew upgrade jamjam` never picks it up.

@@ -24,6 +24,16 @@
 //! target. [`PlayoutBuffer::adapt`] moves the target from the loss rate and
 //! [`PlayoutBuffer::set_delay`] moves it because the user chose a preset.
 //!
+//! # Holding no more than the target
+//!
+//! What is held only ever grows by itself: a read that finds nothing waits
+//! without moving the play position, and a device that reads late lets frames
+//! pile up, and neither gives the frames back. So the shallowest the buffer got
+//! over a stretch of reads is watched, and when even that was deeper than the
+//! target asks for, the extra is discarded from the play position in one skip
+//! (ADR-047). A buffer that dipped to the target in that stretch needed what it
+//! held, and keeps it.
+//!
 //! # Real-time discipline
 //!
 //! The reader runs in the audio callback, so `read_into` allocates nothing and
@@ -34,15 +44,31 @@
 
 use super::plc::PcmPlc;
 
-/// Loss rate over an adaptation window above which the delay grows.
-const GROW_ABOVE_LOSS_RATE: f32 = 0.05;
-/// Loss rate over an adaptation window below which the window counts as clean.
-const SHRINK_BELOW_LOSS_RATE: f32 = 0.01;
+/// Share of reads over an adaptation window that found their frame missing
+/// (concealed or starved) above which the delay grows. One in a hundred is
+/// already a gap every 1.3 seconds at 64-sample frames, and every gap is heard.
+const GROW_ABOVE_MISS_RATE: f32 = 0.01;
+/// Share of missing frames below which the window counts as clean: not one
+/// missing frame in a window of up to a thousand reads.
+const SHRINK_BELOW_MISS_RATE: f32 = 0.001;
 /// Clean windows in a row before the delay gives a frame back. With a
 /// one-second timer that is ten seconds.
 const CLEAN_WINDOWS_BEFORE_SHRINK: u32 = 10;
+/// A grow within this many windows of a shrink means the shrink was wrong.
+const BOUNCE_WITHIN_WINDOWS: u32 = 3;
+/// The clean stretch a shrink asks for at most, after it has been wrong
+/// repeatedly: eighty seconds.
+const MAX_CLEAN_WINDOWS_BEFORE_SHRINK: u32 = 80;
 /// Fewest frames a window needs before its loss rate means anything.
 const MIN_ADAPT_WINDOW_FRAMES: u64 = 20;
+/// Reads over which the buffer's shallowest moment is remembered. About two
+/// thirds of a second at 64-sample frames and 48 kHz.
+const DEPTH_WINDOW_READS: u32 = 500;
+/// How many frames deeper than the target the buffer must have stayed, at its
+/// shallowest, over a whole window before the extra is thrown away. One frame
+/// is the playing phase: the count moves by one as a frame arrives and is
+/// read. Two means the buffer never needed what it held.
+const TRIM_WHEN_EXCESS_AT_LEAST: u32 = 2;
 
 /// How the buffer is sized and how long it holds audio back.
 ///
@@ -158,7 +184,15 @@ pub struct PlayoutStats {
     pub frames_played: u64,
     pub frames_concealed: u64,
     pub frames_late: u64,
+    /// Reads that found nothing at or after the frame due and played silence
+    /// (`PlayoutResult::Starved`), while playing.
+    pub frames_starved: u64,
     pub resyncs: u64,
+    /// Frames discarded because the buffer held more than the target for a
+    /// whole depth window, or because the target was lowered.
+    pub frames_trimmed: u64,
+    /// How far, in frames, the stream jumped at the last resynchronisation.
+    pub last_resync_distance: u32,
 }
 
 /// One slot of the ring.
@@ -185,12 +219,21 @@ pub struct PlayoutBuffer {
     /// held catches up with `target_delay_frames` (ADR-031). Only meaningful
     /// while playing.
     pending_shift: i32,
-    /// Played plus concealed frames at the last adaptation window.
+    /// Played, concealed and starved reads at the last adaptation window.
     adapt_seen: u64,
-    /// Concealed frames at the last adaptation window.
-    adapt_concealed: u64,
-    /// Consecutive adaptation windows with almost no loss.
+    /// Concealed and starved reads at the last adaptation window.
+    adapt_missed: u64,
+    /// Consecutive adaptation windows with almost no missing frame.
     clean_windows: u32,
+    /// Clean windows in a row the next shrink waits for. Doubles when a shrink
+    /// is followed by a grow within [`BOUNCE_WITHIN_WINDOWS`].
+    shrink_after_windows: u32,
+    /// Windows since the last shrink, while a grow would still show it wrong.
+    windows_since_shrink: Option<u32>,
+    /// Fewest frames held at any read of the current depth window.
+    depth_window_min: usize,
+    /// Reads made in the current depth window.
+    depth_window_reads: u32,
     /// Sequence the next read will play.
     play_sequence: Option<u32>,
     /// Whether enough has been buffered to start.
@@ -235,8 +278,12 @@ impl PlayoutBuffer {
             ring_delay_frames,
             pending_shift: 0,
             adapt_seen: 0,
-            adapt_concealed: 0,
+            adapt_missed: 0,
             clean_windows: 0,
+            shrink_after_windows: CLEAN_WINDOWS_BEFORE_SHRINK,
+            windows_since_shrink: None,
+            depth_window_min: usize::MAX,
+            depth_window_reads: 0,
             config,
             play_sequence: None,
             playing: false,
@@ -269,6 +316,7 @@ impl PlayoutBuffer {
                     self.resync_to(sequence);
                     self.store(sequence, samples);
                     self.stats.resyncs += 1;
+                    self.stats.last_resync_distance = distance.unsigned_abs();
                     self.stats.frames_written += 1;
                     return WriteOutcome::Resynced;
                 }
@@ -334,6 +382,9 @@ impl PlayoutBuffer {
             return read;
         }
 
+        let ready = self.ready_frames();
+        self.watch_depth(ready);
+
         let sequence = match self.play_sequence {
             Some(sequence) => sequence,
             None => return silence(out, self.last_len),
@@ -352,6 +403,7 @@ impl PlayoutBuffer {
             // (ADR-026). Waiting is the honest answer.
             let mut read = silence(out, self.last_len);
             read.result = PlayoutResult::Starved;
+            self.stats.frames_starved += 1;
             return read;
         }
         self.play_sequence = Some(sequence.wrapping_add(1));
@@ -405,6 +457,7 @@ impl PlayoutBuffer {
         );
         if self.playing {
             self.pending_shift += frames as i32 - self.target_delay_frames as i32;
+            self.restart_depth_window();
         }
         self.target_delay_frames = frames;
     }
@@ -423,44 +476,66 @@ impl PlayoutBuffer {
         self.config.max_delay_frames = bounds.max_delay_frames.min(self.ring_delay_frames);
         self.config.target_delay_frames = frames.min(self.config.max_delay_frames);
         self.clean_windows = 0;
+        self.shrink_after_windows = CLEAN_WINDOWS_BEFORE_SHRINK;
+        self.windows_since_shrink = None;
         self.set_target_delay_frames(self.config.target_delay_frames);
     }
 
     /// Follows the link over the time since the last call: grows the delay
-    /// after a lossy stretch, gives it back after a long clean one. Returns the
-    /// new delay when it moved.
+    /// after a stretch with missing frames, gives it back after a long clean
+    /// one. Returns the new delay when it moved.
+    ///
+    /// A frame is missing when it was concealed (a later one had arrived) or
+    /// when the read found the buffer empty and played silence (`Starved`).
+    /// Both are heard as a gap. Starved reads count because a frame that is
+    /// merely late - the common case on Wi-Fi - starves the read and is never
+    /// concealed, so leaving them out let a link drop a frame in a hundred
+    /// without the delay ever moving.
     ///
     /// Call it on a timer, not per frame: the point is to follow the link, not
     /// to react to one packet. It judges the stretch since its previous
     /// decision rather than the whole session - a burst of loss early on must
     /// not keep pushing the delay up for minutes.
     ///
-    /// Growing takes one lossy stretch; shrinking takes
-    /// [`CLEAN_WINDOWS_BEFORE_SHRINK`] clean ones in a row. Every move costs a
-    /// gap or a skip (ADR-031), so the delay must not flip back and forth.
+    /// Growing takes one bad stretch; shrinking takes `shrink_after_windows`
+    /// clean ones in a row, starting at [`CLEAN_WINDOWS_BEFORE_SHRINK`]. Every
+    /// move costs a gap or a skip (ADR-031), so the delay must not flip back
+    /// and forth: a shrink that is followed by a grow within
+    /// [`BOUNCE_WITHIN_WINDOWS`] was wrong, and the next one waits twice as long.
     pub fn adapt(&mut self) -> Option<u32> {
-        let seen = self.stats.frames_played + self.stats.frames_concealed;
+        let seen =
+            self.stats.frames_played + self.stats.frames_concealed + self.stats.frames_starved;
         let window = seen.saturating_sub(self.adapt_seen);
         if window < MIN_ADAPT_WINDOW_FRAMES {
             return None;
         }
-        let concealed = self
-            .stats
-            .frames_concealed
-            .saturating_sub(self.adapt_concealed);
+        let missed_total = self.stats.frames_concealed + self.stats.frames_starved;
+        let missed = missed_total.saturating_sub(self.adapt_missed);
         self.adapt_seen = seen;
-        self.adapt_concealed = self.stats.frames_concealed;
+        self.adapt_missed = missed_total;
+        self.windows_since_shrink = self.windows_since_shrink.map(|n| n + 1);
 
         let before = self.target_delay_frames;
-        let loss_rate = concealed as f32 / window as f32;
-        if loss_rate > GROW_ABOVE_LOSS_RATE {
+        let miss_rate = missed as f32 / window as f32;
+        if miss_rate > GROW_ABOVE_MISS_RATE {
             self.clean_windows = 0;
+            if self
+                .windows_since_shrink
+                .is_some_and(|n| n <= BOUNCE_WITHIN_WINDOWS)
+            {
+                self.shrink_after_windows =
+                    (self.shrink_after_windows * 2).min(MAX_CLEAN_WINDOWS_BEFORE_SHRINK);
+            }
+            self.windows_since_shrink = None;
             self.set_target_delay_frames(before + 1);
-        } else if loss_rate < SHRINK_BELOW_LOSS_RATE {
+        } else if miss_rate < SHRINK_BELOW_MISS_RATE {
             self.clean_windows += 1;
-            if self.clean_windows >= CLEAN_WINDOWS_BEFORE_SHRINK {
+            if self.clean_windows >= self.shrink_after_windows {
                 self.clean_windows = 0;
                 self.set_target_delay_frames(before.saturating_sub(1));
+                if self.target_delay_frames != before {
+                    self.windows_since_shrink = Some(0);
+                }
             }
         } else {
             self.clean_windows = 0;
@@ -487,8 +562,11 @@ impl PlayoutBuffer {
         self.stats = PlayoutStats::default();
         self.pending_shift = 0;
         self.adapt_seen = 0;
-        self.adapt_concealed = 0;
+        self.adapt_missed = 0;
         self.clean_windows = 0;
+        self.shrink_after_windows = CLEAN_WINDOWS_BEFORE_SHRINK;
+        self.windows_since_shrink = None;
+        self.restart_depth_window();
     }
 
     fn slot_for(&self, sequence: u32) -> usize {
@@ -509,7 +587,38 @@ impl PlayoutBuffer {
         self.play_sequence = Some(sequence);
         self.playing = false;
         self.pending_shift = 0;
+        self.restart_depth_window();
         self.plc.reset();
+    }
+
+    fn restart_depth_window(&mut self) {
+        self.depth_window_min = usize::MAX;
+        self.depth_window_reads = 0;
+    }
+
+    /// Remembers the shallowest read of the window, and at the end of it
+    /// discards what the buffer held beyond the target the whole time.
+    ///
+    /// Only the shallowest read is a fair measure: the count swings by a frame
+    /// with the phase of the reads, and a burst that arrived after a stall
+    /// deepens it for a moment. What was never used in a whole window is
+    /// delay for nothing. A read that found the buffer empty counts as zero,
+    /// so a link that keeps running dry never trims.
+    fn watch_depth(&mut self, ready: usize) {
+        self.depth_window_min = self.depth_window_min.min(ready);
+        self.depth_window_reads += 1;
+        if self.depth_window_reads < DEPTH_WINDOW_READS {
+            return;
+        }
+
+        let excess = self
+            .depth_window_min
+            .saturating_sub(self.target_delay_frames as usize + 1);
+        self.restart_depth_window();
+        if excess >= TRIM_WHEN_EXCESS_AT_LEAST as usize {
+            self.pending_shift = -(excess as i32);
+            self.trim_excess();
+        }
     }
 
     /// Discards frames from the play position while the buffer holds more than
@@ -523,6 +632,7 @@ impl PlayoutBuffer {
                 let slot = self.slot_for(sequence);
                 if self.slots[slot].sequence == Some(sequence) {
                     self.slots[slot].sequence = None;
+                    self.stats.frames_trimmed += 1;
                 }
                 self.play_sequence = Some(sequence.wrapping_add(1));
             }
@@ -739,6 +849,11 @@ mod tests {
         }
     }
 
+    /// Reads in a window that is meant to be clean. Long enough that the one
+    /// frame a growth leaves concealed at its start stays under the limit for
+    /// a growing window (one in a hundred).
+    const CLEAN_WINDOW: u32 = 300;
+
     fn adaptive(target: u32, min: u32, max: u32) -> PlayoutBuffer {
         PlayoutBuffer::new(PlayoutConfig {
             frame_samples: 4,
@@ -784,7 +899,7 @@ mod tests {
         // The link has been clean since. The cumulative rate is still high,
         // but the delay must hold.
         for _ in 0..(CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
-            drive(&mut buffer, &mut next, 100, false);
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             assert_eq!(buffer.adapt(), None);
         }
         assert_eq!(buffer.target_delay_frames(), 3);
@@ -845,16 +960,222 @@ mod tests {
         drive(&mut buffer, &mut next, 6, false);
 
         for _ in 0..(CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
-            drive(&mut buffer, &mut next, 100, false);
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             buffer.adapt();
         }
         drive(&mut buffer, &mut next, 40, true);
         assert_eq!(buffer.adapt(), Some(4));
 
         for _ in 0..(CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
-            drive(&mut buffer, &mut next, 100, false);
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             assert_eq!(buffer.adapt(), None);
         }
+    }
+
+    /// A read that finds the buffer empty plays silence and leaves the position
+    /// where it is: it is starved, not concealed. Adaptation has to see it, or a
+    /// link that leaves the buffer empty one read in ten never moves the delay
+    /// (a Mac on Wi-Fi played 1546 starved reads and never adjusted).
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn reads_that_find_the_buffer_empty_grow_the_delay() {
+        let mut buffer = adaptive(1, 1, 4);
+        let mut out = frame(0.0);
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 4, false);
+
+        // The device asks ten times for what the peer sends nine times: one
+        // read in ten finds the buffer empty and plays silence.
+        let mut starved = 0;
+        for period in 0..100u32 {
+            if period % 10 != 5 {
+                buffer.write(next, &frame(next as f32));
+                next += 1;
+            }
+            if buffer.read_into(&mut out).result == PlayoutResult::Starved {
+                starved += 1;
+            }
+        }
+
+        assert!(
+            starved > 5,
+            "the scenario has to starve reads, got {}",
+            starved
+        );
+        assert_eq!(buffer.stats().frames_concealed, 0, "nothing was concealed");
+        assert_eq!(buffer.stats().frames_starved, starved);
+        assert_eq!(buffer.adapt(), Some(2), "starved reads buy a frame");
+    }
+
+    /// One read in a hundred finding its frame missing is a gap every second
+    /// and a half: enough to grow the delay, where the old limit of one in
+    /// twenty left it alone.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn about_one_missing_frame_in_a_hundred_grows_the_delay() {
+        let mut buffer = adaptive(1, 1, 4);
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 4, false);
+
+        // 750 reads a second at 64 samples, 15 of them concealed: 2%.
+        let mut out = frame(0.0);
+        for period in 0..750u32 {
+            if period % 50 != 25 {
+                buffer.write(next, &frame(next as f32));
+            }
+            next += 1;
+            let _ = buffer.read_into(&mut out);
+        }
+
+        assert_eq!(buffer.adapt(), Some(2));
+    }
+
+    /// A delay that was given back and had to be taken again was given back
+    /// too early. The next attempt waits twice as long, so a link that needs
+    /// the frame does not lose and regain it every eleven seconds.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn a_shrink_that_bounces_makes_the_next_one_wait_twice_as_long() {
+        let mut buffer = adaptive(3, 1, 8);
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 6, false);
+
+        for _ in 0..(CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            assert_eq!(buffer.adapt(), None);
+        }
+        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+        assert_eq!(
+            buffer.adapt(),
+            Some(2),
+            "ten clean windows give a frame back"
+        );
+
+        drive(&mut buffer, &mut next, 40, true);
+        assert_eq!(buffer.adapt(), Some(3), "the frame was needed after all");
+
+        // The window right after a grow still carries the frame it left
+        // concealed, so the count of clean windows starts with the next.
+        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+        buffer.adapt();
+        for _ in 0..(2 * CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            assert_eq!(
+                buffer.adapt(),
+                None,
+                "the second attempt waits twice as long"
+            );
+        }
+        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+        assert_eq!(buffer.adapt(), Some(2));
+    }
+
+    /// A shrink that stood for a while was right, and does not slow the next.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn a_shrink_that_holds_does_not_change_how_long_the_next_one_waits() {
+        let mut buffer = adaptive(4, 1, 8);
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 8, false);
+
+        for _ in 0..CLEAN_WINDOWS_BEFORE_SHRINK {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            buffer.adapt();
+        }
+        assert_eq!(buffer.target_delay_frames(), 3);
+
+        for _ in 0..(BOUNCE_WITHIN_WINDOWS + 2) {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            buffer.adapt();
+        }
+        drive(&mut buffer, &mut next, 40, true);
+        assert_eq!(buffer.adapt(), Some(4));
+
+        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+        buffer.adapt();
+        for _ in 0..(CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            assert_eq!(buffer.adapt(), None);
+        }
+        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+        assert_eq!(buffer.adapt(), Some(3), "still ten windows");
+    }
+
+    /// Every fifth frame comes in a period and a half late, behind the frame
+    /// after it. Its read has to conceal it, and it is dropped when it turns
+    /// up. The buffer keeps missing at that spot until the delay is deep
+    /// enough to have the late frame in its slot when the read comes; the
+    /// adaptation is what gets it there.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn adaptation_finds_the_delay_a_link_with_late_frames_needs() {
+        // One frame is `PERIOD` ticks; the device reads once per period.
+        const PERIOD: u64 = 1_000;
+        const LATENESS: u64 = 1_500;
+        const READS_PER_WINDOW: u64 = 750;
+        const WINDOWS: u64 = 30;
+
+        let miss_rates = |adaptive_delay: bool| -> Vec<f32> {
+            let mut buffer = adaptive(1, 1, 4);
+            let total = READS_PER_WINDOW * WINDOWS;
+            let mut writes: Vec<(u64, u32)> = (0..total + 8)
+                .map(|n| {
+                    let late = if n % 5 == 2 { LATENESS } else { 0 };
+                    (n * PERIOD + late, n as u32)
+                })
+                .collect();
+            writes.sort_by_key(|&(time, _)| time);
+            let mut writes = writes.into_iter().peekable();
+
+            let mut out = frame(0.0);
+            let mut rates = Vec::new();
+            let (mut before_missed, mut before_reads) = (0u64, 0u64);
+            for read in 0..total {
+                let now = (read + 1) * PERIOD;
+                while let Some(&(time, sequence)) = writes.peek() {
+                    if time > now {
+                        break;
+                    }
+                    buffer.write(sequence, &frame(sequence as f32));
+                    writes.next();
+                }
+                let _ = buffer.read_into(&mut out);
+                if (read + 1) % READS_PER_WINDOW == 0 {
+                    let stats = buffer.stats();
+                    let reads = stats.frames_played + stats.frames_concealed + stats.frames_starved;
+                    let missed = stats.frames_concealed + stats.frames_starved;
+                    rates.push(
+                        (missed - before_missed) as f32 / (reads - before_reads).max(1) as f32,
+                    );
+                    before_missed = missed;
+                    before_reads = reads;
+                    if adaptive_delay {
+                        buffer.adapt();
+                    }
+                }
+            }
+            rates
+        };
+
+        let fixed = miss_rates(false);
+        let adapted = miss_rates(true);
+        let last = |rates: &[f32]| rates[rates.len() - 10..].iter().sum::<f32>() / 10.0;
+
+        assert!(
+            last(&fixed) > 0.05,
+            "without adaptation the buffer keeps missing: {:?}",
+            &fixed[fixed.len() - 10..]
+        );
+        assert!(
+            last(&adapted) < GROW_ABOVE_MISS_RATE,
+            "with adaptation the delay settles where the late frames fit: {:?}",
+            &adapted[adapted.len() - 10..]
+        );
     }
 
     /// Fixed bounds and passthrough are not moved by adaptation.
@@ -1274,5 +1595,152 @@ mod tests {
             concealed.samples, 5,
             "the gap must be as long as the audio it replaces"
         );
+    }
+
+    /// One tick: the sender delivers the frames due (`deliver` says which) and
+    /// the device reads once unless it is stalled. Returns what the read made.
+    fn tick(
+        buffer: &mut PlayoutBuffer,
+        deliver: &[u32],
+        read: bool,
+        out: &mut [f32],
+    ) -> Option<PlayoutResult> {
+        for &sequence in deliver {
+            buffer.write(sequence, &frame(sequence as f32));
+        }
+        read.then(|| buffer.read_into(out).result)
+    }
+
+    /// The sender keeps its pace and the device reads at the same pace on
+    /// average, but now and then the device does not read for a few ticks. The
+    /// frames that arrive meanwhile stay, so the buffer holds more than the
+    /// target from then on. It must give them back.
+    ///
+    /// Verifies: REQ-LAT-025
+    #[test]
+    fn frames_that_piled_up_while_the_device_did_not_read_are_given_back() {
+        const TARGET: u32 = 2;
+        let mut buffer = PlayoutBuffer::new(config(TARGET));
+        let mut out = frame(0.0);
+        let mut results = Vec::new();
+
+        for t in 0..3_000u32 {
+            let stalled = (100..300).contains(&t) && t % 100 < 3;
+            results.extend(tick(&mut buffer, &[t], !stalled, &mut out));
+        }
+
+        assert_eq!(
+            buffer.ready_frames() as u32,
+            TARGET,
+            "what is held is the target again"
+        );
+        let stats = buffer.stats();
+        assert_eq!(stats.frames_trimmed, 6, "the six frames that piled up");
+        assert_eq!(stats.resyncs, 0);
+        assert!(
+            !results.contains(&PlayoutResult::Starved) && stats.frames_concealed == 0,
+            "giving the frames back is a skip, not a gap"
+        );
+    }
+
+    /// Everything the buffer holds beyond the target goes in one skip, from the
+    /// play position, so the stream carries on from the frame after the ones
+    /// discarded rather than stepping down a frame at a time.
+    ///
+    /// Verifies: REQ-LAT-025
+    #[test]
+    fn the_excess_is_discarded_in_one_skip_from_the_play_position() {
+        let mut buffer = PlayoutBuffer::new(config(1));
+        let mut out = frame(0.0);
+
+        for t in 0..40u32 {
+            let stalled = (10..14).contains(&t);
+            tick(&mut buffer, &[t], !stalled, &mut out);
+        }
+        assert_eq!(buffer.ready_frames(), 5, "four frames piled up on the one");
+
+        let mut skipped = Vec::new();
+        let mut last = None;
+        for t in 40..40 + 2 * DEPTH_WINDOW_READS {
+            if let Some(PlayoutResult::Played { sequence }) =
+                tick(&mut buffer, &[t], true, &mut out)
+            {
+                if let Some(last) = last {
+                    if sequence != last + 1 {
+                        skipped.push((last, sequence));
+                    }
+                }
+                last = Some(sequence);
+            }
+        }
+
+        assert_eq!(skipped.len(), 1, "one skip: {:?}", skipped);
+        let (before, after) = skipped[0];
+        assert_eq!(after - before - 1, 4, "the four frames that piled up");
+        assert_eq!(buffer.ready_frames(), 1);
+    }
+
+    /// The last frame of excess is the playing phase, not delay for nothing:
+    /// one frame more than the target is left alone.
+    #[test]
+    fn a_single_frame_beyond_the_target_is_left_alone() {
+        let mut buffer = PlayoutBuffer::new(config(2));
+        let mut out = frame(0.0);
+
+        for t in 0..4 * DEPTH_WINDOW_READS {
+            let stalled = t == 20;
+            tick(&mut buffer, &[t], !stalled, &mut out);
+        }
+
+        assert_eq!(buffer.stats().frames_trimmed, 0);
+        assert_eq!(buffer.ready_frames(), 3);
+    }
+
+    /// A link that delivers in bursts needs the depth it settles at: the
+    /// buffer runs down towards empty before each burst, so it is never deeper
+    /// than the target for a whole window and nothing is discarded.
+    #[test]
+    fn a_depth_the_link_keeps_needing_is_kept() {
+        let mut buffer = PlayoutBuffer::new(config(2));
+        let mut out = frame(0.0);
+        let mut held: Vec<u32> = Vec::new();
+        let mut results = Vec::new();
+
+        for t in 0..6 * DEPTH_WINDOW_READS {
+            let mut deliver = Vec::new();
+            match t % 50 {
+                10..=12 => held.push(t),
+                13 => {
+                    deliver.append(&mut held);
+                    deliver.push(t);
+                }
+                _ => deliver.push(t),
+            }
+            results.extend(tick(&mut buffer, &deliver, true, &mut out));
+        }
+
+        assert_eq!(buffer.stats().frames_trimmed, 0);
+        assert_eq!(buffer.stats().resyncs, 0);
+        assert!(
+            results.iter().all(|r| !matches!(r, PlayoutResult::Padded)),
+            "the target never moved"
+        );
+    }
+
+    /// Passthrough has the same problem and the same cure: a frame or two
+    /// beyond what it promises is discarded once it has stayed for a whole
+    /// window.
+    #[test]
+    fn passthrough_gives_back_what_piled_up_too() {
+        let mut buffer = PlayoutBuffer::new(config(0));
+        let mut out = frame(0.0);
+
+        for t in 0..3 * DEPTH_WINDOW_READS {
+            let stalled = (10..14).contains(&t);
+            tick(&mut buffer, &[t], !stalled, &mut out);
+        }
+
+        assert_eq!(buffer.ready_frames(), 0, "nothing is held back");
+        assert_eq!(buffer.stats().frames_trimmed, 4);
     }
 }

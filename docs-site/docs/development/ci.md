@@ -27,7 +27,7 @@ GitHub Actions を使用して以下を自動化しています:
 flowchart TD
     subgraph Triggers
         PR[Pull Request]
-        Push[Push to main]
+        Push[Push to main / develop]
         Tag[Tag v*]
     end
 
@@ -60,7 +60,7 @@ flowchart TD
 
 ## CI Workflow
 
-Pull Request および main ブランチへの push 時に実行されます。
+Pull Request および main・develop ブランチへの push 時に実行されます。
 
 | ジョブ | 内容 |
 |-------|------|
@@ -70,7 +70,7 @@ Pull Request および main ブランチへの push 時に実行されます。
 
 ### マージ要件
 
-Pull Request を main にマージするには以下をすべて満たす必要があります:
+Pull Request を develop（リリースのときは main）にマージするには以下をすべて満たす必要があります:
 
 - check 成功
 - test 成功
@@ -78,7 +78,7 @@ Pull Request を main にマージするには以下をすべて満たす必要�
 
 ## Build Workflow
 
-main ブランチへの push またはタグ作成時に実行されます。
+main・develop ブランチへの push またはタグ作成時に実行されます。
 
 | OS | runner | 成果物 |
 |----|--------|--------|
@@ -88,17 +88,17 @@ main ブランチへの push またはタグ作成時に実行されます。
 
 ## Release Workflow
 
-main ブランチへの push またはタグ作成時に実行されます。
+タグ作成時に実行されます。ブランチへの push では何も公開しません。
 
 | きっかけ | 公開されるもの | Homebrew |
 |---------|---------------|----------|
-| main への push | ベータ版（タグ `vX.Y.Z-beta.<実行番号>`、X.Y.Z は `src-tauri/tauri.conf.json` の版）。GitHub の pre-release になり "Latest" には載らない | `jamjam@beta` を更新 |
-| `vX.Y.Z` のタグ | 正式版 | `jamjam` を更新 |
+| `vX.Y.Z-beta.N` のタグ（develop か feature ブランチに打つ） | ベータ版。GitHub の pre-release になり "Latest" には載らない | `jamjam@beta` を更新 |
+| `vX.Y.Z` のタグ（main に打つ） | 正式版 | `jamjam` を更新 |
 | 手動起動 | 何も公開しない（ビルドの予行演習） | 更新しない |
 
 リリースのビルドは、更新用の成果物と署名（`.sig`）も作り、更新情報 `latest.json` を Release に添えます（[ADR-041](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-041-self-update.md)）。正式版のタグ `vX.Y.Z` は、`src-tauri/tauri.conf.json` の版と同じでなければ、更新情報を作る段階で失敗します。先に版を上げてからタグを打ってください。
 
-ベータ版のタグは main への push ごとに作られます。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ベータ版のアプリは `X.Y.Z-N`（`vX.Y.Z-beta.N` の N）の版としてビルドされ、更新情報は固定タグの Release `beta-channel` の `latest.json` から読みます。ベータ版・正式版のどちらのリリースでも、より新しければその `latest.json` に置き換えます（[ADR-045](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-045-beta-self-update.md)）。
+ベータ版のタグは、動作を確かめたいコミットに開発者が打ちます。同じ X.Y.Z のベータ版では、それまでの最大の N に 1 を足します。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ベータ版のアプリは `X.Y.Z-N`（`vX.Y.Z-beta.N` の N）の版としてビルドされ、更新情報は固定タグの Release `beta-channel` の `latest.json` から読みます。ベータ版・正式版のどちらのリリースでも、より新しければその `latest.json` に置き換えます（[ADR-045](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-045-beta-self-update.md)）。ブランチの使い分けとリリースの手順は [ADR-047](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-047-git-flow-branching.md) にあります。
 
 ## ローカルでのCI実行
 

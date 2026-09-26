@@ -150,7 +150,8 @@ fn latency_breakdown_includes_the_jitter_buffer() {
     );
 }
 
-/// The bandwidth estimator must report the rate it observes, not a constant.
+/// The bandwidth estimator must report the rate it observes, not a constant,
+/// and its verdict must follow what the link drops.
 ///
 /// Verifies: REQ-NET-028
 #[test]
@@ -161,19 +162,22 @@ fn bandwidth_estimate_responds_to_throughput() {
     let preset = AudioPreset::Balanced;
     let mut estimator = BandwidthEstimator::new(Duration::from_millis(100));
 
+    estimator.note_audio(0, 0);
     estimator.sample_at(start, 0);
 
-    // A narrow link, then a wide one. Both the rate and the classification must
-    // change.
+    // A narrow link that drops half of what the peer sends, then a wide one
+    // that drops nothing. Both the rate and the verdict must change.
+    estimator.note_audio(50, 50);
     let narrow = estimator
         .sample_at(start + Duration::from_millis(100), 1_000)
         .expect("first interval");
-    let narrow_status = estimator.status_for(&preset, BUDGET_SAMPLE_RATE, 2);
+    let narrow_status = estimator.status();
 
+    estimator.note_audio(150, 50);
     let wide = estimator
         .sample_at(start + Duration::from_millis(200), 1_000_000)
         .expect("second interval");
-    let wide_status = estimator.status_for(&preset, BUDGET_SAMPLE_RATE, 2);
+    let wide_status = estimator.status();
 
     assert!(
         wide > narrow * 10.0,
@@ -183,7 +187,7 @@ fn bandwidth_estimate_responds_to_throughput() {
     );
     assert_ne!(
         narrow_status, wide_status,
-        "the classification is the same for {:.0} and {:.0} bps",
+        "the verdict is the same for {:.0} and {:.0} bps",
         narrow, wide
     );
 

@@ -1,11 +1,24 @@
 //! Bandwidth requirement and measurement
 //!
 //! Uncompressed PCM has a fixed cost, so the interesting question is not "what
-//! bitrate should we pick" but "does this link carry what the preset needs".
+//! bitrate should we pick" but "does this link carry what the peer sends".
 //! Bitrate adaptation is out of scope: narrow-band links are not a target and
 //! PCM's rate cannot be lowered without adding latency (ADR-022). What this
-//! module does is detect and report a link that cannot carry the preset
+//! module does is detect and report a link that cannot carry the stream
 //! (REQ-LAT-124, REQ-LAT-125, REQ-LAT-126).
+//!
+//! # What the verdict is made of
+//!
+//! Not the received rate against the preset's requirement. A peer sends
+//! exactly what its preset needs and no more, so on a healthy link the rate it
+//! delivers can only equal the requirement, never exceed it: measured that
+//! way, every healthy link sits on the boundary and is called insufficient or
+//! marginal by the accounting alone (a 5% shortfall from leaving the UDP and IP
+//! headers out of the count was enough), and a peer that has muted itself and
+//! sends nothing reads as a dead link. The peer's own sequence numbers say how
+//! many audio packets it sent, so the verdict is the share of them that did not
+//! arrive: a link too narrow for the stream drops packets, and one that
+//! carries it drops none.
 
 use std::time::{Duration, Instant};
 
@@ -15,43 +28,42 @@ use crate::audio::AudioPreset;
 const BITS_PER_BYTE: f64 = 8.0;
 /// Bytes per 32-bit float sample (ADR-003: PCM f32 is the default codec)
 const BYTES_PER_SAMPLE: f64 = 4.0;
+/// UDP + IP header bytes per packet on IPv4: 20 + 8. What the socket counts
+/// is the jamjam packet; the link carries these on top.
+pub const UDP_IP_OVERHEAD_BYTES: u64 = 20 + 8;
+
 /// UDP + IP + jamjam header bytes per packet
 ///
-/// 20 (IPv4) + 8 (UDP) + [`crate::protocol::HEADER_SIZE`].
-const PACKET_OVERHEAD_BYTES: f64 = 20.0 + 8.0 + 12.0;
+/// [`UDP_IP_OVERHEAD_BYTES`] + [`crate::protocol::HEADER_SIZE`].
+const PACKET_OVERHEAD_BYTES: f64 = UDP_IP_OVERHEAD_BYTES as f64 + 12.0;
 
-/// Fraction of the requirement below which a link is called insufficient
-const INSUFFICIENT_RATIO: f64 = 1.0;
-/// Fraction of the requirement below which a link is called marginal
+/// Share of the peer's audio packets lost, from which a link is called marginal
 ///
-/// A link with under 20% of headroom will not survive a burst, so it is worth
-/// warning about before it actually drops packets.
-const MARGINAL_RATIO: f64 = 1.2;
+/// The same line `quality` draws between a good link and a fair one: a link
+/// that loses one packet in a hundred is already dropping audio.
+const MARGINAL_LOSS: f64 = 0.01;
+/// Share of the peer's audio packets lost, from which a link is called
+/// insufficient. The same line `quality` draws between a fair link and a poor one.
+const INSUFFICIENT_LOSS: f64 = 0.05;
 
-/// Whether a measured link carries what a preset needs
+/// Whether the link carried what the peer sent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BandwidthStatus {
-    /// At least 20% more than required
+    /// Under 1% of the peer's audio packets were lost
     Sufficient,
-    /// Enough, but with less than 20% of headroom
+    /// 1% or more, under 5%, were lost: the link is close to what it can carry
     Marginal,
-    /// Less than required
+    /// 5% or more were lost: the link does not carry the stream
     Insufficient,
 }
 
 impl BandwidthStatus {
-    /// Classify a measured rate against a requirement
-    ///
-    /// A non-positive requirement is [`BandwidthStatus::Sufficient`]: nothing is
-    /// needed, so nothing can be missing.
-    pub fn classify(available_bps: f64, required_bps: f64) -> Self {
-        if required_bps <= 0.0 {
-            return BandwidthStatus::Sufficient;
-        }
-        let ratio = available_bps / required_bps;
-        if ratio < INSUFFICIENT_RATIO {
+    /// Classify the share of the peer's audio packets that did not arrive
+    /// (0.0 - 1.0)
+    pub fn classify(loss: f64) -> Self {
+        if loss >= INSUFFICIENT_LOSS {
             BandwidthStatus::Insufficient
-        } else if ratio < MARGINAL_RATIO {
+        } else if loss >= MARGINAL_LOSS {
             BandwidthStatus::Marginal
         } else {
             BandwidthStatus::Sufficient
@@ -109,7 +121,8 @@ pub fn required_bps(preset: &AudioPreset, sample_rate: u32, channels: u16) -> f6
     with_fec * BITS_PER_BYTE
 }
 
-/// Measures the rate at which bytes actually move
+/// Measures the rate at which bytes actually move, and how many of the peer's
+/// audio packets did not arrive
 ///
 /// Fed from the monotonically increasing counters `ConnectionStats` reports, so
 /// it works without touching the send path. Rates are computed over the interval
@@ -121,6 +134,13 @@ pub struct BandwidthEstimator {
     current_bps: f64,
     /// Shortest interval that produces a usable rate
     min_interval: Duration,
+    /// Audio packets received and lost so far, as last reported
+    audio_now: (u64, u64),
+    /// The same, when the interval being measured began
+    audio_at_start: (u64, u64),
+    /// Share of the audio packets the peer sent in the last complete interval
+    /// that did not arrive, or `None` when it sent none (muted, or silent)
+    interval_loss: Option<f64>,
 }
 
 impl BandwidthEstimator {
@@ -133,7 +153,17 @@ impl BandwidthEstimator {
             last_sample: None,
             current_bps: 0.0,
             min_interval,
+            audio_now: (0, 0),
+            audio_at_start: (0, 0),
+            interval_loss: None,
         }
+    }
+
+    /// Say how many audio packets have arrived and how many were lost so far
+    /// (cumulative, as `ConnectionStats` counts them). Call it before
+    /// [`Self::sample`] with the same reading.
+    pub fn note_audio(&mut self, received: u64, lost: u64) {
+        self.audio_now = (received, lost);
     }
 
     /// Feed a cumulative byte counter, using an explicit clock reading
@@ -145,6 +175,7 @@ impl BandwidthEstimator {
         match self.last_sample {
             None => {
                 self.last_sample = Some((now, cumulative_bytes));
+                self.audio_at_start = self.audio_now;
                 None
             }
             Some((last_time, last_bytes)) => {
@@ -158,6 +189,14 @@ impl BandwidthEstimator {
                 // rate.
                 let delta = cumulative_bytes.saturating_sub(last_bytes);
                 let bps = delta as f64 * BITS_PER_BYTE / elapsed.as_secs_f64();
+
+                // A late packet takes its loss back, so the lost count can go
+                // down: an interval never has fewer than none.
+                let received = self.audio_now.0.saturating_sub(self.audio_at_start.0);
+                let lost = self.audio_now.1.saturating_sub(self.audio_at_start.1);
+                self.interval_loss =
+                    (received + lost > 0).then(|| lost as f64 / (received + lost) as f64);
+                self.audio_at_start = self.audio_now;
 
                 self.last_sample = Some((now, cumulative_bytes));
                 self.current_bps = bps;
@@ -176,23 +215,22 @@ impl BandwidthEstimator {
         self.current_bps
     }
 
-    /// Classify the measured rate against what `preset` needs
+    /// Whether the link carried what the peer sent in the last complete
+    /// interval
     ///
     /// Returns `None` until a rate has been measured, so a caller does not warn
-    /// about a link it has not observed yet.
-    pub fn status_for(
-        &self,
-        preset: &AudioPreset,
-        sample_rate: u32,
-        channels: u16,
-    ) -> Option<BandwidthStatus> {
+    /// about a link it has not observed yet, and `None` for an interval that
+    /// carried no bytes at all (REQ-LAT-127). An interval in which the peer sent
+    /// no audio - it has muted itself - is sufficient: there was nothing to
+    /// carry, and nothing was dropped.
+    pub fn status(&self) -> Option<BandwidthStatus> {
         if self.last_sample.is_none() || self.current_bps == 0.0 {
             return None;
         }
-        Some(BandwidthStatus::classify(
-            self.current_bps,
-            required_bps(preset, sample_rate, channels),
-        ))
+        Some(match self.interval_loss {
+            Some(loss) => BandwidthStatus::classify(loss),
+            None => BandwidthStatus::Sufficient,
+        })
     }
 }
 
@@ -213,16 +251,13 @@ const STARTUP_GRACE: Duration = Duration::from_secs(4);
 
 /// Confirms a raw per-interval classification before it is safe to show a user
 ///
-/// [`BandwidthEstimator::status_for`] reports exactly what one interval
+/// [`BandwidthEstimator::status`] reports exactly what one interval
 /// measured, which is what the classifier and the tests need. A user-facing
-/// warning needs more than that: the requirement PCM computes has no headroom
-/// built in (it is exactly what the sender transmits), so a link that is
-/// perfectly healthy still straddles the insufficient/marginal boundary on
-/// whichever interval happens to catch a packet a few milliseconds late. A
-/// peer that has only just connected is worse - a test peer that replies
-/// after a deliberate delay, or plain connection setup, means the first
-/// intervals carry only keepalives, which read as an extremely narrow link
-/// rather than no signal (REQ-LAT-128). Both call for withholding judgment:
+/// warning needs more than that: a second in which a Wi-Fi link dropped two
+/// packets in a hundred is not a link that cannot carry the stream. A peer
+/// that has only just connected is worse - a test peer that replies after a
+/// deliberate delay, or plain connection setup, means the first intervals
+/// carry only keepalives (REQ-LAT-128). Both call for withholding judgment:
 /// a single bad reading proves nothing, so `BandwidthVerdict` requires
 /// [`CONFIRM_INTERVALS`] in a row before it reports one, while a sufficient
 /// reading clears immediately (REQ-LAT-129).
@@ -349,29 +384,140 @@ mod tests {
     /// Verifies: REQ-LAT-124
     /// Verifies: REQ-LAT-125
     #[test]
-    fn status_classifies_headroom() {
-        let required = 1_000_000.0;
+    fn status_classifies_the_share_of_the_peers_packets_that_were_lost() {
+        assert_eq!(BandwidthStatus::classify(0.0), BandwidthStatus::Sufficient);
         assert_eq!(
-            BandwidthStatus::classify(999_999.0, required),
+            BandwidthStatus::classify(0.0099),
+            BandwidthStatus::Sufficient
+        );
+        assert_eq!(BandwidthStatus::classify(0.01), BandwidthStatus::Marginal);
+        assert_eq!(BandwidthStatus::classify(0.0499), BandwidthStatus::Marginal);
+        assert_eq!(
+            BandwidthStatus::classify(0.05),
             BandwidthStatus::Insufficient
         );
         assert_eq!(
-            BandwidthStatus::classify(1_000_000.0, required),
-            BandwidthStatus::Marginal
+            BandwidthStatus::classify(1.0),
+            BandwidthStatus::Insufficient
         );
-        assert_eq!(
-            BandwidthStatus::classify(1_100_000.0, required),
-            BandwidthStatus::Marginal
+    }
+
+    /// One interval of a stream at exactly `preset`'s requirement, on the wire,
+    /// with `audio` packets received and `lost` lost in it. The estimator
+    /// starts at `start`, so the interval ends a second later.
+    fn one_interval(
+        estimator: &mut BandwidthEstimator,
+        start: Instant,
+        second: u64,
+        bytes_per_second: u64,
+        audio: (u64, u64),
+    ) {
+        let (received, lost) = audio;
+        estimator.note_audio(received * (second + 1), lost * (second + 1));
+        estimator.sample_at(
+            start + Duration::from_secs(second + 1),
+            bytes_per_second * (second + 1),
         );
-        assert_eq!(
-            BandwidthStatus::classify(1_200_000.0, required),
-            BandwidthStatus::Sufficient
+    }
+
+    /// A healthy link delivers exactly what the peer sends, which is exactly
+    /// the preset's requirement and never more. Measured against the
+    /// requirement that is the boundary, so the old verdict read every healthy
+    /// link as insufficient or marginal; measured by what was lost it reads as
+    /// sufficient.
+    ///
+    /// Verifies: REQ-LAT-124
+    /// Verifies: REQ-LAT-125
+    #[test]
+    fn a_link_that_delivers_exactly_what_the_peer_sends_is_sufficient() {
+        let preset = AudioPreset::UltraLowLatency;
+        let required_bytes = (required_bps(&preset, 48_000, 2) / 8.0) as u64;
+        let start = Instant::now();
+        let mut estimator = BandwidthEstimator::new(Duration::from_secs(1));
+        estimator.sample_at(start, 0);
+
+        // 750 packets a second, none lost, at exactly the requirement.
+        one_interval(&mut estimator, start, 0, required_bytes, (750, 0));
+
+        assert_eq!(estimator.status(), Some(BandwidthStatus::Sufficient));
+        let measured = estimator.current_bps();
+        assert!(
+            (measured / required_bps(&preset, 48_000, 2) - 1.0).abs() < 0.01,
+            "the rate is the requirement, {} bps",
+            measured
         );
-        // Nothing required means nothing missing.
-        assert_eq!(
-            BandwidthStatus::classify(0.0, 0.0),
-            BandwidthStatus::Sufficient
-        );
+    }
+
+    /// A peer that has muted itself sends no audio, only keepalives. That is
+    /// not a link too narrow for the stream.
+    ///
+    /// Verifies: REQ-LAT-131
+    #[test]
+    fn a_peer_that_sends_no_audio_is_not_a_narrow_link() {
+        let start = Instant::now();
+        let mut estimator = BandwidthEstimator::new(Duration::from_secs(1));
+        estimator.sample_at(start, 0);
+
+        // Two keepalives and a ping a second.
+        one_interval(&mut estimator, start, 0, 3 * 52, (0, 0));
+
+        assert_eq!(estimator.status(), Some(BandwidthStatus::Sufficient));
+    }
+
+    /// Packets the peer's sequence numbers show as missing decide the verdict,
+    /// however many bytes arrived.
+    ///
+    /// Verifies: REQ-LAT-124
+    /// Verifies: REQ-LAT-125
+    #[test]
+    fn a_link_that_drops_the_peers_packets_is_marginal_and_then_insufficient() {
+        let start = Instant::now();
+        let mut estimator = BandwidthEstimator::new(Duration::from_secs(1));
+        estimator.sample_at(start, 0);
+
+        one_interval(&mut estimator, start, 0, 400_000, (740, 10));
+        assert_eq!(estimator.status(), Some(BandwidthStatus::Marginal));
+
+        one_interval(&mut estimator, start, 1, 400_000, (740, 40));
+        assert_eq!(estimator.status(), Some(BandwidthStatus::Insufficient));
+    }
+
+    /// The verdict is about the last interval. A link that lost packets and
+    /// recovered is sufficient again.
+    ///
+    /// Verifies: REQ-LAT-124
+    #[test]
+    fn the_verdict_follows_the_last_interval_and_not_the_whole_session() {
+        let start = Instant::now();
+        let mut estimator = BandwidthEstimator::new(Duration::from_secs(1));
+        estimator.sample_at(start, 0);
+
+        estimator.note_audio(700, 50);
+        estimator.sample_at(start + Duration::from_secs(1), 400_000);
+        assert_eq!(estimator.status(), Some(BandwidthStatus::Insufficient));
+
+        // The next second: 750 more arrived, none more were lost.
+        estimator.note_audio(1_450, 50);
+        estimator.sample_at(start + Duration::from_secs(2), 800_000);
+        assert_eq!(estimator.status(), Some(BandwidthStatus::Sufficient));
+    }
+
+    /// A late packet takes its loss back, so the cumulative count of lost
+    /// packets can go down. That must not read as anything but a clean
+    /// interval.
+    ///
+    /// Verifies: REQ-LAT-124
+    #[test]
+    fn a_packet_that_takes_its_loss_back_does_not_break_the_interval() {
+        let start = Instant::now();
+        let mut estimator = BandwidthEstimator::new(Duration::from_secs(1));
+        estimator.note_audio(0, 5);
+        estimator.sample_at(start, 0);
+
+        estimator.note_audio(750, 4);
+        estimator.sample_at(start + Duration::from_secs(1), 400_000);
+
+        assert_eq!(estimator.status(), Some(BandwidthStatus::Sufficient));
     }
 
     /// The estimator must report the rate over the interval, ignore samples that
@@ -439,26 +585,30 @@ mod tests {
     fn status_is_absent_until_measured() {
         let start = Instant::now();
         let mut estimator = BandwidthEstimator::new(Duration::from_secs(1));
-        let preset = AudioPreset::Balanced;
 
-        assert_eq!(estimator.status_for(&preset, 48_000, 2), None);
+        assert_eq!(estimator.status(), None);
 
-        // A link carrying far more than needed is sufficient.
+        // The baseline alone measures nothing.
         estimator.sample_at(start, 0);
-        estimator.sample_at(start + Duration::from_secs(1), 10_000_000);
-        assert_eq!(
-            estimator.status_for(&preset, 48_000, 2),
-            Some(BandwidthStatus::Sufficient)
-        );
+        assert_eq!(estimator.status(), None);
 
-        // A narrow link is insufficient for PCM.
-        let mut narrow = BandwidthEstimator::new(Duration::from_secs(1));
-        narrow.sample_at(start, 0);
-        narrow.sample_at(start + Duration::from_secs(1), 12_500); // 100 kbps
-        assert_eq!(
-            narrow.status_for(&preset, 48_000, 2),
-            Some(BandwidthStatus::Insufficient)
-        );
+        // An interval that carried bytes has a verdict.
+        estimator.sample_at(start + Duration::from_secs(1), 10_000_000);
+        assert_eq!(estimator.status(), Some(BandwidthStatus::Sufficient));
+    }
+
+    /// An interval with no bytes at all is a dead link, not a verdict.
+    ///
+    /// Verifies: REQ-LAT-127
+    #[test]
+    fn an_interval_that_carried_nothing_has_no_verdict() {
+        let start = Instant::now();
+        let mut estimator = BandwidthEstimator::new(Duration::from_secs(1));
+        estimator.sample_at(start, 100_000);
+
+        estimator.sample_at(start + Duration::from_secs(1), 100_000);
+
+        assert_eq!(estimator.status(), None);
     }
 
     /// Verifies: REQ-LAT-128

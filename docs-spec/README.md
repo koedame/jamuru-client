@@ -70,6 +70,8 @@ sidebar_position: 1
 | [ADR-043](./adr/ADR-043-remote-operation-rpc.md) | アプリの操作は名前付きのコマンド（RPC）。E2E は全部を呼ぶ（手伝いの部分は ADR-044 が置き換えた） |
 | [ADR-044](./adr/ADR-044-portals-and-permissions.md) | アプリの操作は「口」ごとに呼べる範囲を 1 つの表で決める。遠隔の口は WebSocket の中継に載せ、権限はデバッグモード（ベータ版だけ）と手伝いの 2 段 |
 | [ADR-045](./adr/ADR-045-beta-self-update.md) | ベータ版も自動更新する。ベータ版は `X.Y.Z-N` の版としてビルドし、更新情報は固定タグの Release `beta-channel` から読む（ADR-041 の 4 節を置き換えた） |
+| [ADR-046](./adr/ADR-046-audio-gaps-are-measured-not-guessed.md) | 受信バッファの自動調整は空読みも欠けとして数える。帯域の判定は相手が送ったパケットの欠けの割合で行う。音の欠けの原因は飛行記録（`debug.audio_timing`）で測る |
+| [ADR-047](./adr/ADR-047-git-flow-branching.md) | 開発は develop で進め、main には出した正式版だけを置く。ベータ版はタグを打ったときだけ公開し、タグは対になるサーバー側のリポジトリと同じ名前を同じときに打つ |
 
 ---
 

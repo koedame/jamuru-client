@@ -30,7 +30,7 @@ WARN  [jamjam_app_lib::updater] Self-update did not finish: Could not fetch a va
    - 却下: ベータ版ごとに Release へ `latest.json` を置き、`releases/latest` を pre-release に向ける。GitHub は pre-release を `latest` にしない。
 2. **`beta-channel` には、ベータ版と正式版の更新情報を置く。** 置き換えるのは、置く版が今の版より新しいときだけ（`scripts/publish-beta-channel.sh`）。
    - ベータ版は、同じ版の正式版（`0.1.0-17` に対する `0.1.0`）が出るとそこに移る。正式版は、そのあとのベータ版（次の版の `0.2.0-1`）が出るまでの置き場になる。
-   - 版が新しいときだけ置き換えるのは、遅れて終わった古い run が置き場を巻き戻さないため。同じ版の正式版が出たあとも main へのマージでは `0.1.0-N` が出続けるが、`0.1.0` の方が新しいので置き場は動かない。版を上げると `0.2.0-1` から始まって動く。
+   - 版が新しいときだけ置き換えるのは、遅れて終わった古い run が置き場を巻き戻さないため。同じ版の正式版が出たあとも `v0.1.0-beta.N` のタグを打てば `0.1.0-N` が出るが、`0.1.0` の方が新しいので置き場は動かない。版を上げると `0.2.0-1` から始まって動く。
    - `beta-channel` は pre-release として作る。"Latest" には載らず、`releases/latest` にも影響しない。タグ名が `v` で始まらないので、Release のワークフローは動かない。
 3. **ベータ版のタグ `vX.Y.Z-beta.N` のアプリは、`X.Y.Z-N` の版としてビルドする**（`scripts/build-version.sh`）。ビルド時の `--config` で `tauri.conf.json` の版を上書きする。署名も更新情報もこの版を指し、`make-update-manifest.sh` が署名の版を検査する。
    - `-N` は数字だけにする。Windows の MSI は pre-release に 65535 以下の数字しか受け付けない。`-beta.N` のままでは MSI が組めない。
