@@ -4,7 +4,6 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -13,23 +12,15 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use super::clock::{clock_skew_of_refusal, now_unix_secs};
 use super::device_identity::DeviceIdentity;
 use super::discovery::discover_signaling_url;
 use super::error::{NetworkError, SignalingFailure};
 
-/// Current Unix time in whole seconds, the timestamp a device identity signs
-/// when connecting.
-fn now_unix_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// The four `X-Device-*` handshake headers proving `identity` to a server
 /// (ADR-024), signed for the current time.
 pub(super) fn signed_device_headers(identity: &DeviceIdentity) -> [(&'static str, String); 4] {
-    let timestamp = now_unix_secs() as i64;
+    let timestamp = now_unix_secs();
     [
         (DEVICE_ID_HEADER, identity.device_id().to_string()),
         (DEVICE_PUBKEY_HEADER, identity.public_key_b64()),
@@ -437,6 +428,12 @@ impl SignalingClient {
         }
         let (ws_stream, _) = connect_async(request).await.map_err(|e| {
             use tokio_tungstenite::tungstenite::Error as WsError;
+            if let WsError::Http(response) = &e {
+                let date = response.headers().get("date").and_then(|v| v.to_str().ok());
+                if let Some(skew) = clock_skew_of_refusal(response.status().as_u16(), date) {
+                    return skew;
+                }
+            }
             let failure = match &e {
                 WsError::Http(response) => SignalingFailure::of_status(response.status().as_u16()),
                 WsError::Tls(_) => SignalingFailure::Tls,
@@ -649,6 +646,109 @@ pub fn candidates_to_addrs(candidates: &[AddressCandidate]) -> Vec<SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server on this machine whose clock reads `now - behind_secs`: it
+    /// answers the question of where its signaling is, and refuses the
+    /// WebSocket handshake with a 401 dated by that clock. Returns its URL.
+    async fn refusing_server(behind_secs: i64) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..read]).to_lowercase();
+                let date = chrono::DateTime::from_timestamp(now_unix_secs() - behind_secs, 0)
+                    .unwrap()
+                    .format("%a, %d %b %Y %H:%M:%S GMT");
+                let response = if request.contains("upgrade: websocket") {
+                    format!(
+                        "HTTP/1.1 401 Unauthorized\r\nDate: {date}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                } else {
+                    let body = format!(r#"{{"url":"ws://{addr}/v1/signaling"}}"#);
+                    format!(
+                        "HTTP/1.1 200 OK\r\nDate: {date}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                };
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        format!("{}://{}", "http", addr)
+    }
+
+    async fn connect_error(server: &str) -> NetworkError {
+        SignalingClient::new(server, Arc::new(DeviceIdentity::generate()))
+            .connect()
+            .await
+            .err()
+            .expect("the server refuses the connection")
+    }
+
+    /// Verifies: REQ-IDT-009
+    #[tokio::test]
+    async fn when_the_clock_is_minutes_off_and_the_server_refuses_the_identity_the_error_is_the_clock_with_its_size(
+    ) {
+        let server = refusing_server(375).await;
+
+        let error = connect_error(&server).await;
+
+        assert!(
+            matches!(error, NetworkError::ClockSkew { offset_secs } if (374..=376).contains(&offset_secs)),
+            "{error:?}"
+        );
+        assert!(
+            error.to_string().contains("ahead of the server's by 37"),
+            "{error}"
+        );
+    }
+
+    /// Verifies: REQ-IDT-009
+    #[tokio::test]
+    async fn when_the_clock_is_behind_and_the_server_refuses_the_identity_the_error_says_behind() {
+        let server = refusing_server(-900).await;
+
+        let error = connect_error(&server).await;
+
+        assert!(
+            matches!(error, NetworkError::ClockSkew { offset_secs } if (-901..=-899).contains(&offset_secs)),
+            "{error:?}"
+        );
+    }
+
+    /// Verifies: REQ-IDT-009
+    #[tokio::test]
+    async fn when_the_clock_is_right_and_the_server_refuses_the_identity_it_is_still_a_4xx() {
+        let server = refusing_server(0).await;
+
+        let error = connect_error(&server).await;
+
+        assert!(
+            matches!(
+                error,
+                NetworkError::SignalingUnreachable {
+                    failure: SignalingFailure::Http4xx,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    /// Verifies: REQ-IDT-009
+    #[tokio::test]
+    async fn when_asked_the_server_says_how_far_the_clock_is_from_its_own() {
+        let server = refusing_server(375).await;
+
+        let offset = super::super::discovery::server_clock_offset_secs(&server)
+            .await
+            .expect("the server dates its answer");
+
+        assert!((374..=376).contains(&offset), "{offset}");
+    }
 
     #[test]
     fn a_room_list_from_a_server_that_marks_no_test_room_parses_with_none_marked() {

@@ -457,6 +457,10 @@
   },
   "error": {
     "connection": {
+      "clockSkew": {
+        "title": "This Computer's Clock Is Off",
+        "message": "The clock is about {{amount}} off from the server's. Set the time correctly and jamjam connects again by itself."
+      },
       "timeout": {
         "title": "Connection Failed",
         "message": "Could not find the other party. Please check the invite code."

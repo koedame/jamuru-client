@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 213 |
-| うち must | 207 |
+| 要求 総数 | 215 |
+| うち must | 209 |
 | うち should | 6 |
-| 検証済み | 184 |
+| 検証済み | 186 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -134,6 +134,8 @@
 | REQ-IDT-006 | should | 秘密鍵はアプリデータディレクトリの `device_identity.json` に保存され、Unix では 0600 で作成される | `docs-spec/requirements.md` | `src/identity_store.rs`::test_identity_file_is_owner_only |
 | REQ-IDT-007 | must | 参加者の端末識別子は他の参加者へ配布されない | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-IDT-008 | must | 端末の証明を付けない接続は拒否される（匿名の接続は無い）。アプリも CLI も必ず証明を付けて繋ぐ | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
+| REQ-IDT-009 | must | 端末の証明をサーバーに拒否されたとき、サーバーの応答の時刻とこの PC の時計が 30 秒以上ずれていれば、拒否の理由を「時計のずれ」とし、ずれの大きさと向き（進み・遅れ）を付けて報告する。画面は「401」ではなく、ずれの大きさと、時刻を合わせる必要があることを示す。ずれていなければ、これまでどおり 4xx の拒否として報告する | `docs-spec/requirements.md` | `src-tauri/src/session/mod.rs`::the_server_refuses_the_identity_because_the_clock_is_off_ends_in_an_error_that_names_the_gap<br/>`src/network/signaling.rs`::when_asked_the_server_says_how_far_the_clock_is_from_its_own<br/>`src/network/signaling.rs`::when_the_clock_is_behind_and_the_server_refuses_the_identity_the_error_says_behind<br/>`src/network/signaling.rs`::when_the_clock_is_minutes_off_and_the_server_refuses_the_identity_the_error_is_the_clock_with_its_size<br/>`src/network/signaling.rs`::when_the_clock_is_right_and_the_server_refuses_the_identity_it_is_still_a_4xx |
+| REQ-IDT-010 | must | 時計のずれで接続を拒否されたあと、ずれが直ったことをサーバーの応答の時刻で確かめたら、人が操作しなくても接続し直す。待つあいだ、画面は接続中と失敗を行き来しない | `docs-spec/requirements.md` | `src-tauri/src/session/mod.rs`::the_clock_is_put_right_after_the_refusal_connects_again_without_being_asked<br/>`src-tauri/src/session/mod.rs`::the_clock_is_still_off_after_a_wait_stays_in_the_error_and_does_not_flicker_to_connecting<br/>`src-tauri/src/session/mod.rs`::the_person_connects_by_hand_while_the_clock_is_off_the_wait_for_the_clock_ends |
 | REQ-LAT-020 | must | 全プリセットの設計上のアプリ起因片道遅延が、自身のバジェット以下である | `docs-spec/requirements.md` | `src/audio/preset.rs`::every_preset_fits_its_latency_budget<br/>`tests/e2e/src/scenarios/loopback.rs`::test_all_presets_meet_their_latency_budget |
 | REQ-LAT-021 | must | プリセットは遅延の昇順（zero-latency < ultra-low-latency < balanced < high-quality）に並ぶ | `docs-spec/requirements.md` | `src/audio/preset.rs`::presets_are_ordered_by_latency |
 | REQ-LAT-022 | must | プリセット識別子は文字列と列挙値の間で往復変換できる | `docs-spec/requirements.md` | `src/audio/preset.rs`::preset_names_round_trip |
