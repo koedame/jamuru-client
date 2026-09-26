@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 205 |
-| うち must | 199 |
+| 要求 総数 | 206 |
+| うち must | 200 |
 | うち should | 6 |
-| 検証済み | 176 |
+| 検証済み | 177 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -38,7 +38,7 @@
 | REQ-AUD-105 | must | サンプルレート96kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_96khz |
 | REQ-AUD-106 | must | 異なるサンプルレートの参加者がいる場合 | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_mismatched_sample_rates_are_resampled |
 | REQ-AUD-107 | must | モノラル入力で動作する | `docs-spec/behavior/audio-quality.feature` | `src-tauri/src/settings.rs`::a_change_during_a_session_is_saved_reaches_the_session_and_is_announced<br/>`src-tauri/src/settings.rs`::a_change_with_no_session_running_is_saved_and_no_session_is_told<br/>`src-tauri/src/settings.rs`::choosing_mono_plans_to_save_it_and_to_tell_a_running_session<br/>`tests/audio_quality_test.rs`::test_mono_input<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.transmit.test.tsx`::the user picks mono, the app is asked for that one change and the panel shows mono |
-| REQ-AUD-108 | must | ステレオ入力で動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_stereo_input |
+| REQ-AUD-108 | must | ステレオ入力で動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_stereo_input<br/>`tests/audio_quality_test.rs`::test_stereo_input_is_played_back_in_stereo |
 | REQ-AUD-109 | must | フレームサイズ64サンプルで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_frame_size_64 |
 | REQ-AUD-110 | must | フレームサイズ256サンプルで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_frame_size_256 |
 | REQ-AUD-111 | must | ローカルモニタリングを有効にする | `docs-spec/behavior/audio-quality.feature` | `src-tauri/src/streaming.rs`::test_monitored_input_is_played_before_any_peer_has_sent_audio<br/>`src/audio/monitor.rs`::test_enabled_monitor_plays_the_captured_input_in_order_and_unaltered<br/>`src/audio/monitor.rs`::test_monitor_adds_to_what_the_peers_are_playing_rather_than_replacing_it<br/>`src/audio/monitor.rs`::test_monitor_level_scales_what_is_heard<br/>`src/audio/monitor.rs`::test_monitor_plays_a_stereo_capture_as_the_mean_of_its_sides<br/>`tests/audio_quality_test.rs`::test_local_monitoring_on_plays_my_input_together_with_the_others<br/>`tests/cli_test.rs`::a_monitoring_cli_hears_its_own_input_without_a_peer |
@@ -50,6 +50,7 @@
 | REQ-AUD-117 | must | 相手の送信チャンネル数をミキサーに表示する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_peer_channel_count_is_carried_in_latency_info |
 | REQ-AUD-118 | must | 多チャンネルのインターフェースで、選んだ入力チャンネルを取り込む | `docs-spec/behavior/audio-quality.feature` | `src/audio/channels.rs`::test_a_device_is_opened_with_the_smallest_channel_count_that_reaches_the_channel<br/>`src/audio/channels.rs`::test_a_mono_transmit_reads_only_the_left_input_channel<br/>`src/audio/channels.rs`::test_a_selection_the_device_lacks_falls_back_to_its_first_channels<br/>`src/audio/channels.rs`::test_a_stereo_transmit_with_no_right_channel_sends_the_left_on_both_sides<br/>`src/audio/channels.rs`::test_input_channels_5_and_6_are_read_from_the_fifth_and_sixth_channel<br/>`src/audio/channels.rs`::test_the_default_input_setting_reads_the_first_two_channels<br/>`src/audio/channels.rs`::test_the_default_selection_falls_back_only_to_mono |
 | REQ-AUD-119 | must | 多チャンネルのインターフェースで、選んだ出力チャンネルに再生する | `docs-spec/behavior/audio-quality.feature` | `src/audio/channels.rs`::test_a_route_needs_a_device_with_its_highest_channel<br/>`src/audio/channels.rs`::test_an_output_with_no_right_channel_plays_both_sides_mixed_on_the_left<br/>`src/audio/channels.rs`::test_output_channels_5_and_6_play_the_left_and_right_on_the_fifth_and_sixth<br/>`src/audio/channels.rs`::test_the_default_output_setting_is_the_stereo_frame_itself<br/>`src/audio/engine.rs`::test_a_device_wider_than_stereo_is_played_on_the_selected_channels |
+| REQ-AUD-120 | must | 受信側のパンは、届いた音がステレオかモノラルかで意味が変わる | `docs-spec/behavior/audio-quality.feature` | `src/audio/stream.rs`::a_centred_pan_leaves_the_sides_of_a_stereo_peer_alone<br/>`src/audio/stream.rs`::a_left_only_signal_from_a_stereo_peer_plays_on_the_left_only<br/>`src/audio/stream.rs`::panning_a_stereo_peer_turns_down_only_the_side_away_from_the_pan<br/>`src/audio/stream.rs`::the_pan_of_a_mono_peer_keeps_the_constant_power_law<br/>`tests/audio_quality_test.rs`::test_stereo_input_is_played_back_in_stereo |
 | REQ-CLI-001 | must | CLI でルームを作成でき、招待コードが表示される。他の参加者はそのコードで参加し、チャットが双方に届く | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CLI-002 | must | セッション中のコマンド（`/mute` `/unmute` `/stats` `/help` `/quit`）が解釈され、ミュート状態が切り替わる。コマンド以外はチャットとして送られる | `docs-spec/requirements.md` | `src/main.rs`::muting_without_audio_reports_that_there_is_nothing_to_mute<br/>`src/main.rs`::only_commands_are_intercepted<br/>`src/main.rs`::session_commands_are_recognised_and_act |
 | REQ-CLI-003 | must | プリセットの選択を保存でき、GUI と同じ設定ファイルに書かれる。未知のプリセット名は拒否される | `docs-spec/requirements.md` | `tests/cli_test.rs`::preset_use_refuses_a_name_that_is_not_a_preset<br/>`tests/cli_test.rs`::preset_use_saves_the_choice_where_the_app_reads_it |

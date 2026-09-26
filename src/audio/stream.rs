@@ -16,6 +16,7 @@ use super::playout::{
 };
 use super::preset::AudioPreset;
 use super::resampler::{create_resampler_with_channels, AudioResampler, ResamplerError};
+use crate::protocol::LatencyInfoMessage;
 
 /// Channels carried on the wire.
 ///
@@ -45,6 +46,52 @@ pub fn mono_to_wire(mono: &[f32], volume: f32, pan: i32, out: &mut [f32]) {
     }
 }
 
+/// Gains that balance a stereo signal: the side `pan` points to (-100 left,
+/// 100 right) is left untouched and the other is turned down, so a centred
+/// balance is `(1.0, 1.0)`.
+pub fn balance_gains(pan: i32) -> (f32, f32) {
+    let angle = (pan.clamp(-100, 100).unsigned_abs() as f32 / 100.0) * std::f32::consts::FRAC_PI_2;
+    let quieter = angle.cos();
+    if pan > 0 {
+        (quieter, 1.0)
+    } else {
+        (1.0, quieter)
+    }
+}
+
+/// Applies `volume` and the listener's `pan` to a received stereo frame, in
+/// place.
+///
+/// What the peer sent decides what pan means. A stereo peer's two sides are
+/// its own image, so pan is a balance ([`balance_gains`]) and a centred pan
+/// passes the sides through untouched. A mono peer was placed in the field by
+/// its own pan already, so the listener's constant-power pan moves that
+/// placement, each side feeding the other as it turns.
+pub fn pan_received(frames: &mut [f32], peer_channels: u8, volume: f32, pan: i32) {
+    let stereo_peer = peer_channels as usize >= WIRE_CHANNELS;
+    let (balance_left, balance_right) = balance_gains(pan);
+    let angle = ((pan + 100) as f32 / 200.0) * std::f32::consts::FRAC_PI_2;
+    let (left_gain, right_gain) = (angle.cos(), angle.sin());
+
+    for frame in frames.chunks_mut(WIRE_CHANNELS) {
+        if frame.len() < WIRE_CHANNELS {
+            for slot in frame.iter_mut() {
+                *slot *= volume;
+            }
+            continue;
+        }
+        let left = frame[0] * volume;
+        let right = frame[1] * volume;
+        if stereo_peer {
+            frame[0] = left * balance_left;
+            frame[1] = right * balance_right;
+        } else {
+            frame[0] = left * left_gain + right * (1.0 - right_gain);
+            frame[1] = right * right_gain + left * (1.0 - left_gain);
+        }
+    }
+}
+
 /// Turns a captured frame of `channels` channels into the stereo frame that is
 /// sent, applying `volume` and `pan` (both as in [`mono_to_wire`]).
 ///
@@ -58,13 +105,7 @@ pub fn capture_to_wire(captured: &[f32], channels: usize, volume: f32, pan: i32,
         return;
     }
 
-    let angle = (pan.clamp(-100, 100).unsigned_abs() as f32 / 100.0) * std::f32::consts::FRAC_PI_2;
-    let quieter = angle.cos();
-    let (left_gain, right_gain) = if pan > 0 {
-        (quieter, 1.0)
-    } else {
-        (1.0, quieter)
-    };
+    let (left_gain, right_gain) = balance_gains(pan);
 
     for (frame, pair) in out
         .as_chunks_mut::<WIRE_CHANNELS>()
@@ -113,6 +154,9 @@ pub struct ReceivePath {
     resampler: Arc<Mutex<Option<Box<dyn AudioResampler>>>>,
     /// Peer rate being followed; 0 until the peer has said.
     peer_rate: Arc<AtomicU32>,
+    /// Channels the peer captures and sends (1 = mono, 2 = stereo), which
+    /// decides what the listener's pan means ([`pan_received`]).
+    peer_channels: Arc<AtomicU32>,
     sample_rate: u32,
     frame_size: u32,
     /// What went wrong with the audio, and when; see [`FlightRecorder`].
@@ -189,6 +233,9 @@ impl ReceivePath {
             })),
             resampler: Arc::new(Mutex::new(None)),
             peer_rate: Arc::new(AtomicU32::new(0)),
+            peer_channels: Arc::new(AtomicU32::new(u32::from(
+                LatencyInfoMessage::DEFAULT_CHANNEL_COUNT,
+            ))),
             sample_rate,
             frame_size,
             flight,
@@ -370,6 +417,19 @@ impl ReceivePath {
                 PeerRateChange::Failed(e)
             }
         }
+    }
+
+    /// Records how many channels the peer sends. Call it whenever the peer
+    /// reports them; the output callback reads it without a lock.
+    pub fn follow_peer_channels(&self, peer_channels: u8) {
+        self.peer_channels
+            .store(u32::from(peer_channels), Ordering::Relaxed);
+    }
+
+    /// Channels the peer sends: what it last reported, or what a peer that
+    /// predates the report sends.
+    pub fn peer_channels(&self) -> u8 {
+        self.peer_channels.load(Ordering::Relaxed) as u8
     }
 
     /// What has happened to received frames so far.
@@ -700,6 +760,78 @@ mod tests {
         capture_to_wire(&[1.0, 1.0], 2, 1.0, -100, &mut out);
         assert!((out[0] - 1.0).abs() < 1e-6);
         assert!(out[1].abs() < 1e-6, "hard left silences the right: {out:?}");
+    }
+
+    /// The listener's pan on a stereo peer is a balance: a centred pan leaves
+    /// a left-only signal on the left, with nothing leaking to the right and
+    /// no level lost.
+    ///
+    /// Verifies: REQ-AUD-120
+    #[test]
+    fn a_centred_pan_leaves_the_sides_of_a_stereo_peer_alone() {
+        let mut frames = [0.5, 0.0, -0.25, 0.0];
+
+        pan_received(&mut frames, 2, 1.0, 0);
+
+        assert_eq!(frames, [0.5, 0.0, -0.25, 0.0]);
+    }
+
+    /// Verifies: REQ-AUD-120
+    #[test]
+    fn panning_a_stereo_peer_turns_down_only_the_side_away_from_the_pan() {
+        let mut frames = [1.0, 1.0];
+        pan_received(&mut frames, 2, 0.5, 100);
+        assert!(frames[0].abs() < 1e-6, "hard right silences the left");
+        assert!((frames[1] - 0.5).abs() < 1e-6, "the right keeps its level");
+
+        let mut frames = [1.0, 1.0];
+        pan_received(&mut frames, 2, 1.0, -100);
+        assert!((frames[0] - 1.0).abs() < 1e-6);
+        assert!(frames[1].abs() < 1e-6, "hard left silences the right");
+    }
+
+    /// A mono peer's two sides were placed by its own pan, and the listener's
+    /// constant-power pan moves them as before.
+    ///
+    /// Verifies: REQ-AUD-120
+    #[test]
+    fn the_pan_of_a_mono_peer_keeps_the_constant_power_law() {
+        let mut centred = [0.6, 0.6];
+        pan_received(&mut centred, 1, 1.0, 0);
+        assert!((centred[0] - 0.6).abs() < 1e-6 && (centred[1] - 0.6).abs() < 1e-6);
+
+        let mut hard_right = [0.6, 0.6];
+        pan_received(&mut hard_right, 1, 1.0, 100);
+        assert!(
+            hard_right[0].abs() < 1e-6,
+            "left is moved over: {hard_right:?}"
+        );
+        assert!(
+            (hard_right[1] - 1.2).abs() < 1e-6,
+            "both sides gather on the right"
+        );
+    }
+
+    /// The whole route a stereo peer's audio takes to the output: through the
+    /// play-out buffer, with the channel count the peer reported, a
+    /// left-only signal comes out on the left only.
+    ///
+    /// Verifies: REQ-AUD-120
+    #[test]
+    fn a_left_only_signal_from_a_stereo_peer_plays_on_the_left_only() {
+        let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available");
+        path.follow_peer_channels(2);
+        let left_only: Vec<f32> = (0..4).flat_map(|_| [0.3f32, 0.0]).collect();
+        let mut out = stereo_frame(4, 9.0);
+
+        assert!(path.receive(0, &pcm(&left_only)));
+        let read = path.read_into(&mut out);
+        pan_received(&mut out[..read.samples], path.peer_channels(), 1.0, 0);
+
+        for frame in out.chunks(WIRE_CHANNELS) {
+            assert!((frame[0] - 0.3).abs() < 1e-6, "left is as sent: {frame:?}");
+            assert_eq!(frame[1], 0.0, "nothing reaches the right");
+        }
     }
 
     /// A mono capture takes the same path as before: one sample becomes a

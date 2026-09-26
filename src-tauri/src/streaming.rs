@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 use jamjam::audio::{
     capture_attempts, capture_to_wire, AudioConfig, AudioEngine, AudioError, AudioPreset, DeviceId,
     FlightKind, FlightRecorder, LocalMonitor, OutputRoute, PeerRateChange, PlayoutResult,
-    ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
+    pan_received, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
@@ -1336,24 +1336,9 @@ fn mix_peers(
     let combined_vol = (peer_volume.load(Ordering::Relaxed) as f32 / 100.0)
         * (master_volume.load(Ordering::Relaxed) as f32 / 100.0);
 
-    // Constant-power pan on top of whatever the sender already applied.
     let pan = peer_pan.load(Ordering::Relaxed);
-    let angle = ((pan + 100) as f32 / 200.0) * std::f32::consts::FRAC_PI_2;
-    let (left_gain, right_gain) = (angle.cos(), angle.sin());
-
     let samples = &mut out[..read.samples];
-    for frame in samples.chunks_mut(WIRE_CHANNELS) {
-        if frame.len() < WIRE_CHANNELS {
-            for slot in frame.iter_mut() {
-                *slot *= combined_vol;
-            }
-            continue;
-        }
-        let left = frame[0] * combined_vol;
-        let right = frame[1] * combined_vol;
-        frame[0] = left * left_gain + right * (1.0 - right_gain);
-        frame[1] = right * right_gain + left * (1.0 - left_gain);
-    }
+    pan_received(samples, receive.peer_channels(), combined_vol, pan);
 
     output_level.store(rms_level(samples), Ordering::Relaxed);
     read.samples
@@ -2157,6 +2142,7 @@ async fn run_audio_streaming(
                             eprintln!("Failed to create resampler: {}", e)
                         }
                     }
+                    receive.follow_peer_channels(peer_info.channel_count);
                     if let Ok(mut info) = shared_peer_latency_info.write() {
                         *info = Some(peer_info);
                     }

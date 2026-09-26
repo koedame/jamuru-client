@@ -45,5 +45,6 @@ pub use resampler::{
     PassthroughResampler, ResamplerError,
 };
 pub use stream::{
-    capture_to_wire, mono_to_wire, PeerRateChange, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
+    balance_gains, capture_to_wire, mono_to_wire, pan_received, PeerRateChange, ReceivePath,
+    ADAPT_INTERVAL, WIRE_CHANNELS,
 };
