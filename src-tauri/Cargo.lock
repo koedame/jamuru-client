@@ -2359,6 +2359,7 @@ name = "jamjam-app"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "block2",
  "cairo-rs",
  "chrono",
  "data-encoding",
@@ -2366,6 +2367,10 @@ dependencies = [
  "futures-util",
  "jamjam",
  "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-web-kit",
  "rtrb",
  "serde",
  "serde_json",
