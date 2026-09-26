@@ -265,7 +265,15 @@ impl ReceivePath {
         self.flight.count_read();
         self.note_read_time();
         let read = match self.playout.try_lock() {
-            Ok(mut buffer) => buffer.read_into(out),
+            Ok(mut buffer) => {
+                let trimmed_before = buffer.stats().frames_trimmed;
+                let read = buffer.read_into(out);
+                let trimmed = buffer.stats().frames_trimmed - trimmed_before;
+                if trimmed > 0 {
+                    self.flight.note(Kind::Trimmed, trimmed);
+                }
+                read
+            }
             Err(_) => {
                 self.flight.note(Kind::Busy, 0);
                 let samples = self.frame_samples().min(out.len());
@@ -771,6 +779,30 @@ mod tests {
             1,
             "1 is missing, 2 is here"
         );
+    }
+
+    /// Frames that piled up because the device did not read for a while are
+    /// discarded once they have stayed for a whole stretch of reads, and the
+    /// skip is recorded with how many frames it took.
+    #[test]
+    fn a_skip_that_gives_back_piled_up_frames_is_recorded_with_its_size() {
+        let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 1).expect("PCM is always available");
+        let mut out = stereo_frame(4, 0.0);
+
+        for sequence in 0..1_500 {
+            // The device does not read for four ticks; the peer keeps sending.
+            let stalled = (10..14).contains(&sequence);
+            path.receive(sequence, &pcm(&stereo_frame(4, 0.5)));
+            if !stalled {
+                path.read_into(&mut out);
+            }
+        }
+
+        assert_eq!(path.flight().count(Kind::Trimmed), 1);
+        let report = path.flight().report();
+        let event = report.events.iter().find(|e| e.kind == Kind::Trimmed);
+        assert_eq!(event.map(|e| e.value_us), Some(4), "the four that piled up");
+        assert_eq!(path.flight().count(Kind::Resynced), 0);
     }
 
     /// Silence before the first frame plays, and after a reconnect, is the
