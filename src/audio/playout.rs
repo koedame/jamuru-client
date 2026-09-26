@@ -24,6 +24,16 @@
 //! target. [`PlayoutBuffer::adapt`] moves the target from the loss rate and
 //! [`PlayoutBuffer::set_delay`] moves it because the user chose a preset.
 //!
+//! # Holding no more than the target
+//!
+//! What is held only ever grows by itself: a read that finds nothing waits
+//! without moving the play position, and a device that reads late lets frames
+//! pile up, and neither gives the frames back. So the shallowest the buffer got
+//! over a stretch of reads is watched, and when even that was deeper than the
+//! target asks for, the extra is discarded from the play position in one skip
+//! (ADR-047). A buffer that dipped to the target in that stretch needed what it
+//! held, and keeps it.
+//!
 //! # Real-time discipline
 //!
 //! The reader runs in the audio callback, so `read_into` allocates nothing and
@@ -51,6 +61,14 @@ const BOUNCE_WITHIN_WINDOWS: u32 = 3;
 const MAX_CLEAN_WINDOWS_BEFORE_SHRINK: u32 = 80;
 /// Fewest frames a window needs before its loss rate means anything.
 const MIN_ADAPT_WINDOW_FRAMES: u64 = 20;
+/// Reads over which the buffer's shallowest moment is remembered. About two
+/// thirds of a second at 64-sample frames and 48 kHz.
+const DEPTH_WINDOW_READS: u32 = 500;
+/// How many frames deeper than the target the buffer must have stayed, at its
+/// shallowest, over a whole window before the extra is thrown away. One frame
+/// is the playing phase: the count moves by one as a frame arrives and is
+/// read. Two means the buffer never needed what it held.
+const TRIM_WHEN_EXCESS_AT_LEAST: u32 = 2;
 
 /// How the buffer is sized and how long it holds audio back.
 ///
@@ -170,6 +188,9 @@ pub struct PlayoutStats {
     /// (`PlayoutResult::Starved`), while playing.
     pub frames_starved: u64,
     pub resyncs: u64,
+    /// Frames discarded because the buffer held more than the target for a
+    /// whole depth window, or because the target was lowered.
+    pub frames_trimmed: u64,
     /// How far, in frames, the stream jumped at the last resynchronisation.
     pub last_resync_distance: u32,
 }
@@ -209,6 +230,10 @@ pub struct PlayoutBuffer {
     shrink_after_windows: u32,
     /// Windows since the last shrink, while a grow would still show it wrong.
     windows_since_shrink: Option<u32>,
+    /// Fewest frames held at any read of the current depth window.
+    depth_window_min: usize,
+    /// Reads made in the current depth window.
+    depth_window_reads: u32,
     /// Sequence the next read will play.
     play_sequence: Option<u32>,
     /// Whether enough has been buffered to start.
@@ -257,6 +282,8 @@ impl PlayoutBuffer {
             clean_windows: 0,
             shrink_after_windows: CLEAN_WINDOWS_BEFORE_SHRINK,
             windows_since_shrink: None,
+            depth_window_min: usize::MAX,
+            depth_window_reads: 0,
             config,
             play_sequence: None,
             playing: false,
@@ -355,6 +382,9 @@ impl PlayoutBuffer {
             return read;
         }
 
+        let ready = self.ready_frames();
+        self.watch_depth(ready);
+
         let sequence = match self.play_sequence {
             Some(sequence) => sequence,
             None => return silence(out, self.last_len),
@@ -427,6 +457,7 @@ impl PlayoutBuffer {
         );
         if self.playing {
             self.pending_shift += frames as i32 - self.target_delay_frames as i32;
+            self.restart_depth_window();
         }
         self.target_delay_frames = frames;
     }
@@ -535,6 +566,7 @@ impl PlayoutBuffer {
         self.clean_windows = 0;
         self.shrink_after_windows = CLEAN_WINDOWS_BEFORE_SHRINK;
         self.windows_since_shrink = None;
+        self.restart_depth_window();
     }
 
     fn slot_for(&self, sequence: u32) -> usize {
@@ -555,7 +587,38 @@ impl PlayoutBuffer {
         self.play_sequence = Some(sequence);
         self.playing = false;
         self.pending_shift = 0;
+        self.restart_depth_window();
         self.plc.reset();
+    }
+
+    fn restart_depth_window(&mut self) {
+        self.depth_window_min = usize::MAX;
+        self.depth_window_reads = 0;
+    }
+
+    /// Remembers the shallowest read of the window, and at the end of it
+    /// discards what the buffer held beyond the target the whole time.
+    ///
+    /// Only the shallowest read is a fair measure: the count swings by a frame
+    /// with the phase of the reads, and a burst that arrived after a stall
+    /// deepens it for a moment. What was never used in a whole window is
+    /// delay for nothing. A read that found the buffer empty counts as zero,
+    /// so a link that keeps running dry never trims.
+    fn watch_depth(&mut self, ready: usize) {
+        self.depth_window_min = self.depth_window_min.min(ready);
+        self.depth_window_reads += 1;
+        if self.depth_window_reads < DEPTH_WINDOW_READS {
+            return;
+        }
+
+        let excess = self
+            .depth_window_min
+            .saturating_sub(self.target_delay_frames as usize + 1);
+        self.restart_depth_window();
+        if excess >= TRIM_WHEN_EXCESS_AT_LEAST as usize {
+            self.pending_shift = -(excess as i32);
+            self.trim_excess();
+        }
     }
 
     /// Discards frames from the play position while the buffer holds more than
@@ -569,6 +632,7 @@ impl PlayoutBuffer {
                 let slot = self.slot_for(sequence);
                 if self.slots[slot].sequence == Some(sequence) {
                     self.slots[slot].sequence = None;
+                    self.stats.frames_trimmed += 1;
                 }
                 self.play_sequence = Some(sequence.wrapping_add(1));
             }
@@ -1531,5 +1595,152 @@ mod tests {
             concealed.samples, 5,
             "the gap must be as long as the audio it replaces"
         );
+    }
+
+    /// One tick: the sender delivers the frames due (`deliver` says which) and
+    /// the device reads once unless it is stalled. Returns what the read made.
+    fn tick(
+        buffer: &mut PlayoutBuffer,
+        deliver: &[u32],
+        read: bool,
+        out: &mut [f32],
+    ) -> Option<PlayoutResult> {
+        for &sequence in deliver {
+            buffer.write(sequence, &frame(sequence as f32));
+        }
+        read.then(|| buffer.read_into(out).result)
+    }
+
+    /// The sender keeps its pace and the device reads at the same pace on
+    /// average, but now and then the device does not read for a few ticks. The
+    /// frames that arrive meanwhile stay, so the buffer holds more than the
+    /// target from then on. It must give them back.
+    ///
+    /// Verifies: REQ-LAT-025
+    #[test]
+    fn frames_that_piled_up_while_the_device_did_not_read_are_given_back() {
+        const TARGET: u32 = 2;
+        let mut buffer = PlayoutBuffer::new(config(TARGET));
+        let mut out = frame(0.0);
+        let mut results = Vec::new();
+
+        for t in 0..3_000u32 {
+            let stalled = (100..300).contains(&t) && t % 100 < 3;
+            results.extend(tick(&mut buffer, &[t], !stalled, &mut out));
+        }
+
+        assert_eq!(
+            buffer.ready_frames() as u32,
+            TARGET,
+            "what is held is the target again"
+        );
+        let stats = buffer.stats();
+        assert_eq!(stats.frames_trimmed, 6, "the six frames that piled up");
+        assert_eq!(stats.resyncs, 0);
+        assert!(
+            !results.contains(&PlayoutResult::Starved) && stats.frames_concealed == 0,
+            "giving the frames back is a skip, not a gap"
+        );
+    }
+
+    /// Everything the buffer holds beyond the target goes in one skip, from the
+    /// play position, so the stream carries on from the frame after the ones
+    /// discarded rather than stepping down a frame at a time.
+    ///
+    /// Verifies: REQ-LAT-025
+    #[test]
+    fn the_excess_is_discarded_in_one_skip_from_the_play_position() {
+        let mut buffer = PlayoutBuffer::new(config(1));
+        let mut out = frame(0.0);
+
+        for t in 0..40u32 {
+            let stalled = (10..14).contains(&t);
+            tick(&mut buffer, &[t], !stalled, &mut out);
+        }
+        assert_eq!(buffer.ready_frames(), 5, "four frames piled up on the one");
+
+        let mut skipped = Vec::new();
+        let mut last = None;
+        for t in 40..40 + 2 * DEPTH_WINDOW_READS {
+            if let Some(PlayoutResult::Played { sequence }) =
+                tick(&mut buffer, &[t], true, &mut out)
+            {
+                if let Some(last) = last {
+                    if sequence != last + 1 {
+                        skipped.push((last, sequence));
+                    }
+                }
+                last = Some(sequence);
+            }
+        }
+
+        assert_eq!(skipped.len(), 1, "one skip: {:?}", skipped);
+        let (before, after) = skipped[0];
+        assert_eq!(after - before - 1, 4, "the four frames that piled up");
+        assert_eq!(buffer.ready_frames(), 1);
+    }
+
+    /// The last frame of excess is the playing phase, not delay for nothing:
+    /// one frame more than the target is left alone.
+    #[test]
+    fn a_single_frame_beyond_the_target_is_left_alone() {
+        let mut buffer = PlayoutBuffer::new(config(2));
+        let mut out = frame(0.0);
+
+        for t in 0..4 * DEPTH_WINDOW_READS {
+            let stalled = t == 20;
+            tick(&mut buffer, &[t], !stalled, &mut out);
+        }
+
+        assert_eq!(buffer.stats().frames_trimmed, 0);
+        assert_eq!(buffer.ready_frames(), 3);
+    }
+
+    /// A link that delivers in bursts needs the depth it settles at: the
+    /// buffer runs down towards empty before each burst, so it is never deeper
+    /// than the target for a whole window and nothing is discarded.
+    #[test]
+    fn a_depth_the_link_keeps_needing_is_kept() {
+        let mut buffer = PlayoutBuffer::new(config(2));
+        let mut out = frame(0.0);
+        let mut held: Vec<u32> = Vec::new();
+        let mut results = Vec::new();
+
+        for t in 0..6 * DEPTH_WINDOW_READS {
+            let mut deliver = Vec::new();
+            match t % 50 {
+                10..=12 => held.push(t),
+                13 => {
+                    deliver.append(&mut held);
+                    deliver.push(t);
+                }
+                _ => deliver.push(t),
+            }
+            results.extend(tick(&mut buffer, &deliver, true, &mut out));
+        }
+
+        assert_eq!(buffer.stats().frames_trimmed, 0);
+        assert_eq!(buffer.stats().resyncs, 0);
+        assert!(
+            results.iter().all(|r| !matches!(r, PlayoutResult::Padded)),
+            "the target never moved"
+        );
+    }
+
+    /// Passthrough has the same problem and the same cure: a frame or two
+    /// beyond what it promises is discarded once it has stayed for a whole
+    /// window.
+    #[test]
+    fn passthrough_gives_back_what_piled_up_too() {
+        let mut buffer = PlayoutBuffer::new(config(0));
+        let mut out = frame(0.0);
+
+        for t in 0..3 * DEPTH_WINDOW_READS {
+            let stalled = (10..14).contains(&t);
+            tick(&mut buffer, &[t], !stalled, &mut out);
+        }
+
+        assert_eq!(buffer.ready_frames(), 0, "nothing is held back");
+        assert_eq!(buffer.stats().frames_trimmed, 4);
     }
 }

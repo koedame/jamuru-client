@@ -62,10 +62,13 @@ pub enum Kind {
     /// more than one frame per callback, so its callback is bigger than the
     /// frame. Value: microseconds.
     ReadBurst = 11,
+    /// The buffer held more than its target for a whole stretch of reads, and
+    /// the extra was discarded in one skip. Value: frames discarded.
+    Trimmed = 12,
 }
 
 impl Kind {
-    const ALL: [Kind; 11] = [
+    const ALL: [Kind; 12] = [
         Kind::Starved,
         Kind::Concealed,
         Kind::Primed,
@@ -77,6 +80,7 @@ impl Kind {
         Kind::ThreadStall,
         Kind::ReadGap,
         Kind::ReadBurst,
+        Kind::Trimmed,
     ];
 
     fn from_bits(bits: u64) -> Option<Kind> {
@@ -96,6 +100,7 @@ impl Kind {
             Kind::ThreadStall => "thread_stall",
             Kind::ReadGap => "read_gap",
             Kind::ReadBurst => "read_burst",
+            Kind::Trimmed => "trimmed",
         }
     }
 }
