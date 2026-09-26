@@ -80,6 +80,9 @@ struct Tone {
     point: Point,
     frequency: f32,
     amplitude: f32,
+    /// The 1-based channel the tone is on, the others being silent; `None`
+    /// puts it on every channel.
+    channel: Option<u32>,
     /// Frames still to fill.
     remaining: u64,
     phase: f32,
@@ -141,21 +144,35 @@ pub fn inject(point: Point, samples: &mut [f32], channels: usize) {
         let value = tone.amplitude * tone.phase.sin();
         tone.phase = (tone.phase + step) % TAU;
         tone.remaining -= 1;
-        frame.fill(value);
+        match tone.channel {
+            Some(channel) if (channel as usize) <= frame.len() && channel > 0 => {
+                frame.fill(0.0);
+                frame[channel as usize - 1] = value;
+            }
+            _ => frame.fill(value),
+        }
     }
     if tone.remaining == 0 {
         tap.tone = None;
     }
 }
 
-/// Arms a tone. It ends by itself after `seconds`; a second call replaces it.
-pub fn arm_tone(point: Point, frequency: f32, amplitude: f32, seconds: f32) {
+/// Arms a tone, on every channel or only on `channel` (1-based). It ends by
+/// itself after `seconds`; a second call replaces it.
+pub fn arm_tone(
+    point: Point,
+    frequency: f32,
+    amplitude: f32,
+    channel: Option<u32>,
+    seconds: f32,
+) {
     let frames = (seconds * SAMPLE_RATE.load(Ordering::Relaxed) as f32) as u64;
     let mut tap = TAP.lock().unwrap_or_else(|e| e.into_inner());
     tap.tone = Some(Tone {
         point,
         frequency,
         amplitude,
+        channel,
         remaining: frames,
         phase: 0.0,
     });
@@ -374,6 +391,38 @@ mod tests {
         let found = dominant_frequency(&signal, 48_000.0).unwrap();
 
         assert!((found - 1000.0).abs() < 2.0, "{}", found);
+    }
+
+    /// The tones armed here are shared by the whole process, so one test
+    /// covers both shapes in turn.
+    ///
+    /// Verifies: REQ-RMT-027
+    #[test]
+    fn a_tone_on_one_channel_leaves_the_other_silent_and_a_tone_without_one_fills_both() {
+        set_sample_rate(48_000);
+        let mut frames = vec![0.5f32; 8];
+
+        arm_tone(Point::Sent, 1000.0, 0.5, Some(1), 1.0);
+        inject(Point::Sent, &mut frames, 2);
+        assert!(
+            frames.chunks(2).skip(1).any(|frame| frame[0] != 0.0),
+            "the tone is on the left"
+        );
+        assert!(
+            frames.chunks(2).all(|frame| frame[1] == 0.0),
+            "the right is silent: {frames:?}"
+        );
+
+        arm_tone(Point::Sent, 1000.0, 0.5, None, 1.0);
+        inject(Point::Sent, &mut frames, 2);
+        assert!(frames
+            .chunks(2)
+            .skip(1)
+            .all(|frame| frame[0] != 0.0 && frame[0] == frame[1]));
+
+        // A tone of no length ends at once and leaves nothing armed.
+        arm_tone(Point::Sent, 1000.0, 0.5, None, 0.0);
+        inject(Point::Sent, &mut frames, 2);
     }
 
     #[test]
