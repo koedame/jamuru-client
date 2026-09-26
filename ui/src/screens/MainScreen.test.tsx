@@ -288,7 +288,7 @@ describe('MainScreen のデバイスの問題の表示', () => {
   /** Verifies: REQ-AUD-123 */
   it('入力デバイスが応答しないとき、セッションが始まっていなくても、その名前を添えて知らせること', async () => {
     current = inRoom();
-    statusDeviceProblems = [{ side: 'input', trouble: 'unresponsive', device: 'AG06/AG03' }];
+    statusDeviceProblems = [{ side: 'input', trouble: 'unresponsive', device: 'AG06/AG03', sample_rate: 48000 }];
 
     render(<MainScreen />);
 
@@ -299,17 +299,32 @@ describe('MainScreen のデバイスの問題の表示', () => {
   /** Verifies: REQ-AUD-123 */
   it('出力デバイスを開けなかったとき、名前が分からなくても、出力の問題として知らせること', async () => {
     current = inRoom();
-    statusDeviceProblems = [{ side: 'output', trouble: 'failed', device: null }];
+    statusDeviceProblems = [{ side: 'output', trouble: 'failed', device: null, sample_rate: 48000 }];
 
     render(<MainScreen />);
 
     expect(await screen.findByText(/Couldn't open the output device/)).toBeInTheDocument();
   });
 
+  /** Verifies: REQ-AUD-125 */
+  it('入力デバイスが 48000Hz で開けないとき、デバイスの名前とレートを添えて、形式を合わせるよう知らせること', async () => {
+    current = inRoom();
+    statusDeviceProblems = [
+      { side: 'input', trouble: 'unsupported_format', device: 'USB AUDIO CODEC', sample_rate: 48000 },
+    ];
+
+    render(<MainScreen />);
+
+    const message = await screen.findByText(/Couldn't open the input device/);
+    expect(message).toHaveTextContent(
+      "Couldn't open the input device (USB AUDIO CODEC) at 48000 Hz. In your sound settings, set this device's format to 48000 Hz"
+    );
+  });
+
   /** Verifies: REQ-AUD-123 */
   it('デバイスの問題が解けたとき、知らせが消えること', async () => {
     current = inRoom();
-    statusDeviceProblems = [{ side: 'input', trouble: 'unresponsive', device: null }];
+    statusDeviceProblems = [{ side: 'input', trouble: 'unresponsive', device: null, sample_rate: 48000 }];
     render(<MainScreen />);
     await screen.findByText(/Input device isn't responding/);
 
