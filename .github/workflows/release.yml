@@ -107,6 +107,18 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2"
 
+      # A beta is built as X.Y.Z-N, not as X.Y.Z: two betas of one version are
+      # otherwise the same version, and an installed beta never updates to the
+      # next one (ADR-045).
+      - name: Write the beta's build version
+        if: contains(needs.prepare.outputs.tag, '-')
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          version=$(scripts/build-version.sh "${TAG}")
+          jq -n --arg version "${version}" '{version: $version}' > "${RUNNER_TEMP}/build-version.conf.json"
+
       - name: Build Tauri app
         env:
           # The signaling server the app dials (ADR-030). Kept out of the source.
@@ -126,9 +138,10 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.os, 'macos') && '-' || '' }}
         # The updater settings (public key, where to look) are given to the
         # release build only, so a build from source never replaces itself.
-        # A beta (a tag with a `-`) also gets remote debugging (ADR-044); a
+        # A beta (a tag with a `-`) also gets remote debugging (ADR-044), its
+        # own place to look for updates and its own version (ADR-045); a
         # release and a rehearsal (no tag) do not.
-        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json ${{ contains(needs.prepare.outputs.tag, '-') && '--features debug-remote' || '' }}
+        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json ${{ contains(needs.prepare.outputs.tag, '-') && format('--config src-tauri/tauri.updater.beta.conf.json --config {0}/build-version.conf.json --features debug-remote', runner.temp) || '' }}
 
       - name: Check the app dials the production signaling server
         shell: bash
@@ -249,8 +262,8 @@ jobs:
           tag_name: ${{ needs.prepare.outputs.tag }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
-          # `v0.1.0-rc.1`, `v0.2.0-beta.7` and friends stay off the "Latest
-          # release" badge; only a plain `vX.Y.Z` tag is a real release.
+          # `v0.2.0-beta.7` stays off the "Latest release" badge; only a
+          # plain `vX.Y.Z` tag is a real release.
           prerelease: ${{ contains(needs.prepare.outputs.tag, '-') }}
           files: |
             artifacts/jamjam-linux-x64/**/*.AppImage
@@ -269,6 +282,28 @@ jobs:
             latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # What an installed beta reads to learn there is a newer version (ADR-045).
+  # The betas cannot read `releases/latest`: that is the newest release that is
+  # not a pre-release, which is a 404 until the first one is made. A release
+  # goes here too, so a beta moves on to the release of its version.
+  update-beta-channel:
+    name: Update the beta update channel
+    runs-on: ubuntu-latest
+    needs: [prepare, release]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release download "${TAG}" -p latest.json
+
+      - name: Publish it as the beta channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/publish-beta-channel.sh latest.json
 
   update-cask:
     name: Update Homebrew Cask

@@ -140,19 +140,67 @@ fn when_the_tag_is_another_version_than_the_one_built_no_manifest_is_written() {
     assert!(stderr(&output).contains("v99.0.0"), "{}", stderr(&output));
 }
 
-/// A beta is tagged `v<built version>-beta.<n>`: the same version, so the
-/// same check passes.
+/// A beta is tagged `v<built version>-beta.<n>` and built as
+/// `<built version>-<n>` (`scripts/build-version.sh`), so that the next beta is
+/// a newer version to the installed one.
 ///
-/// Verifies: REQ-UPD-010
+/// Verifies: REQ-UPD-010, REQ-UPD-012
 #[test]
-fn when_the_tag_is_a_beta_of_the_built_version_the_manifest_is_written() {
+fn when_the_tag_is_a_beta_of_the_built_version_the_manifest_is_for_the_beta_build() {
+    let version = built_version();
+    let dir = tempfile::tempdir().unwrap();
+    artifacts(dir.path(), &format!("{version}-7"));
+
+    let output = run(&format!("v{version}-beta.7"), dir.path());
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let manifest: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(manifest["version"], format!("{version}-7").as_str());
+    assert_eq!(
+        manifest["platforms"]["linux-x86_64-appimage"]["url"],
+        format!(
+            "https://github.com/koedame/jamjam-client/releases/download/v{version}-beta.7/jamjam_amd64.AppImage"
+        )
+    );
+}
+
+/// A beta built as the release version would be offered as the release, and
+/// never be seen as newer than the next beta.
+///
+/// Verifies: REQ-UPD-012
+#[test]
+fn when_a_beta_is_signed_for_the_release_version_no_manifest_is_written() {
     let version = built_version();
     let dir = tempfile::tempdir().unwrap();
     artifacts(dir.path(), &version);
 
     let output = run(&format!("v{version}-beta.7"), dir.path());
 
-    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        stderr(&output).contains("was not signed for version"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+/// Verifies: REQ-UPD-010
+#[test]
+fn when_the_tag_is_a_beta_of_another_version_no_manifest_is_written() {
+    let version = built_version();
+    let dir = tempfile::tempdir().unwrap();
+    artifacts(dir.path(), "99.0.0-7");
+
+    let output = run("v99.0.0-beta.7", dir.path());
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        stderr(&output).contains(&format!("builds {version}")),
+        "{}",
+        stderr(&output)
+    );
 }
 
 /// Verifies: REQ-UPD-011
