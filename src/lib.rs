@@ -9,6 +9,7 @@ pub mod diagnostics;
 pub mod environment;
 pub mod identity_store;
 pub mod network;
+pub mod perf;
 pub mod protocol;
 pub mod telemetry;
 

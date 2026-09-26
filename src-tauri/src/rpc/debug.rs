@@ -34,6 +34,12 @@ const MAX_LOG_BYTES: u64 = 256 * 1024;
 /// The longest tone. It ends by itself.
 const MAX_TONE_SECONDS: f32 = 60.0;
 
+/// The shortest and longest `debug.perf` window, and the one used when the
+/// caller names none. Under a second the CPU reading is not yet meaningful.
+const MIN_PERF_SECONDS: f32 = 1.0;
+const MAX_PERF_SECONDS: f32 = 60.0;
+const DEFAULT_PERF_SECONDS: f32 = 3.0;
+
 /// How many panic lines from the log `debug.crashes` returns.
 const MAX_PANIC_LINES: usize = 20;
 
@@ -84,6 +90,12 @@ pub const METHODS: &[Method] = &[
         summary: "入力・送信直前・出力のいずれかを指定時間だけ録音し、最大値・RMS・支配的な周波数・途切れを返す",
     },
     Method {
+        name: "debug.perf",
+        access: Access::TOOLS,
+        kind: Kind::Native,
+        summary: "指定の秒数のあいだ、アプリの CPU・メモリ、音声コールバックと受信ループの所要時間（平均・最大）、xrun の数を測って返す",
+    },
+    Method {
         name: "debug.audio_timing",
         access: Access::TOOLS,
         kind: Kind::Native,
@@ -111,6 +123,7 @@ pub async fn call<R: Runtime>(
         "debug.update_apply" => update_apply(app).await,
         "debug.screenshot" => screenshot(app, params(&call)?).await,
         "debug.audio_record" => audio_record(params(&call)?).await,
+        "debug.perf" => perf(params(&call)?).await,
         "debug.audio_tone" => audio_tone(params(&call)?),
         "debug.audio_timing" => audio_timing(app),
         other => Err(RpcError::new(
@@ -143,6 +156,7 @@ async fn info<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
         .await
         .map_err(|e| RpcError::failed(format!("the audio settings could not be read: {:?}", e)))?;
     let server_url = app.state::<ConfigState>().server_url();
+    let (cpu_model, cpu_threads) = jamjam::perf::cpu_description();
     Ok(json!({
         "app_version": app.package_info().version.to_string(),
         "build": if cfg!(feature = "e2e-control") { "e2e" } else { "beta" },
@@ -150,6 +164,8 @@ async fn info<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
         "arch": std::env::consts::ARCH,
         "os_version": jamjam::environment::os_version(),
         "ram_gb": jamjam::environment::ram_gb(),
+        "cpu_model": cpu_model,
+        "cpu_threads": cpu_threads,
         "audio_host": jamjam::environment::audio_host(),
         "device_id": app.state::<DeviceIdentityState>().identity().device_id(),
         "server_url": strip_userinfo(&server_url),
@@ -341,6 +357,31 @@ async fn audio_record(params: RecordParams) -> Result<Value, RpcError> {
     audio_tap::record(point, params.seconds, params.wav)
         .await
         .map_err(RpcError::failed)
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PerfParams {
+    /// How long to measure, up to [`MAX_PERF_SECONDS`]. [`DEFAULT_PERF_SECONDS`] when absent.
+    #[serde(default)]
+    seconds: Option<f32>,
+}
+
+/// What the app cost the machine over `seconds`. Measure while a call is
+/// running, or the audio numbers are zero.
+async fn perf(params: PerfParams) -> Result<Value, RpcError> {
+    let seconds = params.seconds.unwrap_or(DEFAULT_PERF_SECONDS);
+    if !(MIN_PERF_SECONDS..=MAX_PERF_SECONDS).contains(&seconds) {
+        return Err(RpcError::invalid_params(format!(
+            "seconds is {} to {}",
+            MIN_PERF_SECONDS, MAX_PERF_SECONDS
+        )));
+    }
+    let sampler = jamjam::perf::ProcessSampler::start().map_err(RpcError::failed)?;
+    let window = jamjam::perf::Window::start();
+    tokio::time::sleep(Duration::from_secs_f32(seconds)).await;
+    let report = window.finish();
+    let process = sampler.finish().map_err(RpcError::failed)?;
+    Ok(json!({ "seconds": seconds, "process": process, "audio": report }))
 }
 
 #[derive(Debug, Deserialize)]
