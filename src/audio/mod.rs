@@ -44,8 +44,8 @@ pub use plc::PcmPlc;
 pub use preset::{AudioPreset, BUDGET_SAMPLE_RATE};
 pub use probe::{BurstProbe, BurstSignal, DelayStats, RoundTripReport};
 pub use resampler::{
-    create_resampler, create_resampler_with_channels, AudioResampler, FastResampler,
-    PassthroughResampler, ResamplerError,
+    create_resampler, create_resampler_with_channels, AudioResampler, CaptureResampler,
+    FastResampler, PassthroughResampler, ResamplerError,
 };
 pub use stream::{
     balance_gains, capture_to_wire, mono_to_wire, pan_received, PeerRateChange, ReceivePath,

@@ -78,6 +78,11 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Threading"] }
+# `debug.screenshot` on Windows goes to WebView2 (`CapturePreview`), which writes
+# a PNG into an `IStream`. `windows-webview2` is the 0.61 that webview2-com is
+# built on; the 0.62 above would make the stream a different type.
+webview2-com = { version = "0.38", optional = true }
+windows-webview2 = { package = "windows", version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"], optional = true }
 
 # `debug.screenshot` on Linux asks WebKitGTK for a snapshot of the window and
 # writes it as a PNG. The same versions Tauri's own webview uses.
@@ -124,6 +129,8 @@ debug-tools = [
     "dep:objc2-app-kit",
     "dep:objc2-foundation",
     "dep:objc2-web-kit",
+    "dep:webview2-com",
+    "dep:windows-webview2",
     "jamjam/fault-injection",
 ]
 # Remote debugging: the beta build asks the server whether this installation is

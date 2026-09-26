@@ -697,6 +697,9 @@ pub enum DeviceTrouble {
     Unresponsive,
     /// The device refused to open
     Failed,
+    /// The device does not open at the session's sample rate, and no rate it
+    /// offers helped. Its format can be changed in the system's sound settings.
+    UnsupportedFormat,
 }
 
 /// A device the audio thread could not open, for the UI to tell the user
@@ -709,6 +712,8 @@ pub struct DeviceProblem {
     pub trouble: DeviceTrouble,
     /// The device's name, when the system's list has one for it
     pub device: Option<String>,
+    /// The sample rate the session asked the device to open at
+    pub sample_rate: u32,
 }
 
 /// Records that the `side` device could not be opened, replacing what was
@@ -717,6 +722,7 @@ fn note_device_problem(
     problems: &RwLock<Vec<DeviceProblem>>,
     side: DeviceSide,
     device: Option<&DeviceId>,
+    sample_rate: u32,
     error: &AudioError,
 ) {
     let listed = match side {
@@ -735,6 +741,7 @@ fn note_device_problem(
         .map(|d| d.name.clone());
     let trouble = match error {
         AudioError::DeviceUnresponsive(_) => DeviceTrouble::Unresponsive,
+        AudioError::UnsupportedConfig(_) => DeviceTrouble::UnsupportedFormat,
         _ => DeviceTrouble::Failed,
     };
     if let Ok(mut problems) = problems.write() {
@@ -743,6 +750,7 @@ fn note_device_problem(
             side,
             trouble,
             device: name,
+            sample_rate,
         });
     }
 }
@@ -1449,6 +1457,14 @@ struct CaptureRing {
     channels: usize,
 }
 
+impl CaptureRing {
+    /// A ring nothing is ever written to, for a session whose input did not open
+    fn silent(channels: usize) -> Self {
+        let (_, consumer) = RingBuffer::<f32>::new(1);
+        Self { consumer, channels }
+    }
+}
+
 /// Starts capture on `device_id` with `wanted` channels (1 or 2), taken from
 /// the input channels `(left, right)` the user selected (1-based), and returns
 /// the ring the captured audio lands in.
@@ -1537,6 +1553,27 @@ fn start_capture_ring(
         }
     }
     Err(failure)
+}
+
+/// The ring the session sends from: the one the input opened, or, when it
+/// did not open, one that stays empty. What others say is still heard, so the
+/// session goes on without sending, and the screen says why the input is not
+/// in use.
+fn capture_or_silence(
+    opened: Result<CaptureRing, AudioError>,
+    wanted_channels: u16,
+    device_problems: &RwLock<Vec<DeviceProblem>>,
+    device: Option<&DeviceId>,
+    sample_rate: u32,
+) -> CaptureRing {
+    match opened {
+        Ok(ring) => ring,
+        Err(e) => {
+            tracing::warn!("The session goes on without input: {}", e);
+            note_device_problem(device_problems, DeviceSide::Input, device, sample_rate, &e);
+            CaptureRing::silent(wanted_channels as usize)
+        }
+    }
 }
 
 /// Converts a frame of samples to the 0-100 level the meters display.
@@ -1698,7 +1735,7 @@ async fn run_audio_streaming(
     // Start audio capture with level metering. Mono or stereo follows the
     // transmit channel setting (REQ-AUD-107/108).
     let mut wanted_channels = transmit_channels.clamp(1, WIRE_CHANNELS as u32) as u16;
-    let capture_ring = match start_capture_ring(
+    let opened = start_capture_ring(
         &mut capture_engine,
         input_id.as_ref(),
         wanted_channels,
@@ -1706,13 +1743,14 @@ async fn run_audio_streaming(
         buffer_size as usize,
         &input_level_for_capture,
         &monitor,
-    ) {
-        Ok(ring) => ring,
-        Err(e) => {
-            note_device_problem(device_problems, DeviceSide::Input, input_id.as_ref(), &e);
-            return Err(format!("Failed to start capture: {}", e));
-        }
-    };
+    );
+    let capture_ring = capture_or_silence(
+        opened,
+        wanted_channels,
+        device_problems,
+        input_id.as_ref(),
+        sample_rate,
+    );
     let mut capture = DeviceSlot::new("input", capture_config, capture_engine, input_id);
     let capture_channels = capture_ring.channels;
     let capture_ring = Arc::new(std::sync::Mutex::new(capture_ring));
@@ -1738,7 +1776,13 @@ async fn run_audio_streaming(
             )
         },
     ) {
-        note_device_problem(device_problems, DeviceSide::Output, output_id.as_ref(), &e);
+        note_device_problem(
+            device_problems,
+            DeviceSide::Output,
+            output_id.as_ref(),
+            sample_rate,
+            &e,
+        );
         return Err(format!("Failed to start playback: {}", e));
     }
     tracing::info!("Playback started on {:?}", output_id);
@@ -2098,7 +2142,13 @@ async fn run_audio_streaming(
                 }
                 Err(e) => {
                     eprintln!("Failed to restart capture: {}", e);
-                    note_device_problem(device_problems, DeviceSide::Input, capture.device(), &e);
+                    note_device_problem(
+                        device_problems,
+                        DeviceSide::Input,
+                        capture.device(),
+                        sample_rate,
+                        &e,
+                    );
                 }
             }
         }
@@ -2107,7 +2157,13 @@ async fn run_audio_streaming(
                 Ok(()) => clear_device_problem(device_problems, DeviceSide::Output),
                 Err(e) => {
                     eprintln!("Failed to switch output device: {}", e);
-                    note_device_problem(device_problems, DeviceSide::Output, playback.device(), &e);
+                    note_device_problem(
+                        device_problems,
+                        DeviceSide::Output,
+                        playback.device(),
+                        sample_rate,
+                        &e,
+                    );
                 }
             }
         }
@@ -2365,6 +2421,60 @@ mod tests {
         let public: SocketAddr = "203.0.113.7:5000".parse().unwrap();
 
         assert_eq!(merge_candidate_addrs(public, &[]), vec![public]);
+    }
+
+    /// Verifies: REQ-AUD-125
+    #[test]
+    fn when_the_input_does_not_open_at_the_session_rate_the_session_goes_on_and_says_which_rate() {
+        let problems = RwLock::new(Vec::new());
+        let refused = AudioError::UnsupportedConfig("Failed to initialize audio client".into());
+
+        let ring = capture_or_silence(Err(refused), 2, &problems, None, 48000);
+
+        assert_eq!(ring.channels, 2);
+        assert_eq!(
+            ring.consumer.slots(),
+            0,
+            "nothing is sent from a closed input"
+        );
+        let problems = problems.read().unwrap();
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].side, DeviceSide::Input);
+        assert_eq!(problems[0].trouble, DeviceTrouble::UnsupportedFormat);
+        assert_eq!(problems[0].sample_rate, 48000);
+    }
+
+    /// Verifies: REQ-AUD-125
+    #[test]
+    fn when_the_input_refuses_for_any_other_reason_the_session_goes_on_too() {
+        let problems = RwLock::new(Vec::new());
+        let refused = AudioError::StreamError("device busy".into());
+
+        let ring = capture_or_silence(Err(refused), 1, &problems, None, 48000);
+
+        assert_eq!(ring.channels, 1);
+        assert_eq!(problems.read().unwrap()[0].trouble, DeviceTrouble::Failed);
+    }
+
+    /// Verifies: REQ-AUD-125
+    #[test]
+    fn when_the_input_opens_nothing_is_reported() {
+        let problems = RwLock::new(Vec::new());
+        let (_, consumer) = RingBuffer::<f32>::new(8);
+
+        let ring = capture_or_silence(
+            Ok(CaptureRing {
+                consumer,
+                channels: 2,
+            }),
+            2,
+            &problems,
+            None,
+            48000,
+        );
+
+        assert_eq!(ring.channels, 2);
+        assert!(problems.read().unwrap().is_empty());
     }
 
     /// Verifies: REQ-AUD-029

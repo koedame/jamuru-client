@@ -280,8 +280,7 @@ struct ScreenshotParams {
     window: Option<String>,
 }
 
-/// The window as the user sees it, as a PNG. WebKitGTK can snapshot itself;
-/// WebView2 (Windows) needs its own call, which is not written yet.
+/// The window as the user sees it, as a PNG. WebKitGTK can snapshot itself.
 #[cfg(target_os = "linux")]
 async fn screenshot<R: Runtime>(
     app: &AppHandle<R>,
@@ -417,13 +416,109 @@ fn png_of(image: &objc2_app_kit::NSImage) -> Result<(i32, i32, Vec<u8>), String>
     ))
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// The window as the user sees it, as a PNG. WebView2 writes the PNG into a
+/// stream of its own (`CapturePreview`).
+#[cfg(target_os = "windows")]
+async fn screenshot<R: Runtime>(
+    app: &AppHandle<R>,
+    params: ScreenshotParams,
+) -> Result<Value, RpcError> {
+    use webview2_com::CapturePreviewCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
+    use windows_webview2::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
+
+    let label = params
+        .window
+        .as_deref()
+        .unwrap_or(super::webview::MAIN_WINDOW);
+    let window = app.get_webview_window(label).ok_or_else(|| {
+        RpcError::new(
+            Code::NoWindow,
+            format!("the window {:?} is not open", label),
+        )
+    })?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    window
+        .with_webview(move |webview| {
+            // `with_webview` runs on the main thread, where WebView2 may be used.
+            let tx = std::rc::Rc::new(std::cell::Cell::new(Some(tx)));
+            let start = || -> Result<(), String> {
+                let stream = unsafe { CreateStreamOnHGlobal(Default::default(), true) }
+                    .map_err(|e| e.to_string())?;
+                let core =
+                    unsafe { webview.controller().CoreWebView2() }.map_err(|e| e.to_string())?;
+                let done_tx = tx.clone();
+                let done_stream = stream.clone();
+                let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+                    if let Some(tx) = done_tx.take() {
+                        let _ = tx.send(
+                            result
+                                .map_err(|e| e.to_string())
+                                .and_then(|()| png_of(&done_stream)),
+                        );
+                    }
+                    Ok(())
+                }));
+                unsafe {
+                    core.CapturePreview(
+                        COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                        &stream,
+                        &handler,
+                    )
+                }
+                .map_err(|e| e.to_string())
+            };
+            if let Err(e) = start() {
+                if let Some(tx) = tx.take() {
+                    let _ = tx.send(Err(e));
+                }
+            }
+        })
+        .map_err(|e| RpcError::failed(format!("the webview could not be reached: {}", e)))?;
+    let (width, height, png) = tokio::time::timeout(Duration::from_secs(10), rx)
+        .await
+        .map_err(|_| RpcError::new(Code::Timeout, "the webview did not answer the snapshot"))?
+        .map_err(|_| RpcError::failed("the snapshot was dropped"))?
+        .map_err(|e| RpcError::failed(format!("the snapshot failed: {}", e)))?;
+    Ok(json!({
+        "width": width,
+        "height": height,
+        "png_base64": data_encoding::BASE64.encode(&png),
+    }))
+}
+
+/// Reads back what WebView2 wrote into the stream, and the image's size from
+/// the PNG header (width and height are the two big-endian words after the
+/// `IHDR` tag).
+#[cfg(target_os = "windows")]
+fn png_of(
+    stream: &windows_webview2::Win32::System::Com::IStream,
+) -> Result<(i32, i32, Vec<u8>), String> {
+    use windows_webview2::Win32::System::Com::{STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET};
+
+    let mut stat = STATSTG::default();
+    unsafe { stream.Stat(&mut stat, STATFLAG_NONAME) }.map_err(|e| e.to_string())?;
+    let mut png = vec![0u8; stat.cbSize as usize];
+    unsafe { stream.Seek(0, STREAM_SEEK_SET, None) }.map_err(|e| e.to_string())?;
+    let mut read = 0u32;
+    unsafe { stream.Read(png.as_mut_ptr().cast(), png.len() as u32, Some(&mut read)) }
+        .ok()
+        .map_err(|e| e.to_string())?;
+    png.truncate(read as usize);
+    if png.len() < 24 || &png[12..16] != b"IHDR" {
+        return Err("the snapshot is not a PNG".to_string());
+    }
+    let word = |at: usize| i32::from_be_bytes([png[at], png[at + 1], png[at + 2], png[at + 3]]);
+    Ok((word(16), word(20), png))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 async fn screenshot<R: Runtime>(
     _app: &AppHandle<R>,
     _params: ScreenshotParams,
 ) -> Result<Value, RpcError> {
     Err(RpcError::failed(
-        "screenshots are only taken on Linux and macOS so far",
+        "screenshots are only taken on Linux, macOS and Windows so far",
     ))
 }
 

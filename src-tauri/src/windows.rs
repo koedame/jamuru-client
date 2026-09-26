@@ -243,8 +243,11 @@ pub fn toggle_chat_window(app: &AppHandle) -> tauri::Result<()> {
 // ============================================================================
 
 /// Open settings window
+///
+/// The commands that can create a window are `async`: WebView2 deadlocks the
+/// main thread when a window is built from a synchronous command.
 #[tauri::command]
-pub fn window_open_settings(app: AppHandle) -> Result<(), String> {
+pub async fn window_open_settings(app: AppHandle) -> Result<(), String> {
     create_settings_window(&app).map_err(|e| e.to_string())
 }
 
@@ -260,13 +263,13 @@ pub fn window_close_settings(app: AppHandle) -> Result<(), String> {
 
 /// Toggle chat window visibility
 #[tauri::command]
-pub fn window_toggle_chat(app: AppHandle) -> Result<(), String> {
+pub async fn window_toggle_chat(app: AppHandle) -> Result<(), String> {
     toggle_chat_window(&app).map_err(|e| e.to_string())
 }
 
 /// Show chat window
 #[tauri::command]
-pub fn window_show_chat(app: AppHandle) -> Result<(), String> {
+pub async fn window_show_chat(app: AppHandle) -> Result<(), String> {
     if !is_in_session() {
         return Err("Not in session".to_string());
     }
@@ -291,13 +294,16 @@ pub fn window_hide_chat(app: AppHandle) -> Result<(), String> {
 
 /// Transition to connected state (called when session starts)
 #[tauri::command]
-pub fn window_session_connected(app: AppHandle) -> Result<(), String> {
+pub async fn window_session_connected(app: AppHandle) -> Result<(), String> {
     transition_to_connected(&app).map_err(|e| e.to_string())
 }
 
 /// Transition to disconnected state (called when session ends)
 #[tauri::command]
-pub fn window_session_disconnected(app: AppHandle, reason: Option<String>) -> Result<(), String> {
+pub async fn window_session_disconnected(
+    app: AppHandle,
+    reason: Option<String>,
+) -> Result<(), String> {
     transition_to_disconnected(&app, reason.as_deref()).map_err(|e| e.to_string())
 }
 
