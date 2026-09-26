@@ -6,13 +6,16 @@
 //! - Buffer size compatibility
 //! - Sample rate support
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use super::{DiagnosticGrade, DiagnosticProblem, ProblemCode, ProblemSeverity};
 use crate::audio::{
-    list_input_devices, list_output_devices, resolve_input_device, resolve_output_device,
-    stable_device_id, AudioDevice, DeviceId,
+    bounded, list_input_devices, list_output_devices, resolve_input_device, resolve_output_device,
+    stable_device_id, AudioDevice, AudioError, DeviceId, LIST_TIMEOUT,
 };
 
 /// Diagnostics for a single audio device
@@ -150,6 +153,79 @@ pub struct AudioDiagnosticsResult {
     pub problems: Vec<DiagnosticProblem>,
 }
 
+/// Which side of the audio path a device read is for
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Input,
+    Output,
+}
+
+impl Direction {
+    fn reading(self) -> &'static str {
+        match self {
+            Direction::Input => "reading the input devices",
+            Direction::Output => "reading the output devices",
+        }
+    }
+
+    fn enumeration_failed(self, error: String) -> ProblemCode {
+        match self {
+            Direction::Input => ProblemCode::InputEnumerationFailed { error },
+            Direction::Output => ProblemCode::OutputEnumerationFailed { error },
+        }
+    }
+
+    fn unresponsive(self) -> ProblemCode {
+        match self {
+            Direction::Input => ProblemCode::InputDeviceUnresponsive,
+            Direction::Output => ProblemCode::OutputDeviceUnresponsive,
+        }
+    }
+}
+
+/// What one side's calls into the audio driver gave: the devices, and the id
+/// of the one streaming would use.
+type DeviceRead = (Result<Vec<AudioDevice>, AudioError>, Option<String>);
+
+/// Asks the audio driver for one side's devices, given the configured id
+/// (`None`: the OS default). Every call in it can hang with the driver.
+type ReadDevices = Arc<dyn Fn(Direction, Option<DeviceId>) -> DeviceRead + Send + Sync>;
+
+fn read_devices_from_driver(direction: Direction, configured: Option<DeviceId>) -> DeviceRead {
+    match direction {
+        Direction::Input => (
+            list_input_devices(),
+            resolve_input_device(configured.as_ref())
+                .ok()
+                .and_then(|device| stable_device_id(&device)),
+        ),
+        Direction::Output => (
+            list_output_devices(),
+            resolve_output_device(configured.as_ref())
+                .ok()
+                .and_then(|device| stable_device_id(&device)),
+        ),
+    }
+}
+
+/// Reads one side's devices on a thread of its own, giving up at `timeout`,
+/// so a driver that has hung costs neither this task nor the runtime's
+/// threads more than that.
+async fn read_devices_within(
+    read: ReadDevices,
+    direction: Direction,
+    configured: Option<DeviceId>,
+    timeout: Duration,
+) -> Result<DeviceRead, AudioError> {
+    tokio::task::spawn_blocking(move || {
+        bounded(direction.reading(), timeout, move || {
+            read(direction, configured)
+        })
+    })
+    .await
+    .unwrap_or_else(|e| Err(AudioError::StreamError(e.to_string())))
+}
+
 /// Audio diagnostics runner
 pub struct AudioDiagnostics;
 
@@ -159,63 +235,57 @@ impl AudioDiagnostics {
     /// used). Resolves through `resolve_input_device`/`resolve_output_device`,
     /// the same functions `streaming_start` uses, so the diagnostics tab
     /// reports on the device a call would actually use, not a different one.
-    pub fn run(
+    ///
+    /// The calls into the audio driver are bounded (REQ-AUD-123): a side
+    /// whose driver does not answer within [`LIST_TIMEOUT`] is reported as
+    /// unresponsive, not as having no devices.
+    pub async fn run(
+        configured_input: Option<&str>,
+        configured_output: Option<&str>,
+    ) -> AudioDiagnosticsResult {
+        Self::run_with(
+            Arc::new(read_devices_from_driver),
+            LIST_TIMEOUT,
+            configured_input,
+            configured_output,
+        )
+        .await
+    }
+
+    async fn run_with(
+        read: ReadDevices,
+        timeout: Duration,
         configured_input: Option<&str>,
         configured_output: Option<&str>,
     ) -> AudioDiagnosticsResult {
         let mut problems = Vec::new();
 
-        // Get input devices
-        let input_devices: Vec<DeviceDiagnostics> = match list_input_devices() {
-            Ok(devices) => devices
-                .iter()
-                .map(DeviceDiagnostics::from_audio_device)
-                .collect(),
-            Err(e) => {
-                warn!("Failed to list input devices: {}", e);
-                problems.push(DiagnosticProblem {
-                    severity: ProblemSeverity::Error,
-                    category: "audio".to_string(),
-                    code: ProblemCode::InputEnumerationFailed {
-                        error: e.to_string(),
-                    },
-                });
-                Vec::new()
-            }
-        };
-
-        // Get output devices
-        let output_devices: Vec<DeviceDiagnostics> = match list_output_devices() {
-            Ok(devices) => devices
-                .iter()
-                .map(DeviceDiagnostics::from_audio_device)
-                .collect(),
-            Err(e) => {
-                warn!("Failed to list output devices: {}", e);
-                problems.push(DiagnosticProblem {
-                    severity: ProblemSeverity::Error,
-                    category: "audio".to_string(),
-                    code: ProblemCode::OutputEnumerationFailed {
-                        error: e.to_string(),
-                    },
-                });
-                Vec::new()
-            }
-        };
-
         // Resolve the input/output device the same way `streaming_start`
         // would: the configured id if there is one, otherwise the OS default.
-        let configured_input_id = configured_input.map(|id| DeviceId(id.to_string()));
-        let configured_output_id = configured_output.map(|id| DeviceId(id.to_string()));
+        let (input_read, output_read) = tokio::join!(
+            read_devices_within(
+                read.clone(),
+                Direction::Input,
+                configured_input.map(|id| DeviceId(id.to_string())),
+                timeout,
+            ),
+            read_devices_within(
+                read,
+                Direction::Output,
+                configured_output.map(|id| DeviceId(id.to_string())),
+                timeout,
+            ),
+        );
 
-        let selected_input = resolve_input_device(configured_input_id.as_ref())
-            .ok()
-            .and_then(|device| stable_device_id(&device))
-            .and_then(|id| input_devices.iter().find(|d| d.id == id).cloned());
-        let selected_output = resolve_output_device(configured_output_id.as_ref())
-            .ok()
-            .and_then(|device| stable_device_id(&device))
-            .and_then(|id| output_devices.iter().find(|d| d.id == id).cloned());
+        let (input_devices, selected_input_id, input_answered) =
+            Self::diagnose_side(Direction::Input, input_read, &mut problems);
+        let (output_devices, selected_output_id, output_answered) =
+            Self::diagnose_side(Direction::Output, output_read, &mut problems);
+
+        let selected_input =
+            selected_input_id.and_then(|id| input_devices.iter().find(|d| d.id == id).cloned());
+        let selected_output =
+            selected_output_id.and_then(|id| output_devices.iter().find(|d| d.id == id).cloned());
 
         let input_source = if configured_input.is_some() {
             DeviceSource::Configured
@@ -228,8 +298,9 @@ impl AudioDiagnostics {
             DeviceSource::OsDefault
         };
 
-        // Check for no devices
-        if input_devices.is_empty() {
+        // Check for no devices. A side that did not answer has not said it
+        // has none.
+        if input_answered && input_devices.is_empty() {
             problems.push(DiagnosticProblem {
                 severity: ProblemSeverity::Error,
                 category: "audio".to_string(),
@@ -237,7 +308,7 @@ impl AudioDiagnostics {
             });
         }
 
-        if output_devices.is_empty() {
+        if output_answered && output_devices.is_empty() {
             problems.push(DiagnosticProblem {
                 severity: ProblemSeverity::Error,
                 category: "audio".to_string(),
@@ -306,6 +377,45 @@ impl AudioDiagnostics {
             overall_grade,
             problems,
         }
+    }
+
+    /// One side's devices and the id of the one streaming would use, from
+    /// what its read gave. The last is whether the driver answered, which is
+    /// what "no devices" can be said on.
+    fn diagnose_side(
+        direction: Direction,
+        read: Result<DeviceRead, AudioError>,
+        problems: &mut Vec<DiagnosticProblem>,
+    ) -> (Vec<DeviceDiagnostics>, Option<String>, bool) {
+        let (listed, selected_id) = match read {
+            Ok(read) => read,
+            Err(AudioError::DeviceUnresponsive(what)) => {
+                warn!("The audio driver did not answer while {}", what);
+                problems.push(DiagnosticProblem {
+                    severity: ProblemSeverity::Error,
+                    category: "audio".to_string(),
+                    code: direction.unresponsive(),
+                });
+                return (Vec::new(), None, false);
+            }
+            Err(e) => (Err(e), None),
+        };
+        let devices = match listed {
+            Ok(devices) => devices
+                .iter()
+                .map(DeviceDiagnostics::from_audio_device)
+                .collect(),
+            Err(e) => {
+                warn!("Failed to list {:?} devices: {}", direction, e);
+                problems.push(DiagnosticProblem {
+                    severity: ProblemSeverity::Error,
+                    category: "audio".to_string(),
+                    code: direction.enumeration_failed(e.to_string()),
+                });
+                Vec::new()
+            }
+        };
+        (devices, selected_id, true)
     }
 
     /// Detect low-latency support
@@ -430,16 +540,16 @@ mod tests {
 
     /// Reports the source as configured/OS-default independent of whether any
     /// audio hardware is present, so this runs everywhere.
-    #[test]
-    fn test_run_reports_configured_source_when_a_device_id_is_given() {
-        let result = AudioDiagnostics::run(Some("nonexistent-device-id"), None);
+    #[tokio::test]
+    async fn test_run_reports_configured_source_when_a_device_id_is_given() {
+        let result = AudioDiagnostics::run(Some("nonexistent-device-id"), None).await;
         assert_eq!(result.input_source, DeviceSource::Configured);
         assert_eq!(result.output_source, DeviceSource::OsDefault);
     }
 
-    #[test]
-    fn test_run_reports_os_default_source_when_no_device_is_configured() {
-        let result = AudioDiagnostics::run(None, None);
+    #[tokio::test]
+    async fn test_run_reports_os_default_source_when_no_device_is_configured() {
+        let result = AudioDiagnostics::run(None, None).await;
         assert_eq!(result.input_source, DeviceSource::OsDefault);
         assert_eq!(result.output_source, DeviceSource::OsDefault);
     }
@@ -450,15 +560,15 @@ mod tests {
     /// skips on machines/CI runners with only one device or none - the GUI
     /// e2e suite covers this with the ALSA/PipeWire virtual devices set up by
     /// `tests/e2e/scripts/setup-virtual-audio-linux.sh`.
-    #[test]
-    fn test_run_selects_configured_device_over_os_default_when_they_differ() {
+    #[tokio::test]
+    async fn test_run_selects_configured_device_over_os_default_when_they_differ() {
         let inputs = list_input_devices().unwrap_or_default();
         let Some(non_default) = inputs.iter().find(|d| !d.is_default) else {
             eprintln!("skipping: no non-default input device available in this environment");
             return;
         };
 
-        let result = AudioDiagnostics::run(Some(non_default.id.0.as_str()), None);
+        let result = AudioDiagnostics::run(Some(non_default.id.0.as_str()), None).await;
 
         assert_eq!(
             result.selected_input.map(|d| d.id),
@@ -466,5 +576,127 @@ mod tests {
             "diagnostics must report the configured device, not the OS default"
         );
         assert_eq!(result.input_source, DeviceSource::Configured);
+    }
+
+    /// Reads answered from a table: `hang` makes that side never come back
+    /// until the returned sender is dropped, as a hung driver does not.
+    fn reader(hang: Option<Direction>) -> (ReadDevices, std::sync::mpsc::Sender<()>) {
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let released = std::sync::Mutex::new(released);
+        let read: ReadDevices = Arc::new(move |direction, _| {
+            if hang == Some(direction) {
+                let _ = released.lock().unwrap().recv();
+            }
+            let device = AudioDevice {
+                id: DeviceId(format!("{:?}", direction)),
+                name: format!("{:?} device", direction),
+                supported_sample_rates: vec![48000],
+                supported_channels: vec![2],
+                is_default: true,
+                is_asio: false,
+            };
+            (Ok(vec![device]), Some(format!("{:?}", direction)))
+        });
+        (read, release)
+    }
+
+    fn problem_codes(result: &AudioDiagnosticsResult) -> Vec<String> {
+        result
+            .problems
+            .iter()
+            .map(|p| format!("{:?}", p.code))
+            .collect()
+    }
+
+    /// The point of the limit: a task of the runtime that asks a hung driver
+    /// must not be the one that waits, or the runtime stops with it. With a
+    /// single worker, a ticker that keeps ticking shows nothing was blocked.
+    ///
+    /// Verifies: REQ-AUD-123
+    #[tokio::test(flavor = "current_thread")]
+    async fn when_the_driver_hangs_while_the_devices_are_read_the_runtime_keeps_running() {
+        let (read, release) = reader(Some(Direction::Input));
+        let ticks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let ticker = {
+            let ticks = ticks.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            })
+        };
+
+        let result = AudioDiagnostics::run_with(read, Duration::from_millis(200), None, None).await;
+
+        ticker.abort();
+        drop(release);
+        assert!(
+            ticks.load(std::sync::atomic::Ordering::SeqCst) >= 10,
+            "the runtime was blocked while the driver hung: {} ticks",
+            ticks.load(std::sync::atomic::Ordering::SeqCst)
+        );
+        assert!(
+            problem_codes(&result).contains(&"InputDeviceUnresponsive".to_string()),
+            "a hung driver must be reported: {:?}",
+            problem_codes(&result)
+        );
+    }
+
+    /// Verifies: REQ-AUD-123
+    #[tokio::test]
+    async fn when_the_input_driver_hangs_the_input_is_reported_unresponsive_and_the_output_is_still_read(
+    ) {
+        let (read, release) = reader(Some(Direction::Input));
+
+        let result = AudioDiagnostics::run_with(read, Duration::from_millis(200), None, None).await;
+
+        drop(release);
+        let codes = problem_codes(&result);
+        assert!(codes.contains(&"InputDeviceUnresponsive".to_string()));
+        assert!(
+            !codes.contains(&"NoInputDevices".to_string()),
+            "a driver that did not answer has not said it has no devices: {:?}",
+            codes
+        );
+        assert!(result.input_devices.is_empty());
+        assert!(result.selected_input.is_none());
+        assert_eq!(result.output_devices.len(), 1);
+        assert_eq!(
+            result.selected_output.map(|d| d.id),
+            Some("Output".to_string())
+        );
+        assert!(!codes.contains(&"OutputDeviceUnresponsive".to_string()));
+    }
+
+    /// Verifies: REQ-AUD-123
+    #[tokio::test]
+    async fn when_the_output_driver_hangs_the_output_is_reported_unresponsive() {
+        let (read, release) = reader(Some(Direction::Output));
+
+        let result = AudioDiagnostics::run_with(read, Duration::from_millis(200), None, None).await;
+
+        drop(release);
+        let codes = problem_codes(&result);
+        assert!(codes.contains(&"OutputDeviceUnresponsive".to_string()));
+        assert!(!codes.contains(&"NoOutputDevices".to_string()));
+        assert!(result.selected_output.is_none());
+        assert_eq!(result.input_devices.len(), 1);
+    }
+
+    /// Verifies: REQ-AUD-123
+    #[tokio::test]
+    async fn when_the_driver_answers_no_unresponsive_problem_is_reported() {
+        let (read, _release) = reader(None);
+
+        let result = AudioDiagnostics::run_with(read, Duration::from_secs(5), None, None).await;
+
+        let codes = problem_codes(&result);
+        assert!(!codes.contains(&"InputDeviceUnresponsive".to_string()));
+        assert!(!codes.contains(&"OutputDeviceUnresponsive".to_string()));
+        assert_eq!(
+            result.selected_input.map(|d| d.id),
+            Some("Input".to_string())
+        );
     }
 }

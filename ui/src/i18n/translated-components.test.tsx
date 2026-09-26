@@ -144,6 +144,8 @@ const diagnosticsProblems: DiagnosticProblem[] = [
     category: 'audio',
     code: { type: 'OutputEnumerationFailed', data: { error: 'ENODEV' } },
   },
+  { severity: 'Error', category: 'audio', code: { type: 'InputDeviceUnresponsive' } },
+  { severity: 'Error', category: 'audio', code: { type: 'OutputDeviceUnresponsive' } },
   { severity: 'Error', category: 'audio', code: { type: 'NoInputDevices' } },
   { severity: 'Error', category: 'audio', code: { type: 'NoOutputDevices' } },
   { severity: 'Warning', category: 'audio', code: { type: 'InputNot48kHz', data: { device_name: 'Mic' } } },

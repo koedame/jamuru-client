@@ -319,6 +319,14 @@
           "message": "Failed to enumerate output devices",
           "suggestion": "Error: {{error}}. Try restarting your audio interface."
         },
+        "inputDeviceUnresponsive": {
+          "message": "The input device is not responding",
+          "suggestion": "The audio driver did not answer in time, so the input devices could not be read. Reconnect the audio interface, or restart it and the computer's audio service, then run the diagnostics again."
+        },
+        "outputDeviceUnresponsive": {
+          "message": "The output device is not responding",
+          "suggestion": "The audio driver did not answer in time, so the output devices could not be read. Reconnect the audio interface, or restart it and the computer's audio service, then run the diagnostics again."
+        },
         "noInputDevices": {
           "message": "No input devices found",
           "suggestion": "Connect a microphone or audio interface"

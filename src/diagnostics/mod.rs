@@ -116,6 +116,10 @@ pub enum ProblemCode {
         /// Underlying error (not localized)
         error: String,
     },
+    /// The input side of the audio driver did not answer within the limit
+    InputDeviceUnresponsive,
+    /// The output side of the audio driver did not answer within the limit
+    OutputDeviceUnresponsive,
     /// No input devices found
     NoInputDevices,
     /// No output devices found
@@ -190,7 +194,7 @@ pub async fn run_complete_diagnostics(
 ) -> CompleteDiagnosticsResult {
     // Run diagnostics (network is async, others are sync)
     let network = NetworkDiagnostics::run(signaling).await;
-    let audio = AudioDiagnostics::run(configured_input, configured_output);
+    let audio = AudioDiagnostics::run(configured_input, configured_output).await;
     let cpu = CpuDiagnostics::run();
 
     // Calculate overall score (weighted average)
