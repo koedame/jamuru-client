@@ -274,6 +274,64 @@ impl StreamingState {
         }
     }
 
+    /// Sets the volume of the peer's audio, in percent of unity gain (0-200).
+    pub async fn set_peer_volume(&self, percent: u32) {
+        let clamped = percent.min(200);
+        self.peer_volume.store(clamped, Ordering::SeqCst);
+        self.send(StreamingCommand::SetPeerVolume(clamped as f32 / 100.0))
+            .await;
+    }
+
+    /// Sets where the peer's audio sits, from -100 (left) to 100 (right).
+    pub async fn set_peer_pan(&self, pan: i32) {
+        let clamped = pan.clamp(-100, 100);
+        self.peer_pan.store(clamped, Ordering::SeqCst);
+        self.send(StreamingCommand::SetPeerPan(clamped)).await;
+    }
+
+    /// Sets the volume of the microphone, in percent of unity gain (0-200).
+    pub async fn set_local_volume(&self, percent: u32) {
+        let clamped = percent.min(200);
+        self.local_volume.store(clamped, Ordering::SeqCst);
+        self.send(StreamingCommand::SetLocalVolume(clamped as f32 / 100.0))
+            .await;
+    }
+
+    /// Sets where the microphone sits, from -100 (left) to 100 (right).
+    pub async fn set_local_pan(&self, pan: i32) {
+        let clamped = pan.clamp(-100, 100);
+        self.local_pan.store(clamped, Ordering::SeqCst);
+        self.send(StreamingCommand::SetLocalPan(clamped)).await;
+    }
+
+    /// The peer's volume (percent of unity gain) and pan, as stored.
+    #[cfg(test)]
+    pub(crate) fn peer_gain(&self) -> (u32, i32) {
+        (
+            self.peer_volume.load(Ordering::SeqCst),
+            self.peer_pan.load(Ordering::SeqCst),
+        )
+    }
+
+    /// The microphone's volume (percent of unity gain) and pan, as stored.
+    #[cfg(test)]
+    pub(crate) fn local_gain(&self) -> (u32, i32) {
+        (
+            self.local_volume.load(Ordering::SeqCst),
+            self.local_pan.load(Ordering::SeqCst),
+        )
+    }
+
+    /// Tells the audio thread, if a session is running; a value set before one
+    /// starts is picked up from the stored one.
+    async fn send(&self, command: StreamingCommand) {
+        if self.is_active.load(Ordering::SeqCst) {
+            if let Some(sender) = self.cmd_tx.lock().await.as_ref() {
+                let _ = sender.send(command);
+            }
+        }
+    }
+
     /// Bind the audio socket, or report the address of the one already bound.
     async fn prepare_socket(&self) -> Result<SocketAddr, String> {
         let mut addr_lock = self.prepared_addr.lock().await;
@@ -754,12 +812,9 @@ pub async fn streaming_start(
     if let Ok(mut facts) = state.link_facts.write() {
         *facts = None;
     }
-    // Reset volumes to unity gain and pan to center
-    state.peer_volume.store(100, Ordering::SeqCst);
+    // The master volume goes back to unity gain. The faders' own values are
+    // the mixer's, which sets them before a session starts (`mixer`).
     state.master_volume.store(100, Ordering::SeqCst);
-    state.peer_pan.store(0, Ordering::SeqCst);
-    state.local_volume.store(100, Ordering::SeqCst);
-    state.local_pan.store(0, Ordering::SeqCst);
     // Clear peer latency info
     if let Ok(mut info) = state.peer_latency_info.write() {
         *info = None;
@@ -1131,35 +1186,6 @@ pub async fn streaming_get_input_level(
     Ok(state.input_level.load(Ordering::SeqCst))
 }
 
-/// Set peer (received audio) volume
-/// Volume is 0-200 where 100 = unity gain (1.0x), 200 = 2.0x
-#[tauri::command]
-pub async fn streaming_set_peer_volume(
-    volume: u32,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    let clamped = volume.min(200);
-    state.peer_volume.store(clamped, Ordering::SeqCst);
-
-    // If streaming, also send command to audio thread
-    if state.is_active.load(Ordering::SeqCst) {
-        let tx = state.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetPeerVolume(clamped as f32 / 100.0));
-        }
-    }
-
-    Ok(())
-}
-
-/// Get peer volume (0-200, 100 = unity)
-#[tauri::command]
-pub async fn streaming_get_peer_volume(
-    state: tauri::State<'_, StreamingState>,
-) -> Result<u32, String> {
-    Ok(state.peer_volume.load(Ordering::SeqCst))
-}
-
 /// Set master output volume
 /// Volume is 0-200 where 100 = unity gain (1.0x), 200 = 2.0x
 #[tauri::command]
@@ -1187,93 +1213,6 @@ pub async fn streaming_get_master_volume(
     state: tauri::State<'_, StreamingState>,
 ) -> Result<u32, String> {
     Ok(state.master_volume.load(Ordering::SeqCst))
-}
-
-/// Set peer (received audio) pan
-/// Pan is -100 (full left) to 100 (full right), 0 = center
-#[tauri::command]
-pub async fn streaming_set_peer_pan(
-    pan: i32,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    let clamped = pan.clamp(-100, 100);
-    state.peer_pan.store(clamped, Ordering::SeqCst);
-
-    // If streaming, also send command to audio thread
-    if state.is_active.load(Ordering::SeqCst) {
-        let tx = state.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetPeerPan(clamped));
-        }
-    }
-
-    Ok(())
-}
-
-/// Get peer pan (-100 to 100, 0 = center)
-#[tauri::command]
-pub async fn streaming_get_peer_pan(
-    state: tauri::State<'_, StreamingState>,
-) -> Result<i32, String> {
-    Ok(state.peer_pan.load(Ordering::SeqCst))
-}
-
-/// Set local (microphone input) volume
-/// Volume is 0-200 where 100 = unity gain (1.0x), 200 = 2.0x
-#[tauri::command]
-pub async fn streaming_set_local_volume(
-    volume: u32,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    let clamped = volume.min(200);
-    state.local_volume.store(clamped, Ordering::SeqCst);
-
-    // If streaming, also send command to audio thread
-    if state.is_active.load(Ordering::SeqCst) {
-        let tx = state.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetLocalVolume(clamped as f32 / 100.0));
-        }
-    }
-
-    Ok(())
-}
-
-/// Get local volume (0-200, 100 = unity)
-#[tauri::command]
-pub async fn streaming_get_local_volume(
-    state: tauri::State<'_, StreamingState>,
-) -> Result<u32, String> {
-    Ok(state.local_volume.load(Ordering::SeqCst))
-}
-
-/// Set local (microphone input) pan
-/// Pan is -100 (full left) to 100 (full right), 0 = center
-#[tauri::command]
-pub async fn streaming_set_local_pan(
-    pan: i32,
-    state: tauri::State<'_, StreamingState>,
-) -> Result<(), String> {
-    let clamped = pan.clamp(-100, 100);
-    state.local_pan.store(clamped, Ordering::SeqCst);
-
-    // If streaming, also send command to audio thread
-    if state.is_active.load(Ordering::SeqCst) {
-        let tx = state.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetLocalPan(clamped));
-        }
-    }
-
-    Ok(())
-}
-
-/// Get local pan (-100 to 100, 0 = center)
-#[tauri::command]
-pub async fn streaming_get_local_pan(
-    state: tauri::State<'_, StreamingState>,
-) -> Result<i32, String> {
-    Ok(state.local_pan.load(Ordering::SeqCst))
 }
 
 /// The frame source the output callback pulls from.

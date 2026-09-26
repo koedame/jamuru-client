@@ -22,6 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use uuid::Uuid;
 
 use crate::config::ConfigState;
+use crate::mixer::{self, MixerState};
 use crate::settings_help::HelpEvent;
 use crate::signaling::{self, JoinResult, SignalingEvent};
 use crate::streaming;
@@ -299,6 +300,15 @@ impl SessionState {
         if let Some(snapshot) = announce {
             if let Err(e) = app.emit(CHANGED_EVENT, &snapshot) {
                 tracing::warn!("Could not announce the session change: {}", e);
+            }
+            // The mixer has a strip for each of the room, and for no one else.
+            if let Some(mixer) = app.try_state::<MixerState>() {
+                let ids: Vec<String> = snapshot
+                    .room
+                    .iter()
+                    .flat_map(|room| room.participants.iter().map(|p| p.id.clone()))
+                    .collect();
+                mixer.keep_only(app, &ids);
             }
         }
         value
@@ -994,6 +1004,7 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
                 let Some(addr) = candidates.first().cloned() else {
                     continue;
                 };
+                mixer::set_on_audio(app, &peer.to_string()).await;
                 // The devices, buffer size and sample rate are the saved
                 // settings.
                 let started = streaming::streaming_start(

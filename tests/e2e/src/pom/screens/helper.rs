@@ -16,6 +16,19 @@ const OWN_PEAK: &str = concat!(
     " [data-testid='channel-peak']"
 );
 
+const PEER_FADER: &str = concat!(
+    "[data-testid='channel-strip'][data-channel-type='remote']",
+    " [data-testid='channel-fader']"
+);
+const PEER_PAN: &str = concat!(
+    "[data-testid='channel-strip'][data-channel-type='remote']",
+    " [data-testid='channel-pan']"
+);
+const PEER_MUTE: &str = concat!(
+    "[data-testid='channel-strip'][data-channel-type='remote']",
+    " [data-testid='channel-mute']"
+);
+
 pub struct HelperScreen<'a> {
     driver: &'a Driver,
     label: String,
@@ -49,6 +62,22 @@ impl<'a> HelperScreen<'a> {
             .text()?
             .trim()
             .to_string())
+    }
+
+    /// The volume fader of the other participant's channel, 0 to 100. Set it
+    /// with `select_value`, as a person drags it.
+    pub fn peer_fader(&self) -> Element<'a> {
+        self.element(PEER_FADER, "peer volume fader")
+    }
+
+    /// The pan of the other participant's channel, -100 to 100.
+    pub fn peer_pan(&self) -> Element<'a> {
+        self.element(PEER_PAN, "peer pan")
+    }
+
+    /// Mute of the other participant's channel.
+    pub fn peer_mute_button(&self) -> Element<'a> {
+        self.element(PEER_MUTE, "peer mute button")
     }
 
     /// Mute of the helped person's own channel: what they hear of themselves

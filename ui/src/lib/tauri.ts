@@ -544,68 +544,57 @@ export async function streamingGetInputLevel(): Promise<number> {
   return invoke("streaming_get_input_level");
 }
 
-/**
- * Set peer (received audio) volume
- * @param volume Volume from 0 to 200 (100 = unity gain, 200 = 2x)
- */
-export async function streamingSetPeerVolume(volume: number): Promise<void> {
-  return invoke("streaming_set_peer_volume", { volume: Math.round(volume) });
+/** One fader strip: volume 0 to 100 (80 is 0 dB), pan -100 (left) to 100 (right) */
+export interface MixerStrip {
+  volume: number;
+  pan: number;
 }
 
-/**
- * Get peer volume
- * @returns Volume from 0 to 200 (100 = unity)
- */
-export async function streamingGetPeerVolume(): Promise<number> {
-  return invoke("streaming_get_peer_volume");
+/** The strip of another participant. Muting keeps the fader where it is. */
+export interface MixerPeerStrip extends MixerStrip {
+  muted: boolean;
 }
 
-/**
- * Set peer (received audio) pan
- * @param pan Pan from -100 (full left) to 100 (full right), 0 = center
- */
-export async function streamingSetPeerPan(pan: number): Promise<void> {
-  return invoke("streaming_set_peer_pan", { pan: Math.round(pan) });
+/** Where the faders stand. The backend owns it; the screen draws it. */
+export interface MixerSnapshot {
+  /** Rises with every change, so an old snapshot heard after a newer one can be told */
+  revision: number;
+  local: MixerStrip;
+  /** One strip for each participant of the room, by their id */
+  peers: Record<string, MixerPeerStrip>;
 }
 
-/**
- * Get peer pan
- * @returns Pan from -100 to 100 (0 = center)
- */
-export async function streamingGetPeerPan(): Promise<number> {
-  return invoke("streaming_get_peer_pan");
+/** Event the backend sends with the new snapshot whenever a fader moves */
+export const MIXER_CHANGED = "mixer:changed";
+
+/** Where the faders stand */
+export async function mixerGet(): Promise<MixerSnapshot> {
+  return invoke("mixer_get");
 }
 
-/**
- * Set local (microphone input) volume
- * @param volume Volume from 0 to 200 (100 = unity gain, 200 = 2x)
- */
-export async function streamingSetLocalVolume(volume: number): Promise<void> {
-  return invoke("streaming_set_local_volume", { volume: Math.round(volume) });
+/** Move the microphone's fader */
+export async function mixerSetLocalVolume(volume: number): Promise<MixerSnapshot> {
+  return invoke("mixer_set_local_volume", { volume: Math.round(volume) });
 }
 
-/**
- * Get local volume
- * @returns Volume from 0 to 200 (100 = unity)
- */
-export async function streamingGetLocalVolume(): Promise<number> {
-  return invoke("streaming_get_local_volume");
+/** Move the microphone's pan */
+export async function mixerSetLocalPan(pan: number): Promise<MixerSnapshot> {
+  return invoke("mixer_set_local_pan", { pan: Math.round(pan) });
 }
 
-/**
- * Set local (microphone input) pan
- * @param pan Pan from -100 (full left) to 100 (full right), 0 = center
- */
-export async function streamingSetLocalPan(pan: number): Promise<void> {
-  return invoke("streaming_set_local_pan", { pan: Math.round(pan) });
+/** Move the fader of a participant */
+export async function mixerSetPeerVolume(peerId: string, volume: number): Promise<MixerSnapshot> {
+  return invoke("mixer_set_peer_volume", { peerId, volume: Math.round(volume) });
 }
 
-/**
- * Get local pan
- * @returns Pan from -100 to 100 (0 = center)
- */
-export async function streamingGetLocalPan(): Promise<number> {
-  return invoke("streaming_get_local_pan");
+/** Move the pan of a participant */
+export async function mixerSetPeerPan(peerId: string, pan: number): Promise<MixerSnapshot> {
+  return invoke("mixer_set_peer_pan", { peerId, pan: Math.round(pan) });
+}
+
+/** Mute a participant, or bring them back */
+export async function mixerSetPeerMuted(peerId: string, muted: boolean): Promise<MixerSnapshot> {
+  return invoke("mixer_set_peer_muted", { peerId, muted });
 }
 
 // ============================================================================

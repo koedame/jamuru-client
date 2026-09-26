@@ -72,6 +72,7 @@ export function PanSlider({
         onChange={handleChange}
         disabled={disabled}
         className="pan-slider__input"
+        data-testid="channel-pan"
         aria-label={label}
         aria-valuemin={-100}
         aria-valuemax={100}

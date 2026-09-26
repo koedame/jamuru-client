@@ -553,8 +553,8 @@ mod tests {
         let (guard, announced) = guard();
         for (method, params) in [
             ("streaming_set_mute", json!({"muted": true})),
-            ("streaming_set_peer_volume", json!({"volume": 120})),
-            ("streaming_set_local_pan", json!({"pan": -20})),
+            ("mixer_set_peer_volume", json!({"peer_id": "a", "volume": 60})),
+            ("mixer_set_local_pan", json!({"pan": -20})),
         ] {
             // A mock app has no window to run these in; either way nothing is announced.
             let _ = guard.call(&app(), call(method, params)).await;
