@@ -105,7 +105,7 @@ pub const METHODS: &[Method] = &[
         name: "debug.audio_tone",
         access: Access::TOOLS,
         kind: Kind::Native,
-        summary: "送信直前または出力に、指定の周波数・振幅・時間の正弦波を入れる",
+        summary: "送信直前または出力に、指定の周波数・振幅・時間の正弦波を入れる。channel（1 = 左、2 = 右）を付けるとその側だけに入れ、もう一方は無音にする",
     },
 ];
 
@@ -391,6 +391,9 @@ struct ToneParams {
     frequency_hz: f32,
     /// 0 to 1.
     amplitude: f32,
+    /// The channel to put the tone on, 1 for the left and 2 for the right,
+    /// the other staying silent. Without it the tone is on both.
+    channel: Option<u32>,
     seconds: f32,
 }
 
@@ -411,13 +414,24 @@ fn audio_tone(params: ToneParams) -> Result<Value, RpcError> {
             "amplitude is more than 0 and at most 1",
         ));
     }
+    if params.channel.is_some_and(|channel| !(1..=2).contains(&channel)) {
+        return Err(RpcError::invalid_params(
+            "channel is 1 (left) or 2 (right), or left out for both",
+        ));
+    }
     if !(params.seconds > 0.0 && params.seconds <= MAX_TONE_SECONDS) {
         return Err(RpcError::invalid_params(format!(
             "seconds is more than 0 and at most {}",
             MAX_TONE_SECONDS
         )));
     }
-    audio_tap::arm_tone(point, params.frequency_hz, params.amplitude, params.seconds);
+    audio_tap::arm_tone(
+        point,
+        params.frequency_hz,
+        params.amplitude,
+        params.channel,
+        params.seconds,
+    );
     Ok(json!({ "armed": true, "ends_in_seconds": params.seconds }))
 }
 

@@ -5,14 +5,15 @@
 
 /// The channels capture delivers, as indexes into a device frame.
 ///
-/// One channel for a mono transmit, two for stereo. A stereo transmit with no
-/// right channel chosen sends the left one on both sides.
+/// One channel for a mono transmit, two for stereo. A stereo transmit needs two
+/// different channels: with no right channel chosen, or the same one on both
+/// sides, there is only one signal, and it is captured as one channel - the
+/// peer is told mono rather than handed the same sound twice as stereo.
 pub fn capture_picks(left: u32, right: Option<u32>, wanted: u16) -> Vec<usize> {
     let left = index(left);
-    if wanted >= 2 {
-        vec![left, right.map_or(left, index)]
-    } else {
-        vec![left]
+    match right.map(index) {
+        Some(right) if wanted >= 2 && right != left => vec![left, right],
+        _ => vec![left],
     }
 }
 
@@ -158,10 +159,17 @@ mod tests {
         assert_eq!(out, [2.0, 2.0]);
     }
 
-    /// Verifies: REQ-AUD-118
+    /// Verifies: REQ-AUD-121
     #[test]
-    fn test_a_stereo_transmit_with_no_right_channel_sends_the_left_on_both_sides() {
-        assert_eq!(capture_picks(3, None, 2), [2, 2]);
+    fn test_a_stereo_transmit_with_no_right_channel_captures_the_left_as_one_channel() {
+        assert_eq!(capture_picks(3, None, 2), [2]);
+    }
+
+    /// Verifies: REQ-AUD-121
+    #[test]
+    fn test_a_stereo_transmit_with_the_same_channel_on_both_sides_captures_it_once() {
+        assert_eq!(capture_picks(3, Some(3), 2), [2]);
+        assert_eq!(capture_picks(1, Some(1), 2), [0]);
     }
 
     /// Verifies: REQ-AUD-118
@@ -249,6 +257,7 @@ mod tests {
     /// hand-edited config can hold it; it reads as channel 1.
     #[test]
     fn test_a_channel_setting_of_zero_is_read_as_the_first_channel() {
-        assert_eq!(capture_picks(0, Some(0), 2), [0, 0]);
+        assert_eq!(capture_picks(0, Some(2), 2), [0, 1]);
+        assert_eq!(capture_picks(2, Some(0), 2), [1, 0]);
     }
 }

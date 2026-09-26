@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 use jamjam::audio::{
     capture_attempts, capture_to_wire, AudioConfig, AudioEngine, AudioError, AudioPreset, DeviceId,
     FlightKind, FlightRecorder, LocalMonitor, OutputRoute, PeerRateChange, PlayoutResult,
-    ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
+    pan_received, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
@@ -29,6 +29,8 @@ use jamjam::network::{
     LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
 };
 use jamjam::protocol::LatencyInfoMessage;
+
+use crate::settings::{pair_in_use, Devices};
 
 /// How long the receive loop waits when it has nothing to hand to playback.
 ///
@@ -1276,18 +1278,21 @@ fn playout_source(
 /// user selected (1-based). `make_source` builds the frame source, once per
 /// attempt.
 ///
-/// A device that has no such channels is played on its first two, so a stale
-/// setting never leaves a session without sound.
+/// A device that has no such channels is played on its first ones
+/// (`pair_in_use`), so a stale setting never leaves a session without sound.
+/// The saved pair is not touched.
 fn start_playout<S>(
     engine: &mut AudioEngine,
     device_id: Option<&DeviceId>,
-    (left, right): (u32, Option<u32>),
+    saved: (u32, Option<u32>),
     frame_samples: usize,
     make_source: impl Fn() -> S,
 ) -> Result<(), AudioError>
 where
     S: FnMut(&mut [f32]) -> usize + Send + 'static,
 {
+    let chosen = device_id.map(|id| id.0.clone());
+    let (left, right) = pair_in_use(&Devices::list().output, &chosen, saved);
     let selected = OutputRoute::from_settings(left, right);
     engine.set_playback_route(selected);
     match engine.start_playback_with_source(device_id, frame_samples, make_source()) {
@@ -1336,24 +1341,9 @@ fn mix_peers(
     let combined_vol = (peer_volume.load(Ordering::Relaxed) as f32 / 100.0)
         * (master_volume.load(Ordering::Relaxed) as f32 / 100.0);
 
-    // Constant-power pan on top of whatever the sender already applied.
     let pan = peer_pan.load(Ordering::Relaxed);
-    let angle = ((pan + 100) as f32 / 200.0) * std::f32::consts::FRAC_PI_2;
-    let (left_gain, right_gain) = (angle.cos(), angle.sin());
-
     let samples = &mut out[..read.samples];
-    for frame in samples.chunks_mut(WIRE_CHANNELS) {
-        if frame.len() < WIRE_CHANNELS {
-            for slot in frame.iter_mut() {
-                *slot *= combined_vol;
-            }
-            continue;
-        }
-        let left = frame[0] * combined_vol;
-        let right = frame[1] * combined_vol;
-        frame[0] = left * left_gain + right * (1.0 - right_gain);
-        frame[1] = right * right_gain + left * (1.0 - left_gain);
-    }
+    pan_received(samples, receive.peer_channels(), combined_vol, pan);
 
     output_level.store(rms_level(samples), Ordering::Relaxed);
     read.samples
@@ -1370,19 +1360,23 @@ struct CaptureRing {
 /// the input channels `(left, right)` the user selected (1-based), and returns
 /// the ring the captured audio lands in.
 ///
-/// A device that has no such channels, or will not open with two - a mono
-/// microphone - is opened with the first channels instead, so a stale setting
-/// never leaves a session without input. The ring reports how many channels
-/// it actually has.
+/// A device that has no such channels is opened with its first ones instead
+/// (`pair_in_use`; a mono microphone gets its one channel, which is captured
+/// as mono), and one that will not open with two falls back to its first
+/// channel, so a stale setting never leaves a session without input. The
+/// saved pair is not touched. The ring reports how many channels it actually
+/// has.
 fn start_capture_ring(
     engine: &mut AudioEngine,
     device_id: Option<&DeviceId>,
     wanted: u16,
-    (left, right): (u32, Option<u32>),
+    selected: (u32, Option<u32>),
     frame_size: usize,
     input_level: &Arc<AtomicU32>,
     monitor: &LocalMonitor,
 ) -> Result<CaptureRing, String> {
+    let chosen = device_id.map(|id| id.0.clone());
+    let (left, right) = pair_in_use(&Devices::list().input, &chosen, selected);
     let mut failure = String::new();
     for picks in capture_attempts(left, right, wanted) {
         let channels = picks.len() as u16;
@@ -2157,6 +2151,7 @@ async fn run_audio_streaming(
                             eprintln!("Failed to create resampler: {}", e)
                         }
                     }
+                    receive.follow_peer_channels(peer_info.channel_count);
                     if let Ok(mut info) = shared_peer_latency_info.write() {
                         *info = Some(peer_info);
                     }

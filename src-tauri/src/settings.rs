@@ -219,7 +219,7 @@ impl Devices {
     /// The devices the system lists. A direction that cannot be listed counts
     /// as offering none: that refuses choosing one of its devices, but leaves
     /// every other setting (buffer size, sample rate, ...) changeable.
-    fn list() -> Self {
+    pub(crate) fn list() -> Self {
         let or_none = |listed: Result<Vec<AudioDeviceInfo>, String>, kind: &str| {
             listed.unwrap_or_else(|e| {
                 tracing::warn!("Could not list the {} devices: {}", kind, e);
@@ -242,9 +242,11 @@ pub struct Plan {
 
 /// Decides what `change` does to `config`, given the devices on offer.
 ///
-/// A new device keeps the chosen channel pair when it has both channels, and
-/// falls back to the first ones when it does not - otherwise a channel of the
-/// previous interface would be asked of one too small to have it.
+/// A new device leaves the saved channel pair as it is: the pair is what the
+/// user chose, and a device that lacks it is opened with its first channels
+/// instead (`pair_in_use`), so going back to the interface brings the chosen
+/// channels back. A change to one channel of the pair starts from the pair in
+/// use, the one the settings show.
 pub fn plan(
     config: &AppConfig,
     devices: &Devices,
@@ -254,40 +256,24 @@ pub fn plan(
     let mut session = Vec::new();
     match change {
         SettingChange::InputDevice { device_id } => {
-            let device = offered(&devices.input, device_id)?;
-            let (left, right) = fit_channels(
-                config.input_channel_l,
-                config.input_channel_r,
-                channel_count(device),
-            );
+            offered(&devices.input, device_id)?;
             next.input_device_id = Some(device_id.clone());
-            next.input_channel_l = left;
-            next.input_channel_r = right;
-            if (left, right) != (config.input_channel_l, config.input_channel_r) {
-                session.push(SessionSetting::InputChannels(left, right));
-            }
             session.push(SessionSetting::InputDevice(Some(device_id.clone())));
         }
         SettingChange::OutputDevice { device_id } => {
-            let device = offered(&devices.output, device_id)?;
-            let (left, right) = fit_channels(
-                config.output_channel_l,
-                config.output_channel_r,
-                channel_count(device),
-            );
+            offered(&devices.output, device_id)?;
             next.output_device_id = Some(device_id.clone());
-            next.output_channel_l = left;
-            next.output_channel_r = right;
-            if (left, right) != (config.output_channel_l, config.output_channel_r) {
-                session.push(SessionSetting::OutputChannels(left, right));
-            }
             session.push(SessionSetting::OutputDevice(Some(device_id.clone())));
         }
         SettingChange::InputChannel { side, channel } => {
             let available =
                 selected(&devices.input, &config.input_device_id).and_then(channel_count);
             let (left, right) = with_side(
-                (config.input_channel_l, config.input_channel_r),
+                pair_in_use(
+                    &devices.input,
+                    &config.input_device_id,
+                    (config.input_channel_l, config.input_channel_r),
+                ),
                 *side,
                 *channel,
                 available,
@@ -300,7 +286,11 @@ pub fn plan(
             let available =
                 selected(&devices.output, &config.output_device_id).and_then(channel_count);
             let (left, right) = with_side(
-                (config.output_channel_l, config.output_channel_r),
+                pair_in_use(
+                    &devices.output,
+                    &config.output_device_id,
+                    (config.output_channel_l, config.output_channel_r),
+                ),
                 *side,
                 *channel,
                 available,
@@ -373,6 +363,18 @@ fn channel_count(device: &AudioDeviceInfo) -> Option<u32> {
         .map(|&c| u32::from(c))
 }
 
+/// The channel pair the device in use is opened with: the saved `pair` when the
+/// device has both channels, otherwise its first ones. Decided whenever a
+/// device is opened and whenever the settings are shown, never saved.
+pub fn pair_in_use(
+    devices: &[AudioDeviceInfo],
+    chosen: &Option<String>,
+    (left, right): (u32, Option<u32>),
+) -> (u32, Option<u32>) {
+    let available = selected(devices, chosen).and_then(channel_count);
+    fit_channels(left, right, available)
+}
+
 /// Keeps the pair when the device has both channels, and falls back to the
 /// first ones as a pair when it does not: channels 1 and 2 (1 and 1 on a mono
 /// device; mono stays mono). A device that does not say keeps the pair.
@@ -416,6 +418,16 @@ pub fn snapshot(config: &AppConfig, devices: Devices, revision: u64) -> AudioSet
         selected(&devices.input, &config.input_device_id).and_then(channel_count);
     let output_channel_count =
         selected(&devices.output, &config.output_device_id).and_then(channel_count);
+    let input_pair = pair_in_use(
+        &devices.input,
+        &config.input_device_id,
+        (config.input_channel_l, config.input_channel_r),
+    );
+    let output_pair = pair_in_use(
+        &devices.output,
+        &config.output_device_id,
+        (config.output_channel_l, config.output_channel_r),
+    );
     AudioSettings {
         revision,
         input_channel_count,
@@ -425,12 +437,12 @@ pub fn snapshot(config: &AppConfig, devices: Devices, revision: u64) -> AudioSet
         input_device_id: config.input_device_id.clone(),
         output_device_id: config.output_device_id.clone(),
         input_channels: ChannelPair {
-            left: config.input_channel_l,
-            right: config.input_channel_r,
+            left: input_pair.0,
+            right: input_pair.1,
         },
         output_channels: ChannelPair {
-            left: config.output_channel_l,
-            right: config.output_channel_r,
+            left: output_pair.0,
+            right: output_pair.1,
         },
         transmit_channels: config.transmit_channels,
         buffer_size: config.buffer_size,
@@ -534,6 +546,7 @@ pub async fn settings_change(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jamjam::audio::capture_attempts;
 
     fn device(id: &str, channels: &[u16], is_default: bool) -> AudioDeviceInfo {
         AudioDeviceInfo {
@@ -606,15 +619,16 @@ mod tests {
         );
     }
 
-    /// Channels 5 and 6 of the interface do not exist on a stereo device;
-    /// asking for them would capture nothing.
+    /// Channels 5 and 6 of the interface do not exist on a stereo device, so
+    /// the device is opened with its first two - but the pair the user chose
+    /// stays saved, and comes back with the interface.
     ///
-    /// Verifies: REQ-GUI-024
+    /// Verifies: REQ-AUD-122
     #[test]
-    fn switching_to_an_input_device_without_the_chosen_channels_plans_the_first_ones() {
+    fn switching_to_an_input_device_without_the_chosen_channels_keeps_the_saved_pair() {
         let (config, devices) = setup();
 
-        let plan = plan(
+        let to_builtin = plan(
             &config,
             &devices,
             &SettingChange::InputDevice {
@@ -624,47 +638,134 @@ mod tests {
         .unwrap();
 
         assert_eq!(
+            (
+                to_builtin.config.input_channel_l,
+                to_builtin.config.input_channel_r
+            ),
+            (5, Some(6)),
+            "the choice is not rewritten to suit the device"
+        );
+        assert_eq!(
+            to_builtin.session,
+            vec![SessionSetting::InputDevice(Some("alsa:builtin".into()))],
+            "the session reopens the device and fits the pair itself"
+        );
+        assert_eq!(
+            pair_in_use(&devices.input, &to_builtin.config.input_device_id, (5, Some(6))),
+            (1, Some(2)),
+            "the stereo device is opened with its first two channels"
+        );
+
+        let back = plan(
+            &to_builtin.config,
+            &devices,
+            &SettingChange::InputDevice {
+                device_id: "alsa:interface".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            pair_in_use(&devices.input, &back.config.input_device_id, (
+                back.config.input_channel_l,
+                back.config.input_channel_r
+            )),
+            (5, Some(6)),
+            "back on the interface, the chosen channels are in use again"
+        );
+    }
+
+    /// A mono microphone is opened with its one channel, as a pair of the same
+    /// channel (captured as mono). Choosing it must not leave that pair saved:
+    /// the stereo interface used next would have lost its right side.
+    ///
+    /// Verifies: REQ-AUD-122
+    #[test]
+    fn a_mono_microphone_is_used_as_one_channel_without_changing_the_saved_stereo_pair() {
+        let (mut config, mut devices) = setup();
+        config.input_channel_l = 1;
+        config.input_channel_r = Some(2);
+        devices.input.push(device("alsa:mic", &[1], false));
+
+        let plan = plan(
+            &config,
+            &devices,
+            &SettingChange::InputDevice {
+                device_id: "alsa:mic".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
             (plan.config.input_channel_l, plan.config.input_channel_r),
             (1, Some(2))
         );
+        let in_use = pair_in_use(&devices.input, &plan.config.input_device_id, (1, Some(2)));
+        assert_eq!(in_use, (1, Some(1)));
         assert_eq!(
-            plan.session,
-            vec![
-                SessionSetting::InputChannels(1, Some(2)),
-                SessionSetting::InputDevice(Some("alsa:builtin".into())),
-            ],
-            "a running session must hear about the channels before it reopens the device"
+            capture_attempts(in_use.0, in_use.1, 2)[0],
+            [0],
+            "the microphone is opened once, as one channel - the peer is told mono"
         );
     }
 
     /// Falling back one channel at a time could leave a doubled or reversed
     /// pair (2 and 3 on a stereo device becoming 2 and 2).
     ///
-    /// Verifies: REQ-GUI-024
+    /// Verifies: REQ-AUD-122
     #[test]
     fn when_only_one_channel_of_the_pair_is_missing_the_whole_pair_falls_back() {
-        let (mut config, devices) = setup();
-        config.input_channel_l = 2;
-        config.input_channel_r = Some(3);
-
-        let plan = plan(
-            &config,
-            &devices,
-            &SettingChange::InputDevice {
-                device_id: "alsa:builtin".to_string(),
-            },
-        )
-        .unwrap();
+        let (_, devices) = setup();
 
         assert_eq!(
-            (plan.config.input_channel_l, plan.config.input_channel_r),
+            pair_in_use(&devices.input, &Some("alsa:builtin".into()), (2, Some(3))),
             (1, Some(2))
         );
     }
 
-    /// Verifies: REQ-GUI-024
+    /// The settings show the channels in use, so the choice on screen is the
+    /// one a device that lacks the saved channels is actually opened with.
+    ///
+    /// Verifies: REQ-AUD-122
     #[test]
-    fn switching_to_a_mono_output_device_plans_its_only_channel() {
+    fn the_settings_show_the_channels_in_use_while_the_saved_pair_stays() {
+        let (mut config, devices) = setup();
+        config.input_device_id = Some("alsa:builtin".to_string());
+        config.output_device_id = Some("alsa:builtin".to_string());
+
+        let shown = snapshot(&config, devices, 1);
+
+        assert_eq!((shown.input_channels.left, shown.input_channels.right), (1, Some(2)));
+        assert_eq!((shown.output_channels.left, shown.output_channels.right), (1, Some(2)));
+        assert_eq!(
+            (config.input_channel_l, config.input_channel_r),
+            (5, Some(6)),
+            "showing the pair does not change what is saved"
+        );
+    }
+
+    /// A change to one channel starts from the pair on screen, not from the
+    /// saved pair the device does not have.
+    ///
+    /// Verifies: REQ-AUD-122
+    #[test]
+    fn changing_one_channel_on_a_device_that_lacks_the_saved_pair_starts_from_the_pair_in_use() {
+        let (mut config, devices) = setup();
+        config.input_device_id = Some("alsa:builtin".to_string());
+
+        let plan = plan(&config, &devices, &input_channel(ChannelSide::Left, Some(2))).unwrap();
+
+        assert_eq!(
+            (plan.config.input_channel_l, plan.config.input_channel_r),
+            (2, Some(2))
+        );
+    }
+
+    /// The same holds for a mono output device: it plays its only channel,
+    /// and the saved pair stays.
+    ///
+    /// Verifies: REQ-AUD-122
+    #[test]
+    fn switching_to_a_mono_output_device_keeps_the_saved_pair_and_plays_its_only_channel() {
         let (config, mut devices) = setup();
         devices.output.push(device("alsa:mono", &[1], false));
 
@@ -679,6 +780,10 @@ mod tests {
 
         assert_eq!(
             (plan.config.output_channel_l, plan.config.output_channel_r),
+            (7, Some(8))
+        );
+        assert_eq!(
+            pair_in_use(&devices.output, &plan.config.output_device_id, (7, Some(8))),
             (1, Some(1))
         );
     }

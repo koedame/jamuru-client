@@ -3,8 +3,9 @@
 //! Tests for audio quality functionality.
 
 use jamjam::audio::{
-    capture_to_wire, create_resampler, AudioCodec, AudioConfig, AudioEngine, AudioPreset, BitDepth,
-    CaptureConfig, CodecConfig, CodecType, LocalMonitor, PcmCodec, PlaybackConfig, WIRE_CHANNELS,
+    capture_to_wire, create_resampler, pan_received, AudioCodec, AudioConfig, AudioEngine,
+    AudioPreset, BitDepth, CaptureConfig, CodecConfig, CodecType, LocalMonitor, PcmCodec,
+    PlaybackConfig, WIRE_CHANNELS,
 };
 use jamjam::protocol::Packet;
 
@@ -139,6 +140,25 @@ async fn test_stereo_input() {
     assert_eq!(
         decoded, captured,
         "the receiving side gets each side as it was captured"
+    );
+}
+
+/// A stereo capture with sound on the left only reaches the listener's output
+/// on the left only: what the sender keeps apart, the receiving side's pan
+/// keeps apart too.
+///
+/// Verifies: REQ-AUD-108
+/// Verifies: REQ-AUD-120
+#[tokio::test]
+async fn test_stereo_input_is_played_back_in_stereo() {
+    let captured = [0.5f32, 0.0, -0.25, 0.0, 0.75, 0.0];
+
+    let (mut heard, _) = send_captured_frame(&captured, 2, 1.0, 0).await;
+    pan_received(&mut heard, 2, 1.0, 0);
+
+    assert_eq!(
+        heard, captured,
+        "the left stays on the left, the right silent"
     );
 }
 

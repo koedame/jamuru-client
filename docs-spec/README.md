@@ -72,6 +72,7 @@ sidebar_position: 1
 | [ADR-045](./adr/ADR-045-beta-self-update.md) | ベータ版も自動更新する。ベータ版は `X.Y.Z-N` の版としてビルドし、更新情報は固定タグの Release `beta-channel` から読む（ADR-041 の 4 節を置き換えた） |
 | [ADR-046](./adr/ADR-046-audio-gaps-are-measured-not-guessed.md) | 受信バッファの自動調整は空読みも欠けとして数える。帯域の判定は相手が送ったパケットの欠けの割合で行う。音の欠けの原因は飛行記録（`debug.audio_timing`）で測る |
 | [ADR-047](./adr/ADR-047-git-flow-branching.md) | 開発は develop で進め、main には出した正式版だけを置く。ベータ版はタグを打ったときだけ公開し、タグは対になるサーバー側のリポジトリと同じ名前を同じときに打つ |
+| [ADR-049](./adr/ADR-049-channels-fit-when-opened-and-pan-follows-the-sender.md) | デバイスへのチャンネルの当てはめは開くときだけ（保存は書き換えない）。同じ番号の組は 1 チャンネル。受け手のパンは届いた音がステレオかモノラルかで変わる |
 
 ---
 
