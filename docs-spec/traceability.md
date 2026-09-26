@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 217 |
-| うち must | 211 |
+| 要求 総数 | 219 |
+| うち must | 213 |
 | うち should | 6 |
-| 検証済み | 188 |
+| 検証済み | 190 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -237,6 +237,8 @@
 | REQ-UPD-012 | must | ベータ版のタグ `vX.Y.Z-beta.N` のアプリは `X.Y.Z-N` の版としてビルドし、更新情報とその署名もその版を指す。次のベータ版が、入っているベータ版より新しい版になる。`-beta.N` の形でない pre-release のタグは組まない | `docs-spec/requirements.md` | `tests/beta_channel_test.rs`::a_beta_is_older_than_the_next_beta_and_than_its_own_release<br/>`tests/beta_channel_test.rs`::when_the_tag_is_a_beta_the_app_is_built_as_the_version_with_the_beta_number<br/>`tests/beta_channel_test.rs`::when_the_tag_is_a_release_the_app_is_built_as_the_tag_version<br/>`tests/beta_channel_test.rs`::when_the_tag_is_another_pre_release_no_version_is_given<br/>`tests/update_manifest_test.rs`::when_a_beta_is_signed_for_the_release_version_no_manifest_is_written<br/>`tests/update_manifest_test.rs`::when_the_tag_is_a_beta_of_the_built_version_the_manifest_is_for_the_beta_build |
 | REQ-UPD-013 | must | ベータ版のビルドは、更新情報の取得先をベータ用の置き場（Release `beta-channel` の `latest.json`）にする。ベータ版のビルドにだけそう渡し、正式版のビルドには渡さない。`releases/latest` は、pre-release でない Release が無いうちは 404 で、ベータ版は一度も更新できない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::a_beta_looks_for_updates_in_the_beta_channel_and_changes_nothing_else<br/>`tests/distribution_config_test.rs`::only_a_beta_build_is_given_the_beta_channel_and_its_version |
 | REQ-UPD-014 | must | ベータ用の置き場には、ベータ版と正式版の更新情報を置き、より新しい版のときだけ置き換える。ベータ版は同じ版の正式版が出ると正式版に移り、遅れて終わった古い版の run が置き場を巻き戻さない | `docs-spec/requirements.md` | `tests/beta_channel_test.rs`::when_a_newer_beta_is_published_it_replaces_the_manifest<br/>`tests/beta_channel_test.rs`::when_an_older_version_is_published_the_manifest_is_kept<br/>`tests/beta_channel_test.rs`::when_the_beta_of_the_next_version_is_published_it_replaces_the_release<br/>`tests/beta_channel_test.rs`::when_the_channel_has_never_been_published_it_is_created_with_the_manifest<br/>`tests/beta_channel_test.rs`::when_the_release_of_the_version_is_published_it_replaces_the_beta |
+| REQ-UPD-015 | must | 更新は 1 度に 1 つしか走らない。自動の更新と `debug.update_apply` が重なったとき、後から来た方は待たずに断られ、同じ場所に二重に入れない。入れ終えたあと再起動するまでは、別の更新を始めない。自動の更新がセッションを抜けるのを待っているあいだは、手で頼んだ更新を断らない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_an_update_has_ended_without_installing_the_next_may_start<br/>`src-tauri/src/updater.rs`::when_an_update_is_installed_no_other_starts_before_the_restart<br/>`src-tauri/src/updater.rs`::when_an_update_is_running_another_is_refused_at_once<br/>`src-tauri/src/updater.rs`::when_an_update_is_running_update_apply_is_refused_and_both_end |
+| REQ-UPD-016 | must | 版の確認・ダウンロード・入れ替えにはそれぞれ上限時間があり、超えたら諦める。入れ替えが返らなくなっても、その完了までは次の更新を始めない。更新が止まっても失敗しても、アプリは動き続け、遠隔の呼び出しには答え続ける | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_a_step_does_not_finish_it_is_given_up_after_its_limit<br/>`src-tauri/src/updater.rs`::when_an_install_never_returns_it_is_given_up_and_the_gate_stays_shut_until_it_ends<br/>`src-tauri/src/updater.rs`::when_an_update_is_running_update_apply_is_refused_and_both_end |
 
 ## 未検証の要求（ギャップ）
 
