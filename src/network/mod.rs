@@ -3,6 +3,7 @@
 //! Handles UDP transport, NAT traversal, signaling, FEC, encryption, and connection management.
 
 mod bandwidth;
+mod clock;
 mod connection;
 mod device_identity;
 mod discovery;
@@ -22,6 +23,7 @@ mod transport;
 pub use bandwidth::{
     required_bps, status_label, BandwidthEstimator, BandwidthStatus, BandwidthVerdict,
 };
+pub use clock::{clock_offset_secs, CLOCK_SKEW_NOTICE_SECS};
 pub use connection::{
     AudioEncodingConfig, Connection, ConnectionState, ConnectionStats, PeerLatencyInfo,
     ReconnectConfig,
@@ -30,8 +32,8 @@ pub use device_identity::{
     device_id_from_public_key, signed_payload, DeviceIdentity, DEVICE_ID_LEN,
 };
 pub use discovery::{
-    check_signaling_url, discover_signaling_url, signaling_endpoint_url, SignalingEndpoint,
-    SIGNALING_ENDPOINT_PATH,
+    check_signaling_url, discover_signaling_url, server_clock_offset_secs, signaling_endpoint_url,
+    SignalingEndpoint, SIGNALING_ENDPOINT_PATH,
 };
 pub use encryption::{EncryptedTransport, EncryptionContext, KeyExchangeMessage, KeyPair};
 pub use error::{NetworkError, SignalingFailure};

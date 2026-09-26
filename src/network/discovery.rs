@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use super::clock::{clock_offset_secs, now_unix_secs};
 use super::error::{NetworkError, SignalingFailure};
 
 /// Where the server answers with its signaling address.
@@ -64,6 +65,26 @@ pub async fn discover_signaling_url(server_url: &str) -> Result<String, NetworkE
     })?;
     check_signaling_url(server_url, &answer.url)?;
     Ok(answer.url)
+}
+
+/// How far this computer's clock is ahead of the server's, in seconds
+/// (negative when it is behind), read from the `Date` of the server's answer
+/// to the question of [`discover_signaling_url`]. `None` when the server does
+/// not answer or its answer carries no date.
+pub async fn server_clock_offset_secs(server_url: &str) -> Option<i64> {
+    let endpoint = signaling_endpoint_url(server_url).ok()?;
+    let client = reqwest::Client::builder()
+        .timeout(DISCOVERY_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .ok()?;
+    let response = client.get(&endpoint).send().await.ok()?;
+    let date = response
+        .headers()
+        .get(reqwest::header::DATE)?
+        .to_str()
+        .ok()?;
+    clock_offset_secs(date, now_unix_secs())
 }
 
 /// The URL to ask: `server_url` (`http://` or `https://`, optionally ending in

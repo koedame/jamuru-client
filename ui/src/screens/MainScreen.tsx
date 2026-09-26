@@ -680,7 +680,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // Get error message for ConnectionPanel
   const getErrorMessage = (): string | undefined => {
     if (failure !== null) {
-      const formatted = formatErrorForDisplay(failure, t);
+      const formatted = formatErrorForDisplay(failure, t, i18n.language);
       return `${formatted.title}: ${formatted.message}`;
     }
     return undefined;

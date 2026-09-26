@@ -10,6 +10,7 @@
  * Error category types matching the i18n error structure
  */
 export type ErrorCategory =
+  | "connection.clockSkew"
   | "connection.timeout"
   | "connection.refused"
   | "connection.lost"
@@ -36,12 +37,20 @@ export interface ParsedError {
 }
 
 /**
+ * How the backend words a refusal caused by the computer's clock (the
+ * `ClockSkew` network error): the size of the gap, in seconds, is read back out
+ * of it.
+ */
+const CLOCK_SKEW_PATTERN = /clock is (?:ahead of|behind) the server's by (\d+) seconds/i;
+
+/**
  * Error pattern matchers
  *
  * Each pattern is a tuple of [regex, category]
  */
 const ERROR_PATTERNS: Array<[RegExp, ErrorCategory]> = [
   // Connection errors
+  [CLOCK_SKEW_PATTERN, "connection.clockSkew"],
   [/connection\s*refused/i, "connection.refused"],
   [/timed?\s*out/i, "connection.timeout"],
   [/timeout/i, "connection.timeout"],
@@ -84,6 +93,36 @@ export function getErrorCategory(errorMessage: string): ErrorCategory {
 }
 
 /**
+ * How far off the computer's clock is, in seconds, when the message says the
+ * server refused the connection because of it; otherwise null.
+ */
+export function getClockSkewSeconds(errorMessage: string): number | null {
+  const match = CLOCK_SKEW_PATTERN.exec(errorMessage);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * A gap in the clock as a person reads it: "6 minutes" / "6分", in the
+ * largest unit that is at least 1.5 of itself.
+ */
+export function formatClockGap(seconds: number, language?: string): string {
+  const units: Array<[number, string]> = [
+    [86400, "day"],
+    [3600, "hour"],
+    [60, "minute"],
+  ];
+  const [size, unit] = units.find(([size]) => seconds >= size * 1.5) ?? [1, "second"];
+  const gap = new Intl.NumberFormat(language, {
+    style: "unit",
+    unit,
+    unitDisplay: "long",
+    maximumFractionDigits: 0,
+  }).format(Math.round(seconds / size));
+  // Japanese has no space between the number and its unit ("6 分" -> "6分").
+  return language?.startsWith("ja") ? gap.replace(/\s+/g, "") : gap;
+}
+
+/**
  * Parse a technical error message into a user-friendly structure
  *
  * @param errorMessage Technical error message from the backend
@@ -108,16 +147,22 @@ export function parseErrorMessage(errorMessage: string): ParsedError {
  *
  * @param errorMessage Technical error message
  * @param t i18n translation function
+ * @param language Language the size of a clock gap is written in
  * @returns Object with title and message for display
  */
 export function formatErrorForDisplay(
   errorMessage: string,
-  t: (key: string) => string
+  t: (key: string, options?: { amount: string }) => string,
+  language?: string
 ): { title: string; message: string } {
   const parsed = parseErrorMessage(errorMessage);
+  const clockSkew = getClockSkewSeconds(errorMessage);
 
   return {
     title: t(parsed.titleKey),
-    message: t(parsed.messageKey),
+    message:
+      clockSkew === null
+        ? t(parsed.messageKey)
+        : t(parsed.messageKey, { amount: formatClockGap(clockSkew, language) }),
   };
 }
