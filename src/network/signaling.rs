@@ -147,6 +147,11 @@ impl PeerInfo {
             }
         }
 
+        // The app publishes its bind address (`0.0.0.0:port`) as `local_addr`.
+        // That names no host: macOS refuses the send (EHOSTUNREACH) and Linux
+        // delivers it to ourselves.
+        addrs.retain(|addr| !addr.ip().is_unspecified());
+
         addrs
     }
 }
