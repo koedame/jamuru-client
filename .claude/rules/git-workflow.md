@@ -62,7 +62,7 @@ Adjusted frame size to keep latency under 150ms.
 | `release/X.Y.Z` | 版上げなどリリースのための作業だけ（機能は足さない。不具合の修正は可） | develop から切り、main へ、そのあと develop へ |
 | `hotfix/<内容>` | 出した正式版の緊急修正 | main から切り、main へ、そのあと develop へ |
 
-- **PR の向き先は既定で develop。** main に向けてよいのは `release/*` と `hotfix/*` だけ。
+- **PR の向き先は既定で develop。** main に向けてよいのは `release/*` と `hotfix/*` だけ。Dependabot の PR も develop（`.github/dependabot.yml` の `target-branch`）
   main と develop へは直接コミットせず、PR（マージコミット）で入れる
 - **feature を develop に入れる前**: 最新の develop を feature に取り込み、CI を通す。動作確認が要る変更は、この状態でベータ版を配って確かめ、済んでから develop へマージする
 - **リリース**:
