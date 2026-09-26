@@ -889,6 +889,8 @@ export type ProblemCode =
   | { type: "SignalingUnreachable"; data: { url: string; error: string | null } }
   | { type: "InputEnumerationFailed"; data: { error: string } }
   | { type: "OutputEnumerationFailed"; data: { error: string } }
+  | { type: "InputDeviceUnresponsive" }
+  | { type: "OutputDeviceUnresponsive" }
   | { type: "NoInputDevices" }
   | { type: "NoOutputDevices" }
   | { type: "InputNot48kHz"; data: { device_name: string } }

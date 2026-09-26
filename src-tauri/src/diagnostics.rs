@@ -52,14 +52,15 @@ pub async fn diagnostics_run_network(
 
 /// Run audio diagnostics only
 #[tauri::command]
-pub fn diagnostics_run_audio(
+pub async fn diagnostics_run_audio(
     config_state: State<'_, ConfigState>,
 ) -> Result<AudioDiagnosticsResult, String> {
     let config = config_state.get()?;
     let result = AudioDiagnostics::run(
         config.input_device_id.as_deref(),
         config.output_device_id.as_deref(),
-    );
+    )
+    .await;
     Ok(result)
 }
 
