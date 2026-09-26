@@ -10,8 +10,10 @@
 #
 # An app installs an update only when all of these hold, so each is checked
 # here, at release time, instead of failing on every user's machine:
-#   - the version the bundles were built as (`src-tauri/tauri.conf.json`) is the
-#     tag's version, or the app would offer the same release again forever;
+#   - the version the bundles were built as is the tag's version (a beta is
+#     built as X.Y.Z-N for `vX.Y.Z-beta.N`, see `scripts/build-version.sh`), and
+#     its X.Y.Z is `src-tauri/tauri.conf.json`'s, or the app would offer the
+#     same release again forever;
 #   - every platform has its updater bundle and signature;
 #   - each signature names the version it was signed for, and it is that
 #     version (the app rejects a signature that does not).
@@ -22,10 +24,10 @@ artifacts=${2:?usage: $0 <tag> <artifacts directory>}
 repository=${GITHUB_REPOSITORY:-koedame/jamjam-client}
 conf=src-tauri/tauri.conf.json
 
-version=$(jq -r .version "$conf")
-tag_version=${tag#v}
-if [ "${tag_version%%-*}" != "$version" ]; then
-  echo "ERROR: tag $tag is for ${tag_version%%-*} but $conf builds $version." >&2
+conf_version=$(jq -r .version "$conf")
+version=$("$(dirname "$0")/build-version.sh" "$tag")
+if [ "${version%%-*}" != "$conf_version" ]; then
+  echo "ERROR: tag $tag is for ${version%%-*} but $conf builds $conf_version." >&2
   echo "Bump the version in $conf (and Cargo.toml) before tagging." >&2
   exit 1
 fi

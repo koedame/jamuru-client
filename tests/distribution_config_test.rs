@@ -495,7 +495,7 @@ fn updates_are_checked_against_a_public_key_and_fetched_over_https() {
 }
 
 /// `releases/latest` is GitHub's latest non-pre-release, so the betas that
-/// every push to main publishes reach nobody.
+/// every push to main publishes reach nobody who has a release build.
 ///
 /// Verifies: REQ-UPD-007
 #[test]
@@ -508,6 +508,46 @@ fn updates_come_from_the_latest_release_only() {
             "https://github.com/koedame/jamjam-client/releases/latest/download/latest.json"
         ])
     );
+}
+
+/// `releases/latest` answers 404 until there is a release that is not a
+/// pre-release, so a beta that looked there never updated once.
+///
+/// Verifies: REQ-UPD-013
+#[test]
+fn a_beta_looks_for_updates_in_the_beta_channel_and_changes_nothing_else() {
+    let conf: Value = serde_json::from_str(&src_tauri("tauri.updater.beta.conf.json"))
+        .expect("tauri.updater.beta.conf.json is not valid JSON");
+
+    assert_eq!(
+        conf["plugins"]["updater"],
+        serde_json::json!({
+            "endpoints": [
+                "https://github.com/koedame/jamjam-client/releases/download/beta-channel/latest.json"
+            ]
+        }),
+        "the beta settings must only say where to look; the key and the checks come from tauri.updater.conf.json"
+    );
+    assert!(conf.get("bundle").is_none());
+}
+
+/// Verifies: REQ-UPD-013
+#[test]
+fn only_a_beta_build_is_given_the_beta_channel_and_its_version() {
+    let workflow =
+        std::fs::read_to_string(repo_file(".github/workflows/release.yml")).expect("release.yml");
+    let build = workflow
+        .lines()
+        .find(|line| line.contains("cargo tauri build"))
+        .expect("release.yml has no build");
+
+    let (always, only_for_a_beta) = build
+        .split_once("contains(needs.prepare.outputs.tag, '-') &&")
+        .expect("the build does not tell a beta from a release");
+    assert!(always.contains("--config src-tauri/tauri.updater.conf.json"));
+    assert!(!always.contains("beta"));
+    assert!(only_for_a_beta.contains("--config src-tauri/tauri.updater.beta.conf.json"));
+    assert!(only_for_a_beta.contains("build-version.conf.json"));
 }
 
 /// Verifies: REQ-UPD-008

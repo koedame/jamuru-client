@@ -7,7 +7,7 @@ sidebar_position: 41
 
 ## Status
 
-Accepted
+Accepted。4 節の「配るのは正式版だけ」は [ADR-045](./ADR-045-beta-self-update.md) が置き換えた（ベータ版も自動更新する）。ほかは有効。
 
 ## Context
 
@@ -24,8 +24,8 @@ Accepted
    - 却下: Homebrew に任せる。`brew upgrade` を打たない人には届かず、DMG や MSI で入れた人には仕組み自体が無い。
 2. **セッション中は入れない。** ダウンロードは先に済ませておき、セッションを抜けるのを 30 秒おきに見て、抜けたら入れる（Windows では入れる時点でアプリが終わり、インストーラーが起動し直す）。
 3. **入れるのは、アプリに埋め込んだ公開鍵で署名が合うものだけ。** 署名の鍵はリリースのビルドだけが持つ。署名が指す版が、案内された版と食い違うものも入れない（`requireSignedVersion`。署名は正しいが古い版を新しい版として差し出す「ダウングレード」を防ぐ）。更新情報の取得先は `https` に限る。
-4. **配るのは正式版だけ。** 更新情報の場所は `https://github.com/koedame/jamjam-client/releases/latest/download/latest.json`。GitHub の「Latest release」は pre-release を含まないので、main へのマージごとに出るベータ版（`vX.Y.Z-beta.N`）は誰の更新にも配られない。
-   - ベータ版の利用者（`jamjam@beta`）は今までどおり `brew upgrade` で更新する。ベータ版どうしの自動更新は持たない。ベータ版のアプリも同じ場所を見るので、ビルドした版より新しい正式版が出たときは、正式版に更新される。
+4. **正式版のビルドが読むのは、正式版だけ。** 更新情報の場所は `https://github.com/koedame/jamjam-client/releases/latest/download/latest.json`。GitHub の「Latest release」は pre-release を含まないので、main へのマージごとに出るベータ版（`vX.Y.Z-beta.N`）は誰の更新にも配られない。
+   - （置き換えられた）当初はベータ版のアプリも同じ場所を見て、ベータ版どうしの自動更新は持たない決めだった。実際は、正式版が 1 つも無いうちは `releases/latest` が 404 で、ベータ版は一度も更新できなかった（ADR-045）。
 5. **更新の設定は、リリースのビルドにだけ渡す（`src-tauri/tauri.updater.conf.json`）。** `tauri.conf.json` には入れない。入れると、自分でビルドした利用者（自前のサーバーを指しているかもしれない）の手元のアプリが、公式のビルドに置き換わる。設定が無いビルドは、更新の部品も登録しない。
 6. **止め方は 2 つ。** 設定ファイル `config.toml` の `auto_update = false`（既定は `true`。設定画面には出さない）。開発ビルド（`cargo tauri dev`・E2E 用）は、いつも動かさない。
 7. **Linux は AppImage だけ。** deb は入れ替えに `sudo` とパスワードの入力が要り、「操作なし」にならないので、パッケージ管理に任せる。
@@ -38,7 +38,7 @@ Accepted
 - 利用者のアプリが、起動のたびと 6 時間おきに GitHub へ接続する（更新情報の取得だけ。送るのはアプリの版と OS の種類。利用状況の送信とは別で、設定に関係なく動く）。プライバシーの文書に書く。
 - macOS の配布物は Developer ID で署名されていない（ad-hoc 署名）。更新のたびにアプリの署名が変わるため、マイクの許可を OS が聞き直す可能性がある（macOS 実機では未確認）。Developer ID の署名を入れれば消える。
 - 更新で入れたアプリには隔離属性（Gatekeeper の警告）が付かない。ダウンロードしたのがアプリ自身だからである。
-- ベータ版どうしは自動更新されない。ベータ版のアプリは、ビルドした版より新しい正式版が出たときだけ正式版に更新される。
+- ベータ版の更新は ADR-045 に移った。
 
 ## References
 
