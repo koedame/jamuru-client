@@ -47,7 +47,15 @@ pub enum HelpMessage {
     Declined { busy: bool },
     /// Either side to the other: the help is over. `role` is the sender's
     /// side of it, so help the two give each other the other way goes on.
-    Stop { role: Role },
+    /// `session` names the help that ended, once it has one: a stop that
+    /// arrives after the two began a help again ends only the help it names.
+    /// Without it (asked but not answered, or from an app that does not name
+    /// it) the stop ends whatever help there is with the sender.
+    Stop {
+        role: Role,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<String>,
+    },
     /// Helped to everyone in the room, for the chat. The helped participant
     /// is the sender, which the server stamps; each app names the helper
     /// from its own list of the room's participants.
@@ -190,6 +198,13 @@ impl Giving {
             Giving::Asking { peer } | Giving::Active { peer, .. } => *peer,
         }
     }
+
+    fn session(&self) -> Option<&str> {
+        match self {
+            Giving::Asking { .. } => None,
+            Giving::Active { session, .. } => Some(session),
+        }
+    }
 }
 
 /// Someone helping this app.
@@ -209,6 +224,13 @@ impl Receiving {
     fn peer(&self) -> Uuid {
         match self {
             Receiving::Asked { peer, .. } | Receiving::Active { peer, .. } => *peer,
+        }
+    }
+
+    fn session(&self) -> Option<&str> {
+        match self {
+            Receiving::Asked { .. } => None,
+            Receiving::Active { session, .. } => Some(session),
         }
     }
 }
@@ -299,20 +321,24 @@ impl Help {
     /// cleared the help, and an end that reached it later could land on a help
     /// it began in the meantime.
     pub fn stop(&mut self, role: Role) -> Result<Vec<Out>, HelpError> {
-        let (peer, announce) = match role {
-            Role::Helper => (
-                self.giving.take().ok_or(HelpError::NotActive)?.peer(),
-                false,
-            ),
+        let (peer, session, announce) = match role {
+            Role::Helper => {
+                let giving = self.giving.take().ok_or(HelpError::NotActive)?;
+                (giving.peer(), giving.session().map(String::from), false)
+            }
             Role::Helped => {
                 let receiving = self.receiving.take().ok_or(HelpError::NotActive)?;
                 let active = matches!(receiving, Receiving::Active { .. });
-                (receiving.peer(), active)
+                (
+                    receiving.peer(),
+                    receiving.session().map(String::from),
+                    active,
+                )
             }
         };
         let mut out = vec![Out::Send {
             to: peer,
-            message: HelpMessage::Stop { role },
+            message: HelpMessage::Stop { role, session },
         }];
         if announce {
             out.push(Out::Broadcast(notice(NoticeEvent::Ended, peer, None)));
@@ -392,11 +418,25 @@ impl Help {
                 _ => Vec::new(),
             },
             // The sender stopped helping this app...
-            HelpMessage::Stop { role: Role::Helper } => {
+            HelpMessage::Stop {
+                role: Role::Helper,
+                session,
+            } => {
+                let held = self.receiving.as_ref().and_then(Receiving::session);
+                if !names_the_help(session.as_deref(), held) {
+                    return Vec::new();
+                }
                 self.end_receiving_with(from, EndReason::PeerStopped, true)
             }
             // ...or stopped being helped by it.
-            HelpMessage::Stop { role: Role::Helped } => {
+            HelpMessage::Stop {
+                role: Role::Helped,
+                session,
+            } => {
+                let held = self.giving.as_ref().and_then(Giving::session);
+                if !names_the_help(session.as_deref(), held) {
+                    return Vec::new();
+                }
                 self.end_giving_with(from, EndReason::PeerStopped)
             }
             HelpMessage::Notice {
@@ -447,7 +487,10 @@ impl Help {
         };
         let mut out = vec![Out::Send {
             to: peer,
-            message: HelpMessage::Stop { role },
+            message: HelpMessage::Stop {
+                role,
+                session: Some(session.to_string()),
+            },
         }];
         out.extend(match role {
             Role::Helper => self.end_giving_with(peer, EndReason::PeerStopped),
@@ -505,6 +548,16 @@ impl Help {
             reason,
         }));
         out
+    }
+}
+
+/// Whether a stop naming `named` (nothing: it names no help) ends the help this
+/// app holds, numbered `held` (nothing: not answered yet). A stop that names an
+/// earlier help does not end one begun since.
+fn names_the_help(named: Option<&str>, held: Option<&str>) -> bool {
+    match named {
+        None => true,
+        Some(named) => held == Some(named),
     }
 }
 
@@ -705,7 +758,14 @@ mod tests {
         let (first, second) = (Uuid::new_v4(), Uuid::new_v4());
         let mut helped = Help::new();
         helped.receive(first, "First", HelpMessage::Request);
-        helped.receive(first, "First", HelpMessage::Stop { role: Role::Helper });
+        helped.receive(
+            first,
+            "First",
+            HelpMessage::Stop {
+                role: Role::Helper,
+                session: None,
+            },
+        );
         helped.receive(second, "Second", HelpMessage::Request);
 
         assert_eq!(
@@ -853,13 +913,91 @@ mod tests {
         let stranger = Uuid::new_v4();
 
         assert!(helped
-            .receive(stranger, "Cy", HelpMessage::Stop { role: Role::Helper })
+            .receive(
+                stranger,
+                "Cy",
+                HelpMessage::Stop {
+                    role: Role::Helper,
+                    session: None
+                }
+            )
             .is_empty());
         assert!(helper
-            .receive(stranger, "Cy", HelpMessage::Stop { role: Role::Helped })
+            .receive(
+                stranger,
+                "Cy",
+                HelpMessage::Stop {
+                    role: Role::Helped,
+                    session: None
+                }
+            )
             .is_empty());
         assert_eq!(helped.helper(), Some(helper_id));
         assert!(helper.stop(Role::Helper).is_ok());
+    }
+
+    /// The helped side sees the relay end and tells the helper the help is over,
+    /// and that reaches the helper after the helper has asked again. The stop
+    /// names the help it ended, so the new request is not ended by it.
+    ///
+    /// Verifies: REQ-RMT-003
+    #[test]
+    fn a_stop_that_names_an_earlier_help_does_not_end_the_request_made_since() {
+        let (mut helper, mut helped, _, helped_id) = active();
+        let [(_, late_stop)] = sent(&helped.link_closed(Role::Helped, SESSION))
+            .try_into()
+            .unwrap();
+        helper.stop(Role::Helper).unwrap();
+        helper.request(helped_id).unwrap();
+
+        assert!(helper.receive(helped_id, HELPED_NAME, late_stop).is_empty());
+
+        let answered = helper.receive(
+            helped_id,
+            HELPED_NAME,
+            HelpMessage::Accepted {
+                session: "f".repeat(32),
+            },
+        );
+        assert_eq!(links(&answered).len(), 1, "the new request is still asked");
+        assert_eq!(helped.helper(), None);
+    }
+
+    /// Verifies: REQ-RMT-003
+    #[test]
+    fn a_stop_that_names_an_earlier_help_does_not_end_the_help_begun_since() {
+        let (mut helper, mut helped, helper_id, _) = active();
+        let [(_, late_stop)] = sent(&helper.link_closed(Role::Helper, SESSION))
+            .try_into()
+            .unwrap();
+        helped.stop(Role::Helped).unwrap();
+        helped.receive(helper_id, HELPER_NAME, HelpMessage::Request);
+        helped.accept(helper_id, "f".repeat(32)).unwrap();
+
+        assert!(helped.receive(helper_id, HELPER_NAME, late_stop).is_empty());
+
+        assert_eq!(helped.helper(), Some(helper_id));
+    }
+
+    /// A stop from an app that does not name the help (asked and not answered,
+    /// or an older app) ends the help with the sender, as it always did.
+    ///
+    /// Verifies: REQ-RMT-003
+    #[test]
+    fn a_stop_that_names_no_help_ends_the_help_with_its_sender() {
+        let (_, mut helped, helper_id, _) = active();
+
+        let ended = helped.receive(
+            helper_id,
+            HELPER_NAME,
+            HelpMessage::Stop {
+                role: Role::Helper,
+                session: None,
+            },
+        );
+
+        assert_eq!(events(&ended).len(), 1);
+        assert_eq!(helped.helper(), None);
     }
 
     /// Verifies: REQ-RMT-003
@@ -927,7 +1065,13 @@ mod tests {
         );
         assert_eq!(
             sent(&on_helped),
-            vec![(helper_id, HelpMessage::Stop { role: Role::Helped })],
+            vec![(
+                helper_id,
+                HelpMessage::Stop {
+                    role: Role::Helped,
+                    session: Some(SESSION.to_string())
+                }
+            )],
             "the peer is told too, in case the relay could not"
         );
         assert_eq!(helped.helper(), None);
@@ -943,7 +1087,13 @@ mod tests {
         );
         assert_eq!(
             sent(&on_helper),
-            vec![(helped_id, HelpMessage::Stop { role: Role::Helper })]
+            vec![(
+                helped_id,
+                HelpMessage::Stop {
+                    role: Role::Helper,
+                    session: Some(SESSION.to_string())
+                }
+            )]
         );
         assert!(broadcast(&on_helper).is_empty());
         assert_eq!(helper.stop(Role::Helper), Err(HelpError::NotActive));
@@ -1025,7 +1175,15 @@ mod tests {
         );
 
         for _ in 0..20 {
-            helped.receive_at(x, "X", HelpMessage::Stop { role: Role::Helper }, now);
+            helped.receive_at(
+                x,
+                "X",
+                HelpMessage::Stop {
+                    role: Role::Helper,
+                    session: None,
+                },
+                now,
+            );
             helped.receive_at(x, "X", HelpMessage::Request, now);
             assert!(helped
                 .receive_at(y, "Y", HelpMessage::Request, now)
@@ -1116,7 +1274,21 @@ mod tests {
         .unwrap();
         assert_eq!(
             parsed,
-            PeerBody::SettingsHelp(HelpMessage::Stop { role: Role::Helped })
+            PeerBody::SettingsHelp(HelpMessage::Stop {
+                role: Role::Helped,
+                session: None
+            })
+        );
+        let named: PeerBody = serde_json::from_value(serde_json::json!(
+            {"settings_help": {"kind": "stop", "role": "helper", "session": SESSION}}
+        ))
+        .unwrap();
+        assert_eq!(
+            named,
+            PeerBody::SettingsHelp(HelpMessage::Stop {
+                role: Role::Helper,
+                session: Some(SESSION.to_string())
+            })
         );
         assert!(
             serde_json::from_value::<PeerBody>(serde_json::json!({"other_topic": {}})).is_err(),
