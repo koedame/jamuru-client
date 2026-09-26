@@ -102,7 +102,7 @@ export function getClockSkewSeconds(errorMessage: string): number | null {
 }
 
 /**
- * A gap in the clock as a person reads it: "6 minutes" / "6 分", in the
+ * A gap in the clock as a person reads it: "6 minutes" / "6分", in the
  * largest unit that is at least 1.5 of itself.
  */
 export function formatClockGap(seconds: number, language?: string): string {
@@ -112,12 +112,14 @@ export function formatClockGap(seconds: number, language?: string): string {
     [60, "minute"],
   ];
   const [size, unit] = units.find(([size]) => seconds >= size * 1.5) ?? [1, "second"];
-  return new Intl.NumberFormat(language, {
+  const gap = new Intl.NumberFormat(language, {
     style: "unit",
     unit,
     unitDisplay: "long",
     maximumFractionDigits: 0,
   }).format(Math.round(seconds / size));
+  // Japanese has no space between the number and its unit ("6 分" -> "6分").
+  return language?.startsWith("ja") ? gap.replace(/\s+/g, "") : gap;
 }
 
 /**
