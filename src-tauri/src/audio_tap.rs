@@ -159,13 +159,7 @@ pub fn inject(point: Point, samples: &mut [f32], channels: usize) {
 
 /// Arms a tone, on every channel or only on `channel` (1-based). It ends by
 /// itself after `seconds`; a second call replaces it.
-pub fn arm_tone(
-    point: Point,
-    frequency: f32,
-    amplitude: f32,
-    channel: Option<u32>,
-    seconds: f32,
-) {
+pub fn arm_tone(point: Point, frequency: f32, amplitude: f32, channel: Option<u32>, seconds: f32) {
     let frames = (seconds * SAMPLE_RATE.load(Ordering::Relaxed) as f32) as u64;
     let mut tap = TAP.lock().unwrap_or_else(|e| e.into_inner());
     tap.tone = Some(Tone {

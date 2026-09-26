@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use jamjam::audio::bounded;
 use jamjam::config::AppConfig;
 use jamjam::network::{NetworkError, SignalingFailure};
 use jamjam::telemetry::{
@@ -44,14 +45,26 @@ fn spawn_settling(task: impl std::future::Future<Output = ()> + Send + 'static) 
     tokio::spawn(task);
 }
 
+/// How long the audio devices may take to describe. A driver that has hung
+/// never answers, and what is being reported is not worth waiting for.
+#[cfg(not(test))]
+const AUDIO_ENV_TIMEOUT: Duration = jamjam::audio::LIST_TIMEOUT;
+#[cfg(test)]
+const AUDIO_ENV_TIMEOUT: Duration = Duration::from_millis(200);
+
 /// The longest the app waits to send the last events when it is closed.
 const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Reads the `audio_env` for the devices with these ids (`None`: the OS
+/// default).
+type ReadAudioEnv = Arc<dyn Fn(Option<&str>, Option<&str>) -> AudioEnv + Send + Sync>;
 
 /// Tauri-managed state: the reporter.
 #[derive(Clone)]
 pub struct UsageState {
     reporter: UsageReporter,
     changes: Arc<Changes>,
+    read_audio_env: ReadAudioEnv,
 }
 
 /// What was last reported about the machine's settings and audio devices,
@@ -85,6 +98,7 @@ impl UsageState {
         Self {
             reporter,
             changes: Arc::default(),
+            read_audio_env: Arc::new(snapshot::audio_env),
         }
     }
 
@@ -97,14 +111,22 @@ impl UsageState {
     pub fn report_launch(&self, config: AppConfig) {
         let reporter = self.reporter.clone();
         let changes = self.changes.clone();
+        let read_audio_env = self.read_audio_env.clone();
         tauri::async_runtime::spawn(async move {
             reporter.report_previous_crash();
             let app_start = app_start_of(&config);
-            let audio_env = audio_env_of(&config);
             *changes.reported_app_start.lock().unwrap() = Some(app_start.clone());
-            *changes.reported_audio_env.lock().unwrap() = Some(audio_env.clone());
             reporter.record(EventBody::AppStart(app_start));
-            reporter.record(EventBody::AudioEnv(audio_env));
+            let audio_env = audio_env_within(
+                read_audio_env,
+                config.input_device_id.clone(),
+                config.output_device_id.clone(),
+            )
+            .await;
+            if let Some(audio_env) = audio_env {
+                *changes.reported_audio_env.lock().unwrap() = Some(audio_env.clone());
+                reporter.record(EventBody::AudioEnv(audio_env));
+            }
             reporter.flush().await;
         });
     }
@@ -149,12 +171,16 @@ impl UsageState {
         }
         let seen = self.changes.devices_seen.fetch_add(1, Ordering::SeqCst) + 1;
         let (reporter, changes) = (self.reporter.clone(), self.changes.clone());
+        let read_audio_env = self.read_audio_env.clone();
         spawn_settling(async move {
             tokio::time::sleep(CHANGE_SETTLE).await;
             if changes.devices_seen.load(Ordering::SeqCst) != seen {
                 return;
             }
-            let audio_env = snapshot::audio_env(input_id.as_deref(), output_id.as_deref());
+            let Some(audio_env) = audio_env_within(read_audio_env, input_id, output_id).await
+            else {
+                return;
+            };
             {
                 let mut reported = changes.reported_audio_env.lock().unwrap();
                 if reported.as_ref() == Some(&audio_env) {
@@ -248,12 +274,23 @@ fn app_start_of(config: &AppConfig) -> AppStart {
     app_start
 }
 
-/// The `audio_env` for the devices `config` selects.
-fn audio_env_of(config: &AppConfig) -> AudioEnv {
-    snapshot::audio_env(
-        config.input_device_id.as_deref(),
-        config.output_device_id.as_deref(),
-    )
+/// The `audio_env` for the devices with these ids, or `None` when the drivers
+/// do not answer in time. Asking a driver that hung never returns, so it is
+/// asked on a thread of its own: no task of the runtime waits for it, and
+/// what is not known is not reported.
+async fn audio_env_within(
+    read: ReadAudioEnv,
+    input_id: Option<String>,
+    output_id: Option<String>,
+) -> Option<AudioEnv> {
+    tauri::async_runtime::spawn_blocking(move || {
+        bounded("reading the audio devices", AUDIO_ENV_TIMEOUT, move || {
+            read(input_id.as_deref(), output_id.as_deref())
+        })
+    })
+    .await
+    .ok()?
+    .ok()
 }
 
 /// The NDJSON the next send will contain, for the "what is sent" view.
@@ -566,6 +603,36 @@ mod tests {
         (app, reporter)
     }
 
+    /// Lets the reads of the devices finish. They run on threads of their own,
+    /// in real time, which a paused clock does not wait for: the test's own
+    /// waits would be over before they were.
+    async fn let_the_device_reads_finish() {
+        tokio::task::spawn_blocking(|| std::thread::sleep(AUDIO_ENV_TIMEOUT * 3))
+            .await
+            .unwrap();
+    }
+
+    /// A reader of the devices that never comes back until the returned
+    /// sender is dropped, as a hung driver does not.
+    fn hung_reader() -> (ReadAudioEnv, std::sync::mpsc::Sender<()>) {
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let released = Mutex::new(released);
+        let read: ReadAudioEnv = Arc::new(move |_, _| {
+            let _ = released.lock().unwrap().recv();
+            unnamed_devices(None)
+        });
+        (read, release)
+    }
+
+    fn unnamed_devices(input_id: Option<&str>) -> AudioEnv {
+        AudioEnv {
+            input: None,
+            output: None,
+            input_id: input_id.map(str::to_string),
+            output_id: None,
+        }
+    }
+
     fn reported_lines(reporter: &UsageReporter) -> Vec<serde_json::Value> {
         reporter
             .preview_ndjson()
@@ -691,6 +758,7 @@ mod tests {
         // the microphone reported at launch on any machine.
         usage.devices_selected(Some("no-such-device".to_string()), None);
         tokio::time::sleep(CHANGE_SETTLE * 4).await;
+        let_the_device_reads_finish().await;
 
         let lines = reported_lines(&reporter);
         assert_eq!(lines.len(), 1, "{lines:?}");
@@ -708,6 +776,7 @@ mod tests {
             usage.devices_selected(Some(id.to_string()), None);
         }
         tokio::time::sleep(CHANGE_SETTLE * 4).await;
+        let_the_device_reads_finish().await;
 
         assert_eq!(reported_lines(&reporter).len(), 1);
     }
@@ -722,8 +791,67 @@ mod tests {
 
         usage.devices_selected(Some("no-such-device".to_string()), None);
         tokio::time::sleep(CHANGE_SETTLE * 4).await;
+        let_the_device_reads_finish().await;
 
         assert_eq!(reporter.preview_ndjson(), "");
+    }
+
+    /// Verifies: REQ-AUD-123
+    #[tokio::test(start_paused = true)]
+    async fn when_the_driver_hangs_while_the_devices_are_read_nothing_is_reported() {
+        let (app, reporter) = launched(true);
+        let (read, release) = hung_reader();
+        let mut usage = app.state::<UsageState>().inner().clone();
+        usage.read_audio_env = read;
+
+        usage.devices_selected(Some("no-such-device".to_string()), None);
+        tokio::time::sleep(CHANGE_SETTLE * 4).await;
+        let_the_device_reads_finish().await;
+
+        assert_eq!(reporter.preview_ndjson(), "");
+        drop(release);
+    }
+
+    /// The point of the limit: a task of the runtime that asks a hung driver
+    /// must not be the one that waits, or the runtime stops with it. With a
+    /// single worker, a ticker that keeps ticking shows nothing was blocked.
+    ///
+    /// Verifies: REQ-AUD-123
+    #[tokio::test(flavor = "current_thread")]
+    async fn when_the_driver_hangs_while_the_devices_are_read_the_runtime_keeps_running() {
+        let (read, release) = hung_reader();
+        let ticks = Arc::new(AtomicU64::new(0));
+        let ticker = {
+            let ticks = ticks.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    ticks.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        };
+
+        let audio_env = audio_env_within(read, None, None).await;
+
+        ticker.abort();
+        drop(release);
+        assert!(audio_env.is_none());
+        assert!(
+            ticks.load(Ordering::SeqCst) >= 10,
+            "the runtime was blocked while the driver hung: {} ticks in {:?}",
+            ticks.load(Ordering::SeqCst),
+            AUDIO_ENV_TIMEOUT
+        );
+    }
+
+    /// Verifies: REQ-AUD-123
+    #[tokio::test]
+    async fn when_the_driver_answers_the_devices_are_read() {
+        let read: ReadAudioEnv = Arc::new(|input_id, _| unnamed_devices(input_id));
+
+        let audio_env = audio_env_within(read, Some("mic".to_string()), None).await;
+
+        assert_eq!(audio_env.unwrap().input_id.as_deref(), Some("mic"));
     }
 
     #[test]
