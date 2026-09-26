@@ -74,6 +74,7 @@ sidebar_position: 1
 | [ADR-047](./adr/ADR-047-git-flow-branching.md) | 開発は develop で進め、main には出した正式版だけを置く。ベータ版はタグを打ったときだけ公開し、タグは対になるサーバー側のリポジトリと同じ名前を同じときに打つ |
 | [ADR-049](./adr/ADR-049-channels-fit-when-opened-and-pan-follows-the-sender.md) | デバイスへのチャンネルの当てはめは開くときだけ（保存は書き換えない）。同じ番号の組は 1 チャンネル。受け手のパンは届いた音がステレオかモノラルかで変わる |
 | [ADR-050](./adr/ADR-050-device-calls-are-bounded.md) | 固まったオーディオドライバへの呼び出しには上限を付け、待ちが設定の読み書き・別のデバイスへの切り替え・ネットワークを止めないようにする。開けなかったデバイスは画面に出す |
+| [ADR-051](./adr/ADR-051-route-follows-the-peers-answers.md) | 音声の送り先は、こちらから送れた候補の中から選ぶ。相手が ping に応答しないまま別の候補から声が届いたら、送り先をそちらに移す |
 
 ---
 
