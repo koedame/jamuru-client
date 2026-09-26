@@ -42,7 +42,7 @@ SHA256 checksums:
 
 - **macOS**: 11.0 (Big Sur) or later
 - **Windows**: 10 (1903) or later
-- **Linux**: glibc 2.31+, ALSA or PipeWire
+- **Linux**: glibc 2.31+, PipeWire 1.0 or later (older `pipewire-alsa` makes the audio threads spin at 100% CPU)
 
 ## Feedback
 
