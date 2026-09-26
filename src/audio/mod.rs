@@ -7,6 +7,7 @@ pub(crate) mod codec;
 mod device;
 mod engine;
 mod error;
+mod flight;
 mod monitor;
 mod playout;
 mod plc;
@@ -28,6 +29,10 @@ pub use engine::{
     AudioBuffer, AudioConfig, AudioEngine, AudioEvent, BitDepth, CaptureConfig, PlaybackConfig,
 };
 pub use error::AudioError;
+pub use flight::{
+    Event as FlightEvent, FlightRecorder, Kind as FlightKind, Report as FlightReport,
+    CAPACITY as FLIGHT_CAPACITY,
+};
 pub use monitor::{LocalMonitor, MonitorTap, MONITOR_MARGIN_FRAMES};
 pub use playout::{
     PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult, PlayoutStats, WriteOutcome,

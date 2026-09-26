@@ -96,6 +96,12 @@ pub const METHODS: &[Method] = &[
         summary: "指定の秒数のあいだ、アプリの CPU・メモリ、音声コールバックと受信ループの所要時間（平均・最大）、xrun の数を測って返す",
     },
     Method {
+        name: "debug.audio_timing",
+        access: Access::TOOLS,
+        kind: Kind::Native,
+        summary: "受信した音の欠けを種類ごとに数え、直近の欠けの時刻（マイクロ秒）と、読み出し・書き込みの数を返す",
+    },
+    Method {
         name: "debug.audio_tone",
         access: Access::TOOLS,
         kind: Kind::Native,
@@ -119,6 +125,7 @@ pub async fn call<R: Runtime>(
         "debug.audio_record" => audio_record(params(&call)?).await,
         "debug.perf" => perf(params(&call)?).await,
         "debug.audio_tone" => audio_tone(params(&call)?),
+        "debug.audio_timing" => audio_timing(app),
         other => Err(RpcError::new(
             Code::UnknownMethod,
             format!("no method named {:?}", other),
@@ -414,6 +421,41 @@ fn audio_tone(params: ToneParams) -> Result<Value, RpcError> {
     Ok(json!({ "armed": true, "ends_in_seconds": params.seconds }))
 }
 
+/// What went wrong with the received audio in this session, or the last one:
+/// the count of each kind, and when the latest of them happened, in
+/// microseconds since the session's audio started. Compare the times of
+/// `starved` with those of `late_arrival` and `thread_stall` to tell a link
+/// that delivered late from a thread that was away; `reads` over `writes`
+/// says whether the device asks for frames faster than the peer sends them.
+fn audio_timing<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
+    let report = app
+        .state::<crate::streaming::StreamingState>()
+        .flight_report()
+        .ok_or_else(|| RpcError::failed("no session has started audio yet"))?;
+    Ok(timing_json(&report))
+}
+
+fn timing_json(report: &jamjam::audio::FlightReport) -> Value {
+    let counts: serde_json::Map<String, Value> = report
+        .counts
+        .iter()
+        .map(|(kind, count)| (kind.name().to_string(), json!(count)))
+        .collect();
+    let events: Vec<Value> = report
+        .events
+        .iter()
+        .map(|event| json!([event.kind.name(), event.at_us, event.value_us]))
+        .collect();
+    json!({
+        "now_us": report.now_us,
+        "reads": report.reads,
+        "writes": report.writes,
+        "counts": counts,
+        "event_fields": ["kind", "at_us", "value_us"],
+        "events": events,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,5 +482,28 @@ mod tests {
     #[test]
     fn a_log_without_a_panic_has_no_panic_lines() {
         assert!(panic_lines("INFO all well\nWARN a warning").is_empty());
+    }
+
+    /// Verifies: REQ-RMT-027
+    #[test]
+    fn the_audio_timing_names_each_kind_and_lists_events_with_their_time() {
+        let recorder = jamjam::audio::FlightRecorder::new();
+        recorder.count_read();
+        recorder.count_write();
+        recorder.note(jamjam::audio::FlightKind::Starved, 0);
+        recorder.note(jamjam::audio::FlightKind::LateArrival, 3_500);
+
+        let value = timing_json(&recorder.report());
+
+        assert_eq!(value["reads"], 1);
+        assert_eq!(value["writes"], 1);
+        assert_eq!(value["counts"]["starved"], 1);
+        assert_eq!(value["counts"]["late_arrival"], 1);
+        assert_eq!(value["counts"]["thread_stall"], 0);
+        let events = value["events"].as_array().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1][0], "late_arrival");
+        assert_eq!(events[1][2], 3_500);
+        assert_eq!(value["event_fields"], json!(["kind", "at_us", "value_us"]));
     }
 }
