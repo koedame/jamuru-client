@@ -52,7 +52,7 @@ Adjusted frame size to keep latency under 150ms.
 
 ## ブランチ運用（Git-Flow）
 
-判断は [ADR-046](../../docs-spec/adr/ADR-046-git-flow-branching.md)。正式版を使う人のアプリを壊さないために、開発は develop で進め、main には出した版だけを置く。
+判断は [ADR-047](../../docs-spec/adr/ADR-047-git-flow-branching.md)。正式版を使う人のアプリを壊さないために、開発は develop で進め、main には出した版だけを置く。
 
 | ブランチ | 役割 | 切り元 → 戻し先 |
 |---------|------|----------------|

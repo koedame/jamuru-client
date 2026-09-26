@@ -13,6 +13,7 @@ use tracing::{debug, info, trace, warn};
 use crate::audio::{create_codec, AudioCodec, CodecConfig, CodecType};
 use crate::protocol::{LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType};
 
+use super::bandwidth::UDP_IP_OVERHEAD_BYTES;
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
 use super::link_facts::LinkFacts;
@@ -45,6 +46,11 @@ pub struct ConnectionStats {
     pub packets_sent: u64,
     /// Total packets received
     pub packets_received: u64,
+    /// Audio packets that arrived, counting each arrival (cumulative)
+    pub audio_packets_received: u64,
+    /// Audio packets the peer's sequence numbers show as missing (cumulative).
+    /// A late packet takes its loss back, so this can go down.
+    pub audio_packets_lost: u64,
     /// Audio packets rebuilt from FEC because they never arrived, or `None`
     /// when this link sends no FEC
     pub fec_recovered: Option<u64>,
@@ -53,6 +59,13 @@ pub struct ConnectionStats {
 }
 
 impl ConnectionStats {
+    /// Bytes received as the link carried them: every packet with the UDP and
+    /// IP headers the socket does not count. What a bandwidth requirement, which
+    /// counts them, is compared with.
+    pub fn wire_bytes_received(&self) -> u64 {
+        self.bytes_received + self.packets_received * UDP_IP_OVERHEAD_BYTES
+    }
+
     /// How usable this connection currently is, or `None` before the first
     /// RTT sample arrives (REQ-LAT-121, REQ-LAT-130).
     ///
@@ -972,11 +985,17 @@ impl Connection {
             .and_then(|start| start.map(|s| s.elapsed().as_secs()))
             .unwrap_or(0);
 
-        let packet_loss_rate = self
+        let (packet_loss_rate, audio_packets_received, audio_packets_lost) = self
             .sequence_tracker
             .lock()
-            .map(|tracker| tracker.loss_rate())
-            .unwrap_or(0.0);
+            .map(|tracker| {
+                (
+                    tracker.loss_rate(),
+                    tracker.packets_received(),
+                    tracker.packets_lost(),
+                )
+            })
+            .unwrap_or((0.0, 0, 0));
 
         ConnectionStats {
             rtt_ms: rtt.rtt_ms,
@@ -986,6 +1005,8 @@ impl Connection {
             bytes_received: self.bytes_received.load(Ordering::Relaxed),
             packets_sent: self.packets_sent.load(Ordering::Relaxed),
             packets_received: self.packets_received.load(Ordering::Relaxed),
+            audio_packets_received,
+            audio_packets_lost,
             fec_recovered: self
                 .fec_decoder
                 .as_ref()
@@ -1497,6 +1518,22 @@ mod tests {
             measurement.rtt_ms.is_some(),
             "the first pong must record a sample instead of leaving None"
         );
+    }
+
+    /// What the link carried counts the UDP and IP headers of every packet, or
+    /// a stream at its preset's requirement (which counts them) would read as
+    /// short of it.
+    ///
+    /// Verifies: REQ-NET-024
+    #[test]
+    fn wire_bytes_add_the_udp_and_ip_headers_of_every_packet() {
+        let stats = ConnectionStats {
+            bytes_received: 1_000,
+            packets_received: 10,
+            ..Default::default()
+        };
+
+        assert_eq!(stats.wire_bytes_received(), 1_000 + 10 * 28);
     }
 
     /// `ConnectionStats::quality()` must withhold judgment until RTT has been

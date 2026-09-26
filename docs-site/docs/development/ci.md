@@ -98,7 +98,7 @@ main・develop ブランチへの push またはタグ作成時に実行され�
 
 リリースのビルドは、更新用の成果物と署名（`.sig`）も作り、正式版だけ更新情報 `latest.json` を Release に添えます（[ADR-041](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-041-self-update.md)）。正式版のタグ `vX.Y.Z` は、`src-tauri/tauri.conf.json` の版と同じでなければ、更新情報を作る段階で失敗します。先に版を上げてからタグを打ってください。
 
-ベータ版のタグは、動作を確かめたいコミットに開発者が打ちます。同じ X.Y.Z のベータ版では、それまでの最大の N に 1 を足します。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ブランチの使い分けとリリースの手順は [ADR-046](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-046-git-flow-branching.md) にあります。
+ベータ版のタグは、動作を確かめたいコミットに開発者が打ちます。同じ X.Y.Z のベータ版では、それまでの最大の N に 1 を足します。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ブランチの使い分けとリリースの手順は [ADR-047](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-047-git-flow-branching.md) にあります。
 
 ## ローカルでのCI実行
 
