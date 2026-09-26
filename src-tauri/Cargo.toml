@@ -51,6 +51,9 @@ tauri-plugin-deep-link = "2.4.9"
 tauri-plugin-updater = "2"
 
 [dev-dependencies]
+# Lets the tests make the audio driver hang (`jamjam::audio::fault`)
+jamjam = { path = "..", features = ["fault-injection"] }
+
 # Isolated config/identity directories for persistence tests
 tempfile = "3"
 
@@ -121,6 +124,7 @@ debug-tools = [
     "dep:objc2-app-kit",
     "dep:objc2-foundation",
     "dep:objc2-web-kit",
+    "jamjam/fault-injection",
 ]
 # Remote debugging: the beta build asks the server whether this installation is
 # enrolled and, if so, keeps a connection to the relay that lets it be operated

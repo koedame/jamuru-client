@@ -5,8 +5,10 @@
 mod channels;
 pub(crate) mod codec;
 mod device;
+mod driver;
 mod engine;
 mod error;
+pub mod fault;
 mod flight;
 mod monitor;
 mod playout;
@@ -25,6 +27,7 @@ pub use device::{
     list_input_devices, list_output_devices, resolve_input_device, resolve_output_device,
     AudioDevice, DeviceId,
 };
+pub use driver::{bounded, LIST_TIMEOUT, OPEN_TIMEOUT};
 pub use engine::{
     AudioBuffer, AudioConfig, AudioEngine, AudioEvent, BitDepth, CaptureConfig, PlaybackConfig,
 };

@@ -16,6 +16,10 @@ e2e-network-local = []   # Local network tests (localhost)
 e2e-remote = []          # Remote node tests
 e2e-full = ["e2e-loopback", "e2e-network-local", "e2e-remote"]
 
+# Lets a caller make the calls into the audio driver stall, to test what the
+# app does when a driver hangs. Absent from every release build.
+fault-injection = []
+
 [dependencies]
 # Audio I/O
 cpal = "0.18"

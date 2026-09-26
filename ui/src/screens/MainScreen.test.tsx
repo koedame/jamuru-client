@@ -12,7 +12,7 @@ import { act, render, screen, waitFor, fireEvent, within } from '@testing-librar
 
 import i18n from '../i18n';
 import { MainScreen } from './MainScreen';
-import type { MixerSnapshot, SessionSnapshot } from '../lib/tauri';
+import type { DeviceProblem, MixerSnapshot, SessionSnapshot } from '../lib/tauri';
 
 const invoke = vi.hoisted(() => vi.fn());
 /** What the screen listens for, by event name. */
@@ -71,6 +71,8 @@ function inRoom(changes: Partial<SessionSnapshot> = {}): SessionSnapshot {
 let current: SessionSnapshot | Promise<SessionSnapshot>;
 /** Where the backend says the faders stand, for `mixer_get`. */
 let mixerNow: MixerSnapshot;
+/** The devices the backend says it could not open, for `streaming_status`. */
+let statusDeviceProblems: DeviceProblem[];
 /** Commands the screen sent to the backend, in order, with their arguments. */
 let calls: Array<{ cmd: string; args: Record<string, unknown> | undefined }>;
 
@@ -98,6 +100,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   calls = [];
+  statusDeviceProblems = [];
   current = snapshot();
   mixerNow = faders();
   openUrl.handler = null;
@@ -111,7 +114,7 @@ beforeEach(() => {
       case 'mixer_get':
         return mixerNow;
       case 'streaming_status':
-        return { is_active: false };
+        return { is_active: false, device_problems: statusDeviceProblems };
       case 'config_get_connection_history':
         return [];
       case 'config_get_sample_rate':
@@ -278,6 +281,43 @@ describe('MainScreen のルームの表示', () => {
 
     expect(callsTo('session_reconnect')).toHaveLength(1);
     expect(screen.getByText(/no route to host/)).toBeInTheDocument();
+  });
+});
+
+describe('MainScreen のデバイスの問題の表示', () => {
+  /** Verifies: REQ-AUD-123 */
+  it('入力デバイスが応答しないとき、セッションが始まっていなくても、その名前を添えて知らせること', async () => {
+    current = inRoom();
+    statusDeviceProblems = [{ side: 'input', trouble: 'unresponsive', device: 'AG06/AG03' }];
+
+    render(<MainScreen />);
+
+    const message = await screen.findByText(/Input device isn't responding/);
+    expect(message).toHaveTextContent('(AG06/AG03)');
+  });
+
+  /** Verifies: REQ-AUD-123 */
+  it('出力デバイスを開けなかったとき、名前が分からなくても、出力の問題として知らせること', async () => {
+    current = inRoom();
+    statusDeviceProblems = [{ side: 'output', trouble: 'failed', device: null }];
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText(/Couldn't open the output device/)).toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-AUD-123 */
+  it('デバイスの問題が解けたとき、知らせが消えること', async () => {
+    current = inRoom();
+    statusDeviceProblems = [{ side: 'input', trouble: 'unresponsive', device: null }];
+    render(<MainScreen />);
+    await screen.findByText(/Input device isn't responding/);
+
+    statusDeviceProblems = [];
+
+    await waitFor(() =>
+      expect(screen.queryByText(/Input device isn't responding/)).not.toBeInTheDocument()
+    );
   });
 });
 

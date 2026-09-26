@@ -65,6 +65,7 @@ import {
   type DetailedLatency,
   type ConnectionHistoryEntry,
   type PeerAudioInfo,
+  type DeviceProblem,
 } from "../lib/tauri";
 import { JOIN_WINDOW_SIZE, MIXER_WINDOW_SIZE, JOIN_MIN_SIZE, MIXER_MIN_SIZE } from "../lib/windowSizes";
 
@@ -109,6 +110,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const [networkStats, setNetworkStats] = useState<NetworkStats | null>(null);
   const [connectionState, setConnectionState] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [deviceProblems, setDeviceProblems] = useState<DeviceProblem[]>([]);
   // Last bandwidth band we warned about, so the toast appears on the edge rather
   // than on every 100ms poll.
   const [warnedBandwidth, setWarnedBandwidth] = useState<string | null>(null);
@@ -445,6 +447,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       setNetworkStats(null);
       setConnectionState(null);
       setConnectionError(null);
+      setDeviceProblems([]);
       setWarnedBandwidth(null);
       setDelayAdjustments(0);
       setInputLevel(0);
@@ -465,6 +468,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       reading = true;
       try {
         const status = await streamingStatus();
+        // Whether or not a session is active: one that could not open its
+        // device never became active
+        setDeviceProblems(status.device_problems);
         if (status.is_active) {
           setDetailedLatency(status.latency);
           setNetworkStats(status.network);
@@ -918,6 +924,18 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
               <Toast type="warning" message={bandwidthWarning} />
             </div>
           )}
+          {deviceProblems.map((problem) => (
+            <div key={problem.side} className="main-footer__warning">
+              <Toast
+                type="error"
+                message={t(`notification.deviceProblem.${problem.trouble}.${problem.side}`, {
+                  name: problem.device
+                    ? t("notification.deviceProblem.named", { device: problem.device })
+                    : "",
+                })}
+              />
+            </div>
+          ))}
           {connectionState === "failed" && (
             <div className="main-footer__warning">
               <Toast

@@ -34,6 +34,9 @@ const MAX_LOG_BYTES: u64 = 256 * 1024;
 /// The longest tone. It ends by itself.
 const MAX_TONE_SECONDS: f32 = 60.0;
 
+/// The longest a call into the audio driver may be made to hang
+const MAX_HANG_SECONDS: f32 = 600.0;
+
 /// The shortest and longest `debug.perf` window, and the one used when the
 /// caller names none. Under a second the CPU reading is not yet meaningful.
 const MIN_PERF_SECONDS: f32 = 1.0;
@@ -107,6 +110,12 @@ pub const METHODS: &[Method] = &[
         kind: Kind::Native,
         summary: "送信直前または出力に、指定の周波数・振幅・時間の正弦波を入れる。channel（1 = 左、2 = 右）を付けるとその側だけに入れ、もう一方は無音にする",
     },
+    Method {
+        name: "debug.device_hang",
+        access: Access::TOOLS,
+        kind: Kind::Native,
+        summary: "音声ドライバへの呼び出し（list_inputs・list_outputs・open_input・open_output）を、以後 seconds 秒のあいだ返らなくする。0 で解く。ドライバが固まったときの挙動を確かめるため",
+    },
 ];
 
 /// Runs the `debug.*` method `name`.
@@ -125,6 +134,7 @@ pub async fn call<R: Runtime>(
         "debug.audio_record" => audio_record(params(&call)?).await,
         "debug.perf" => perf(params(&call)?).await,
         "debug.audio_tone" => audio_tone(params(&call)?),
+        "debug.device_hang" => device_hang(params(&call)?),
         "debug.audio_timing" => audio_timing(app),
         other => Err(RpcError::new(
             Code::UnknownMethod,
@@ -522,6 +532,33 @@ fn audio_tone(params: ToneParams) -> Result<Value, RpcError> {
     Ok(json!({ "armed": true, "ends_in_seconds": params.seconds }))
 }
 
+#[derive(Debug, Deserialize)]
+struct DeviceHangParams {
+    /// `list_inputs`, `list_outputs`, `open_input` or `open_output`.
+    call: String,
+    /// How long each such call takes from now on; 0 lifts it.
+    seconds: f32,
+}
+
+/// Makes a call into the audio driver hang, as a driver that has stopped
+/// answering does. Only calls made after this are held, and each for the
+/// whole time.
+fn device_hang(params: DeviceHangParams) -> Result<Value, RpcError> {
+    let call = jamjam::audio::fault::Call::parse(&params.call).ok_or_else(|| {
+        RpcError::invalid_params(
+            "call is one of \"list_inputs\", \"list_outputs\", \"open_input\" and \"open_output\"",
+        )
+    })?;
+    if !(0.0..=MAX_HANG_SECONDS).contains(&params.seconds) {
+        return Err(RpcError::invalid_params(format!(
+            "seconds is 0 to {}",
+            MAX_HANG_SECONDS
+        )));
+    }
+    jamjam::audio::fault::stall(call, Duration::from_secs_f32(params.seconds));
+    Ok(json!({ "call": params.call, "seconds": params.seconds }))
+}
+
 /// What went wrong with the received audio in this session, or the last one:
 /// the count of each kind, and when the latest of them happened, in
 /// microseconds since the session's audio started. Compare the times of
@@ -583,6 +620,26 @@ mod tests {
     #[test]
     fn a_log_without_a_panic_has_no_panic_lines() {
         assert!(panic_lines("INFO all well\nWARN a warning").is_empty());
+    }
+
+    /// Verifies: REQ-AUD-123
+    #[test]
+    fn a_call_into_the_driver_is_hung_by_name_and_lifted_with_zero_seconds() {
+        let hang = |call: &str, seconds: f32| {
+            device_hang(DeviceHangParams {
+                call: call.to_string(),
+                seconds,
+            })
+        };
+
+        assert!(hang("open_output", 30.0).is_ok());
+        assert!(hang("open_output", 0.0).is_ok());
+        assert!(
+            hang("open_nothing", 1.0).is_err(),
+            "an unknown call is refused"
+        );
+        assert!(hang("open_input", -1.0).is_err());
+        assert!(hang("open_input", MAX_HANG_SECONDS + 1.0).is_err());
     }
 
     /// Verifies: REQ-RMT-027

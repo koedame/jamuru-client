@@ -107,7 +107,7 @@ beforeEach(() => {
         return result;
       }
       case 'streaming_status':
-        return { is_active: false };
+        return { is_active: false, device_problems: [] };
       case 'config_get_sample_rate':
         return 48000;
       case 'config_get_transmit_channels':
@@ -245,7 +245,7 @@ describe('HelperScreen', () => {
       });
       expect(askedOf('streaming_status')).toHaveLength(1);
 
-      answer({ is_active: false });
+      answer({ is_active: false, device_problems: [] });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(300);
       });
