@@ -20,8 +20,8 @@ use tokio::sync::Mutex;
 
 use jamjam::audio::{
     capture_attempts, capture_to_wire, AudioConfig, AudioEngine, AudioError, AudioPreset, DeviceId,
-    LocalMonitor, OutputRoute, PeerRateChange, PlayoutResult, ReceivePath, ADAPT_INTERVAL,
-    WIRE_CHANNELS,
+    FlightKind, FlightRecorder, LocalMonitor, OutputRoute, PeerRateChange, PlayoutResult,
+    ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
@@ -214,6 +214,9 @@ pub struct StreamingState {
     silence_giveups: Arc<AtomicU64>,
     /// How the current link came up, once the audio thread has a connection
     link_facts: Arc<RwLock<Option<Arc<LinkFacts>>>>,
+    /// What went wrong with the received audio and when. The last session's
+    /// stays until the next one starts, so a debug call can still read it.
+    flight: Arc<RwLock<Option<Arc<FlightRecorder>>>>,
     /// Peer (received) audio volume (0-200, 100 = unity gain)
     peer_volume: Arc<AtomicU32>,
     /// Master output volume (0-200, 100 = unity gain)
@@ -261,6 +264,7 @@ impl StreamingState {
             reconnect_count: Arc::new(AtomicU64::new(0)),
             silence_giveups: Arc::new(AtomicU64::new(0)),
             link_facts: Arc::new(RwLock::new(None)),
+            flight: Arc::new(RwLock::new(None)),
             peer_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             master_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             peer_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
@@ -486,6 +490,16 @@ impl StreamingState {
             .ok()
             .and_then(|facts| facts.as_ref().map(|facts| facts.snapshot()))
             .unwrap_or_default()
+    }
+
+    /// What went wrong with the received audio in this session, or the last
+    /// one, and when. `None` before any session has run.
+    #[cfg(feature = "debug-tools")]
+    pub(crate) fn flight_report(&self) -> Option<jamjam::audio::FlightReport> {
+        self.flight
+            .read()
+            .ok()
+            .and_then(|flight| flight.as_ref().map(|flight| flight.report()))
     }
 
     /// Stands in for the audio thread: a link that came up as `facts` says.
@@ -786,6 +800,7 @@ pub async fn streaming_start(
     let reconnect_count = state.reconnect_count.clone();
     let silence_giveups = state.silence_giveups.clone();
     let shared_link_facts = state.link_facts.clone();
+    let shared_flight = state.flight.clone();
     let peer_volume = state.peer_volume.clone();
     let master_volume = state.master_volume.clone();
     let peer_pan = state.peer_pan.clone();
@@ -811,6 +826,9 @@ pub async fn streaming_start(
     state.silence_giveups.store(0, Ordering::SeqCst);
     if let Ok(mut facts) = state.link_facts.write() {
         *facts = None;
+    }
+    if let Ok(mut flight) = state.flight.write() {
+        *flight = None;
     }
     // The master volume goes back to unity gain. The faders' own values are
     // the mixer's, which sets them before a session starts (`mixer`).
@@ -912,6 +930,7 @@ pub async fn streaming_start(
                 &reconnect_count,
                 &silence_giveups,
                 &shared_link_facts,
+                &shared_flight,
                 &peer_volume,
                 &master_volume,
                 &peer_pan,
@@ -1482,6 +1501,7 @@ async fn run_audio_streaming(
     reconnect_count: &Arc<AtomicU64>,
     silence_giveups: &Arc<AtomicU64>,
     shared_link_facts: &RwLock<Option<Arc<LinkFacts>>>,
+    shared_flight: &RwLock<Option<Arc<FlightRecorder>>>,
     peer_volume: &Arc<AtomicU32>,
     master_volume: &Arc<AtomicU32>,
     peer_pan: &Arc<std::sync::atomic::AtomicI32>,
@@ -1553,6 +1573,9 @@ async fn run_audio_streaming(
     let receive = ReceivePath::new(codec_type, sample_rate, buffer_size, jitter_buffer_frames)
         .map_err(|e| format!("Failed to create audio decoder: {}", e))?;
     let stereo_frame_size = receive.frame_samples();
+    if let Ok(mut shared) = shared_flight.write() {
+        *shared = Some(receive.flight().clone());
+    }
     // The delay the display and the peer have been told about. The loop below
     // compares it with the buffer's own and reports the difference, so a preset
     // switch, an adaptation and a reconnect all reach the display the same way
@@ -1805,7 +1828,22 @@ async fn run_audio_streaming(
     // Pre-allocate buffers to avoid allocation in hot path
     // Receive buffer is stereo (frame_size * 2) since sender transmits stereo with local_pan applied
 
+    // This thread carries the network task as well as this loop, so a turn of
+    // the loop that comes late is a stretch in which no packet was taken off
+    // the socket either.
+    let mut last_turn = std::time::Instant::now();
+    let stall_after = std::time::Duration::from_micros(2 * receive.frame_us());
+
     loop {
+        let turn_started = std::time::Instant::now();
+        let away = turn_started.duration_since(last_turn);
+        if away > stall_after {
+            receive
+                .flight()
+                .note(FlightKind::ThreadStall, away.as_micros() as u64);
+        }
+        last_turn = turn_started;
+
         // Set by a command that has capture start over: a new device, or a new
         // channel count on the current one.
         let mut reopen_capture: Option<Option<DeviceId>> = None;
@@ -2054,11 +2092,15 @@ async fn run_audio_streaming(
                 // test peer that replies after a deliberate delay, or plain connection
                 // setup) reads as insufficient rather than idle for its first few
                 // seconds (REQ-LAT-128, REQ-LAT-129).
+                bandwidth_estimator.note_audio(
+                    conn_stats.audio_packets_received,
+                    conn_stats.audio_packets_lost,
+                );
                 if bandwidth_estimator
-                    .sample(conn_stats.bytes_received)
+                    .sample(conn_stats.wire_bytes_received())
                     .is_some()
                 {
-                    let raw_status = bandwidth_estimator.status_for(&preset, sample_rate, 2);
+                    let raw_status = bandwidth_estimator.status();
                     let status = bandwidth_verdict.confirm(raw_status);
                     if let Ok(mut snapshot) = shared_bandwidth.write() {
                         *snapshot = Some(BandwidthSnapshot {
@@ -2071,14 +2113,14 @@ async fn run_audio_streaming(
                     if status != last_bandwidth_status {
                         match status {
                             Some(BandwidthStatus::Insufficient) => tracing::warn!(
-                                "Link carries {:.0} kbps but {} needs {:.0} kbps",
+                                "Link drops the peer's audio: {:.0} kbps arrive where {} needs {:.0} kbps",
                                 bandwidth_estimator.current_bps() / 1000.0,
                                 preset.name(),
                                 bandwidth_required_bps / 1000.0
                             ),
                             Some(BandwidthStatus::Marginal) => tracing::warn!(
-                                "Link has under 20% of bandwidth headroom for {}",
-                                preset.name()
+                                "Link loses some of the peer's audio packets ({:.0} kbps arrive)",
+                                bandwidth_estimator.current_bps() / 1000.0
                             ),
                             Some(BandwidthStatus::Sufficient) => {
                                 tracing::info!("Link bandwidth is sufficient for {}", preset.name())
