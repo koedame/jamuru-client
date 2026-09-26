@@ -31,6 +31,10 @@ pub const EVENTS: &[EventSpec] = &[
         name: crate::session::CHANGED_EVENT,
         access: Access::ALL,
     },
+    EventSpec {
+        name: crate::mixer::CHANGED_EVENT,
+        access: Access::ALL,
+    },
     // The person's own settings help, drawn on their own screen.
     EventSpec {
         name: crate::session::HELP_EVENT,
