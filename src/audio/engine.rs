@@ -270,6 +270,9 @@ impl AudioEngine {
         let event_tx = self.event_tx.clone();
         let err_fn = move |err: cpal::Error| {
             error!("Capture stream error: {:?}", err);
+            if matches!(err.kind(), cpal::ErrorKind::Xrun) {
+                crate::perf::count_input_xrun();
+            }
             match err.kind() {
                 cpal::ErrorKind::DeviceNotAvailable => {
                     warn!("Input device disconnected");
@@ -290,6 +293,7 @@ impl AudioEngine {
             .build_input_stream(
                 stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    let started = crate::perf::start();
                     if whole_frame {
                         let timestamp =
                             sample_count_clone.fetch_add(data.len() as u64, Ordering::Relaxed);
@@ -300,6 +304,7 @@ impl AudioEngine {
                             sample_count_clone.fetch_add(picked.len() as u64, Ordering::Relaxed);
                         callback(&picked, timestamp);
                     }
+                    crate::perf::INPUT_CALLBACK.stop(started);
                 },
                 err_fn,
                 None,
@@ -325,6 +330,9 @@ impl AudioEngine {
         let event_tx = self.event_tx.clone();
         move |err: cpal::Error| {
             error!("Playback stream error: {:?}", err);
+            if matches!(err.kind(), cpal::ErrorKind::Xrun) {
+                crate::perf::count_output_xrun();
+            }
             match err.kind() {
                 cpal::ErrorKind::DeviceNotAvailable => {
                     warn!("Output device disconnected");
@@ -396,7 +404,11 @@ impl AudioEngine {
         let stream = device
             .build_output_stream(
                 stream_config,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| puller.fill(data),
+                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    let started = crate::perf::start();
+                    puller.fill(data);
+                    crate::perf::OUTPUT_CALLBACK.stop(started);
+                },
                 err_fn,
                 None,
             )
