@@ -122,7 +122,17 @@ interface SettingsPanelProps {
   usagePreview?: string | null;             // 次に送る NDJSON（null = まだ見ていない）
   onShowUsagePreview?: () => void;          // 「送る内容を見る」
   usagePreviewError?: string | null;        // 保存や読み出しに失敗した理由
+  reportProblemState?: ReportProblemState;  // 既定 "idle"
+  reportProblemPreview?: string | null;     // 送る jamjam.log の内容（読み込み前は null）
+  reportProblemComment?: string;
+  reportProblemError?: string | null;       // 読み込み・送信に失敗した理由
+  onOpenReportProblem?: () => void;         // 指定時のみ診断タブに「問題を報告」の節を表示。押すとログを読み込む
+  onReportProblemCommentChange?: (value: string) => void;
+  onSendReportProblem?: () => void;
+  onCancelReportProblem?: () => void;       // ready/error から idle へ戻す（送信しない）
 }
+
+type ReportProblemState = "idle" | "loading" | "ready" | "sending" | "sent" | "error";
 
 type Language = "ja" | "en";
 ```
@@ -268,6 +278,14 @@ stateDiagram-v2
 
   「送る内容を見る」を押すと、次に送る NDJSON をそのまま（`install_id` を含めて）等幅で表示する。押すたびに読み直す。内容が空のとき、オフなら「オフです。何も集めず、何も送らず、インストール ID もありません」、オンなら「送る予定の内容はまだありません」を表示する。表示中にスイッチをオフにすると、表示を読み直して空にする。保存できなかったときはスイッチを戻し、理由を `role="alert"` で表示する。初回起動でも、この節以外の場所にも、ダイアログは出さない（[ADR-037](../../adr/ADR-037-usage-reporting-opt-in.md)）
 - **ログファイルの節**（idle / complete の末尾。`onOpenLogFolder` 指定時のみ）: 見出し「ログファイル」＋ 説明（不具合の報告に `jamjam.log` を添える）＋ 「ログのフォルダを開く」ボタン。押すと OS のファイルマネージャで `jamjam.log` のあるフォルダを開き、そのパスをボタンの下に表示する。開けなかったときは理由（パスを含む）を `role="alert"` で表示する（[ADR-036](../../adr/ADR-036-diagnostic-log-file.md)）
+- **問題を報告の節**（ログファイルの節のさらに下。`onOpenReportProblem` 指定時のみ。[ADR-057](../../adr/ADR-057-report-a-problem.md)）: 状態は `reportProblemState`
+  - **idle**: 見出し「問題を報告」＋ 説明（今困っていることを、ログと一言のコメントを添えて送る）＋「問題を報告する」ボタン（`onOpenReportProblem`）
+  - **loading**: 「読み込み中...」
+  - **ready**: 送る `jamjam.log` の内容（`reportProblemPreview`、等幅・スクロール可の読み取り専用領域）＋ コメント欄（`textarea`、`maxLength=2000`、プレースホルダ「何が起きましたか？（任意）」、`reportProblemComment` / `onReportProblemCommentChange`）＋「送信する」（`onSendReportProblem`）「やめる」（`onCancelReportProblem`）ボタン。専用の同意チェックボックスは無く、「送信する」を押す操作自体が同意である（REQ-RPT-001）
+  - **sending**: ボタンを無効化し「送信中...」
+  - **sent**: 「送信しました。ありがとうございます。」＋「閉じる」ボタン（`onCancelReportProblem` で idle に戻す）
+  - **error**: `reportProblemError` を `role="alert"` で表示＋「もう一度試す」（`onSendReportProblem`）「やめる」ボタン
+  - この節は設定の手伝いからは呼べない（`Access::NO_HELP`）。ログにルーム ID や参加者の識別子が残りうるため（ADR-036）
 
 ---
 
@@ -324,6 +342,8 @@ settings.diagnostics.{title,description,run,running,runningDesc,cancel,rerun,
   supports48khz,minBuffer,estimatedLatency,cores,realtime,processingTime,
   problems,noProblems,recommendation,recommendedPreset,zeroLatency,
   compatible,notCompatible,applyPreset,yes,no,severity.{error,warning,info}}
+settings.diagnostics.reportProblem.{title,description,start,loading,
+  commentPlaceholder,send,sending,cancel,sent,sentClose,retry}
 common.{none,default}
 ```
 

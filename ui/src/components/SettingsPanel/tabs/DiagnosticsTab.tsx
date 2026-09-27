@@ -71,7 +71,24 @@ export interface DiagnosticsTabProps {
   onShowUsagePreview?: () => void;
   /** Why what would be sent could not be read */
   usagePreviewError?: string | null;
+  /** "Report a problem" (ADR-057): a manual, one-off send of jamjam.log and a comment */
+  reportProblemState?: ReportProblemState;
+  /** The jamjam.log content that would be sent; null while not loaded yet */
+  reportProblemPreview?: string | null;
+  reportProblemComment?: string;
+  reportProblemError?: string | null;
+  /** Starts the flow (loads the preview). Renders the section while set. */
+  onOpenReportProblem?: () => void;
+  onReportProblemCommentChange?: (value: string) => void;
+  onSendReportProblem?: () => void;
+  /** Back to idle without sending */
+  onCancelReportProblem?: () => void;
 }
+
+export type ReportProblemState = "idle" | "loading" | "ready" | "sending" | "sent" | "error";
+
+/** The comment field's cap, in Unicode scalar values (matches `MAX_COMMENT_CHARS` in `report_problem.rs`). */
+export const REPORT_PROBLEM_COMMENT_MAX = 2000;
 
 type StepStatus = "done" | "active" | "pending";
 type Tone = "default" | "good" | "warn" | "bad";
@@ -473,6 +490,147 @@ function UsageReportingSection({
   );
 }
 
+function ReportProblemSection({
+  reportProblemState = "idle",
+  reportProblemPreview,
+  reportProblemComment = "",
+  reportProblemError,
+  onOpenReportProblem,
+  onReportProblemCommentChange,
+  onSendReportProblem,
+  onCancelReportProblem,
+}: Pick<
+  DiagnosticsTabProps,
+  | "reportProblemState"
+  | "reportProblemPreview"
+  | "reportProblemComment"
+  | "reportProblemError"
+  | "onOpenReportProblem"
+  | "onReportProblemCommentChange"
+  | "onSendReportProblem"
+  | "onCancelReportProblem"
+>) {
+  const { t } = useTranslation();
+
+  if (!onOpenReportProblem) return null;
+
+  const title = (
+    <span className="diagnostics-tab__problems-title">
+      {t("settings.diagnostics.reportProblem.title", "Report a problem")}
+    </span>
+  );
+
+  if (reportProblemState === "idle") {
+    return (
+      <div className="diagnostics-tab__usage" data-testid="diagnostics-report-problem">
+        {title}
+        <p className="diagnostics-tab__description">
+          {t(
+            "settings.diagnostics.reportProblem.description",
+            "Send the current jamjam.log and a short comment about what is going wrong right now."
+          )}
+        </p>
+        <div>
+          <button
+            className="diagnostics-tab__rerun-btn"
+            onClick={onOpenReportProblem}
+            type="button"
+            data-testid="diagnostics-report-problem-start"
+          >
+            {t("settings.diagnostics.reportProblem.start", "Report a problem")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (reportProblemState === "loading") {
+    return (
+      <div className="diagnostics-tab__usage" data-testid="diagnostics-report-problem">
+        {title}
+        <p className="diagnostics-tab__description">
+          {t("settings.diagnostics.reportProblem.loading", "Loading...")}
+        </p>
+      </div>
+    );
+  }
+
+  if (reportProblemState === "sent") {
+    return (
+      <div className="diagnostics-tab__usage" data-testid="diagnostics-report-problem">
+        {title}
+        <p className="diagnostics-tab__description">
+          {t("settings.diagnostics.reportProblem.sent", "Sent. Thank you.")}
+        </p>
+        <div>
+          <button
+            className="diagnostics-tab__rerun-btn"
+            onClick={onCancelReportProblem}
+            type="button"
+            data-testid="diagnostics-report-problem-close"
+          >
+            {t("settings.diagnostics.reportProblem.sentClose", "Close")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // "ready", "sending" and "error" all show the preview and comment field.
+  const sending = reportProblemState === "sending";
+  return (
+    <div className="diagnostics-tab__usage" data-testid="diagnostics-report-problem">
+      {title}
+      {reportProblemPreview != null && (
+        <pre className="diagnostics-tab__usage-lines" data-testid="diagnostics-report-problem-preview">
+          {reportProblemPreview}
+        </pre>
+      )}
+      <textarea
+        className="diagnostics-tab__comment"
+        value={reportProblemComment}
+        onChange={(e) => onReportProblemCommentChange?.(e.target.value)}
+        maxLength={REPORT_PROBLEM_COMMENT_MAX}
+        placeholder={t(
+          "settings.diagnostics.reportProblem.commentPlaceholder",
+          "What happened? (optional)"
+        )}
+        disabled={sending}
+        data-testid="diagnostics-report-problem-comment"
+      />
+      <div className="diagnostics-tab__usage-actions">
+        <button
+          className="diagnostics-tab__rerun-btn"
+          onClick={onSendReportProblem}
+          type="button"
+          disabled={sending}
+          data-testid="diagnostics-report-problem-send"
+        >
+          {sending
+            ? t("settings.diagnostics.reportProblem.sending", "Sending...")
+            : reportProblemState === "error"
+              ? t("settings.diagnostics.reportProblem.retry", "Try again")
+              : t("settings.diagnostics.reportProblem.send", "Send")}
+        </button>
+        <button
+          className="diagnostics-tab__rerun-btn"
+          onClick={onCancelReportProblem}
+          type="button"
+          disabled={sending}
+          data-testid="diagnostics-report-problem-cancel"
+        >
+          {t("settings.diagnostics.reportProblem.cancel", "Cancel")}
+        </button>
+      </div>
+      {reportProblemError && (
+        <p className="diagnostics-tab__log-error" role="alert">
+          {reportProblemError}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function DiagnosticsTab({
   state = "idle",
   progress = 0,
@@ -492,6 +650,14 @@ export function DiagnosticsTab({
   usagePreview,
   onShowUsagePreview,
   usagePreviewError,
+  reportProblemState,
+  reportProblemPreview,
+  reportProblemComment,
+  reportProblemError,
+  onOpenReportProblem,
+  onReportProblemCommentChange,
+  onSendReportProblem,
+  onCancelReportProblem,
 }: DiagnosticsTabProps) {
   const { t } = useTranslation();
   const logFile = (
@@ -512,6 +678,16 @@ export function DiagnosticsTab({
         onOpenLogFolder={onOpenLogFolder}
         logFolder={logFolder}
         logFolderError={logFolderError}
+      />
+      <ReportProblemSection
+        reportProblemState={reportProblemState}
+        reportProblemPreview={reportProblemPreview}
+        reportProblemComment={reportProblemComment}
+        reportProblemError={reportProblemError}
+        onOpenReportProblem={onOpenReportProblem}
+        onReportProblemCommentChange={onReportProblemCommentChange}
+        onSendReportProblem={onSendReportProblem}
+        onCancelReportProblem={onCancelReportProblem}
       />
     </>
   );

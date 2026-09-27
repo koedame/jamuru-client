@@ -147,6 +147,8 @@ sequenceDiagram
 
 `jamjam.log`（[ADR-036](../adr/ADR-036-diagnostic-log-file.md)）は端末の中に留まる。この仕組みとは別経路で、そのマスク処理も使わない。外に出てよいものは `schema.json` と `LEFT_OUT` だけで決まる。
 
+`jamjam.log` を利用者が手動で送る「問題を報告」（[ADR-057](../adr/ADR-057-report-a-problem.md)）は、この仕組みとも別の第 3 の経路で、`usage_reporting` の設定を読まず・変えない。詳細は ADR-057。
+
 ## Public API（`jamjam::telemetry`）
 
 | 項目 | 内容 |

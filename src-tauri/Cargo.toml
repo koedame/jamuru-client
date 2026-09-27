@@ -50,6 +50,10 @@ tauri-plugin-deep-link = "2.4.9"
 # Installs a new release by itself (ADR-041).
 tauri-plugin-updater = "2"
 
+# "Report a problem" (ADR-057): sends jamjam.log and a comment separately
+# from usage reporting's transport.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+
 [dev-dependencies]
 # Lets the tests make the audio driver hang (`jamjam::audio::fault`)
 jamjam = { path = "..", features = ["fault-injection"] }
