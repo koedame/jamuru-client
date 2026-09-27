@@ -1540,7 +1540,13 @@ fn start_capture_ring(
         engine.set_capture_picks(picks.clone());
         // Zero-allocation: write directly to the rtrb producer (FnMut, no Sync needed)
         let started = engine.start_capture(device_id, move |samples, _timestamp| {
-            on_captured_frame(samples, channels as usize, &mut producer, &mut monitor_tap, &level);
+            on_captured_frame(
+                samples,
+                channels as usize,
+                &mut producer,
+                &mut monitor_tap,
+                &level,
+            );
         });
         match started {
             Ok(()) => {
@@ -1958,8 +1964,12 @@ async fn run_audio_streaming(
     let capture_ring = Arc::new(std::sync::Mutex::new(capture_ring));
 
     let mut capture = DeviceSlot::new("input", capture_config, capture_engine, input_id.clone());
-    let mut playback: DeviceSlot<()> =
-        DeviceSlot::new("output", playback_config, playback_engine, output_id.clone());
+    let mut playback: DeviceSlot<()> = DeviceSlot::new(
+        "output",
+        playback_config,
+        playback_engine,
+        output_id.clone(),
+    );
 
     // What the thread that switches the output device runs: the stream is
     // rebuilt around the same play-out buffer, so the audio already waiting

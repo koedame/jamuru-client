@@ -11,9 +11,9 @@
 use std::sync::mpsc;
 use std::thread;
 
-use jamjam::audio::{AudioConfig, AudioEngine, AudioError, DeviceId};
 #[cfg(target_os = "windows")]
 use jamjam::audio::AsioDuplex;
+use jamjam::audio::{AudioConfig, AudioEngine, AudioError, DeviceId};
 
 /// What an open leaves behind: the engine, back from the thread that used it,
 /// and how the open went
