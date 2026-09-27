@@ -197,7 +197,7 @@ impl RoundTripReport {
 }
 
 impl DelayStats {
-    fn of(mut delays_ms: Vec<f64>) -> Option<Self> {
+    pub(crate) fn of(mut delays_ms: Vec<f64>) -> Option<Self> {
         if delays_ms.is_empty() {
             return None;
         }

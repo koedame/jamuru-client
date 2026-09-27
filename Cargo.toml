@@ -20,6 +20,10 @@ e2e-full = ["e2e-loopback", "e2e-network-local", "e2e-remote"]
 # app does when a driver hangs. Absent from every release build.
 fault-injection = []
 
+# Lets a debug build measure the round trip of an output cabled to an input
+# (`audio::device_loop`). Absent from every release build.
+device-loop = []
+
 [dependencies]
 # Audio I/O
 cpal = "0.18"

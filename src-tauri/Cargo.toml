@@ -132,6 +132,7 @@ debug-tools = [
     "dep:webview2-com",
     "dep:windows-webview2",
     "jamjam/fault-injection",
+    "jamjam/device-loop",
 ]
 # Remote debugging: the beta build asks the server whether this installation is
 # enrolled and, if so, keeps a connection to the relay that lets it be operated

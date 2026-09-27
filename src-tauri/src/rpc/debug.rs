@@ -34,6 +34,17 @@ const MAX_LOG_BYTES: u64 = 256 * 1024;
 /// The longest tone. It ends by itself.
 const MAX_TONE_SECONDS: f32 = 60.0;
 
+const DEFAULT_ROUNDTRIP_PULSES: usize = 20;
+const DEFAULT_ROUNDTRIP_INTERVAL_MS: u64 = 250;
+const MIN_ROUNDTRIP_INTERVAL_MS: u64 = 100;
+const MAX_ROUNDTRIP_INTERVAL_MS: u64 = 2000;
+/// The most a run may take (pulses times interval): a method runs at most 25
+/// seconds (ADR-044 §4), and the run also waits out the warm-up and the last
+/// pulse's return.
+const MAX_ROUNDTRIP_MS: u64 = 20_000;
+/// After the last pulse is due: warm-up and the return of the last pulse.
+const ROUNDTRIP_SETTLE_MS: u64 = 800;
+
 /// The longest a call into the audio driver may be made to hang
 const MAX_HANG_SECONDS: f32 = 600.0;
 
@@ -111,6 +122,12 @@ pub const METHODS: &[Method] = &[
         summary: "送信直前または出力に、指定の周波数・振幅・時間の正弦波を入れる。channel（1 = 左、2 = 右）を付けるとその側だけに入れ、もう一方は無音にする",
     },
     Method {
+        name: "debug.audio_roundtrip",
+        access: Access::TOOLS,
+        kind: Kind::Native,
+        summary: "出力を入力にケーブルで繋いだデバイスで、短いパルスを出力に入れ、入力に戻るまでの時間（デバイスの往復の遅延）を測る。パルスごとの値と最小・中央値・最大を返す。セッション中に呼ぶ",
+    },
+    Method {
         name: "debug.device_hang",
         access: Access::TOOLS,
         kind: Kind::Native,
@@ -134,6 +151,7 @@ pub async fn call<R: Runtime>(
         "debug.audio_record" => audio_record(params(&call)?).await,
         "debug.perf" => perf(params(&call)?).await,
         "debug.audio_tone" => audio_tone(params(&call)?),
+        "debug.audio_roundtrip" => audio_roundtrip(params(&call)?).await,
         "debug.device_hang" => device_hang(params(&call)?),
         "debug.audio_timing" => audio_timing(app),
         other => Err(RpcError::new(
@@ -633,6 +651,92 @@ fn audio_tone(params: ToneParams) -> Result<Value, RpcError> {
 }
 
 #[derive(Debug, Deserialize)]
+struct RoundtripParams {
+    /// Pulses to send. [`DEFAULT_ROUNDTRIP_PULSES`] when absent.
+    #[serde(default)]
+    pulses: Option<usize>,
+    /// Milliseconds between two pulses. [`DEFAULT_ROUNDTRIP_INTERVAL_MS`] when absent.
+    #[serde(default)]
+    interval_ms: Option<u64>,
+    /// Peak of a pulse, 0 to 1. 0.5 when absent.
+    #[serde(default)]
+    amplitude: Option<f32>,
+    /// An input sample louder than this is a pulse. 0.05 when absent.
+    #[serde(default)]
+    threshold: Option<f32>,
+}
+
+/// Measures the round trip of the output cabled to the input: the pulses take
+/// the place of what is played for the length of the run, and the run needs a
+/// session, which is what opens the two streams.
+async fn audio_roundtrip(params: RoundtripParams) -> Result<Value, RpcError> {
+    let pulses = params.pulses.unwrap_or(DEFAULT_ROUNDTRIP_PULSES);
+    let interval_ms = params.interval_ms.unwrap_or(DEFAULT_ROUNDTRIP_INTERVAL_MS);
+    let amplitude = params.amplitude.unwrap_or(0.5);
+    let threshold = params.threshold.unwrap_or(0.05);
+    if pulses == 0
+        || !(MIN_ROUNDTRIP_INTERVAL_MS..=MAX_ROUNDTRIP_INTERVAL_MS).contains(&interval_ms)
+    {
+        return Err(RpcError::invalid_params(format!(
+            "pulses is at least 1 and interval_ms is {} to {}",
+            MIN_ROUNDTRIP_INTERVAL_MS, MAX_ROUNDTRIP_INTERVAL_MS
+        )));
+    }
+    if pulses as u64 * interval_ms > MAX_ROUNDTRIP_MS {
+        return Err(RpcError::invalid_params(format!(
+            "pulses times interval_ms is at most {}",
+            MAX_ROUNDTRIP_MS
+        )));
+    }
+    if !(amplitude > 0.0 && amplitude <= 1.0 && threshold > 0.0 && threshold < amplitude) {
+        return Err(RpcError::invalid_params(
+            "amplitude is more than 0 and at most 1, and threshold is more than 0 and less than amplitude",
+        ));
+    }
+    jamjam::audio::device_loop::start(jamjam::audio::device_loop::Params {
+        count: pulses,
+        interval: Duration::from_millis(interval_ms),
+        amplitude,
+        threshold,
+    })
+    .map_err(RpcError::failed)?;
+    tokio::time::sleep(Duration::from_millis(
+        pulses as u64 * interval_ms + ROUNDTRIP_SETTLE_MS,
+    ))
+    .await;
+    let report = jamjam::audio::device_loop::finish()
+        .ok_or_else(|| RpcError::failed("the round-trip run was lost"))?;
+    if report.output_callback_frames == 0 {
+        return Err(RpcError::failed(
+            "no audio was played: is a session running?",
+        ));
+    }
+    Ok(roundtrip_json(&report))
+}
+
+fn roundtrip_json(report: &jamjam::audio::device_loop::Report) -> Value {
+    let delay = report.delay.as_ref().map(|delay| {
+        json!({
+            "min_ms": delay.min_ms,
+            "median_ms": delay.median_ms,
+            "mean_ms": delay.mean_ms,
+            "p95_ms": delay.p95_ms,
+            "max_ms": delay.max_ms,
+        })
+    });
+    json!({
+        "pulses_sent": report.bursts_sent,
+        "pulses_heard": report.bursts_heard,
+        "other_sounds": report.other_sounds,
+        "delay": delay,
+        "delays_ms": report.delays_ms,
+        "output_callback_frames": report.output_callback_frames,
+        "input_callback_frames": report.input_callback_frames,
+        "input_device_channels": report.input_device_channels,
+    })
+}
+
+#[derive(Debug, Deserialize)]
 struct DeviceHangParams {
     /// `list_inputs`, `list_outputs`, `open_input` or `open_output`.
     call: String,
@@ -740,6 +844,56 @@ mod tests {
         );
         assert!(hang("open_input", -1.0).is_err());
         assert!(hang("open_input", MAX_HANG_SECONDS + 1.0).is_err());
+    }
+
+    /// Verifies: REQ-RMT-027
+    #[tokio::test]
+    async fn a_round_trip_run_with_no_pulses_or_too_long_a_run_is_refused() {
+        let refused = |pulses, interval_ms, amplitude, threshold| {
+            audio_roundtrip(RoundtripParams {
+                pulses: Some(pulses),
+                interval_ms: Some(interval_ms),
+                amplitude: Some(amplitude),
+                threshold: Some(threshold),
+            })
+        };
+        assert!(refused(0, 250, 0.5, 0.05).await.is_err());
+        assert!(refused(20, 50, 0.5, 0.05).await.is_err());
+        assert!(refused(200, 250, 0.5, 0.05).await.is_err());
+        assert!(refused(20, 250, 0.0, 0.05).await.is_err());
+        assert!(refused(20, 250, 0.5, 0.6).await.is_err());
+    }
+
+    /// Verifies: REQ-RMT-027
+    #[test]
+    fn the_round_trip_names_the_pulses_the_delays_and_the_callback_sizes() {
+        let report = jamjam::audio::device_loop::Report {
+            bursts_sent: 3,
+            bursts_heard: 2,
+            other_sounds: 1,
+            delays_ms: vec![21.0, 25.0],
+            delay: Some(jamjam::audio::DelayStats {
+                min_ms: 21.0,
+                mean_ms: 23.0,
+                median_ms: 21.0,
+                p95_ms: 25.0,
+                max_ms: 25.0,
+            }),
+            output_callback_frames: 480,
+            input_callback_frames: 441,
+            input_device_channels: 2,
+        };
+
+        let value = roundtrip_json(&report);
+
+        assert_eq!(value["pulses_sent"], 3);
+        assert_eq!(value["pulses_heard"], 2);
+        assert_eq!(value["other_sounds"], 1);
+        assert_eq!(value["delay"]["min_ms"], 21.0);
+        assert_eq!(value["delay"]["max_ms"], 25.0);
+        assert_eq!(value["delays_ms"], json!([21.0, 25.0]));
+        assert_eq!(value["output_callback_frames"], 480);
+        assert_eq!(value["input_callback_frames"], 441);
     }
 
     /// Verifies: REQ-RMT-027

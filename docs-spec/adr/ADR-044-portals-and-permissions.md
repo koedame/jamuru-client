@@ -101,6 +101,7 @@ flowchart LR
 | `debug.perf` | 指定の秒数のあいだ、アプリの CPU・メモリ、入力・出力の音声コールバックと受信ループの所要時間（平均・最大）、xrun の数を測る（端末が必要とする性能を実測で決めるため） |
 | `debug.device_hang` | 音声ドライバへの呼び出し（デバイスの一覧・ストリームを開く）を、以後指定の秒数のあいだ返らなくする（`call` と `seconds`。0 で解く）。ドライバが固まったときの挙動を確かめるため（[ADR-050](./ADR-050-device-calls-are-bounded.md)） |
 | `debug.audio_timing` | 受信した音の欠けを種類ごとに数え、直近の欠けの時刻（マイクロ秒）付きで返す。読み出しと書き込みの数も返す（[ADR-046](./ADR-046-audio-gaps-are-measured-not-guessed.md)） |
+| `debug.audio_roundtrip` | 出力を入力にケーブルで繋いだデバイスで、短いパルスを出力に入れ、入力に戻るまでの時間（デバイスの往復の遅延）を測る。パルスごとの値と最小・中央値・最大、コールバックの大きさを返す（[ADR-053](./ADR-053-device-round-trip-is-measured-in-the-callbacks.md)） |
 
 今後の遠隔デバッグの機能は、このメソッドの一覧に足していく。足すときは表の 1 行と実装 1 つで済む。
 

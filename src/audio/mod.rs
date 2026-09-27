@@ -5,6 +5,7 @@
 mod channels;
 pub(crate) mod codec;
 mod device;
+pub mod device_loop;
 mod driver;
 mod engine;
 mod error;
