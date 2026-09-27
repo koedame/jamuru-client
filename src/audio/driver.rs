@@ -12,7 +12,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use cpal::Stream;
 use tracing::{debug, warn};
 
 use super::error::AudioError;
@@ -61,30 +60,34 @@ pub fn bounded<T: Send + 'static>(
     }
 }
 
-/// A stream, alive on the thread that opened it
+/// A resource, alive on the thread that opened it
 ///
-/// A stream cannot leave the thread that built it, so the thread stays until
-/// the stream is to be closed. That is also what lets the caller stop waiting
-/// for an open that hangs: the thread is what hangs, not the caller.
+/// A `cpal::Stream` cannot leave the thread that built it; an ASIO session
+/// (`audio::asio`) holds a COM apartment with the same restriction. Either
+/// way, the thread stays until the resource is to be closed. That is also
+/// what lets the caller stop waiting for an open that hangs: the thread is
+/// what hangs, not the caller.
 pub(crate) struct StreamHost {
-    /// Dropping this tells the thread to close the stream
+    /// Dropping this tells the thread to close the resource
     close: Option<mpsc::Sender<()>>,
-    /// Disconnects when the thread has closed the stream and ended
+    /// Disconnects when the thread has closed the resource and ended
     ended: mpsc::Receiver<()>,
 }
 
 impl StreamHost {
-    /// Builds a stream with `build`, on a thread of its own, and waits at
-    /// most `timeout` for it.
+    /// Builds a resource with `build`, on a thread of its own, and waits at
+    /// most `timeout` for it. The resource stays on that thread for as long
+    /// as the returned `StreamHost` lives, and is dropped there when
+    /// [`close`](Self::close) is called.
     ///
     /// # Errors
     /// What `build` failed with, or [`AudioError::DeviceUnresponsive`] when it
-    /// had not returned in time. A stream that is built after that is closed
-    /// again by the thread that built it.
-    pub(crate) fn open(
+    /// had not returned in time. A resource that is built after that is
+    /// closed again by the thread that built it.
+    pub(crate) fn open<T: 'static>(
         what: &str,
         timeout: Duration,
-        build: impl FnOnce() -> Result<Stream, AudioError> + Send + 'static,
+        build: impl FnOnce() -> Result<T, AudioError> + Send + 'static,
     ) -> Result<Self, AudioError> {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (close_tx, close_rx) = mpsc::channel::<()>();

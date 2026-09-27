@@ -13,6 +13,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
+#[cfg(target_os = "windows")]
+use jamjam::audio::{driver_name_of, is_asio_id, AsioDuplex, OutputRoute, OPEN_TIMEOUT};
 use jamjam::audio::{
     list_input_devices, list_output_devices, mono_to_wire, AudioConfig, AudioEngine, AudioPreset,
     BurstProbe, BurstSignal, DeviceId, LocalMonitor, PeerRateChange, PlayoutStats, ReceivePath,
@@ -1391,6 +1393,14 @@ const TONE_AMPLITUDE: f32 = 0.5;
 /// Fills a captured frame with a stand-in signal.
 type SignalGenerator = Box<dyn FnMut(&mut [f32]) + Send>;
 
+/// Hands off each captured frame and its timestamp. Boxed so `AudioIo::start`
+/// can choose at runtime which of capture's backends ends up calling it.
+type OnCapture = Box<dyn FnMut(&[f32], u32) + Send>;
+
+/// Fills a device-sized request with what a peer sent. Boxed for the same
+/// reason as [`OnCapture`].
+type FrameSource = Box<dyn FnMut(&mut [f32]) -> usize + Send>;
+
 /// Capture and playback, on the devices or on their stand-ins.
 ///
 /// The stand-ins (`--input-tone`, `--output-file`) let a session run where
@@ -1402,6 +1412,12 @@ struct AudioIo {
     /// Cleared to stop the stand-in threads.
     running: Arc<AtomicBool>,
     stand_ins: Vec<std::thread::JoinHandle<()>>,
+    /// Set instead of running `capture`/`playback` when the input and output
+    /// device name the same ASIO driver (Windows only): one ASIO session
+    /// serves both directions, so there is nothing for `capture`/`playback`
+    /// to open in that case (see `audio::asio`).
+    #[cfg(target_os = "windows")]
+    asio: Option<AsioDuplex>,
 }
 
 impl AudioIo {
@@ -1414,7 +1430,7 @@ impl AudioIo {
         receive: &ReceivePath,
         monitor: &LocalMonitor,
         probe: Option<Arc<BurstProbe>>,
-        mut on_capture: F,
+        on_capture: F,
     ) -> Result<Self>
     where
         F: FnMut(&[f32], u32) + Send + 'static,
@@ -1429,6 +1445,8 @@ impl AudioIo {
             playback: AudioEngine::new(config(WIRE_CHANNELS)),
             running: Arc::new(AtomicBool::new(true)),
             stand_ins: Vec::new(),
+            #[cfg(target_os = "windows")]
+            asio: None,
         };
 
         let stand_in: Option<SignalGenerator> = if let Some(frequency) = settings.input_tone {
@@ -1447,34 +1465,15 @@ impl AudioIo {
             None
         };
 
-        match stand_in {
-            Some(mut fill) => {
-                let mut timestamp = 0u32;
-                let mut frame = vec![0.0f32; settings.frame_size as usize];
-                let mut tap = monitor.tap();
-                io.stand_ins
-                    .push(run_at_frame_rate(settings, io.running.clone(), move || {
-                        fill(&mut frame);
-                        tap.push(&frame);
-                        on_capture(&frame, timestamp);
-                        timestamp = timestamp.wrapping_add(frame.len() as u32);
-                    }));
-            }
-            None => {
-                let mut tap = monitor.tap();
-                io.capture.start_capture(
-                    settings.input_device.clone().map(DeviceId).as_ref(),
-                    move |samples, timestamp| {
-                        tap.push(samples);
-                        on_capture(samples, timestamp as u32)
-                    },
-                )?
-            }
-        }
-
+        // Boxed, and taken by whichever of the three branches below ends up
+        // using it, so the choice can be made with an `Option`s runtime
+        // check rather than needing the compiler to see one static branch -
+        // `asio_driver`'s branch only exists on Windows, and stays absent
+        // (never `Some`) everywhere else.
+        let mut on_capture: Option<OnCapture> = Some(Box::new(on_capture));
         let for_output = receive.clone();
         let for_monitor = monitor.clone();
-        let source = move |out: &mut [f32]| {
+        let mut source: Option<FrameSource> = Some(Box::new(move |out: &mut [f32]| {
             let samples = for_output.read_into(out).samples;
             // Before the monitor mix: what the peer sent, not our own input.
             if let Some(probe) = &probe {
@@ -1482,31 +1481,100 @@ impl AudioIo {
             }
             for_monitor.mix_into(&mut out[..samples]);
             samples
-        };
-        match &settings.output_file {
-            Some(path) => {
-                let mut file = std::fs::File::create(path)
-                    .with_context(|| format!("cannot write {}", path.display()))?;
-                let mut frame = vec![0.0f32; receive.frame_samples() * 3];
-                let mut bytes = Vec::with_capacity(frame.len() * 4);
-                let path = path.to_path_buf();
-                io.stand_ins
-                    .push(run_at_frame_rate(settings, io.running.clone(), move || {
-                        let samples = source(&mut frame);
-                        bytes.clear();
-                        bytes.extend(frame[..samples].iter().flat_map(|s| s.to_le_bytes()));
-                        // Unbuffered on purpose: whatever was played is on disk
-                        // even if the process is killed.
-                        if let Err(e) = file.write_all(&bytes) {
-                            warn!("Failed to write {}: {}", path.display(), e);
-                        }
-                    }));
+        }));
+
+        // The input and output device name the same ASIO driver: one ASIO
+        // session serves both directions (`audio::asio`), so it takes over
+        // from the two independent opens below. Not considered together
+        // with a stand-in (`--input-tone` etc.) - those exist to run without
+        // real hardware, which an ASIO driver is not.
+        #[cfg(target_os = "windows")]
+        if stand_in.is_none() && settings.output_file.is_none() {
+            let asio_driver = match (&settings.input_device, &settings.output_device) {
+                (Some(input), Some(output)) if input == output => {
+                    let id = DeviceId(input.clone());
+                    is_asio_id(&id).then(|| {
+                        driver_name_of(&id)
+                            .expect("checked by is_asio_id")
+                            .to_string()
+                    })
+                }
+                _ => None,
+            };
+            if let Some(driver_name) = asio_driver {
+                let mut tap = monitor.tap();
+                let mut capture_cb = on_capture.take().expect("not yet taken");
+                let fill_frame = source.take().expect("not yet taken");
+                io.asio = Some(AsioDuplex::start(
+                    &driver_name,
+                    settings.sample_rate,
+                    settings.frame_size,
+                    receive.frame_samples(),
+                    OPEN_TIMEOUT,
+                    vec![0],
+                    OutputRoute::default(),
+                    move |samples, timestamp| {
+                        tap.push(samples);
+                        capture_cb(samples, timestamp as u32);
+                    },
+                    fill_frame,
+                )?);
             }
-            None => io.playback.start_playback_with_source(
-                settings.output_device.clone().map(DeviceId).as_ref(),
-                receive.frame_samples(),
-                source,
-            )?,
+        }
+
+        if let Some(mut on_capture) = on_capture.take() {
+            match stand_in {
+                Some(mut fill) => {
+                    let mut timestamp = 0u32;
+                    let mut frame = vec![0.0f32; settings.frame_size as usize];
+                    let mut tap = monitor.tap();
+                    io.stand_ins
+                        .push(run_at_frame_rate(settings, io.running.clone(), move || {
+                            fill(&mut frame);
+                            tap.push(&frame);
+                            on_capture(&frame, timestamp);
+                            timestamp = timestamp.wrapping_add(frame.len() as u32);
+                        }));
+                }
+                None => {
+                    let mut tap = monitor.tap();
+                    io.capture.start_capture(
+                        settings.input_device.clone().map(DeviceId).as_ref(),
+                        move |samples, timestamp| {
+                            tap.push(samples);
+                            on_capture(samples, timestamp as u32)
+                        },
+                    )?
+                }
+            }
+        }
+
+        if let Some(mut source) = source.take() {
+            match &settings.output_file {
+                Some(path) => {
+                    let mut file = std::fs::File::create(path)
+                        .with_context(|| format!("cannot write {}", path.display()))?;
+                    let mut frame = vec![0.0f32; receive.frame_samples() * 3];
+                    let mut bytes = Vec::with_capacity(frame.len() * 4);
+                    let path = path.to_path_buf();
+                    io.stand_ins
+                        .push(run_at_frame_rate(settings, io.running.clone(), move || {
+                            let samples = source(&mut frame);
+                            bytes.clear();
+                            bytes.extend(frame[..samples].iter().flat_map(|s| s.to_le_bytes()));
+                            // Unbuffered on purpose: whatever was played is on disk
+                            // even if the process is killed.
+                            if let Err(e) = file.write_all(&bytes) {
+                                warn!("Failed to write {}: {}", path.display(), e);
+                            }
+                        }));
+                }
+                None => io.playback.start_playback_with_source(
+                    settings.output_device.clone().map(DeviceId).as_ref(),
+                    receive.frame_samples(),
+                    source,
+                )?,
+            }
         }
 
         Ok(io)
@@ -1516,6 +1584,10 @@ impl AudioIo {
 impl Drop for AudioIo {
     fn drop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
+        #[cfg(target_os = "windows")]
+        if let Some(asio) = self.asio.take() {
+            asio.stop();
+        }
         self.capture.stop_capture();
         self.playback.stop_playback();
         for stand_in in self.stand_ins.drain(..) {

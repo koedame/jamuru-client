@@ -56,7 +56,7 @@ pub fn list_input_devices() -> Result<Vec<AudioDevice>, AudioError> {
         AudioError::DeviceOpenFailed(format!("Failed to enumerate input devices: {}", e))
     })?;
 
-    let result = devices
+    let mut result: Vec<AudioDevice> = devices
         .filter_map(|device| {
             let id = stable_device_id(&device)?;
             let name = display_name(&device)?;
@@ -73,6 +73,7 @@ pub fn list_input_devices() -> Result<Vec<AudioDevice>, AudioError> {
             })
         })
         .collect();
+    result.extend(asio_pseudo_devices());
 
     Ok(result)
 }
@@ -93,7 +94,7 @@ pub fn list_output_devices() -> Result<Vec<AudioDevice>, AudioError> {
         AudioError::DeviceOpenFailed(format!("Failed to enumerate output devices: {}", e))
     })?;
 
-    let result = devices
+    let mut result: Vec<AudioDevice> = devices
         .filter_map(|device| {
             let id = stable_device_id(&device)?;
             let name = display_name(&device)?;
@@ -110,6 +111,7 @@ pub fn list_output_devices() -> Result<Vec<AudioDevice>, AudioError> {
             })
         })
         .collect();
+    result.extend(asio_pseudo_devices());
 
     Ok(result)
 }
@@ -264,6 +266,19 @@ fn is_asio_device(device: &cpal::Device) -> bool {
 #[cfg(not(target_os = "windows"))]
 fn is_asio_device(_device: &cpal::Device) -> bool {
     false
+}
+
+/// ASIO drivers, one [`AudioDevice`] each, usable as both an input and an
+/// output device (see `asio::list_drivers`). `cpal` never sees these: on
+/// Windows it only opens WASAPI, so this is the only place they are listed.
+#[cfg(target_os = "windows")]
+fn asio_pseudo_devices() -> Vec<AudioDevice> {
+    super::asio::list_drivers()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn asio_pseudo_devices() -> Vec<AudioDevice> {
+    Vec::new()
 }
 
 #[cfg(test)]
