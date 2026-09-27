@@ -27,6 +27,8 @@
 //!
 //! - The driver must offer the session's sample rate exactly; unlike the
 //!   `cpal` capture path, this does not resample a mismatched device rate.
+//! - `Driver::output_ready` (a latency hint for drivers with their own
+//!   internal buffering) is never called; correctness does not depend on it.
 //! - `direct_process == false` (the driver asking that processing move off
 //!   its callback thread) is not handled: that buffer is left silent. Every
 //!   interface this was written against reports `direct_process == true`.
@@ -347,11 +349,6 @@ fn open_duplex(
     driver
         .start()
         .map_err(|e| AudioError::StreamError(format!("starting {driver_name}: {e}")))?;
-    // ASIO4ALL withholds `bufferSwitch` until the host signals this, even
-    // though nothing else observed needed it (see the module doc). Devices
-    // without internal buffering report `NOT_PRESENT`, which the crate says
-    // to ignore rather than treat as failure.
-    let _ = driver.output_ready();
 
     Ok(AsioResources { driver: guard })
 }
