@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 224 |
-| うち must | 218 |
+| 要求 総数 | 225 |
+| うち must | 219 |
 | うち should | 6 |
-| 検証済み | 195 |
+| 検証済み | 196 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -244,6 +244,7 @@
 | REQ-UPD-016 | must | 版の確認・ダウンロード・入れ替えにはそれぞれ上限時間があり、超えたら諦める。入れ替えが返らなくなっても、その完了までは次の更新を始めない。更新が止まっても失敗しても、アプリは動き続け、遠隔の呼び出しには答え続ける | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_a_step_does_not_finish_it_is_given_up_after_its_limit<br/>`src-tauri/src/updater.rs`::when_an_install_never_returns_it_is_given_up_and_the_gate_stays_shut_until_it_ends<br/>`src-tauri/src/updater.rs`::when_an_update_is_running_update_apply_is_refused_and_both_end |
 | REQ-UPD-017 | must | 再起動（更新の後・`debug.restart`・`debug.update_apply`）は、始める前に音声を止める。主スレッドの終了に 10 秒たっても再起動されなければ、新しいインスタンスをその場で起動して、古いプロセスを主スレッドを待たずに終わらせる（主スレッドが止まっていると、古いプロセスが残ったまま新しいものが立たず、遠隔デバッグにも応答しない） | `docs-spec/requirements.md` | `src-tauri/src/restart.rs`::when_the_time_has_passed_the_action_runs |
 | REQ-UPD-018 | must | アプリの終了時に最後の利用状況を送る処理は、送信が（yield せずブロックする呼び出しのために）返らなくても、主スレッドを一定時間より長く止めない。同じ経路を通る再起動・自動更新・`debug.update_apply` を、この送信の詰まりが遅らせない | `docs-spec/requirements.md` | `src-tauri/src/usage.rs`::when_the_flush_never_yields_app_exiting_still_returns_within_the_timeout |
+| REQ-UPD-019 | must | ベータ用の置き場は、悪い版が出たとき過去の版へ意図的に戻せる。戻す先の版は既存の release から latest.json を読み直し、より新しい版のときだけ置き換える通常の制約を、この操作でだけ迂回する。戻す先に latest.json が無い（release が存在しない、または更新情報を持たない）ときは何もせず失敗する | `docs-spec/requirements.md` | `tests/beta_channel_rollback_test.rs`::when_rolling_back_to_a_past_release_the_channel_gets_that_releases_manifest<br/>`tests/beta_channel_rollback_test.rs`::when_the_release_does_not_exist_the_rollback_fails<br/>`tests/beta_channel_rollback_test.rs`::when_the_release_has_no_update_manifest_the_rollback_fails<br/>`tests/beta_channel_rollback_test.rs`::when_there_is_no_channel_yet_the_rollback_creates_it<br/>`tests/beta_channel_test.rs`::when_force_rollback_is_set_an_older_version_replaces_the_manifest |
 
 ## 未検証の要求（ギャップ）
 
