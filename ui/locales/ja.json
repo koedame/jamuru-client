@@ -228,6 +228,18 @@
       "logTitle": "ログファイル",
       "logDescription": "うまく動かないときは、このフォルダにある jamjam.log を添えて連絡してください。",
       "openLogFolder": "ログのフォルダを開く",
+      "previousHang": {
+        "title": "前回について",
+        "description": "前回、jamjam が正常に終了しませんでした（{{stage}}の途中で止まっていたようです）。原因を見つけて直すために、小さな報告を送りますか？（音声・チャット・ルームの内容は含まれません）",
+        "stageAppExit": "終了処理",
+        "stageRestart": "再起動",
+        "stageUpdateApply": "更新の適用",
+        "stageDeviceOpen": "音声デバイスを開く処理",
+        "stageUnknown": "動作",
+        "send": "報告を送る",
+        "dismiss": "送らない",
+        "thanks": "わかりました。"
+      },
       "usageTitle": "利用状況の送信",
       "usageToggle": "利用状況を送る",
       "usageDescription": "既定ではオフです。オンにすると、お使いの端末での jamjam の動作の様子を jamjam のサーバーに送ります。特定の機材や回線で起きる不具合を見つけて直すために使います。",

@@ -114,6 +114,9 @@ interface SettingsPanelProps {
   onOpenLogFolder?: () => void;             // 指定時のみ診断タブにログファイルの節を表示
   logFolder?: string | null;                // 開いたフォルダ（ボタンの下に表示）
   logFolderError?: string | null;           // 開けなかった理由（フォルダの場所を含む）
+  previousHang?: Hang | null;               // 前回終了しなかった記録（無ければ節を出さない）
+  onSendPreviousHang?: (send: boolean) => void; // 指定時のみ previousHang があれば節を表示
+  previousHangAnswered?: boolean;           // 答えた後、節を短い確認表示に切り替える
   usageReporting?: boolean;                 // 利用状況を送る設定（既定オフ）
   onUsageReportingChange?: (enabled: boolean) => void; // 指定時のみ診断タブに利用状況の節を表示
   usagePreview?: string | null;             // 次に送る NDJSON（null = まだ見ていない）
@@ -255,6 +258,7 @@ stateDiagram-v2
 - **complete**: スコア（`score/100`, Inter）＋ 再診断ボタン（refresh アイコン）＋ 結果カード（ネットワーク／オーディオ／CPU／推奨設定）＋ 問題点
   - 各カード: 見出しアイコン＋タイトル＋グレードバッジ（A=success / B=warning / C=danger / Unknown=非表示）、行は `label`＋`value`（mono）。RTT・ジッタ・パケットロスは良好時 `--color-success`
   - 問題点: 件数バッジ＋カード（カテゴリ／重大度バッジ。Warning=warning、Error=danger、Info=中立）
+- **前回についての節**（idle / complete の、利用状況の節の上。`onSendPreviousHang` 指定かつ `previousHang` があるときだけ）: 見出し「前回について」＋ 前回どの処理（終了処理・再起動・更新の適用・音声デバイスを開く処理・不明のどれか）で止まっていたようかを書いた説明文 ＋「報告を送る」「送らない」ボタン。どちらかを押すと `previousHangAnswered` になり、節は短い確認表示（「わかりました。」）に切り替わる（[ADR-056](../../adr/ADR-056-hang-detection-and-reporting.md)）
 - **利用状況の節**（idle / complete の、ログファイルの節の上。`onUsageReportingChange` 指定時のみ）: 見出し「利用状況の送信」＋ スイッチ「利用状況を送る」（`role="switch"`。**既定オフ**）＋ 説明文 ＋ 「送る内容を見る」ボタン。説明文は次の 5 段で、英語・日本語の両方がある
   1. 既定はオフ。オンにすると動作の様子をサーバーに送る。何のために送るか（特定の機材や回線の不具合を見つけて直す）
   2. 送るもの: アプリの版・OS・CPU とメモリ・音声デバイスの名前と ID と対応・設定（自前サーバーの URL はホストとポートまで）・セッションごとの集計（経路の種類と接続の所要時間を含む）・自分の IP アドレス・エラーの種別・クラッシュの位置

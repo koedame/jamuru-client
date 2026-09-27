@@ -55,6 +55,7 @@
 | `diagnostics_get_recommended_preset` | 診断からおすすめのプリセットを読む |
 | `diagnostics_check_zero_latency` | ゼロレイテンシーモードが使えるかを調べる |
 | `usage_preview` | 利用状況として送る内容の見本を読む |
+| `usage_previous_hang` | 前回終了できなかった記録が残っているかを読む |
 
 ## できない操作
 
@@ -99,3 +100,4 @@
 | `window_resize_main` | メインウィンドウの大きさを変える |
 | `log_frontend` | 画面のログを診断ログに書く |
 | `log_open_dir` | 診断ログのフォルダを開く |
+| `usage_send_previous_hang` | 前回終了できなかった記録を送る・捨てる |

@@ -196,6 +196,9 @@ app_commands! {
     [Access::NO_HELP] "画面のログを診断ログに書く" crate::logging::log_frontend;
     [Access::NO_HELP] "診断ログのフォルダを開く" crate::logging::log_open_dir;
     [Access::ALL] "利用状況として送る内容の見本を読む" crate::usage::usage_preview;
+    [Access::ALL] "前回終了できなかった記録が残っているかを読む" crate::usage::usage_previous_hang;
+    // Consent to send this one report is the person's own, like the toggle.
+    [Access::NO_HELP] "前回終了できなかった記録を送る・捨てる" crate::usage::usage_send_previous_hang;
 
     // The screen's own answer to a call a portal started (see `webview`).
     [Access::SCREEN_ONLY] "遠隔の呼び出しの結果を返す" crate::rpc::rpc_settle;
@@ -438,6 +441,7 @@ mod tests {
             "streaming_set_mute",
             "streaming_status",
             "usage_preview",
+            "usage_previous_hang",
         ];
         assert_eq!(open, expected);
     }

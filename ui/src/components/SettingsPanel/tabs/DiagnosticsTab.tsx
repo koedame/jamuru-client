@@ -14,6 +14,8 @@ import {
   DeviceSource,
   DiagnosticGrade,
   DiagnosticProblem,
+  Hang,
+  HangStage,
   ProblemCode,
   RecommendedPreset,
 } from "../../../lib/tauri";
@@ -53,6 +55,12 @@ export interface DiagnosticsTabProps {
   logFolder?: string | null;
   /** Why the folder could not be opened */
   logFolderError?: string | null;
+  /** A hang found at startup while usage reporting is off; `null`/undefined = nothing to ask about */
+  previousHang?: Hang | null;
+  /** Answers the pending hang report (renders the section while set, together with `previousHang`) */
+  onSendPreviousHang?: (send: boolean) => void;
+  /** Set once the pending hang report has been answered, to show a short confirmation instead */
+  previousHangAnswered?: boolean;
   /** Whether usage reporting is on (off by default) */
   usageReporting?: boolean;
   /** Turn usage reporting on or off (renders the usage reporting section) */
@@ -293,6 +301,77 @@ function LogFileSection({
   );
 }
 
+function stageLabel(stage: HangStage, t: TFunction): string {
+  switch (stage) {
+    case "app_exit":
+      return t("settings.diagnostics.previousHang.stageAppExit", "closing");
+    case "restart":
+      return t("settings.diagnostics.previousHang.stageRestart", "restarting");
+    case "update_apply":
+      return t("settings.diagnostics.previousHang.stageUpdateApply", "installing an update");
+    case "device_open":
+      return t("settings.diagnostics.previousHang.stageDeviceOpen", "opening an audio device");
+    case "unknown":
+      return t("settings.diagnostics.previousHang.stageUnknown", "running");
+  }
+}
+
+function PreviousHangSection({
+  previousHang,
+  onSendPreviousHang,
+  previousHangAnswered,
+}: Pick<
+  DiagnosticsTabProps,
+  "previousHang" | "onSendPreviousHang" | "previousHangAnswered"
+>) {
+  const { t } = useTranslation();
+
+  if (!onSendPreviousHang || !previousHang) return null;
+
+  if (previousHangAnswered) {
+    return (
+      <div className="diagnostics-tab__usage" data-testid="diagnostics-previous-hang">
+        <p className="diagnostics-tab__description">
+          {t("settings.diagnostics.previousHang.thanks", "Okay.")}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="diagnostics-tab__usage" data-testid="diagnostics-previous-hang">
+      <span className="diagnostics-tab__problems-title">
+        {t("settings.diagnostics.previousHang.title", "Last time")}
+      </span>
+      <p className="diagnostics-tab__description">
+        {t(
+          "settings.diagnostics.previousHang.description",
+          "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
+          { stage: stageLabel(previousHang.stage, t) }
+        )}
+      </p>
+      <div className="diagnostics-tab__usage-actions">
+        <button
+          className="diagnostics-tab__rerun-btn"
+          onClick={() => onSendPreviousHang(true)}
+          type="button"
+          data-testid="diagnostics-previous-hang-send"
+        >
+          {t("settings.diagnostics.previousHang.send", "Send report")}
+        </button>
+        <button
+          className="diagnostics-tab__rerun-btn"
+          onClick={() => onSendPreviousHang(false)}
+          type="button"
+          data-testid="diagnostics-previous-hang-dismiss"
+        >
+          {t("settings.diagnostics.previousHang.dismiss", "Don't send")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function UsageReportingSection({
   usageReporting = false,
   onUsageReportingChange,
@@ -405,6 +484,9 @@ export function DiagnosticsTab({
   onOpenLogFolder,
   logFolder,
   logFolderError,
+  previousHang,
+  onSendPreviousHang,
+  previousHangAnswered,
   usageReporting,
   onUsageReportingChange,
   usagePreview,
@@ -414,6 +496,11 @@ export function DiagnosticsTab({
   const { t } = useTranslation();
   const logFile = (
     <>
+      <PreviousHangSection
+        previousHang={previousHang}
+        onSendPreviousHang={onSendPreviousHang}
+        previousHangAnswered={previousHangAnswered}
+      />
       <UsageReportingSection
         usageReporting={usageReporting}
         onUsageReportingChange={onUsageReportingChange}

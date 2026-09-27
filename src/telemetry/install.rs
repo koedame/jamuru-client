@@ -15,6 +15,7 @@ use directories::ProjectDirs;
 
 const INSTALL_ID_FILE: &str = "install_id";
 pub(crate) const CRASH_FILE: &str = "crash.json";
+pub(crate) const HANG_FILE: &str = "hang.json";
 
 /// Where the install ID and the pending crash record are kept.
 ///

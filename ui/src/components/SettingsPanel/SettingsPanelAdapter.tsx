@@ -24,6 +24,9 @@ import {
   type SettingChange,
   logOpenDir,
   usagePreview as readUsagePreview,
+  usagePreviousHang,
+  usageSendPreviousHang,
+  type Hang,
 } from "../../lib/tauri";
 import { useWindowEvent } from "../../hooks/useWindowEvents";
 import { useAudioSettingsTab } from "./useAudioSettingsTab";
@@ -96,6 +99,13 @@ export function SettingsPanelAdapter({
   const [usagePreview, setUsagePreview] = useState<string | null>(null);
   const [usagePreviewError, setUsagePreviewError] = useState<string | null>(null);
 
+  // A hang found at startup while usage reporting is off (undefined = not
+  // checked yet, null = nothing pending). Answering it clears the pending
+  // report on the backend; `previousHangAnswered` keeps it visible as a
+  // short confirmation instead of the section just disappearing.
+  const [previousHang, setPreviousHang] = useState<Hang | null | undefined>(undefined);
+  const [previousHangAnswered, setPreviousHangAnswered] = useState(false);
+
   // If the panel unmounts mid-run (e.g. the settings window closes while
   // diagnostics are running), stop the progress-simulation interval and
   // mark the run as cancelled so the pending diagnosticsRunComplete() result
@@ -157,6 +167,12 @@ export function SettingsPanelAdapter({
     configLoad()
       .then((config) => setUsageReporting(config?.usage_reporting === true))
       .catch((err) => console.error("Failed to read the usage reporting setting:", err));
+  }, []);
+
+  useEffect(() => {
+    usagePreviousHang()
+      .then(setPreviousHang)
+      .catch((err) => console.error("Failed to read the previous hang report:", err));
   }, []);
 
   // Handlers
@@ -297,6 +313,16 @@ export function SettingsPanelAdapter({
     [usagePreview, handleShowUsagePreview]
   );
 
+  const handleSendPreviousHang = useCallback(async (send: boolean) => {
+    try {
+      await usageSendPreviousHang(send);
+    } catch (err) {
+      console.error("Failed to answer the previous hang report:", err);
+    } finally {
+      setPreviousHangAnswered(true);
+    }
+  }, []);
+
   // Cancel diagnostics: drop the pending result and return to idle.
   const handleCancelDiagnostics = useCallback(() => {
     diagnosticsCancelledRef.current = true;
@@ -335,6 +361,9 @@ export function SettingsPanelAdapter({
       onOpenLogFolder={handleOpenLogFolder}
       logFolder={logFolder}
       logFolderError={logFolderError}
+      previousHang={previousHang}
+      onSendPreviousHang={handleSendPreviousHang}
+      previousHangAnswered={previousHangAnswered}
       usageReporting={usageReporting}
       onUsageReportingChange={handleUsageReportingChange}
       usagePreview={usagePreview}
