@@ -128,18 +128,32 @@ esac
     fn publish(&self, version: &str) -> Output {
         let manifest = self.dir.path().join(format!("manifest-{version}.json"));
         std::fs::write(&manifest, format!(r#"{{"version":"{version}"}}"#)).unwrap();
-        publish(&manifest, self.dir.path())
+        publish(&manifest, self.dir.path(), false)
+    }
+
+    /// As `publish`, but with the deliberate rollback override (ADR-057) that
+    /// a bad build's replacement uses to get past the "only a newer version"
+    /// guard.
+    fn force_publish(&self, version: &str) -> Output {
+        let manifest = self.dir.path().join(format!("manifest-{version}.json"));
+        std::fs::write(&manifest, format!(r#"{{"version":"{version}"}}"#)).unwrap();
+        publish(&manifest, self.dir.path(), true)
     }
 }
 
-fn publish(manifest: &Path, state: &Path) -> Output {
-    Command::new("bash")
+fn publish(manifest: &Path, state: &Path, force_rollback: bool) -> Output {
+    let mut command = Command::new("bash");
+    command
         .arg("scripts/publish-beta-channel.sh")
         .arg(manifest)
         .current_dir(repo_root())
         .env("GH", state.join("gh"))
         .env("GITHUB_REPOSITORY", "koedame/jamjam-client")
-        .env("GITHUB_SHA", "0000000")
+        .env("GITHUB_SHA", "0000000");
+    if force_rollback {
+        command.env("FORCE_ROLLBACK", "1");
+    }
+    command
         .output()
         .expect("bash is needed to run scripts/publish-beta-channel.sh")
 }
@@ -205,4 +219,19 @@ fn when_the_beta_of_the_next_version_is_published_it_replaces_the_release() {
 
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(channel.published().as_deref(), Some("0.2.0-1"));
+}
+
+/// The override a deliberate rollback (ADR-057) needs: nothing in the release
+/// workflow sets FORCE_ROLLBACK, so this only fires when asked for explicitly.
+///
+/// Verifies: REQ-UPD-019
+#[test]
+fn when_force_rollback_is_set_an_older_version_replaces_the_manifest() {
+    let channel = Channel::new();
+    channel.publish("0.1.0-17");
+
+    let output = channel.force_publish("0.1.0-9");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(channel.published().as_deref(), Some("0.1.0-9"));
 }

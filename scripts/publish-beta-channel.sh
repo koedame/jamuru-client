@@ -10,6 +10,11 @@
 # release of its version. The file only ever moves to a newer version: a beta of
 # 0.1.0 built after 0.1.0 was released would otherwise pull every beta back.
 #
+# Set FORCE_ROLLBACK=1 to replace the manifest even with an older version. That
+# is a deliberate rollback away from a bad build, not something this script or
+# the release workflow ever sets on its own: use
+# scripts/publish-beta-channel-rollback.sh, which sets it for you.
+#
 # `GH` names the command that talks to GitHub (the tests give it a stand-in).
 set -euo pipefail
 
@@ -33,7 +38,7 @@ current=$("$gh" release download "$channel" -R "$repository" -p latest.json -O -
 
 # `~` sorts before the end of a version, so 0.1.0~17 < 0.1.0, which is how
 # semver puts a pre-release below its release.
-if [ -n "$current" ] && ! dpkg --compare-versions "${new/-/\~}" gt "${current/-/\~}"; then
+if [ -n "$current" ] && [ -z "${FORCE_ROLLBACK:-}" ] && ! dpkg --compare-versions "${new/-/\~}" gt "${current/-/\~}"; then
   echo "beta-channel already has $current; not replacing it with $new"
   exit 0
 fi
