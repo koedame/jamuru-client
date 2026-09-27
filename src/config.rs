@@ -67,6 +67,17 @@ pub const DEFAULT_SERVER_URL: &str = if cfg!(debug_assertions) {
     }
 };
 
+/// Whether `url` names an HTTP(S) server this app could send requests to.
+/// [`DEFAULT_SERVER_URL`] can be empty (a from-source build with no release
+/// server configured, ADR-030); transports built on it (usage reporting,
+/// problem reports) check this before trying to send. Kept here, rather
+/// than duplicated where it is used, because `tests/distribution_config_test.rs`
+/// forbids `http://`/`https://` literals outside the core library (no other
+/// source may name a server).
+pub fn is_http_url(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
 /// Maximum number of connection history entries to keep
 pub const MAX_HISTORY_ENTRIES: usize = 10;
 

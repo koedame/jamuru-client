@@ -234,3 +234,50 @@ export const UsageReportingOffPreview: Story = {
     usagePreview: "",
   },
 };
+
+export const ReportProblemIdle: Story = {
+  args: {
+    state: "idle",
+    onRunDiagnostics: () => {},
+    reportProblemState: "idle",
+    onOpenReportProblem: () => {},
+  },
+};
+
+export const ReportProblemReady: Story = {
+  args: {
+    state: "idle",
+    onRunDiagnostics: () => {},
+    reportProblemState: "ready",
+    reportProblemPreview: "[2026-09-27T12:00:00Z INFO jamjam] starting\n[2026-09-27T12:00:03Z WARN jamjam] no_packets from peer",
+    reportProblemComment: "音が届かなくなりました",
+    onOpenReportProblem: () => {},
+    onReportProblemCommentChange: () => {},
+    onSendReportProblem: () => {},
+    onCancelReportProblem: () => {},
+  },
+};
+
+export const ReportProblemSent: Story = {
+  args: {
+    state: "idle",
+    onRunDiagnostics: () => {},
+    reportProblemState: "sent",
+    onOpenReportProblem: () => {},
+    onCancelReportProblem: () => {},
+  },
+};
+
+export const ReportProblemError: Story = {
+  args: {
+    state: "idle",
+    onRunDiagnostics: () => {},
+    reportProblemState: "error",
+    reportProblemPreview: "[2026-09-27T12:00:00Z INFO jamjam] starting",
+    reportProblemError: "送信できませんでした。しばらくしてからもう一度試してください",
+    onOpenReportProblem: () => {},
+    onReportProblemCommentChange: () => {},
+    onSendReportProblem: () => {},
+    onCancelReportProblem: () => {},
+  },
+};

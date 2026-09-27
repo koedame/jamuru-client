@@ -101,3 +101,5 @@
 | `log_frontend` | 画面のログを診断ログに書く |
 | `log_open_dir` | 診断ログのフォルダを開く |
 | `usage_send_previous_hang` | 前回終了できなかった記録を送る・捨てる |
+| `report_problem_preview` | 問題の報告として送る診断ログの見本を読む |
+| `report_problem_send` | 問題を報告する（診断ログとコメントを送る） |

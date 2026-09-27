@@ -199,6 +199,10 @@ app_commands! {
     [Access::ALL] "前回終了できなかった記録が残っているかを読む" crate::usage::usage_previous_hang;
     // Consent to send this one report is the person's own, like the toggle.
     [Access::NO_HELP] "前回終了できなかった記録を送る・捨てる" crate::usage::usage_send_previous_hang;
+    // The log can carry a room ID and other participants' identifiers (ADR-036),
+    // which a helper may not read (see the fixed "できない操作" text below).
+    [Access::NO_HELP] "問題の報告として送る診断ログの見本を読む" crate::report_problem::report_problem_preview;
+    [Access::NO_HELP] "問題を報告する（診断ログとコメントを送る）" crate::report_problem::report_problem_send;
 
     // The screen's own answer to a call a portal started (see `webview`).
     [Access::SCREEN_ONLY] "遠隔の呼び出しの結果を返す" crate::rpc::rpc_settle;

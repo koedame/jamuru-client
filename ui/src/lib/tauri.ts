@@ -1346,3 +1346,24 @@ export async function usagePreviousHang(): Promise<Hang | null> {
 export async function usageSendPreviousHang(send: boolean): Promise<void> {
   return invoke("usage_send_previous_hang", { send });
 }
+
+// =============================================================================
+// Report a problem (ADR-057, REQ-RPT)
+// =============================================================================
+
+/**
+ * The `jamjam.log` content `reportProblemSend` would submit right now
+ * (masked, tail-capped), exactly as it will be sent.
+ */
+export async function reportProblemPreview(): Promise<string> {
+  return invoke("report_problem_preview");
+}
+
+/**
+ * Sends the current `jamjam.log` (masked, capped) and `comment` (capped at
+ * 2000 Unicode scalar values) to the problem report intake. Pressing this
+ * is the only consent asked; it does not read or change `usage_reporting`.
+ */
+export async function reportProblemSend(comment: string): Promise<void> {
+  return invoke("report_problem_send", { comment });
+}

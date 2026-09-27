@@ -11,7 +11,7 @@ import { VerticalTabs, Tab } from "./VerticalTabs";
 import { GeneralTab, Language } from "./tabs/GeneralTab";
 import { ProfileTab } from "./tabs/ProfileTab";
 import { DevicesTab, DeviceInfo } from "./tabs/DevicesTab";
-import { DiagnosticsTab, DiagnosticsState } from "./tabs/DiagnosticsTab";
+import { DiagnosticsTab, DiagnosticsState, ReportProblemState } from "./tabs/DiagnosticsTab";
 import { SelectOption } from "./Select";
 import { MicIcon, SlidersIcon, UserIcon, ActivityIcon } from "./icons";
 import { CompleteDiagnosticsResult, Hang, RecommendedPreset } from "../../lib/tauri";
@@ -128,6 +128,16 @@ export interface SettingsPanelProps {
   onShowUsagePreview?: () => void;
   /** Why what would be sent could not be read */
   usagePreviewError?: string | null;
+  /** "Report a problem" (ADR-057) */
+  reportProblemState?: ReportProblemState;
+  reportProblemPreview?: string | null;
+  reportProblemComment?: string;
+  reportProblemError?: string | null;
+  /** Starts the flow (loads the preview). Renders the section while set. */
+  onOpenReportProblem?: () => void;
+  onReportProblemCommentChange?: (value: string) => void;
+  onSendReportProblem?: () => void;
+  onCancelReportProblem?: () => void;
 }
 
 const DEFAULT_CHANNEL_OPTIONS: SelectOption[] = [
@@ -203,6 +213,14 @@ export function SettingsPanel({
   usagePreview,
   onShowUsagePreview,
   usagePreviewError,
+  reportProblemState,
+  reportProblemPreview,
+  reportProblemComment,
+  reportProblemError,
+  onOpenReportProblem,
+  onReportProblemCommentChange,
+  onSendReportProblem,
+  onCancelReportProblem,
 }: SettingsPanelProps) {
   const { t } = useTranslation();
   const [selectedTab, setSelectedTab] = useState<SettingsTabId>(initialTab);
@@ -290,6 +308,14 @@ export function SettingsPanel({
             usagePreview={usagePreview}
             onShowUsagePreview={onShowUsagePreview}
             usagePreviewError={usagePreviewError}
+            reportProblemState={reportProblemState}
+            reportProblemPreview={reportProblemPreview}
+            reportProblemComment={reportProblemComment}
+            reportProblemError={reportProblemError}
+            onOpenReportProblem={onOpenReportProblem}
+            onReportProblemCommentChange={onReportProblemCommentChange}
+            onSendReportProblem={onSendReportProblem}
+            onCancelReportProblem={onCancelReportProblem}
           />
         );
       default:
