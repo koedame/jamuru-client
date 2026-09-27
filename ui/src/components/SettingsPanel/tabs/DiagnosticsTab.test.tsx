@@ -176,7 +176,7 @@ describe('DiagnosticsTab usage reporting section', () => {
   });
 });
 
-describe('DiagnosticsTab report a problem section (ADR-057)', () => {
+describe('DiagnosticsTab report a problem section (ADR-058)', () => {
   // Verifies: REQ-RPT-001
   it('nothing is rendered when there is no handler to start it', () => {
     render(<DiagnosticsTab state="idle" />);
@@ -281,5 +281,103 @@ describe('DiagnosticsTab report a problem section (ADR-057)', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('送信できませんでした');
     expect(screen.getByTestId('diagnostics-report-problem-send')).toHaveTextContent('Try again');
+  });
+});
+
+describe('DiagnosticsTab previous hang section (ADR-056, ADR-059)', () => {
+  const hang = { stage: 'restart' as const, stalled_ms: 9000 };
+
+  // Verifies: REQ-TEL-020
+  it('nothing is rendered when there is no pending hang', () => {
+    render(<DiagnosticsTab state="idle" onSendPreviousHang={() => {}} previousHang={null} />);
+
+    expect(screen.queryByTestId('diagnostics-previous-hang')).not.toBeInTheDocument();
+  });
+
+  // Verifies: REQ-TEL-020
+  it('nothing is rendered when there is no handler to answer it', () => {
+    render(<DiagnosticsTab state="idle" previousHang={hang} />);
+
+    expect(screen.queryByTestId('diagnostics-previous-hang')).not.toBeInTheDocument();
+  });
+
+  // Verifies: REQ-TEL-020
+  it('a pending hang with no attached log describes the report as not carrying audio, chat or room content', () => {
+    render(
+      <DiagnosticsTab
+        state="idle"
+        onSendPreviousHang={() => {}}
+        previousHang={hang}
+        previousHangAttachesLog={false}
+      />
+    );
+
+    expect(screen.getByTestId('diagnostics-previous-hang')).toHaveTextContent(
+      'nothing about your audio, chat or rooms'
+    );
+  });
+
+  // Verifies: REQ-TEL-021
+  it('a pending hang that attaches the log says so and names what the log can carry', () => {
+    render(
+      <DiagnosticsTab
+        state="idle"
+        onSendPreviousHang={() => {}}
+        previousHang={hang}
+        previousHangAttachesLog={true}
+      />
+    );
+
+    const section = screen.getByTestId('diagnostics-previous-hang');
+    expect(section).toHaveTextContent('jamjam.log');
+    expect(section).toHaveTextContent('room ID');
+    expect(section).not.toHaveTextContent('nothing about your audio, chat or rooms');
+  });
+
+  // Verifies: REQ-TEL-020
+  it('pressing send answers with true', () => {
+    const onSendPreviousHang = vi.fn();
+    render(
+      <DiagnosticsTab
+        state="idle"
+        onSendPreviousHang={onSendPreviousHang}
+        previousHang={hang}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('diagnostics-previous-hang-send'));
+
+    expect(onSendPreviousHang).toHaveBeenCalledWith(true);
+  });
+
+  // Verifies: REQ-TEL-020
+  it('pressing dismiss answers with false', () => {
+    const onSendPreviousHang = vi.fn();
+    render(
+      <DiagnosticsTab
+        state="idle"
+        onSendPreviousHang={onSendPreviousHang}
+        previousHang={hang}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('diagnostics-previous-hang-dismiss'));
+
+    expect(onSendPreviousHang).toHaveBeenCalledWith(false);
+  });
+
+  // Verifies: REQ-TEL-020
+  it('once answered, a short confirmation replaces the report and its buttons', () => {
+    render(
+      <DiagnosticsTab
+        state="idle"
+        onSendPreviousHang={() => {}}
+        previousHang={hang}
+        previousHangAnswered={true}
+      />
+    );
+
+    expect(screen.queryByTestId('diagnostics-previous-hang-send')).not.toBeInTheDocument();
+    expect(screen.getByTestId('diagnostics-previous-hang')).toHaveTextContent('Okay.');
   });
 });

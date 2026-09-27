@@ -25,6 +25,7 @@ import {
   logOpenDir,
   usagePreview as readUsagePreview,
   usagePreviousHang,
+  usagePreviousHangAttachesLog,
   usageSendPreviousHang,
   reportProblemPreview as readReportProblemPreview,
   reportProblemSend,
@@ -108,8 +109,10 @@ export function SettingsPanelAdapter({
   // short confirmation instead of the section just disappearing.
   const [previousHang, setPreviousHang] = useState<Hang | null | undefined>(undefined);
   const [previousHangAnswered, setPreviousHangAnswered] = useState(false);
+  // Whether sending it also attaches jamjam.log (ADR-059: true before 1.0.0).
+  const [previousHangAttachesLog, setPreviousHangAttachesLog] = useState(false);
 
-  // Report a problem (ADR-057): a manual, one-off send, independent of
+  // Report a problem (ADR-058): a manual, one-off send, independent of
   // usage reporting. `idle` until the user starts it.
   const [reportProblemState, setReportProblemState] = useState<ReportProblemState>("idle");
   const [reportProblemPreview, setReportProblemPreview] = useState<string | null>(null);
@@ -183,6 +186,9 @@ export function SettingsPanelAdapter({
     usagePreviousHang()
       .then(setPreviousHang)
       .catch((err) => console.error("Failed to read the previous hang report:", err));
+    usagePreviousHangAttachesLog()
+      .then(setPreviousHangAttachesLog)
+      .catch((err) => console.error("Failed to read whether the hang report attaches the log:", err));
   }, []);
 
   // Handlers
@@ -407,6 +413,7 @@ export function SettingsPanelAdapter({
       previousHang={previousHang}
       onSendPreviousHang={handleSendPreviousHang}
       previousHangAnswered={previousHangAnswered}
+      previousHangAttachesLog={previousHangAttachesLog}
       usageReporting={usageReporting}
       onUsageReportingChange={handleUsageReportingChange}
       usagePreview={usagePreview}

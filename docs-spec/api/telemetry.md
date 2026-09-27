@@ -108,6 +108,7 @@ sequenceDiagram
 
 - `usage_reporting` がオンなら、次の起動でクラッシュと同じように自動で `hang` として送る（`UsageReporter::record_previous_hang`）
 - `usage_reporting` がオフのときは記録を保持し（`UsageReporter::previous_hang`）、Diagnostics タブの案内から「送る」を選んだときだけ、送信のためだけに作って送信後に必ず捨てるインストール ID でこの 1 件を送る（`UsageReporter::send_one_off_hang`。`usage_reporting` 自体はオンにならない。REQ-TEL-020）。「送らない」を選べば記録はそのまま捨てる
+- **アプリの版が 1.0.0 未満のときは、「送る」を選ぶと現在の `jamjam.log` も追加で送る**（`src-tauri/src/usage.rs` の `attaches_log`。ADR-058「問題を報告」と同じ送り先・同じ本文の作り方を再利用する。REQ-TEL-021・[ADR-059](../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）。1.0.0 以上ではこの追加送信をしない
 
 ## 送る内容を見る
 
@@ -147,7 +148,7 @@ sequenceDiagram
 
 `jamjam.log`（[ADR-036](../adr/ADR-036-diagnostic-log-file.md)）は端末の中に留まる。この仕組みとは別経路で、そのマスク処理も使わない。外に出てよいものは `schema.json` と `LEFT_OUT` だけで決まる。
 
-`jamjam.log` を利用者が手動で送る「問題を報告」（[ADR-057](../adr/ADR-057-report-a-problem.md)）は、この仕組みとも別の第 3 の経路で、`usage_reporting` の設定を読まず・変えない。詳細は ADR-057。
+`jamjam.log` を利用者が手動で送る「問題を報告」（[ADR-058](../adr/ADR-058-report-a-problem.md)）は、この仕組みとも別の第 3 の経路で、`usage_reporting` の設定を読まず・変えない。詳細は ADR-058。
 
 ## Public API（`jamjam::telemetry`）
 
