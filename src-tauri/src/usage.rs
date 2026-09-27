@@ -6,7 +6,8 @@
 //! here does nothing.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 use jamjam::audio::bounded;
@@ -53,7 +54,10 @@ const AUDIO_ENV_TIMEOUT: Duration = jamjam::audio::LIST_TIMEOUT;
 const AUDIO_ENV_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// The longest the app waits to send the last events when it is closed.
+#[cfg(not(test))]
 const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// Reads the `audio_env` for the devices with these ids (`None`: the OS
 /// default).
@@ -259,9 +263,24 @@ impl UsageState {
             self.reporter.end_session(EndReason::AppQuit);
         }
         let reporter = self.reporter.clone();
-        tauri::async_runtime::block_on(async move {
-            let _ = tokio::time::timeout(EXIT_FLUSH_TIMEOUT, reporter.flush()).await;
+        let (done, waiting) = mpsc::channel();
+        // `flush` can get stuck in a call that never yields back to the
+        // executor (seen hanging in network setup on macOS, never on
+        // Windows). A `tokio::time::timeout` around it, run with `block_on`
+        // on this thread, cannot bound that: both the timeout and the flush
+        // are polled by the same call, so a flush that never returns from a
+        // single poll never lets the timeout be checked either. Running it
+        // on a thread of its own instead - the same fix `restart` already
+        // applies to a main thread stuck elsewhere (ADR-055) - means only
+        // that thread is left stuck; this one moves on once the OS-timed
+        // wait below elapses regardless.
+        thread::spawn(move || {
+            tauri::async_runtime::block_on(async move {
+                let _ = tokio::time::timeout(EXIT_FLUSH_TIMEOUT, reporter.flush()).await;
+            });
+            let _ = done.send(());
         });
+        let _ = waiting.recv_timeout(EXIT_FLUSH_TIMEOUT + Duration::from_millis(500));
     }
 }
 
@@ -577,6 +596,47 @@ mod tests {
         assert_eq!(reporter.session_id(), None);
         assert_eq!(reporter.pending_count(), 0);
         assert_eq!(reporter.preview_ndjson(), "");
+    }
+
+    /// A transport whose `send` blocks the thread polling it directly,
+    /// without ever reaching an `.await` point - the way a synchronous
+    /// system call inside a real HTTP client's setup can (seen hanging in
+    /// network setup on macOS, never on Windows). A `tokio::time::timeout`
+    /// placed around a future built this way cannot interrupt it, since the
+    /// timeout and the send are driven by the same `poll` call.
+    struct HangingTransport;
+
+    impl Transport for HangingTransport {
+        fn send(&self, _body: Vec<u8>) -> jamjam::telemetry::Delivery<'_> {
+            Box::pin(async {
+                std::thread::sleep(Duration::from_secs(3600));
+                true
+            })
+        }
+    }
+
+    /// Verifies: REQ-UPD-018
+    #[test]
+    fn when_the_flush_never_yields_app_exiting_still_returns_within_the_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let reporter = UsageReporter::new(
+            Some(dir.path().to_path_buf()),
+            "test",
+            Arc::new(HangingTransport),
+            true,
+        );
+        reporter.begin_session(SessionMode::Join);
+        let usage = UsageState::with_reporter(reporter);
+        let streaming = StreamingState::new();
+
+        let started = std::time::Instant::now();
+        usage.app_exiting(&streaming);
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "app_exiting took {elapsed:?} instead of returning within the timeout"
+        );
     }
 
     /// A mock app with usage reporting `enabled`, and the launch's settings

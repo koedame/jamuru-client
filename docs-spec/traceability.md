@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 221 |
-| うち must | 215 |
+| 要求 総数 | 222 |
+| うち must | 216 |
 | うち should | 6 |
-| 検証済み | 192 |
+| 検証済み | 193 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -241,6 +241,7 @@
 | REQ-UPD-015 | must | 更新は 1 度に 1 つしか走らない。自動の更新と `debug.update_apply` が重なったとき、後から来た方は待たずに断られ、同じ場所に二重に入れない。入れ終えたあと再起動するまでは、別の更新を始めない。自動の更新がセッションを抜けるのを待っているあいだは、手で頼んだ更新を断らない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_an_update_has_ended_without_installing_the_next_may_start<br/>`src-tauri/src/updater.rs`::when_an_update_is_installed_no_other_starts_before_the_restart<br/>`src-tauri/src/updater.rs`::when_an_update_is_running_another_is_refused_at_once<br/>`src-tauri/src/updater.rs`::when_an_update_is_running_update_apply_is_refused_and_both_end |
 | REQ-UPD-016 | must | 版の確認・ダウンロード・入れ替えにはそれぞれ上限時間があり、超えたら諦める。入れ替えが返らなくなっても、その完了までは次の更新を始めない。更新が止まっても失敗しても、アプリは動き続け、遠隔の呼び出しには答え続ける | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_a_step_does_not_finish_it_is_given_up_after_its_limit<br/>`src-tauri/src/updater.rs`::when_an_install_never_returns_it_is_given_up_and_the_gate_stays_shut_until_it_ends<br/>`src-tauri/src/updater.rs`::when_an_update_is_running_update_apply_is_refused_and_both_end |
 | REQ-UPD-017 | must | 再起動（更新の後・`debug.restart`・`debug.update_apply`）は、始める前に音声を止める。主スレッドの終了に 10 秒たっても再起動されなければ、新しいインスタンスをその場で起動して、古いプロセスを主スレッドを待たずに終わらせる（主スレッドが止まっていると、古いプロセスが残ったまま新しいものが立たず、遠隔デバッグにも応答しない） | `docs-spec/requirements.md` | `src-tauri/src/restart.rs`::when_the_time_has_passed_the_action_runs |
+| REQ-UPD-018 | must | アプリの終了時に最後の利用状況を送る処理は、送信が（yield せずブロックする呼び出しのために）返らなくても、主スレッドを一定時間より長く止めない。同じ経路を通る再起動・自動更新・`debug.update_apply` を、この送信の詰まりが遅らせない | `docs-spec/requirements.md` | `src-tauri/src/usage.rs`::when_the_flush_never_yields_app_exiting_still_returns_within_the_timeout |
 
 ## 未検証の要求（ギャップ）
 
