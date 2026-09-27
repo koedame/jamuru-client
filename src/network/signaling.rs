@@ -16,6 +16,7 @@ use super::clock::{clock_skew_of_refusal, now_unix_secs};
 use super::device_identity::DeviceIdentity;
 use super::discovery::discover_signaling_url;
 use super::error::{NetworkError, SignalingFailure};
+use super::link_facts::route_preference;
 
 /// The four `X-Device-*` handshake headers proving `identity` to a server
 /// (ADR-024), signed for the current time.
@@ -69,10 +70,13 @@ pub struct AddressCandidate {
 impl AddressCandidate {
     /// Create a new host candidate
     pub fn host(address: SocketAddr) -> Self {
-        // Host candidates have high priority
+        // Host candidates have high priority. Among them the nearer route
+        // wins (LAN, then an overlay such as Tailscale, then the rest): every
+        // interface address used to tie, so the order a peer probed them in
+        // was whatever order the OS listed the interfaces in.
         // IPv6 gets slightly higher priority than IPv4 (Happy Eyeballs)
         let type_pref: u32 = 126; // Host type preference
-        let local_pref: u32 = if address.is_ipv6() { 65535 } else { 65534 };
+        let local_pref: u32 = route_preference(address) * 0x2000 + u32::from(address.is_ipv6());
         let priority = (type_pref << 24) | (local_pref << 8) | 255;
 
         Self {
@@ -1073,7 +1077,7 @@ mod tests {
     fn test_address_candidate_priority_ordering() {
         // Host candidates should have higher priority than server reflexive
         let host_v4 = AddressCandidate::host("192.168.1.100:5000".parse().unwrap());
-        let host_v6 = AddressCandidate::host("[2001:db8::1]:5000".parse().unwrap());
+        let host_v6 = AddressCandidate::host("[fd00::1]:5000".parse().unwrap());
         let srflx_v4 = AddressCandidate::server_reflexive("203.0.113.50:5000".parse().unwrap());
         let srflx_v6 = AddressCandidate::server_reflexive("[2001:db8::2]:5000".parse().unwrap());
 
@@ -1084,6 +1088,46 @@ mod tests {
         // IPv6 slightly higher than IPv4 within same type
         assert!(host_v6.priority > host_v4.priority);
         assert!(srflx_v6.priority > srflx_v4.priority);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_the_interfaces_are_listed_overlay_first_the_lan_candidate_is_still_probed_first() {
+        let mut peer = PeerInfo {
+            id: Uuid::nil(),
+            name: "peer".into(),
+            candidates: vec![
+                AddressCandidate::host("100.98.128.5:5000".parse().unwrap()),
+                AddressCandidate::host("203.0.113.9:5000".parse().unwrap()),
+                AddressCandidate::host("192.168.1.20:5000".parse().unwrap()),
+                AddressCandidate::server_reflexive("203.0.113.50:5000".parse().unwrap()),
+            ],
+            public_addr: None,
+            local_addr: None,
+            joined_at: 0,
+            features: Vec::new(),
+        };
+
+        let order: Vec<String> = peer
+            .get_sorted_candidates()
+            .iter()
+            .map(|a| a.ip().to_string())
+            .collect();
+        assert_eq!(
+            order,
+            [
+                "192.168.1.20",
+                "100.98.128.5",
+                "203.0.113.9",
+                "203.0.113.50"
+            ]
+        );
+
+        peer.candidates.reverse();
+        assert_eq!(
+            peer.get_sorted_candidates()[0].ip().to_string(),
+            "192.168.1.20"
+        );
     }
 
     #[test]

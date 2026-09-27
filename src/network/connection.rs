@@ -16,7 +16,7 @@ use crate::protocol::{LatencyInfoMessage, LatencyPing, LatencyPong, Packet, Pack
 use super::bandwidth::UDP_IP_OVERHEAD_BYTES;
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
-use super::link_facts::LinkFacts;
+use super::link_facts::{route_preference, LinkFacts, NEAREST_ROUTE_PREFERENCE};
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
 use super::transport::UdpTransport;
@@ -150,6 +150,27 @@ fn is_probe_answer(
     sendable[index]
         && Packet::from_bytes(bytes)
             .is_some_and(|packet| matches!(packet.packet_type, PacketType::KeepAlive))
+}
+
+/// Wait for the next probe answer on `transport`, `None` if it cannot be read.
+async fn next_probe_answer(
+    transport: &UdpTransport,
+    candidates: &[SocketAddr],
+    sendable: &[bool],
+) -> Option<SocketAddr> {
+    loop {
+        match transport.recv_raw().await {
+            Ok((buf, from_addr)) => {
+                if is_probe_answer(candidates, sendable, from_addr, &buf) {
+                    return Some(from_addr);
+                }
+            }
+            Err(e) => {
+                warn!("Error receiving probe response: {}", e);
+                return None;
+            }
+        }
+    }
 }
 
 /// RTT measurement state
@@ -655,7 +676,9 @@ impl Connection {
 
     /// Connect to a remote peer using multiple address candidates (Happy Eyeballs style)
     ///
-    /// This function tries multiple candidates in parallel and uses the first one that responds.
+    /// This function tries multiple candidates in parallel and uses the nearest route that
+    /// responds (a LAN address, then an overlay such as Tailscale, then any other), waiting a
+    /// moment for a nearer one when the first response is not on the LAN.
     /// Candidates are tried in order of priority, with a small delay between starting each attempt.
     pub async fn connect_with_candidates(
         &mut self,
@@ -683,6 +706,9 @@ impl Connection {
         // - Use the first one that responds
         const PROBE_TIMEOUT: Duration = Duration::from_millis(1000);
         const CANDIDATE_DELAY: Duration = Duration::from_millis(50);
+        // A peer probes our candidates CANDIDATE_DELAY apart, so an answer from
+        // the tenth can come nine delays after the first.
+        const ANSWER_GRACE: Duration = Duration::from_millis(500);
 
         // Send probes to all candidates with small delays between each. Which
         // ones went out is kept: a candidate we cannot send to is not a route,
@@ -714,26 +740,43 @@ impl Connection {
 
         // Wait for first response
         let transport = self.transport.clone();
-        let timeout = tokio::time::timeout(PROBE_TIMEOUT, async {
-            loop {
-                match transport.recv_raw().await {
-                    Ok((buf, from_addr)) => {
-                        if is_probe_answer(candidates, &sendable, from_addr, &buf) {
-                            return Some(from_addr);
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Error receiving probe response: {}", e);
-                        return None;
-                    }
-                }
-            }
-        })
+        let timeout = tokio::time::timeout(
+            PROBE_TIMEOUT,
+            next_probe_answer(&transport, candidates, &sendable),
+        )
         .await;
 
         match timeout {
-            Ok(Some(selected_addr)) => {
-                info!("Selected candidate: {} (first to respond)", selected_addr);
+            Ok(Some(first_answer)) => {
+                // The first answer is the one that arrived first, and which
+                // route that is depends on the order the peer probed us in,
+                // not on how near the route is. Unless it is already the
+                // nearest kind, give the peer time to probe its other
+                // addresses, and take the nearest route that answers.
+                let mut selected_addr = first_answer;
+                if route_preference(first_answer) < NEAREST_ROUTE_PREFERENCE {
+                    let _ = tokio::time::timeout(ANSWER_GRACE, async {
+                        while let Some(answer) =
+                            next_probe_answer(&transport, candidates, &sendable).await
+                        {
+                            if route_preference(answer) > route_preference(selected_addr) {
+                                selected_addr = answer;
+                                if route_preference(answer) == NEAREST_ROUTE_PREFERENCE {
+                                    break;
+                                }
+                            }
+                        }
+                    })
+                    .await;
+                }
+                if selected_addr == first_answer {
+                    info!("Selected candidate: {} (first to respond)", selected_addr);
+                } else {
+                    info!(
+                        "Selected candidate: {} (nearer than {}, which responded first)",
+                        selected_addr, first_answer
+                    );
+                }
                 *self.route.lock() = Route::new(selected_addr, other_candidates(selected_addr));
 
                 // Record connection start time
@@ -1534,6 +1577,24 @@ mod tests {
         assert_eq!(snapshot.route_confirmed, Some(true));
         assert!(snapshot.connect_ms.is_some());
         assert_eq!(snapshot.first_audio_ms, None);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[tokio::test]
+    async fn when_the_first_answer_is_on_the_nearest_kind_of_route_the_connection_does_not_wait_for_others(
+    ) {
+        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        conn2.connect(conn1.local_addr()).await.unwrap();
+        let candidates = vec!["127.0.0.1:59999".parse().unwrap(), conn2.local_addr()];
+
+        conn1.connect_with_candidates(&candidates).await.unwrap();
+
+        let snapshot = conn1.link_facts().snapshot();
+        assert!(
+            snapshot.connect_ms.is_some_and(|ms| ms < 400),
+            "a loopback answer needs no grace: {snapshot:?}"
+        );
     }
 
     /// Verifies: REQ-TEL-015
