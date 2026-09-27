@@ -1339,7 +1339,18 @@ export async function usagePreviousHang(): Promise<Hang | null> {
 }
 
 /**
- * Answers the one pending hang report found at startup.
+ * Whether answering "send" to `usagePreviousHang` also attaches the current
+ * `jamjam.log` (ADR-059): true before the app's 1.0.0 release, so the
+ * confirmation can say so accurately.
+ */
+export async function usagePreviousHangAttachesLog(): Promise<boolean> {
+  return invoke("usage_previous_hang_attaches_log");
+}
+
+/**
+ * Answers the one pending hang report found at startup. When
+ * `usagePreviousHangAttachesLog` is true, `send: true` also submits the
+ * current `jamjam.log` through the same intake "Report a problem" uses.
  *
  * @param send `true` sends it on its own without turning usage reporting on; `false` discards it
  */

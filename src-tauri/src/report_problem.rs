@@ -1,6 +1,6 @@
 //! "Report a problem": the user's own action, from the Diagnostics tab, to
 //! send the current `jamjam.log` (masked, tail-capped) and a comment to a
-//! receiver kept apart from usage reporting (ADR-057, REQ-TEL-021..024).
+//! receiver kept apart from usage reporting (ADR-058, REQ-RPT-001..004).
 //! Pressing send is the only consent asked; there is no setting that gates
 //! this, and it does not touch `usage_reporting`.
 
@@ -109,7 +109,7 @@ fn capped_comment(comment: &str) -> String {
 /// Reads `jamjam.log`, masked the same way `log_frontend` masks a webview
 /// line (ADR-036 §7) and capped to [`MAX_LOG_BYTES`]. The preview command
 /// and the send command both call this, so what is shown is exactly what is
-/// sent (REQ-TEL-022).
+/// sent (REQ-RPT-002).
 fn read_log(app: &AppHandle) -> Result<String, String> {
     let dir = app
         .path()
@@ -121,24 +121,23 @@ fn read_log(app: &AppHandle) -> Result<String, String> {
 }
 
 /// The text `report_problem_send` will submit for `jamjam.log`, so the
-/// screen can show it before the user decides to send (REQ-TEL-022).
+/// screen can show it before the user decides to send (REQ-RPT-002).
 #[tauri::command]
 pub fn report_problem_preview(app: AppHandle) -> Result<String, String> {
     read_log(&app)
 }
 
-/// Sends the current `jamjam.log` (masked, capped) and `comment` (capped) to
-/// the problem report intake. This is the only consent asked for this
-/// report: there is no setting to turn on first, and it does not read or
-/// change `usage_reporting` (REQ-TEL-021, REQ-TEL-023).
-#[tauri::command]
-pub async fn report_problem_send(app: AppHandle, comment: String) -> Result<(), String> {
-    let log = read_log(&app)?;
+/// Sends `jamjam.log` (masked, capped) and `comment` (capped) to the problem
+/// report intake. Shared by the manual "Report a problem" command below and
+/// by the automatic hang report (`usage.rs`, ADR-059), so both go through
+/// the one send path and there is only one place that builds the body.
+pub async fn send_log_report(app: &AppHandle, comment: &str) -> Result<(), String> {
+    let log = read_log(app)?;
     let Some(transport) = HttpReportTransport::for_build() else {
         return Err("送信先が分かりません".to_string());
     };
     let app_version = app.package_info().version.to_string();
-    let comment = capped_comment(&comment);
+    let comment = capped_comment(comment);
     let body = ReportBody {
         ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         app_version: &app_version,
@@ -153,6 +152,15 @@ pub async fn report_problem_send(app: AppHandle, comment: String) -> Result<(), 
     } else {
         Err("送信できませんでした。しばらくしてからもう一度試してください".to_string())
     }
+}
+
+/// Sends the current `jamjam.log` (masked, capped) and `comment` (capped) to
+/// the problem report intake. This is the only consent asked for this
+/// report: there is no setting to turn on first, and it does not read or
+/// change `usage_reporting` (REQ-RPT-001).
+#[tauri::command]
+pub async fn report_problem_send(app: AppHandle, comment: String) -> Result<(), String> {
+    send_log_report(&app, &comment).await
 }
 
 #[cfg(test)]

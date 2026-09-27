@@ -185,10 +185,11 @@ REQ-IDT-006 を `should` とするのは、Windows に 0600 相当のモード�
 | REQ-TEL-018 | `app_start` に、接続先がアプリの持つ既定のサーバーかどうか（`server_is_default`）を付ける | must |
 | REQ-TEL-019 | 主スレッドの終了・再起動・更新の適用・音声デバイスを開く処理のうち、見張っているものが自分の上限時間を過ぎても終わらないとき、`usage_reporting` の設定に関わらず、どの処理で・どれだけの時間止まっていたかをローカルに記録する。上限を過ぎる前に終われば何も残さない。見張っている処理が無いまま前回の起動が正常終了しなかったとき（強制終了・電源断など）も、次の起動時に「処理は不明」として同じ形で記録する。`usage_reporting` がオンならこの記録は次の起動でクラッシュの記録と同じように送信の対象になる | must |
 | REQ-TEL-020 | `usage_reporting` がオフのまま REQ-TEL-019 の記録が残っているとき、アプリはこの記録だけを 1 件、送信のためだけに作って捨てるインストール ID で送れる。送っても `usage_reporting` の設定はオンにならず、送らずに捨てることもできる | must |
+| REQ-TEL-021 | REQ-TEL-020 の確認で「送る」を選んだとき、アプリの版が 1.0.0 未満なら、現在の `jamjam.log` を「問題を報告」（REQ-RPT）と同じ送り先・同じ本文の作り方で追加で送る。確認の説明文は、ログを添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く。1.0.0 以上になったらこの追加送信をしない（[ADR-059](./adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)） | must |
 
 ## REQ-RPT: 問題の報告設計要求
 
-利用者が設定の診断タブから、任意のタイミングで `jamjam.log` と一言のコメントを添えて jamjam サーバーへ送る機能に対する要求（[ADR-057](./adr/ADR-057-report-a-problem.md)）。`usage_reporting`（REQ-TEL）とは別の経路で、その設定を読まず・変えない。実装は `src-tauri/src/report_problem.rs`。
+利用者が設定の診断タブから、任意のタイミングで `jamjam.log` と一言のコメントを添えて jamjam サーバーへ送る機能に対する要求（[ADR-058](./adr/ADR-058-report-a-problem.md)）。`usage_reporting`（REQ-TEL）とは別の経路で、その設定を読まず・変えない。実装は `src-tauri/src/report_problem.rs`。
 
 | ID | 要求 | criticality |
 |----|------|------------|

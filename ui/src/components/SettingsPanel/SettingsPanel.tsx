@@ -118,6 +118,8 @@ export interface SettingsPanelProps {
   onSendPreviousHang?: (send: boolean) => void;
   /** Set once the pending hang report has been answered */
   previousHangAnswered?: boolean;
+  /** Whether "send" also attaches jamjam.log (ADR-059: true before 1.0.0) */
+  previousHangAttachesLog?: boolean;
   /** Whether usage reporting is on */
   usageReporting?: boolean;
   /** Turn usage reporting on or off */
@@ -128,7 +130,7 @@ export interface SettingsPanelProps {
   onShowUsagePreview?: () => void;
   /** Why what would be sent could not be read */
   usagePreviewError?: string | null;
-  /** "Report a problem" (ADR-057) */
+  /** "Report a problem" (ADR-058) */
   reportProblemState?: ReportProblemState;
   reportProblemPreview?: string | null;
   reportProblemComment?: string;
@@ -208,6 +210,7 @@ export function SettingsPanel({
   previousHang,
   onSendPreviousHang,
   previousHangAnswered,
+  previousHangAttachesLog,
   usageReporting,
   onUsageReportingChange,
   usagePreview,
@@ -303,6 +306,7 @@ export function SettingsPanel({
             previousHang={previousHang}
             onSendPreviousHang={onSendPreviousHang}
             previousHangAnswered={previousHangAnswered}
+            previousHangAttachesLog={previousHangAttachesLog}
             usageReporting={usageReporting}
             onUsageReportingChange={onUsageReportingChange}
             usagePreview={usagePreview}

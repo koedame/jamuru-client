@@ -233,6 +233,7 @@
       "previousHang": {
         "title": "Last time",
         "description": "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
+        "descriptionWithLog": "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamjam.log, so this can be found and fixed? The log can include the server address, your audio device names, the room ID, and other participants' identifiers.",
         "stageAppExit": "closing",
         "stageRestart": "restarting",
         "stageUpdateApply": "installing an update",

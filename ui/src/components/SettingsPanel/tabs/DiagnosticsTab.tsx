@@ -61,6 +61,8 @@ export interface DiagnosticsTabProps {
   onSendPreviousHang?: (send: boolean) => void;
   /** Set once the pending hang report has been answered, to show a short confirmation instead */
   previousHangAnswered?: boolean;
+  /** Whether "send" also attaches the current jamjam.log (ADR-059: true before the app's 1.0.0 release) */
+  previousHangAttachesLog?: boolean;
   /** Whether usage reporting is on (off by default) */
   usageReporting?: boolean;
   /** Turn usage reporting on or off (renders the usage reporting section) */
@@ -71,7 +73,7 @@ export interface DiagnosticsTabProps {
   onShowUsagePreview?: () => void;
   /** Why what would be sent could not be read */
   usagePreviewError?: string | null;
-  /** "Report a problem" (ADR-057): a manual, one-off send of jamjam.log and a comment */
+  /** "Report a problem" (ADR-058): a manual, one-off send of jamjam.log and a comment */
   reportProblemState?: ReportProblemState;
   /** The jamjam.log content that would be sent; null while not loaded yet */
   reportProblemPreview?: string | null;
@@ -337,9 +339,10 @@ function PreviousHangSection({
   previousHang,
   onSendPreviousHang,
   previousHangAnswered,
+  previousHangAttachesLog,
 }: Pick<
   DiagnosticsTabProps,
-  "previousHang" | "onSendPreviousHang" | "previousHangAnswered"
+  "previousHang" | "onSendPreviousHang" | "previousHangAnswered" | "previousHangAttachesLog"
 >) {
   const { t } = useTranslation();
 
@@ -361,11 +364,17 @@ function PreviousHangSection({
         {t("settings.diagnostics.previousHang.title", "Last time")}
       </span>
       <p className="diagnostics-tab__description">
-        {t(
-          "settings.diagnostics.previousHang.description",
-          "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
-          { stage: stageLabel(previousHang.stage, t) }
-        )}
+        {previousHangAttachesLog
+          ? t(
+              "settings.diagnostics.previousHang.descriptionWithLog",
+              "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamjam.log, so this can be found and fixed? The log can include the server address, your audio device names, the room ID, and other participants' identifiers.",
+              { stage: stageLabel(previousHang.stage, t) }
+            )
+          : t(
+              "settings.diagnostics.previousHang.description",
+              "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
+              { stage: stageLabel(previousHang.stage, t) }
+            )}
       </p>
       <div className="diagnostics-tab__usage-actions">
         <button
@@ -645,6 +654,7 @@ export function DiagnosticsTab({
   previousHang,
   onSendPreviousHang,
   previousHangAnswered,
+  previousHangAttachesLog,
   usageReporting,
   onUsageReportingChange,
   usagePreview,
@@ -666,6 +676,7 @@ export function DiagnosticsTab({
         previousHang={previousHang}
         onSendPreviousHang={onSendPreviousHang}
         previousHangAnswered={previousHangAnswered}
+        previousHangAttachesLog={previousHangAttachesLog}
       />
       <UsageReportingSection
         usageReporting={usageReporting}
