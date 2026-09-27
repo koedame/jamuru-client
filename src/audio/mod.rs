@@ -2,6 +2,8 @@
 //!
 //! Handles audio capture, playback, and local monitoring.
 
+#[cfg(target_os = "windows")]
+mod asio;
 mod channels;
 pub(crate) mod codec;
 mod device;
@@ -19,6 +21,8 @@ mod probe;
 mod resampler;
 mod stream;
 
+#[cfg(target_os = "windows")]
+pub use asio::{driver_name_of, is_asio_id, AsioDuplex};
 pub use channels::{capture_attempts, OutputRoute};
 pub use codec::{
     create_codec, AudioCodec, CodecConfig, CodecError, CodecType, OpusCodec, PcmCodec,

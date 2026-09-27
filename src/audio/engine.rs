@@ -560,7 +560,7 @@ fn open_channel_count(device: &cpal::Device, input: bool, sample_rate: u32, need
 
 /// Hands the device the stereo a frame source produces, on the channels the
 /// output route names.
-struct RoutedPuller<F> {
+pub(crate) struct RoutedPuller<F> {
     puller: FramePuller<F>,
     /// The stereo for one request, before it is spread over the device's channels.
     stereo: Vec<f32>,
@@ -570,7 +570,31 @@ struct RoutedPuller<F> {
 }
 
 impl<F: FnMut(&mut [f32]) -> usize> RoutedPuller<F> {
-    fn fill(&mut self, data: &mut [f32]) {
+    /// `stereo_len` is the exact size the stereo scratch buffer needs to be
+    /// for a `fill` call of `device_channels`-wide requests, so the caller
+    /// sizes it once and `fill` never has to grow it (see the field doc on
+    /// `stereo`, and `AsioDuplex` in `asio.rs` for such a caller).
+    ///
+    /// Only used by `asio.rs` (Windows only); the `cpal` path below builds
+    /// `RoutedPuller` as a struct literal directly.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn new(
+        puller: FramePuller<F>,
+        stereo_len: usize,
+        device_channels: usize,
+        route: OutputRoute,
+        sample_rate: u32,
+    ) -> Self {
+        Self {
+            puller,
+            stereo: vec![0.0; stereo_len],
+            device_channels,
+            route,
+            sample_rate,
+        }
+    }
+
+    pub(crate) fn fill(&mut self, data: &mut [f32]) {
         if self.device_channels == 2 && self.route.is_default() {
             self.puller.fill(data);
             super::device_loop::on_output(data, self.sample_rate);
@@ -591,7 +615,7 @@ impl<F: FnMut(&mut [f32]) -> usize> RoutedPuller<F> {
 ///
 /// The source is asked for a frame only when the device has used up the last
 /// one, so nothing is fetched ahead of the clock.
-struct FramePuller<F> {
+pub(crate) struct FramePuller<F> {
     fill_frame: F,
     frame: Vec<f32>,
     filled: usize,
@@ -599,7 +623,7 @@ struct FramePuller<F> {
 }
 
 impl<F: FnMut(&mut [f32]) -> usize> FramePuller<F> {
-    fn new(frame_samples: usize, fill_frame: F) -> Self {
+    pub(crate) fn new(frame_samples: usize, fill_frame: F) -> Self {
         // Frames vary in length once a peer at another sample rate is
         // resampled, so the buffer is sized for the widest conversion and the
         // source reports how much of it it filled.

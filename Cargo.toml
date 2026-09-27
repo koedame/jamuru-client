@@ -108,6 +108,13 @@ local-ip-address = "0.6"
 # OS version and installed memory for the environment probe
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
+[target.'cfg(windows)'.dependencies]
+# ASIO support. Talks to the driver's COM interface directly, without
+# Steinberg's ASIO SDK: the SDK's proprietary license needs a signed
+# submission, and its GPLv3 option conflicts with this app's source-available
+# license.
+azo = "0.2"
+
 [dev-dependencies]
 # Testing
 tokio-test = "0.4"
