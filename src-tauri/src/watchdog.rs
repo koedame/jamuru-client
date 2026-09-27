@@ -24,6 +24,16 @@
 //!   folds that into the same shape as a stalled stage, `stage: Unknown` and
 //!   no `stalled_ms`, so the rest of the app does not need to know which of
 //!   the two happened.
+//!
+//! An incident `previous_incident` finds is not necessarily shown to the
+//! user in the same launch that found it: while usage reporting is off, the
+//! confirmation screen has to ask first (`usage.rs`), and an update can
+//! restart the app before that happens. That restart is a normal
+//! `RunEvent::Exit` like any other, so it would otherwise erase the incident
+//! along with the running marker it is built from. [`save_pending_hang`] /
+//! [`read_pending_hang`] keep it on disk, separately, until
+//! [`clear_pending_hang`] says it has actually been resolved (sent, folded
+//! into the ordinary queue, or declined).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,6 +48,7 @@ use serde::{Deserialize, Serialize};
 const CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 const RUNNING_FILE: &str = "running.json";
+const PENDING_HANG_FILE: &str = "pending_hang.json";
 
 /// How long a stage may run before it counts as stuck. Chosen well inside
 /// anything else that would end the process on its own - restarting has its
@@ -84,6 +95,58 @@ fn take_running_marker(dir: &Path) -> Option<RunningMarker> {
 
 fn clear_running_marker(dir: &Path) {
     let _ = fs::remove_file(running_marker_path(dir));
+}
+
+#[derive(Serialize, Deserialize)]
+struct PendingHangMarker {
+    stage: HangStage,
+    stalled_ms: Option<u32>,
+    launch_id: String,
+    app_version: String,
+}
+
+fn pending_hang_marker_path(dir: &Path) -> PathBuf {
+    dir.join(PENDING_HANG_FILE)
+}
+
+/// Saves an incident found by `previous_incident` so it survives even a
+/// launch that exits (restart included) before the confirmation screen has
+/// asked the user about it. Left in place until [`clear_pending_hang`] says
+/// it is resolved - reading it back does not remove it, since a launch that
+/// loaded it into memory and then exits again before asking must still find
+/// it next time.
+pub fn save_pending_hang(dir: &Path, hang: Hang, launch_id: &str, app_version: &str) {
+    let marker = PendingHangMarker {
+        stage: hang.stage,
+        stalled_ms: hang.stalled_ms,
+        launch_id: launch_id.to_string(),
+        app_version: app_version.to_string(),
+    };
+    if let Ok(json) = serde_json::to_string(&marker) {
+        let _ = fs::create_dir_all(dir);
+        let _ = fs::write(pending_hang_marker_path(dir), json);
+    }
+}
+
+/// What a still-unanswered [`save_pending_hang`] left, if any.
+pub fn read_pending_hang(dir: &Path) -> Option<(Hang, String, String)> {
+    let content = fs::read_to_string(pending_hang_marker_path(dir)).ok()?;
+    let marker: PendingHangMarker = serde_json::from_str(&content).ok()?;
+    Some((
+        Hang {
+            stage: marker.stage,
+            stalled_ms: marker.stalled_ms,
+        },
+        marker.launch_id,
+        marker.app_version,
+    ))
+}
+
+/// The incident `save_pending_hang` saved has been resolved (sent, folded
+/// into the ordinary queue, or declined): removes it so it is not found
+/// again.
+pub fn clear_pending_hang(dir: &Path) {
+    let _ = fs::remove_file(pending_hang_marker_path(dir));
 }
 
 /// This launch's evidence that the one before it did not end cleanly.

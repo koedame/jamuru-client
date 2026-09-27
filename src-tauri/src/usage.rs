@@ -20,6 +20,7 @@ use jamjam::telemetry::{
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::streaming::StreamingState;
+use crate::watchdog;
 
 /// How often the open session's link is read for the totals.
 #[cfg(not(test))]
@@ -117,26 +118,51 @@ impl UsageState {
         }
     }
 
-    /// What `watchdog::previous_incident` found at startup, if anything: a
-    /// stage a watchdog caught stuck, or a launch that left no other record
-    /// of a clean exit. While reporting is already on, this is queued at
-    /// once like a crash; while it is off, it is kept so the screen can ask
-    /// before anything about it leaves the machine (`usage_previous_hang`,
-    /// `usage_send_previous_hang`).
+    /// What `watchdog::previous_incident` found at startup, if anything, and
+    /// what an earlier launch found but never got to show
+    /// (`watchdog::read_pending_hang`) - a restart (the app updating itself
+    /// included) is a normal exit, so it does not on its own mean the
+    /// confirmation screen has asked yet. While reporting is already on,
+    /// this is queued at once like a crash and the pending file is cleared;
+    /// while it is off, it is kept (in memory and on disk, so a further
+    /// restart before the screen asks still finds it) until the screen asks
+    /// and answers (`usage_previous_hang`, `usage_send_previous_hang`).
     pub fn apply_previous_incident(&self, incident: Option<(Hang, String, String)>) {
+        let dir = self.reporter.state_dir();
+        let incident = incident.or_else(|| dir.and_then(watchdog::read_pending_hang));
         let Some((hang, launch_id, app_version)) = incident else {
             return;
         };
         if self.reporter.is_enabled() {
             self.reporter
                 .record_previous_hang(hang, &launch_id, &app_version);
+            if let Some(dir) = dir {
+                watchdog::clear_pending_hang(dir);
+            }
         } else {
+            if let Some(dir) = dir {
+                watchdog::save_pending_hang(dir, hang, &launch_id, &app_version);
+            }
             *self.pending_hang.lock().unwrap() = Some(PendingHang {
                 hang,
                 launch_id,
                 app_version,
             });
         }
+    }
+
+    /// The one pending hang report, if there is one, removed either way it
+    /// is about to be used next (sent or discarded): clears the disk copy
+    /// `apply_previous_incident` may have saved alongside it, so neither is
+    /// found again by a launch after this one.
+    fn take_pending_hang(&self) -> Option<PendingHang> {
+        let pending = self.pending_hang.lock().unwrap().take();
+        if pending.is_some() {
+            if let Some(dir) = self.reporter.state_dir() {
+                watchdog::clear_pending_hang(dir);
+            }
+        }
+        pending
     }
 
     pub fn reporter(&self) -> &UsageReporter {
@@ -409,8 +435,7 @@ pub async fn usage_send_previous_hang(
     state: tauri::State<'_, UsageState>,
     send: bool,
 ) -> Result<(), String> {
-    let pending = state.pending_hang.lock().unwrap().take();
-    let Some(pending) = pending else {
+    let Some(pending) = state.take_pending_hang() else {
         return Ok(());
     };
     if send {
@@ -1136,5 +1161,73 @@ mod tests {
     fn when_the_message_is_not_one_the_app_knows_nothing_is_reported() {
         assert_eq!(classify_streaming_error("Invalid address: nonsense"), None);
         assert_eq!(classify_streaming_error(""), None);
+    }
+
+    /// A launch killed with no stage active is found by the very next one,
+    /// but while reporting is off that only lives in `pending_hang` until
+    /// the confirmation screen asks - and an update restarting the app is a
+    /// plain `RunEvent::Exit`, exactly like the clean exit
+    /// `mark_clean_exit` expects, so it must not erase what is still
+    /// waiting to be shown.
+    ///
+    /// Verifies: REQ-TEL-022
+    #[test]
+    fn a_pending_hang_survives_a_clean_restart_before_the_screen_has_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let reporter_for = |app_version: &str| {
+            UsageReporter::new(
+                Some(dir.path().to_path_buf()),
+                app_version,
+                Arc::new(NoTransport) as Arc<dyn Transport>,
+                false,
+            )
+        };
+
+        // Launch 1 is force-killed with no stage active: `running.json` is
+        // left behind instead of being cleared by `mark_clean_exit`.
+        let killed = reporter_for("0.1.0-36");
+        drop(crate::watchdog::Watchdog::install(killed.clone()));
+
+        // Launch 2 (the relaunch) finds it, and - reporting being off -
+        // only keeps it in memory and on disk, waiting for the screen.
+        let relaunch = reporter_for("0.1.0-36");
+        let found = crate::watchdog::previous_incident(&relaunch);
+        assert!(found.is_some(), "the killed launch's marker was found");
+        let usage2 = UsageState::with_reporter(relaunch.clone());
+        usage2.apply_previous_incident(found);
+        let watchdog2 = crate::watchdog::Watchdog::install(relaunch.clone());
+
+        // The auto-updater restarts launch 2 before its own screen ever
+        // asked about the still-pending incident: an ordinary clean exit.
+        watchdog2.mark_clean_exit();
+        assert!(
+            crate::watchdog::previous_incident(&reporter_for("0.1.0-36")).is_none(),
+            "launch 2 exited cleanly, so it left nothing new of its own"
+        );
+
+        // Launch 3 (the new version the update installed) finds nothing
+        // new either, but must still surface the original incident.
+        let next = reporter_for("0.1.0-37");
+        let found_next = crate::watchdog::previous_incident(&next);
+        assert!(found_next.is_none(), "nothing new happened in launch 2");
+        let usage3 = UsageState::with_reporter(next.clone());
+        usage3.apply_previous_incident(found_next);
+
+        let app = tauri::test::mock_app();
+        app.manage(usage3);
+        let hang = usage_previous_hang(app.state::<UsageState>())
+            .expect("the incident from launch 1 survived the clean restart");
+        assert_eq!(hang.stage, HangStage::Unknown);
+        assert_eq!(hang.stalled_ms, None);
+
+        // Once the screen finally asks and the user answers - declining
+        // here, `usage_send_previous_hang`'s other branch - it is gone for
+        // good - not found again by a further launch. Taken through the
+        // same `take_pending_hang` the command itself calls; only the
+        // concrete `AppHandle` the command also needs is out of reach of a
+        // mock app, and it is not part of what this regression is about.
+        assert!(app.state::<UsageState>().take_pending_hang().is_some());
+        assert!(usage_previous_hang(app.state::<UsageState>()).is_none());
+        assert!(crate::watchdog::read_pending_hang(dir.path()).is_none());
     }
 }
