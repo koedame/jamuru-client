@@ -253,18 +253,6 @@ pub enum SignalingMessage {
     Error {
         message: String,
     },
-    /// Sent to every peer in a room the server has closed. Each client should
-    /// treat this as an immediate disconnect.
-    RoomClosed {
-        reason: String,
-    },
-    /// Broadcast room-wide when the server removes one peer from the room;
-    /// only the client whose `peer_id` matches should disconnect, other
-    /// clients in the room should ignore it.
-    Kicked {
-        peer_id: Uuid,
-        reason: String,
-    },
 
     // Chat messages
     /// Send a chat message to the room
