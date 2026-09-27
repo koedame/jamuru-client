@@ -7,7 +7,7 @@
 use std::net::IpAddr;
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use crate::network::LinkRoute;
 
@@ -43,6 +43,7 @@ pub enum EventBody {
     SessionEnd(SessionEnd),
     Error(ErrorEvent),
     Crash(Crash),
+    Hang(Hang),
 }
 
 /// Formats a time the way `ts` is written.
@@ -253,4 +254,28 @@ pub struct Crash {
     pub line: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<String>,
+}
+
+/// The critical operation a watchdog was watching when the launch before
+/// this one did not end cleanly. `Unknown`: no operation was being watched
+/// (the process ended between them, or was killed while idle).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HangStage {
+    AppExit,
+    Restart,
+    UpdateApply,
+    DeviceOpen,
+    Unknown,
+}
+
+/// The launch before this one did not end cleanly: either a watchdog saw
+/// `stage` not finish within its limit (`stalled_ms` is how long it had run
+/// when that was noticed), or the process left no other record at all
+/// (`stage` is `Unknown`, `stalled_ms` is `None`). Sent by the next launch.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct Hang {
+    pub stage: HangStage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stalled_ms: Option<u32>,
 }

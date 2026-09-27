@@ -9,9 +9,11 @@
 
 use std::time::Duration;
 
+use jamjam::telemetry::{HangStage, UsageReporter};
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::streaming::{streaming_stop, StreamingState};
+use crate::usage::UsageState;
 
 /// Audio that is still running is stopped before the restart, so that the
 /// exit does not wait for a driver under a live stream. It is not waited for
@@ -29,7 +31,10 @@ const EXIT_LIMIT: Duration = Duration::from_secs(3);
 pub(crate) async fn restart<R: Runtime>(app: &AppHandle<R>) {
     stop_audio(app).await;
     let env = app.env();
-    after(GRACE, move || start_new_instance(&env));
+    let reporter = app
+        .try_state::<UsageState>()
+        .map(|usage| usage.reporter().clone());
+    after(GRACE, move || start_new_instance(&env, reporter));
     tracing::info!("Restarting");
     app.restart()
 }
@@ -57,11 +62,17 @@ fn after(delay: Duration, action: impl FnOnce() + Send + 'static) {
     });
 }
 
-fn start_new_instance(env: &tauri::Env) -> ! {
+fn start_new_instance(env: &tauri::Env, reporter: Option<UsageReporter>) -> ! {
     tracing::error!(
         "The restart did not happen within {:?}; starting the new instance and ending this one",
         GRACE
     );
+    // Local and unconditional (`write_hang`): otherwise this is only ever
+    // the line above, in a log nobody but the user could see.
+    if let Some(reporter) = reporter {
+        let stalled_ms = u32::try_from(GRACE.as_millis()).unwrap_or(u32::MAX);
+        reporter.write_hang(HangStage::Restart, Some(stalled_ms));
+    }
     // Ending the process runs exit handlers, which can wait on the same thing
     // the main thread does.
     #[cfg(unix)]

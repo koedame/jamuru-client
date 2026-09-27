@@ -14,7 +14,7 @@ use jamjam::audio::bounded;
 use jamjam::config::AppConfig;
 use jamjam::network::{NetworkError, SignalingFailure};
 use jamjam::telemetry::{
-    snapshot, AppStart, AudioEnv, Component, EndReason, ErrorCode, EventBody, HttpTransport,
+    snapshot, AppStart, AudioEnv, Component, EndReason, ErrorCode, EventBody, Hang, HttpTransport,
     NoTransport, SessionMode, Transport, UsageReporter,
 };
 use tauri::{AppHandle, Manager, Runtime};
@@ -69,6 +69,16 @@ pub struct UsageState {
     reporter: UsageReporter,
     changes: Arc<Changes>,
     read_audio_env: ReadAudioEnv,
+    /// A hang found at startup while reporting was off: not yet folded into
+    /// the reporter (that needs consent), waiting for the screen to ask the
+    /// user and answer with `usage_send_previous_hang`.
+    pending_hang: Arc<Mutex<Option<PendingHang>>>,
+}
+
+struct PendingHang {
+    hang: Hang,
+    launch_id: String,
+    app_version: String,
 }
 
 /// What was last reported about the machine's settings and audio devices,
@@ -103,6 +113,29 @@ impl UsageState {
             reporter,
             changes: Arc::default(),
             read_audio_env: Arc::new(snapshot::audio_env),
+            pending_hang: Arc::default(),
+        }
+    }
+
+    /// What `watchdog::previous_incident` found at startup, if anything: a
+    /// stage a watchdog caught stuck, or a launch that left no other record
+    /// of a clean exit. While reporting is already on, this is queued at
+    /// once like a crash; while it is off, it is kept so the screen can ask
+    /// before anything about it leaves the machine (`usage_previous_hang`,
+    /// `usage_send_previous_hang`).
+    pub fn apply_previous_incident(&self, incident: Option<(Hang, String, String)>) {
+        let Some((hang, launch_id, app_version)) = incident else {
+            return;
+        };
+        if self.reporter.is_enabled() {
+            self.reporter
+                .record_previous_hang(hang, &launch_id, &app_version);
+        } else {
+            *self.pending_hang.lock().unwrap() = Some(PendingHang {
+                hang,
+                launch_id,
+                app_version,
+            });
         }
     }
 
@@ -316,6 +349,37 @@ async fn audio_env_within(
 #[tauri::command]
 pub fn usage_preview(state: tauri::State<'_, UsageState>) -> String {
     state.reporter.preview_ndjson()
+}
+
+/// A hang found at startup while usage reporting is off, if there is one
+/// still waiting for the user to say whether to send it. `None` once it has
+/// been answered (`usage_send_previous_hang`) or if reporting is already on
+/// (it went out with the rest, unasked, the way a crash does).
+#[tauri::command]
+pub fn usage_previous_hang(state: tauri::State<'_, UsageState>) -> Option<Hang> {
+    state.pending_hang.lock().unwrap().as_ref().map(|p| p.hang)
+}
+
+/// Answers the one pending hang report: `send` true sends it on its own,
+/// without turning `usage_reporting` on; `send` false discards it. Either
+/// way, `usage_previous_hang` returns `None` afterwards.
+#[tauri::command]
+pub async fn usage_send_previous_hang(
+    state: tauri::State<'_, UsageState>,
+    send: bool,
+) -> Result<(), String> {
+    let pending = state.pending_hang.lock().unwrap().take();
+    let Some(pending) = pending else {
+        return Ok(());
+    };
+    if send {
+        state
+            .reporter()
+            .clone()
+            .send_one_off_hang(pending.hang, &pending.launch_id, &pending.app_version)
+            .await;
+    }
+    Ok(())
 }
 
 /// Reads the streaming totals into the open session: underruns and

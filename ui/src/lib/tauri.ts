@@ -1317,3 +1317,32 @@ export async function logOpenDir(): Promise<string> {
 export async function usagePreview(): Promise<string> {
   return invoke("usage_preview");
 }
+
+/** The critical operation a watchdog was watching when the launch before this one did not end cleanly. */
+export type HangStage = "app_exit" | "restart" | "update_apply" | "device_open" | "unknown";
+
+/** The launch before this one did not end cleanly: found at startup, kept only while usage reporting is off. */
+export interface Hang {
+  stage: HangStage;
+  /** How long the stage had run when it was noticed; absent when `stage` is `unknown`. */
+  stalled_ms?: number;
+}
+
+/**
+ * A hang found at startup while usage reporting is off, if there is one
+ * still waiting for the user to say whether to send it.
+ *
+ * @returns `null` once answered, or if usage reporting is already on (it was sent with the rest, unasked)
+ */
+export async function usagePreviousHang(): Promise<Hang | null> {
+  return invoke("usage_previous_hang");
+}
+
+/**
+ * Answers the one pending hang report found at startup.
+ *
+ * @param send `true` sends it on its own without turning usage reporting on; `false` discards it
+ */
+export async function usageSendPreviousHang(send: boolean): Promise<void> {
+  return invoke("usage_send_previous_hang", { send });
+}

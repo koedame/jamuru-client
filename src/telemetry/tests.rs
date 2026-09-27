@@ -1291,6 +1291,164 @@ fn when_reporting_is_off_a_crash_record_is_removed_and_not_sent() {
     assert!(transport.batches().is_empty());
 }
 
+// -- hang -----------------------------------------------------------------
+
+fn saved_hang(dir: &Path, launch_id: &str, stage: &str, stalled_ms: Option<u32>) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(
+        dir.join("hang.json"),
+        serde_json::json!({
+            "ts": "2026-09-27T12:00:00Z",
+            "launch_id": launch_id,
+            "app_version": "0.1.1",
+            "stage": stage,
+            "stalled_ms": stalled_ms,
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+/// A watchdog's `write_hang` and the next launch's `previous_hang` agree on
+/// the file: what one writes, the other reads back and then finds gone.
+#[test]
+fn a_hang_written_by_the_watchdog_is_read_back_once_by_the_next_launch() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), false);
+
+    reporter.write_hang(HangStage::AppExit, Some(5000));
+
+    let (hang, launch_id, app_version) = reporter.previous_hang().unwrap();
+    assert_eq!(hang.stage, HangStage::AppExit);
+    assert_eq!(hang.stalled_ms, Some(5000));
+    assert_eq!(launch_id, reporter.launch_id());
+    assert_eq!(app_version, "0.1.2");
+    assert!(reporter.previous_hang().is_none(), "read once, then gone");
+}
+
+/// Verifies: REQ-TEL-019
+#[test]
+fn when_the_last_launch_left_a_stalled_stage_the_next_one_records_it_with_the_old_launch_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+    let stalled_launch = "0123456789abcdef0123456789abcdef";
+    saved_hang(dir.path(), stalled_launch, "app_exit", Some(6000));
+
+    let (hang, launch_id, app_version) = reporter.previous_hang().unwrap();
+    reporter.record_previous_hang(hang, &launch_id, &app_version);
+
+    let parsed = lines(&reporter.preview_ndjson());
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0]["event"], "hang");
+    assert_eq!(parsed[0]["stage"], "app_exit");
+    assert_eq!(parsed[0]["stalled_ms"], 6000);
+    assert_eq!(parsed[0]["launch_id"], stalled_launch);
+    assert_eq!(parsed[0]["app_version"], "0.1.1");
+    assert_valid(&parsed[0]);
+}
+
+/// A launch left with no stage being watched (killed while idle) is told
+/// apart from a stalled one by the absence of `stalled_ms`.
+#[test]
+fn a_hang_with_no_known_stage_has_no_stalled_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+    saved_hang(
+        dir.path(),
+        "0123456789abcdef0123456789abcdef",
+        "unknown",
+        None,
+    );
+
+    let (hang, launch_id, app_version) = reporter.previous_hang().unwrap();
+    reporter.record_previous_hang(hang, &launch_id, &app_version);
+
+    let parsed = lines(&reporter.preview_ndjson());
+    assert_eq!(parsed[0]["stage"], "unknown");
+    assert!(parsed[0].get("stalled_ms").is_none());
+    assert_valid(&parsed[0]);
+}
+
+/// Verifies: REQ-TEL-019
+#[test]
+fn previous_hang_reads_and_removes_the_record_even_while_reporting_is_off() {
+    let dir = tempfile::tempdir().unwrap();
+    saved_hang(
+        dir.path(),
+        "0123456789abcdef0123456789abcdef",
+        "restart",
+        Some(10000),
+    );
+    let (reporter, _) = reporter(dir.path(), false);
+
+    let (hang, _, _) = reporter.previous_hang().unwrap();
+
+    assert_eq!(hang.stage, HangStage::Restart);
+    assert!(!dir.path().join("hang.json").exists());
+}
+
+#[test]
+fn when_there_is_no_saved_hang_previous_hang_is_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, _) = reporter(dir.path(), true);
+
+    assert!(reporter.previous_hang().is_none());
+}
+
+/// Verifies: REQ-TEL-020
+#[tokio::test]
+async fn a_one_off_hang_is_sent_while_reporting_stays_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, transport) = reporter(dir.path(), false);
+
+    reporter
+        .send_one_off_hang(
+            Hang {
+                stage: HangStage::AppExit,
+                stalled_ms: Some(5000),
+            },
+            "0123456789abcdef0123456789abcdef",
+            "0.1.1",
+        )
+        .await;
+
+    let sent = transport.batches();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let line = lines(&sent[0]).into_iter().next().unwrap();
+    assert_eq!(line["event"], "hang");
+    assert_eq!(line["app_version"], "0.1.1");
+    assert_valid(&line);
+    assert!(!reporter.is_enabled(), "the toggle is not left on");
+    assert!(
+        !dir.path().join("install_id").exists(),
+        "no install ID is left behind"
+    );
+}
+
+/// A one-off report sent while reporting was already fully on must not turn
+/// it off afterwards - that would silently disable an unrelated, standing
+/// choice the user made.
+#[tokio::test]
+async fn a_one_off_hang_does_not_disable_reporting_that_was_already_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reporter, transport) = reporter(dir.path(), true);
+
+    reporter
+        .send_one_off_hang(
+            Hang {
+                stage: HangStage::Restart,
+                stalled_ms: None,
+            },
+            "0123456789abcdef0123456789abcdef",
+            "0.1.1",
+        )
+        .await;
+
+    assert_eq!(transport.batches().len(), 1);
+    assert!(reporter.is_enabled(), "still on");
+    assert!(dir.path().join("install_id").exists());
+}
+
 // -- transport ----------------------------------------------------------
 
 struct Captured {

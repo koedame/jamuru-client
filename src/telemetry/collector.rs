@@ -13,9 +13,10 @@ use chrono::Utc;
 
 use super::crash;
 use super::event::{
-    format_ts, Component, EndReason, ErrorCode, ErrorEvent, EventBody, Record, SessionMode,
-    SessionStart, SCHEMA_VERSION,
+    format_ts, Component, EndReason, ErrorCode, ErrorEvent, EventBody, Hang, HangStage, Record,
+    SessionMode, SessionStart, SCHEMA_VERSION,
 };
+use super::hang;
 use super::install::{create_install_id, discard, load_install_id, random_id};
 use super::session::SessionTally;
 use super::transport::Transport;
@@ -89,15 +90,24 @@ impl UsageReporter {
         self.inner.enabled.load(Ordering::SeqCst)
     }
 
-    pub(crate) fn state_dir(&self) -> Option<&Path> {
+    /// Where the install ID and the pending crash/hang records are kept -
+    /// `None` when there is nowhere to keep them, in which case nothing is
+    /// collected. Exposed so the app layer can keep its own small local
+    /// records next to these (the watchdog's `running.json`), without a
+    /// second, possibly different, notion of where "the usage state dir" is.
+    pub fn state_dir(&self) -> Option<&Path> {
         self.inner.dir.as_deref()
     }
 
-    pub(crate) fn launch_id(&self) -> &str {
+    /// This launch's random ID, made once at construction. Exposed so the
+    /// watchdog's own local record (`running.json`) can be tied to the same
+    /// launch as `write_hang`/`previous_hang` without keeping a second copy.
+    pub fn launch_id(&self) -> &str {
         &self.inner.launch_id
     }
 
-    pub(crate) fn app_version(&self) -> &str {
+    /// This launch's app version. Same reason as `launch_id`.
+    pub fn app_version(&self) -> &str {
         &self.inner.app_version
     }
 
@@ -281,6 +291,74 @@ impl UsageReporter {
     /// Makes a panic leave a record for the next launch (see `crash`).
     pub fn install_panic_hook(&self) {
         crash::install_hook(self);
+    }
+
+    /// Writes `stage`/`stalled_ms` as this launch's hang record, for the
+    /// next launch to find. Unlike most of this type, this is not gated on
+    /// `is_enabled()`: a watchdog notices a stall before the user has said
+    /// anything, and the record is decided on at read time instead (see the
+    /// module docs and `hang.rs`).
+    pub fn write_hang(&self, stage: HangStage, stalled_ms: Option<u32>) {
+        let Some(dir) = self.inner.dir.as_deref() else {
+            return;
+        };
+        hang::write(
+            dir,
+            &hang::HangFile {
+                ts: format_ts(Utc::now()),
+                launch_id: self.launch_id().to_string(),
+                app_version: self.app_version().to_string(),
+                stage,
+                stalled_ms,
+            },
+        );
+    }
+
+    /// Takes the hang record left by the launch before this one, if there is
+    /// a usable one, along with the `launch_id`/`app_version` it happened
+    /// in. Removes the record either way it is used next: folded into what
+    /// is sent now (`record_previous_hang`) or offered to the user as a
+    /// one-off (`send_one_off_hang`). Not gated on `is_enabled()`: reading
+    /// what is on disk is not the same as sending it.
+    pub fn previous_hang(&self) -> Option<(Hang, String, String)> {
+        let dir = self.inner.dir.as_deref()?;
+        let saved = hang::take(dir)?;
+        saved.has_valid_ids().then(|| {
+            (
+                saved.event(),
+                saved.launch_id.clone(),
+                saved.app_version.clone(),
+            )
+        })
+    }
+
+    /// Queues `hang`, from the launch named by `launch_id`/`app_version`, the
+    /// way `report_previous_crash` queues a crash. Does nothing while
+    /// reporting is off (`push` already checks).
+    pub fn record_previous_hang(&self, hang: Hang, launch_id: &str, app_version: &str) {
+        self.push(EventBody::Hang(hang), Some((launch_id, app_version)));
+    }
+
+    /// Sends `hang` as one `hang` event on its own, using an install ID made
+    /// and discarded just for this send. For the case reporting itself is
+    /// off: the user agreed to send this one report, which must not turn
+    /// `usage_reporting` on or leave an ID behind afterwards.
+    pub async fn send_one_off_hang(&self, hang: Hang, launch_id: &str, app_version: &str) {
+        if self.inner.dir.is_none() {
+            return;
+        }
+        let was_enabled = self.is_enabled();
+        if !was_enabled {
+            self.set_enabled(true);
+            if !self.is_enabled() {
+                return;
+            }
+        }
+        self.push(EventBody::Hang(hang), Some((launch_id, app_version)));
+        self.flush().await;
+        if !was_enabled {
+            self.set_enabled(false);
+        }
     }
 
     /// Sends what is waiting: at most [`MAX_BATCH_LINES`] lines and

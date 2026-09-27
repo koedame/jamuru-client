@@ -238,6 +238,11 @@
   box-shadow: var(--shadow-focus);
 }
 
+.diagnostics-tab__usage-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
 .diagnostics-tab__usage-lines {
   align-self: stretch;
   max-height: 240px;

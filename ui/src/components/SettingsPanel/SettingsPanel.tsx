@@ -14,7 +14,7 @@ import { DevicesTab, DeviceInfo } from "./tabs/DevicesTab";
 import { DiagnosticsTab, DiagnosticsState } from "./tabs/DiagnosticsTab";
 import { SelectOption } from "./Select";
 import { MicIcon, SlidersIcon, UserIcon, ActivityIcon } from "./icons";
-import { CompleteDiagnosticsResult, RecommendedPreset } from "../../lib/tauri";
+import { CompleteDiagnosticsResult, Hang, RecommendedPreset } from "../../lib/tauri";
 import "./SettingsPanel.css";
 
 export type SettingsTabId = "devices" | "general" | "profile" | "diagnostics";
@@ -112,6 +112,12 @@ export interface SettingsPanelProps {
   logFolder?: string | null;
   /** Why the folder could not be opened */
   logFolderError?: string | null;
+  /** A hang found at startup while usage reporting is off; null/undefined = nothing to ask about */
+  previousHang?: Hang | null;
+  /** Answers the pending hang report */
+  onSendPreviousHang?: (send: boolean) => void;
+  /** Set once the pending hang report has been answered */
+  previousHangAnswered?: boolean;
   /** Whether usage reporting is on */
   usageReporting?: boolean;
   /** Turn usage reporting on or off */
@@ -189,6 +195,9 @@ export function SettingsPanel({
   onOpenLogFolder,
   logFolder,
   logFolderError,
+  previousHang,
+  onSendPreviousHang,
+  previousHangAnswered,
   usageReporting,
   onUsageReportingChange,
   usagePreview,
@@ -273,6 +282,9 @@ export function SettingsPanel({
             onOpenLogFolder={onOpenLogFolder}
             logFolder={logFolder}
             logFolderError={logFolderError}
+            previousHang={previousHang}
+            onSendPreviousHang={onSendPreviousHang}
+            previousHangAnswered={previousHangAnswered}
             usageReporting={usageReporting}
             onUsageReportingChange={onUsageReportingChange}
             usagePreview={usagePreview}

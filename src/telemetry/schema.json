@@ -11,7 +11,8 @@
     { "$ref": "#/$defs/session_start" },
     { "$ref": "#/$defs/session_end" },
     { "$ref": "#/$defs/error" },
-    { "$ref": "#/$defs/crash" }
+    { "$ref": "#/$defs/crash" },
+    { "$ref": "#/$defs/hang" }
   ],
   "unevaluatedProperties": false,
   "$defs": {
@@ -34,7 +35,7 @@
           "description": "UTC, ISO 8601, whole seconds."
         },
         "seq": { "type": "integer", "minimum": 0, "description": "Counter within one launch." },
-        "event": { "enum": ["app_start", "audio_env", "session_start", "session_end", "error", "crash"] },
+        "event": { "enum": ["app_start", "audio_env", "session_start", "session_end", "error", "crash", "hang"] },
         "install_id": { "$ref": "#/$defs/id", "description": "16 random bytes made when the user turns usage reporting on; discarded when they turn it off." },
         "launch_id": { "$ref": "#/$defs/id", "description": "16 random bytes made at every launch." },
         "session_id": {
@@ -177,6 +178,15 @@
         "function": { "type": "string", "pattern": "^[A-Za-z0-9_:<>]{1,200}$" }
       },
       "required": ["file", "line"]
+    },
+    "hang": {
+      "description": "The launch before this one did not end cleanly, sent by the next launch. Either a watchdog saw a critical stage (app_exit/restart/update_apply/device_open) not finish within its limit - stage names it and stalled_ms is how long it had run - or the process left no other record at all (stage 'unknown', no stalled_ms). Carries the launch_id and app_version of the launch that did not end cleanly.",
+      "properties": {
+        "event": { "const": "hang" },
+        "stage": { "enum": ["app_exit", "restart", "update_apply", "device_open", "unknown"] },
+        "stalled_ms": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["stage"]
     }
   }
 }
