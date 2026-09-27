@@ -166,6 +166,17 @@ ADR-022 で**対象外**と決定済み。
 - [ ] 任意設定の保存を認めるかを判断
 - **トレードオフ**: ADR-019 / ADR-021 が各プリセットに検証済みの遅延バジェットと FEC 構成を与えている。任意の組み合わせを保存できると、検証されていない遅延特性の設定が生成される
 
+### 録音・配信用の仮想アウトプットチャンネル
+
+自分の音（A）・参加者ごとの音（B）・ミックス後の音（C）を、DAW や配信ソフトが選べる出力デバイスとして同時に提供する機能（2ch ずつ、計 6ch）。
+
+**方針（確定）**: 「特定の既存デバイスに出力する」方式（ユーザーが BlackHole・VB-Audio Virtual Cable 等を別途インストールする前提）は、それを持っていない人には使えず用途が狭いため採らない。**jamjam 自身が仮想デバイスとして OBS / DAW から選べる状態を作る**。
+
+- **Linux（実装済み）**: アプリ起動時に `pw-loopback` を子プロセスとして立て、シンク面（`jamjam-recording-output-in`。ここへアプリが書く）とソース面（`jamjam-recording-output-out`。DAW/OBS はこちらを選ぶ）の仮想デバイスペアを 1 プロセスで作る。書き込みは `pw-cat --playback` を子プロセスにして標準入力へ流す。プロセスを kill するだけで両方のノードが消えるので、`pw-cli create-node` のノード ID を控えて `destroy` する管理が要らない（`libpipewire` への直接リンクも不要 = `libpipewire-0.3-dev` をビルド環境に足さずに済む）。`src/audio/virtual_output.rs` の `VirtualOutputSink` として実装済み。手元の PipeWire + `pw-loopback` + `pw-cat` で実際にノード生成〜書き込みが動くことを確認済み（下記「検証」）
+- **macOS / Windows（未着手・別チケット）**: OS の制約上、仮想デバイスを実行時に動的生成する API が無い。macOS は署名・notarize 済みの Core Audio HAL plugin をインストーラでバンドルし `/Library/Audio/Plug-Ins/HAL/` に導入、Windows は署名済みの仮想オーディオドライバをインストーラでバンドルする方式になる（一度インストールすれば以降は常設デバイスとして、Linux 版と同じ書き込み口を使い回せる）。コード署名・notarize インフラと実機がこの環境に無く、調査・実装ができない
+- **B のチャンネル数（確定）**: 現状のセッションは 1 対 1 のみ（`Roster.streaming_with: Option<Uuid>`）で、3 人以上のフルメッシュ音声（REQ-LAT-102）はまだ無い。B は当面「参加者 1 人ぶん」の固定 2ch とし、メッシュ音声が実装されたときに広げる
+- [ ] **残作業**: `VirtualOutputSink` はまだ streaming セッションから呼ばれていない（配線先の型ができた段階）。次のステップは、セッション開始時に Linux で起動し、A（`LocalMonitor` が持つドライな自分の音）・B（`ReceivePath::read_into` のパン適用前の生データ）・C（`playout_source` の最終出力）を、audio コールバックからロックフリーのリングバッファ経由で `VirtualOutputSink` の書き込みスレッドへ渡す配線を行うこと。既存のリアルタイム制約（`docs-spec/architecture.md` §10.2: audio コールバックでのアロケーション・ブロッキング I/O 禁止）を守ったまま `mix_peers` / `playout_source` を改修する必要があり、リアルタイム音声パスへの影響が大きいため、この ticket の範囲を大きく超えないよう別のコミットで慎重に進める
+
 ---
 
 ## 参照
