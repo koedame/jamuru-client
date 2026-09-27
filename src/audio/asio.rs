@@ -439,6 +439,7 @@ impl CallbackState {
             }
         }
         if in_channels > 0 {
+            super::device_loop::on_input(&self.decoded, in_channels);
             pick_channels(
                 &self.decoded,
                 in_channels,
