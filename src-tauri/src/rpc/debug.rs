@@ -273,7 +273,7 @@ fn restart<R: Runtime>(app: &AppHandle<R>) -> Value {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(RESTART_DELAY).await;
-        app.restart();
+        crate::restart::restart(&app).await;
     });
     json!({ "restarting": true })
 }
