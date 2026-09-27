@@ -75,6 +75,7 @@ sidebar_position: 1
 | [ADR-049](./adr/ADR-049-channels-fit-when-opened-and-pan-follows-the-sender.md) | デバイスへのチャンネルの当てはめは開くときだけ（保存は書き換えない）。同じ番号の組は 1 チャンネル。受け手のパンは届いた音がステレオかモノラルかで変わる |
 | [ADR-050](./adr/ADR-050-device-calls-are-bounded.md) | 固まったオーディオドライバへの呼び出しには上限を付け、待ちが設定の読み書き・別のデバイスへの切り替え・ネットワークを止めないようにする。開けなかったデバイスは画面に出す |
 | [ADR-051](./adr/ADR-051-route-follows-the-peers-answers.md) | 音声の送り先は、こちらから送れた候補の中から選ぶ。相手が ping に応答しないまま別の候補から声が届いたら、送り先をそちらに移す |
+| [ADR-054](./adr/ADR-054-route-is-the-nearest-that-answers.md) | 送り先は、応答した候補のうち近い経路（LAN、Tailscale などの重ね合わせ網、その他の順）にする。候補の優先度もこの順に並べ、最初の応答が LAN でなければ 500 ms まで近い経路の応答を待つ |
 
 ---
 
