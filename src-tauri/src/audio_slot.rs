@@ -12,6 +12,8 @@ use std::sync::mpsc;
 use std::thread;
 
 use jamjam::audio::{AudioConfig, AudioEngine, AudioError, DeviceId};
+#[cfg(target_os = "windows")]
+use jamjam::audio::AsioDuplex;
 
 /// What an open leaves behind: the engine, back from the thread that used it,
 /// and how the open went
@@ -51,6 +53,19 @@ impl<T: Send + 'static> DeviceSlot<T> {
         self.device.as_ref()
     }
 
+    /// Drops the engine (stopping its stream, if any) and gives up on any
+    /// switch in progress, without opening anything in its place: for when
+    /// ASIO takes over this direction (`AsioSwitch`), which opens both
+    /// directions itself. `device` becomes what `device()` reports and what
+    /// the next real [`switch`](Self::switch) sees, the same as if this slot
+    /// had opened it.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn park(&mut self, device: Option<DeviceId>) {
+        self.opening = None;
+        self.engine = None;
+        self.device = device;
+    }
+
     /// Starts opening `device`: `open` runs on a thread of its own, on the
     /// engine. Returns at once; [`poll`](Self::poll) says how it went.
     pub(crate) fn switch(
@@ -61,17 +76,20 @@ impl<T: Send + 'static> DeviceSlot<T> {
         self.device = device;
         let engine = match self.engine.take() {
             Some(engine) => engine,
-            None => {
+            None if self.opening.is_some() => {
                 // An open is still out. It keeps its engine, and hands nothing
                 // back that anyone reads.
                 tracing::warn!(
                     "Switching the {} device again before the last switch finished",
                     self.what
                 );
-                self.opening = None;
                 AudioEngine::new(self.config.clone())
             }
+            // Parked (ASIO took over this direction) rather than mid-open:
+            // nothing to warn about, just build the engine `park` dropped.
+            None => AudioEngine::new(self.config.clone()),
         };
+        self.opening = None;
         let (tx, rx) = mpsc::channel();
         let spawned = thread::Builder::new()
             .name(format!("audio-switch-{}", self.what))
@@ -108,6 +126,78 @@ impl<T: Send + 'static> DeviceSlot<T> {
                     "the {} switch stopped",
                     self.what
                 ))))
+            }
+        }
+    }
+}
+
+/// A switch to a new ASIO session in progress (Windows only).
+///
+/// ASIO opens capture and playback together, as a single session
+/// ([`AsioDuplex`]), not as two `AudioEngine`s, so this does not reuse an
+/// engine across switches the way [`DeviceSlot`] does: each switch tears down
+/// whatever session is running (on the same thread that opens the next one -
+/// only one ASIO session runs at a time) and builds an entirely new one.
+/// Otherwise the shape is the same as `DeviceSlot`: opening happens off the
+/// calling thread, since a driver can hang, and asking for another switch
+/// before [`poll`](Self::poll) has reported the last one abandons it rather
+/// than queuing behind it. The live session itself is the caller's to hold
+/// between switches (there is no persistent resource here to hand back, the
+/// way `DeviceSlot` hands back its engine).
+#[cfg(target_os = "windows")]
+pub(crate) struct AsioSwitch<T> {
+    opening: Option<mpsc::Receiver<Result<(AsioDuplex, T), AudioError>>>,
+}
+
+#[cfg(target_os = "windows")]
+impl<T: Send + 'static> AsioSwitch<T> {
+    pub(crate) fn idle() -> Self {
+        Self { opening: None }
+    }
+
+    /// Starts closing `previous` (when given) and opening a new session with
+    /// `open`, on a thread of its own. Returns at once; [`poll`](Self::poll)
+    /// reports how it went.
+    pub(crate) fn switch(
+        &mut self,
+        previous: Option<AsioDuplex>,
+        open: impl FnOnce() -> Result<(AsioDuplex, T), AudioError> + Send + 'static,
+    ) {
+        if self.opening.is_some() {
+            // The open it was mid this stopped: it keeps running until its
+            // driver call returns, then hands its result to nobody (the
+            // receiver below is dropped here), the same as `DeviceSlot`.
+            tracing::warn!("Switching the ASIO driver again before the last switch finished");
+        }
+        let (tx, rx) = mpsc::channel();
+        let spawned = thread::Builder::new()
+            .name("audio-switch-asio".to_string())
+            .spawn(move || {
+                if let Some(previous) = previous {
+                    previous.stop();
+                }
+                let _ = tx.send(open());
+            });
+        match spawned {
+            Ok(_) => self.opening = Some(rx),
+            Err(e) => tracing::error!("Could not start the ASIO switch: {}", e),
+        }
+    }
+
+    /// How the switch that was started went, once it has finished.
+    pub(crate) fn poll(&mut self) -> Option<Result<(AsioDuplex, T), AudioError>> {
+        let opening = self.opening.as_ref()?;
+        match opening.try_recv() {
+            Ok(result) => {
+                self.opening = None;
+                Some(result)
+            }
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.opening = None;
+                Some(Err(AudioError::StreamError(
+                    "the ASIO switch stopped".to_string(),
+                )))
             }
         }
     }
