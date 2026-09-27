@@ -333,6 +333,7 @@ impl AudioEngine {
                     stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
                         let started = crate::perf::start();
+                        super::device_loop::on_input(data, device_channels);
                         if whole_frame {
                             let timestamp =
                                 sample_count.fetch_add(data.len() as u64, Ordering::Relaxed);
@@ -456,6 +457,7 @@ impl AudioEngine {
                 stereo: vec![0.0; frame_size as usize * 2 * 4],
                 device_channels,
                 route,
+                sample_rate,
             };
 
             let stream = device
@@ -564,12 +566,14 @@ struct RoutedPuller<F> {
     stereo: Vec<f32>,
     device_channels: usize,
     route: OutputRoute,
+    sample_rate: u32,
 }
 
 impl<F: FnMut(&mut [f32]) -> usize> RoutedPuller<F> {
     fn fill(&mut self, data: &mut [f32]) {
         if self.device_channels == 2 && self.route.is_default() {
             self.puller.fill(data);
+            super::device_loop::on_output(data, self.sample_rate);
             return;
         }
         let stereo_len = data.len() / self.device_channels * 2;
@@ -578,6 +582,7 @@ impl<F: FnMut(&mut [f32]) -> usize> RoutedPuller<F> {
         }
         let stereo = &mut self.stereo[..stereo_len];
         self.puller.fill(stereo);
+        super::device_loop::on_output(stereo, self.sample_rate);
         place_stereo(stereo, data, self.device_channels, self.route);
     }
 }
@@ -792,6 +797,7 @@ mod tests {
             stereo: Vec::new(),
             device_channels: 8,
             route: OutputRoute::from_settings(5, Some(6)),
+            sample_rate: 48_000,
         };
         let mut data = vec![f32::NAN; 16];
 
