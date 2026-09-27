@@ -184,7 +184,7 @@ async fn update_once(app: &AppHandle) -> Result<(), UpdateError> {
         tracing::info!("Installed {}; restarting", version);
         // Windows: the installer has already ended this process. Elsewhere the
         // new version runs from the next start.
-        app.restart();
+        crate::restart::restart(app).await;
     }
     Ok(())
 }

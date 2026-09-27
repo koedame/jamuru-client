@@ -17,6 +17,7 @@ mod e2e_control;
 mod help_link;
 mod logging;
 mod mixer;
+mod restart;
 mod rpc;
 mod session;
 mod settings;
@@ -144,11 +145,15 @@ pub fn run() {
     #[cfg(feature = "debug-remote")]
     debug_remote::spawn(app.handle().clone());
 
-    app.run(|handle, event| {
-        if let tauri::RunEvent::Exit = event {
+    app.run(|handle, event| match event {
+        tauri::RunEvent::ExitRequested { code, .. } => {
+            tracing::info!("Exit requested (code {:?})", code);
+        }
+        tauri::RunEvent::Exit => {
             handle
                 .state::<UsageState>()
                 .app_exiting(&handle.state::<StreamingState>());
         }
+        _ => {}
     });
 }
