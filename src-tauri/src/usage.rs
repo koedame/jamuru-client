@@ -360,11 +360,52 @@ pub fn usage_previous_hang(state: tauri::State<'_, UsageState>) -> Option<Hang> 
     state.pending_hang.lock().unwrap().as_ref().map(|p| p.hang)
 }
 
+/// Whether answering "send" to [`usage_previous_hang`] also attaches
+/// `jamjam.log` ([`attaches_log`]), so the confirmation screen can say so
+/// accurately (ADR-059).
+#[tauri::command]
+pub fn usage_previous_hang_attaches_log(app: AppHandle) -> bool {
+    attaches_log(&app)
+}
+
+/// Before 1.0.0, only verification users run the app, so the automatic hang
+/// report also attaches `jamjam.log` through the "Report a problem" send
+/// path (ADR-059). Revisit this at the 1.0.0 release: decide there whether
+/// `jamjam.log` still goes out unasked, and adjust this together with what
+/// the confirmation screen says it will send.
+fn major_attaches_log(major: u64) -> bool {
+    major < 1
+}
+
+fn attaches_log<R: Runtime>(app: &AppHandle<R>) -> bool {
+    major_attaches_log(app.package_info().version.major)
+}
+
+/// The comment sent with the `jamjam.log` [`attaches_log`] attaches to the
+/// automatic hang report, naming the stage and launch it is about so a
+/// report read on the server side does not need to be matched up with the
+/// structured `hang` event by anything but this text.
+fn hang_report_comment(hang: &Hang, launch_id: &str) -> String {
+    format!(
+        "(automatic report: did not exit cleanly last time, stuck while {:?}; launch {launch_id})",
+        hang.stage
+    )
+}
+
 /// Answers the one pending hang report: `send` true sends it on its own,
 /// without turning `usage_reporting` on; `send` false discards it. Either
 /// way, `usage_previous_hang` returns `None` afterwards.
+///
+/// While `send` is true and [`attaches_log`] holds, this also sends
+/// `jamjam.log` through the same path "Report a problem" uses
+/// (`report_problem::send_log_report`), so the two features share one
+/// receiver and one body shape instead of a second one being built here
+/// (ADR-059). That send is best-effort: a failure is logged and does not
+/// change the `Ok(())` this returns, matching `send_one_off_hang` itself
+/// not surfacing a delivery failure either.
 #[tauri::command]
 pub async fn usage_send_previous_hang(
+    app: AppHandle,
     state: tauri::State<'_, UsageState>,
     send: bool,
 ) -> Result<(), String> {
@@ -378,6 +419,12 @@ pub async fn usage_send_previous_hang(
             .clone()
             .send_one_off_hang(pending.hang, &pending.launch_id, &pending.app_version)
             .await;
+        if attaches_log(&app) {
+            let comment = hang_report_comment(&pending.hang, &pending.launch_id);
+            if let Err(err) = crate::report_problem::send_log_report(&app, &comment).await {
+                tracing::warn!("automatic hang report: could not attach jamjam.log: {err}");
+            }
+        }
     }
     Ok(())
 }
@@ -514,6 +561,7 @@ fn classify_streaming_error(message: &str) -> Option<(Component, ErrorCode)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jamjam::telemetry::HangStage;
 
     /// The whole path a room takes through the app: the session opens, the
     /// sampler reads the link on its own timer, a peer joins, and leaving
@@ -984,6 +1032,29 @@ mod tests {
         assert_eq!(major_of("128.0.6613.84").as_deref(), Some("128"));
         assert_eq!(major_of("2.44.0").as_deref(), Some("2"));
         assert_eq!(major_of("17").as_deref(), Some("17"));
+    }
+
+    /// Verifies: REQ-TEL-021
+    #[test]
+    fn a_pre_1_0_0_app_version_attaches_the_log_and_a_1_0_0_or_later_one_does_not() {
+        assert!(major_attaches_log(0));
+        assert!(!major_attaches_log(1));
+        assert!(!major_attaches_log(2));
+    }
+
+    /// Verifies: REQ-TEL-021
+    #[test]
+    fn the_automatic_hang_reports_comment_names_the_stage_and_launch() {
+        let comment = hang_report_comment(
+            &Hang {
+                stage: HangStage::Restart,
+                stalled_ms: Some(9000),
+            },
+            "launch-42",
+        );
+
+        assert!(comment.contains("Restart"));
+        assert!(comment.contains("launch-42"));
     }
 
     #[test]

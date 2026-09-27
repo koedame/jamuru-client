@@ -56,6 +56,7 @@
 | `diagnostics_check_zero_latency` | ゼロレイテンシーモードが使えるかを調べる |
 | `usage_preview` | 利用状況として送る内容の見本を読む |
 | `usage_previous_hang` | 前回終了できなかった記録が残っているかを読む |
+| `usage_previous_hang_attaches_log` | その記録を送るとき診断ログも添えるかを読む |
 
 ## できない操作
 

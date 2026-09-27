@@ -197,6 +197,7 @@ app_commands! {
     [Access::NO_HELP] "診断ログのフォルダを開く" crate::logging::log_open_dir;
     [Access::ALL] "利用状況として送る内容の見本を読む" crate::usage::usage_preview;
     [Access::ALL] "前回終了できなかった記録が残っているかを読む" crate::usage::usage_previous_hang;
+    [Access::ALL] "その記録を送るとき診断ログも添えるかを読む" crate::usage::usage_previous_hang_attaches_log;
     // Consent to send this one report is the person's own, like the toggle.
     [Access::NO_HELP] "前回終了できなかった記録を送る・捨てる" crate::usage::usage_send_previous_hang;
     // The log can carry a room ID and other participants' identifiers (ADR-036),
@@ -446,6 +447,7 @@ mod tests {
             "streaming_status",
             "usage_preview",
             "usage_previous_hang",
+            "usage_previous_hang_attaches_log",
         ];
         assert_eq!(open, expected);
     }
