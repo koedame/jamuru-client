@@ -428,6 +428,7 @@ impl CallbackState {
     fn process(&mut self, half: usize) {
         let n = self.buffer_size;
         let in_channels = self.input.len();
+        let input_started = crate::perf::start();
         for (channel, buf) in self.input.iter().enumerate() {
             let base = buf.ptrs[half].cast::<u8>();
             for frame in 0..n {
@@ -439,6 +440,7 @@ impl CallbackState {
             }
         }
         if in_channels > 0 {
+            super::device_loop::on_input(&self.decoded, in_channels);
             pick_channels(
                 &self.decoded,
                 in_channels,
@@ -449,9 +451,11 @@ impl CallbackState {
             self.sample_count += self.picked.len() as u64;
             (self.capture_callback)(&self.picked, timestamp);
         }
+        crate::perf::INPUT_CALLBACK.stop(input_started);
 
         let out_channels = self.output.len();
         if out_channels > 0 {
+            let output_started = crate::perf::start();
             self.puller.fill(&mut self.device_out);
             for (channel, buf) in self.output.iter().enumerate() {
                 let base = buf.ptrs[half].cast::<u8>();
@@ -467,6 +471,7 @@ impl CallbackState {
                     }
                 }
             }
+            crate::perf::OUTPUT_CALLBACK.stop(output_started);
         }
     }
 }
