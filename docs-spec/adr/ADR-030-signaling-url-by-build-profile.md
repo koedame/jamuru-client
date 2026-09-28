@@ -64,6 +64,8 @@ pub const DEFAULT_SERVER_URL: &str = if cfg!(debug_assertions) {
 
 本番のサーバーはリポジトリに置かない。リリースを組む人（`build.yml` / `release.yml` ではリポジトリの secret `JAMJAM_SERVER_URL`）がビルド時に環境変数 `JAMJAM_SERVER_URL` で渡し、コアライブラリが `option_env!` で取り込む。
 
+`release.yml` はタグが `-` を含む（ベータ）ビルドだけ、渡す secret を `JAMJAM_SERVER_URL_BETA`（ステージングのサーバー）に切り替える。ベータは検証用であり、本番の利用者・本番のデータに影響させないためである（Decision 7）。
+
 環境変数は渡し忘れると黙って別の接続先になりうる（当初の欠陥は `VITE_SIGNALING_SERVER` の渡し忘れで localhost になった）。そこでアプリのビルドスクリプト（`src-tauri/build.rs`）が、リリースのビルドで `JAMJAM_SERVER_URL` が無いとき、`https://` でないとき、ループバックのホストを指すときにビルドを失敗させる。渡し忘れたリリースは作られない。CLI とライブラリのリリースビルドは既定のサーバーを使わないので、渡さなくてもビルドできる。
 
 `tests/distribution_config_test.rs` は、コアライブラリのソースに例示用（`example.com`）以外の `https://` / `wss://` の URL が無いことを検査する。本番のサーバーがソースに書き戻されるのを防ぐ。
@@ -89,6 +91,20 @@ pub const DEFAULT_SERVER_URL: &str = if cfg!(debug_assertions) {
 答えは `ws://` か `wss://` の URL でなければ使わない。`https://` で問い合わせたのに暗号化されない `ws://` が返ったときも繋がない（REQ-CON-029）。問い合わせで送られてきた先に、端末の証明（ADR-024）を渡すことになるためである。
 
 HTTP の問い合わせには `reqwest`（rustls）を使う。WebSocket と同じ TLS の実装（rustls・aws-lc-rs）なので、別の暗号の実装は入らない。
+
+### 7. ベータは本番と別のサーバー（ステージング）を向く
+
+`release.yml` の `prepare` ジョブがタグに `-` を含むかどうかでベータと本番を見分けている（Context 冒頭のコメント）。この判定をそのままサーバーの選択にも使う。
+
+| リリースの種別 | タグの形 | 使う secret | 向く先 |
+|--------------|---------|------------|-------|
+| リリース（`vX.Y.Z`） | `-` を含まない | `JAMJAM_SERVER_URL` | 本番 |
+| ベータ（`vX.Y.Z-beta.N`） | `-` を含む | `JAMJAM_SERVER_URL_BETA` | ステージング |
+| リハーサル（`workflow_dispatch`、タグ無し） | — | `JAMJAM_SERVER_URL` | 本番（公開されないので実害は無いが、既定は本番のまま） |
+
+`build.yml`（`main` / `develop` への push・PR の検証ビルド）は配布しないので対象外。既定どおり `JAMJAM_SERVER_URL` を使う。
+
+`scripts/check-release-server-url.sh` にも同じ条件で選んだ URL を渡す。ビルド時に渡した URL とバイナリを比べる検査なので、ベータでは「バイナリがステージングの URL を持っている」ことを確認する形になる。
 
 ## Consequences
 
