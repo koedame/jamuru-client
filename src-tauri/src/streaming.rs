@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use jamjam::audio::{
     capture_attempts, capture_to_wire, pan_received, AudioConfig, AudioEngine, AudioError,
     AudioPreset, DeviceId, FlightKind, FlightRecorder, LocalMonitor, OutputRoute, PeerRateChange,
-    PlayoutResult, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
+    PlayoutResult, ReceivePath, RecordingFeed, RecordingTap, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
@@ -1343,6 +1343,7 @@ pub async fn streaming_get_master_volume(
 /// contended buffer costs one concealed frame rather than a stalled device.
 /// The mixer gains are applied here rather than on the way in, so a volume or
 /// pan change is heard on the very next frame.
+#[allow(clippy::too_many_arguments)]
 fn playout_source(
     receive: ReceivePath,
     peer_volume: Arc<AtomicU32>,
@@ -1351,8 +1352,14 @@ fn playout_source(
     output_level: Arc<AtomicU32>,
     underrun_count: Arc<AtomicU64>,
     monitor: LocalMonitor,
+    recording: Option<(RecordingTap, RecordingTap)>,
 ) -> impl FnMut(&mut [f32]) -> usize + Send + 'static {
+    let mut recording = recording;
     move |out: &mut [f32]| {
+        let (b_tap, c_tap) = match recording.as_mut() {
+            Some((b, c)) => (Some(b), Some(c)),
+            None => (None, None),
+        };
         let samples = mix_peers(
             &receive,
             &peer_volume,
@@ -1361,10 +1368,15 @@ fn playout_source(
             &output_level,
             &underrun_count,
             out,
+            b_tap,
         );
         // Added after the peers, whatever they did this frame: hearing yourself
         // must not wait for, or depend on, anyone being connected (ADR-033).
         monitor.mix_into(&mut out[..samples]);
+        // C is what is actually heard: post-fader, self included.
+        if let Some(tap) = c_tap {
+            tap.push_stereo(&out[..samples]);
+        }
         #[cfg(feature = "debug-tools")]
         {
             use crate::audio_tap::{inject, observe, Point};
@@ -1413,6 +1425,11 @@ where
 
 /// Fills `out` from the play-out buffer with the mixer gains applied, and
 /// returns how many samples it wrote.
+///
+/// `dry_tap`, when given, gets the peer's stereo frame exactly as decoded:
+/// before `pan_received` applies the listener's fader and pan (recording/
+/// streaming output `B`, rm:1068).
+#[allow(clippy::too_many_arguments)]
 fn mix_peers(
     receive: &ReceivePath,
     peer_volume: &AtomicU32,
@@ -1421,6 +1438,7 @@ fn mix_peers(
     output_level: &AtomicU32,
     underrun_count: &AtomicU64,
     out: &mut [f32],
+    dry_tap: Option<&mut RecordingTap>,
 ) -> usize {
     let read = receive.read_into(out);
 
@@ -1437,6 +1455,10 @@ fn mix_peers(
             return read.samples;
         }
         PlayoutResult::Played { .. } | PlayoutResult::Concealed { .. } => {}
+    }
+
+    if let Some(tap) = dry_tap {
+        tap.push_stereo(&out[..read.samples]);
     }
 
     let combined_vol = (peer_volume.load(Ordering::Relaxed) as f32 / 100.0)
@@ -1475,6 +1497,7 @@ impl CaptureRing {
 /// channel, so a stale setting never leaves a session without input. The
 /// saved pair is not touched. The ring reports how many channels it actually
 /// has.
+#[allow(clippy::too_many_arguments)]
 fn start_capture_ring(
     engine: &mut AudioEngine,
     device_id: Option<&DeviceId>,
@@ -1483,6 +1506,7 @@ fn start_capture_ring(
     frame_size: usize,
     input_level: &Arc<AtomicU32>,
     monitor: &LocalMonitor,
+    recording: Option<&RecordingFeed>,
 ) -> Result<CaptureRing, AudioError> {
     let chosen = device_id.map(|id| id.0.clone());
     let (left, right) = pair_in_use(&Devices::list().input, &chosen, selected);
@@ -1491,6 +1515,7 @@ fn start_capture_ring(
         let channels = picks.len() as u16;
         let (mut producer, consumer) = RingBuffer::<f32>::new(32 * frame_size * channels as usize);
         let mut monitor_tap = monitor.tap();
+        let mut recording_a = recording.map(|feed| feed.tap_a());
         let level = input_level.clone();
 
         engine.stop_capture();
@@ -1500,6 +1525,14 @@ fn start_capture_ring(
             monitor_tap.push_interleaved(samples, channels as usize);
             #[cfg(feature = "debug-tools")]
             crate::audio_tap::observe(crate::audio_tap::Point::Input, samples, channels as usize);
+            // A is dry: no fader/pan applied, whatever the transmit channel count.
+            if let Some(tap) = recording_a.as_mut() {
+                if channels >= 2 {
+                    tap.push_stereo(samples);
+                } else {
+                    tap.push_mono(samples);
+                }
+            }
             // Calculate RMS level (0-100)
             if !samples.is_empty() {
                 level.store(rms_level(samples), Ordering::SeqCst);
@@ -1732,6 +1765,12 @@ async fn run_audio_streaming(
     let monitor = LocalMonitor::new(buffer_size);
     monitor.set_enabled(is_monitoring.load(Ordering::SeqCst));
 
+    // Recording/streaming virtual output (rm:1068): self (A) / peer (B) / mix
+    // (C) as one 6ch device a DAW or OBS can pick as a recording input.
+    // `None` where the platform or environment cannot provide one; the
+    // session runs the same either way.
+    let recording_feed = RecordingFeed::start(sample_rate).map(Arc::new);
+
     // Start audio capture with level metering. Mono or stereo follows the
     // transmit channel setting (REQ-AUD-107/108).
     let mut wanted_channels = transmit_channels.clamp(1, WIRE_CHANNELS as u32) as u16;
@@ -1743,6 +1782,7 @@ async fn run_audio_streaming(
         buffer_size as usize,
         &input_level_for_capture,
         &monitor,
+        recording_feed.as_deref(),
     );
     let capture_ring = capture_or_silence(
         opened,
@@ -1773,6 +1813,9 @@ async fn run_audio_streaming(
                 output_level.clone(),
                 underrun_count.clone(),
                 monitor.clone(),
+                recording_feed
+                    .as_deref()
+                    .map(|feed| (feed.tap_b(), feed.tap_c())),
             )
         },
     ) {
@@ -1800,6 +1843,7 @@ async fn run_audio_streaming(
         let output_level = output_level.clone();
         let underrun_count = underrun_count.clone();
         let monitor = monitor.clone();
+        let recording_feed = recording_feed.clone();
         move |engine: &mut AudioEngine| {
             engine.stop_playback();
             start_playout(engine, device.as_ref(), channels, stereo_frame_size, || {
@@ -1811,6 +1855,9 @@ async fn run_audio_streaming(
                     output_level.clone(),
                     underrun_count.clone(),
                     monitor.clone(),
+                    recording_feed
+                        .as_deref()
+                        .map(|feed| (feed.tap_b(), feed.tap_c())),
                 )
             })
         }
@@ -2113,6 +2160,7 @@ async fn run_audio_streaming(
             let device = device_id.clone();
             let input_level = input_level_for_capture.clone();
             let monitor = monitor.clone();
+            let recording_feed = recording_feed.clone();
             capture.switch(device_id, move |engine| {
                 start_capture_ring(
                     engine,
@@ -2122,6 +2170,7 @@ async fn run_audio_streaming(
                     buffer_size as usize,
                     &input_level,
                     &monitor,
+                    recording_feed.as_deref(),
                 )
             });
         }
@@ -2477,6 +2526,108 @@ mod tests {
         assert!(problems.read().unwrap().is_empty());
     }
 
+    /// A PCM payload as `ReceivePath::receive` expects it: `f32` samples as
+    /// little-endian bytes (matches `PcmCodec::encode`).
+    fn pcm(samples: &[f32]) -> Vec<u8> {
+        samples.iter().flat_map(|s| s.to_le_bytes()).collect()
+    }
+
+    /// `B` (recording/streaming output) must carry what the peer sent, not
+    /// what the listener's fader and pan turned it into: someone recording
+    /// each participant separately wants their dry signal.
+    #[test]
+    fn mix_peers_feeds_its_dry_tap_before_the_fader_and_pan_are_applied() {
+        const FRAME: u32 = 4;
+        let receive = ReceivePath::new(AudioPreset::ZeroLatency.codec_type(), 48_000, FRAME, 0)
+            .expect("a PCM receive path");
+        receive.follow_peer_channels(2);
+        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.8_f32, 0.2_f32]).collect();
+        assert!(receive.receive(0, &pcm(&sent)));
+
+        let (mut dry_tap, mut dry_consumer) = jamjam::audio::RecordingTap::for_wiring_tests();
+        let mut out = vec![0.0f32; receive.frame_samples()];
+
+        let samples = mix_peers(
+            &receive,
+            &AtomicU32::new(50),                     // half volume
+            &AtomicU32::new(100),                    // master untouched
+            &std::sync::atomic::AtomicI32::new(100), // hard right pan
+            &AtomicU32::new(0),
+            &AtomicU64::new(0),
+            &mut out,
+            Some(&mut dry_tap),
+        );
+
+        assert_eq!(samples, sent.len());
+        assert_ne!(
+            &out[..samples],
+            &sent[..],
+            "the mixed output has the fader/pan applied"
+        );
+        let chunk = dry_consumer
+            .read_chunk(samples)
+            .expect("the dry tap got a frame");
+        let (first, _) = chunk.as_slices();
+        assert_eq!(
+            first,
+            &sent[..],
+            "the dry tap keeps exactly what the peer sent"
+        );
+    }
+
+    /// `C` (recording/streaming output) must carry exactly what is played:
+    /// post-fader, with the local monitor mixed in, same as what a listener
+    /// on the output device hears.
+    #[test]
+    fn playout_source_feeds_its_c_tap_the_same_audio_it_plays() {
+        const FRAME: u32 = 4;
+        let receive = ReceivePath::new(AudioPreset::ZeroLatency.codec_type(), 48_000, FRAME, 0)
+            .expect("a PCM receive path");
+        receive.follow_peer_channels(2);
+        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.8_f32, 0.2_f32]).collect();
+        assert!(receive.receive(0, &pcm(&sent)));
+
+        let monitor = LocalMonitor::new(FRAME);
+        let mut monitor_tap = monitor.tap();
+        monitor.set_enabled(true);
+        for _ in 0..3 {
+            monitor_tap.push(&[0.1; FRAME as usize]);
+        }
+
+        let (b_tap, mut b_consumer) = jamjam::audio::RecordingTap::for_wiring_tests();
+        let (c_tap, mut c_consumer) = jamjam::audio::RecordingTap::for_wiring_tests();
+        let mut source = playout_source(
+            receive.clone(),
+            Arc::new(AtomicU32::new(50)),
+            Arc::new(AtomicU32::new(100)),
+            Arc::new(std::sync::atomic::AtomicI32::new(0)),
+            Arc::new(AtomicU32::new(0)),
+            Arc::new(AtomicU64::new(0)),
+            monitor,
+            Some((b_tap, c_tap)),
+        );
+        let mut out = vec![0.0f32; receive.frame_samples() * 3];
+        let samples = source(&mut out);
+        out.truncate(samples);
+
+        let b_chunk = b_consumer.read_chunk(samples).expect("B got a frame");
+        let (b_first, _) = b_chunk.as_slices();
+        assert_eq!(
+            b_first,
+            &sent[..samples],
+            "B stays dry even though C mixes in the monitor"
+        );
+
+        let c_chunk = c_consumer.read_chunk(samples).expect("C got a frame");
+        let (c_first, _) = c_chunk.as_slices();
+        assert_eq!(c_first, &out[..], "C matches exactly what is played");
+        assert_ne!(
+            c_first,
+            &sent[..samples],
+            "C is not dry: the fader and monitor were applied"
+        );
+    }
+
     /// Verifies: REQ-AUD-029
     #[test]
     fn test_rms_level_is_zero_for_silence() {
@@ -2602,6 +2753,7 @@ mod tests {
             Arc::new(AtomicU32::new(0)),
             Arc::new(AtomicU64::new(0)),
             monitor,
+            None,
         );
         let mut out = vec![0.0f32; receive.frame_samples() * 3];
         let samples = source(&mut out);
