@@ -736,20 +736,8 @@ pub enum SignalingEvent {
     PeerUpdated { peer: PeerInfo },
     /// A chat message was received
     ChatMessageReceived { message: ChatMessage },
-    /// The server closed the room. It closes this connection right after
-    /// sending this, so the frontend must treat `conn_id` as dead and
-    /// reconnect rather than keep using it.
-    RoomClosed { reason: String },
-    /// The server removed a peer from the room. Broadcast to the whole
-    /// room, but the server only closes the connection belonging
-    /// to `peer_id` - the frontend should only reconnect when `peer_id`
-    /// matches its own peer id (own_peer_id below), otherwise just note
-    /// that a peer was removed (a PeerLeft event follows once that
-    /// connection actually closes).
-    Kicked { peer_id: String, reason: String },
-    /// The connection dropped without the server sending `RoomClosed` first
-    /// (network blip, proxy reset, server restart). `conn_id` is dead - the
-    /// frontend must disconnect it and reconnect.
+    /// The connection dropped (network blip, proxy reset, server restart).
+    /// `conn_id` is dead - the frontend must disconnect it and reconnect.
     ConnectionLost { reason: String },
     /// Something about helping with settings the UI shows (ADR-044 §5)
     SettingsHelp { event: HelpEvent },
@@ -879,46 +867,6 @@ pub async fn signaling_poll_events(
                         drop(room_state);
 
                         events.push(SignalingEvent::ChatMessageReceived { message: chat_msg });
-                    }
-                    SignalingMessage::RoomClosed { reason } => {
-                        // The server closes this connection right after this
-                        // message, so drop the now-stale room state - the
-                        // frontend must reconnect to keep using signaling.
-                        let mut room_state = state.room_state.lock().await;
-                        *room_state = None;
-                        drop(room_state);
-
-                        usage.session_ended(&streaming, EndReason::Disconnected);
-                        tracing::warn!("Room closed by the server: {}", reason);
-                        // Before the room event: the window stops reading
-                        // the batch there.
-                        events.extend(help_events(lock_help(&state).reset()));
-                        events.push(SignalingEvent::RoomClosed { reason });
-                    }
-                    SignalingMessage::Kicked { peer_id, reason } => {
-                        let peer_id_str = peer_id.to_string();
-                        let mut room_state = state.room_state.lock().await;
-                        let is_self = room_state
-                            .as_ref()
-                            .map(|rs| rs.peer_id == peer_id_str)
-                            .unwrap_or(false);
-                        if is_self {
-                            *room_state = None;
-                            usage.session_ended(&streaming, EndReason::Disconnected);
-                            events.extend(help_events(lock_help(&state).reset()));
-                        }
-                        drop(room_state);
-
-                        tracing::warn!(
-                            "Peer {} was kicked ({}): {}",
-                            peer_id_str,
-                            if is_self { "this app" } else { "another peer" },
-                            reason
-                        );
-                        events.push(SignalingEvent::Kicked {
-                            peer_id: peer_id_str,
-                            reason,
-                        });
                     }
                     SignalingMessage::PeerMessage {
                         from: Some(from),
@@ -1302,8 +1250,8 @@ mod tests {
 
     /// A server that drops the WebSocket right after the handshake, without a
     /// close frame - the same "reset without closing handshake" seen when the
-    /// signaling connection drops unexpectedly in production, as opposed to a
-    /// graceful `RoomClosed` message. Returns the server URL to give the client.
+    /// signaling connection drops unexpectedly in production. Returns the
+    /// server URL to give the client.
     async fn spawn_reset_server() -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1357,10 +1305,10 @@ mod tests {
         app
     }
 
-    /// A connection that drops without the server sending `RoomClosed` first
-    /// must still surface through `signaling_poll_events`, or the frontend
-    /// silently stops receiving events forever without reconnecting.
-    /// Exercises the real command, not a reimplementation of it.
+    /// A connection that drops without a close frame must still surface
+    /// through `signaling_poll_events`, or the frontend silently stops
+    /// receiving events forever without reconnecting. Exercises the real
+    /// command, not a reimplementation of it.
     #[tokio::test]
     async fn a_connection_reset_without_a_close_frame_is_reported_as_connection_lost() {
         let url = spawn_reset_server().await;
@@ -1500,53 +1448,37 @@ mod tests {
         });
     }
 
-    /// The window stops reading a batch of events at the room closing, the
-    /// connection dropping or this app being removed, so the help's end has
-    /// to come first - or the window would go on showing a help that is over.
+    /// The window stops reading a batch of events at the connection dropping,
+    /// so the help's end has to come first - or the window would go on showing
+    /// a help that is over.
     ///
     /// Verifies: REQ-RMT-003
     #[tokio::test]
-    async fn when_the_room_closes_the_connection_drops_or_this_app_is_removed_the_help_ends_first()
-    {
+    async fn when_the_connection_drops_the_help_ends_first() {
         let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
         let me = Uuid::new_v4();
-        for url in [
-            spawn_server_sending(vec![
-                r#"{"type":"RoomClosed","data":{"reason":"closed"}}"#.to_string()
-            ])
-            .await,
-            spawn_reset_server().await,
-            spawn_server_sending(vec![format!(
-                r#"{{"type":"Kicked","data":{{"peer_id":"{me}","reason":"removed"}}}}"#
-            )])
-            .await,
-        ] {
-            let conn = SignalingClient::new(&url, identity.clone())
-                .connect()
-                .await
-                .unwrap();
-            let app = app_with_connection(conn);
-            in_room(&app, me, &[]);
-            lock_help(&app.state::<SignalingState>()).receive(
-                Uuid::new_v4(),
-                "Aki",
-                HelpMessage::Request,
-            );
+        let conn = SignalingClient::new(&spawn_reset_server().await, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, me, &[]);
+        lock_help(&app.state::<SignalingState>()).receive(
+            Uuid::new_v4(),
+            "Aki",
+            HelpMessage::Request,
+        );
 
-            let events = poll_until_events(&app).await;
+        let events = poll_until_events(&app).await;
 
-            assert!(
-                matches!(
-                    events.as_slice(),
-                    [ended, SignalingEvent::RoomClosed { .. }
-                        | SignalingEvent::ConnectionLost { .. }
-                        | SignalingEvent::Kicked { .. }]
-                        if is_help_ended(ended)
-                ),
-                "expected the help to end first, got {:?}",
-                events
-            );
-        }
+        assert!(
+            matches!(
+                events.as_slice(),
+                [ended, SignalingEvent::ConnectionLost { .. }] if is_help_ended(ended)
+            ),
+            "expected the help to end first, got {:?}",
+            events
+        );
     }
 
     /// Verifies: REQ-RMT-003

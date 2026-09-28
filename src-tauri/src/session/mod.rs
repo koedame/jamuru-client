@@ -912,18 +912,6 @@ fn spawn_pump<R: Runtime>(app: AppHandle<R>, conn: u32) {
     });
 }
 
-/// Ends the connection `conn` and starts over from the server, unless `conn`
-/// is no longer the session's.
-fn start_over<R: Runtime>(app: &AppHandle<R>, conn: u32) {
-    let Some(epoch) = app.state::<SessionState>().next_epoch_of(conn) else {
-        return;
-    };
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let _ = connect(&app, epoch).await;
-    });
-}
-
 /// Ends the connection `conn` and gets it back, rejoining the room the app is
 /// in, unless `conn` is no longer the session's.
 fn get_connection_back<R: Runtime>(app: &AppHandle<R>, conn: u32) {
@@ -991,31 +979,9 @@ async fn handle_events<R: Runtime>(
                 });
                 run_audio(app, conn, audio).await;
             }
-            SignalingEvent::RoomClosed { reason } => {
-                // The server closes this connection right after sending it, so
-                // the connection is dead: it cannot be used to leave, create or
-                // join. Start over with a new one.
-                tracing::info!("Room session ended (room closed): {}", reason);
-                start_over(app, conn);
-                return false;
-            }
-            SignalingEvent::Kicked { peer_id, reason } => {
-                // Told to the whole room, but the server closes only the
-                // connection of the peer removed.
-                let is_self = state
-                    .lock()
-                    .room
-                    .as_ref()
-                    .is_some_and(|room| room.peer_id == peer_id);
-                if is_self {
-                    tracing::info!("Room session ended (removed): {}", reason);
-                    start_over(app, conn);
-                    return false;
-                }
-            }
             SignalingEvent::ConnectionLost { reason } => {
-                // The server did not close the room first (network blip, proxy
-                // reset, server restart): the connection is dead either way.
+                // A network blip, a proxy reset or a server restart: the
+                // connection is dead either way.
                 tracing::warn!("Signaling connection lost: {}", reason);
                 get_connection_back(app, conn);
                 return false;
@@ -1652,76 +1618,6 @@ mod tests {
 
         assert_eq!(result, Err("Not in a room".to_string()));
         assert_eq!(app.state::<SessionState>().snapshot(), before);
-    }
-
-    /// Verifies: REQ-RMT-028
-    #[tokio::test]
-    async fn the_server_closes_the_room_starts_over_with_a_new_connection_on_the_room_list() {
-        let server = FakeServer::start().await;
-        let dir = tempfile::tempdir().unwrap();
-        let app = in_a_room(&server, &dir).await;
-        let first = app.state::<SessionState>().snapshot().connection_id;
-
-        server.say(
-            0,
-            r#"{"type":"RoomClosed","data":{"reason":"closed"}}"#.to_string(),
-        );
-        server.reset(0);
-        let snapshot = until(&app, |s| {
-            s.phase == Phase::ServerConnected && s.connection_id != first
-        })
-        .await;
-
-        assert_eq!(snapshot.room, None);
-        assert_eq!(server.connections(), 2);
-    }
-
-    /// Verifies: REQ-RMT-028
-    #[tokio::test]
-    async fn another_participant_is_removed_by_the_server_leaves_the_app_in_the_room() {
-        let server = FakeServer::start().await;
-        let dir = tempfile::tempdir().unwrap();
-        let app = in_a_room(&server, &dir).await;
-
-        server.say(
-            0,
-            format!(
-                r#"{{"type":"Kicked","data":{{"peer_id":"{}","reason":"removed"}}}}"#,
-                Uuid::from_u128(OTHER)
-            ),
-        );
-        tokio::time::sleep(Duration::from_millis(1200)).await;
-
-        assert_eq!(
-            app.state::<SessionState>().snapshot().phase,
-            Phase::Connected
-        );
-        assert_eq!(server.connections(), 1);
-    }
-
-    /// Verifies: REQ-RMT-028
-    #[tokio::test]
-    async fn the_app_itself_is_removed_by_the_server_starts_over_on_the_room_list() {
-        let server = FakeServer::start().await;
-        let dir = tempfile::tempdir().unwrap();
-        let app = in_a_room(&server, &dir).await;
-        let first = app.state::<SessionState>().snapshot().connection_id;
-
-        server.say(
-            0,
-            format!(
-                r#"{{"type":"Kicked","data":{{"peer_id":"{}","reason":"removed"}}}}"#,
-                Uuid::from_u128(ME)
-            ),
-        );
-        server.reset(0);
-        let snapshot = until(&app, |s| {
-            s.phase == Phase::ServerConnected && s.connection_id != first
-        })
-        .await;
-
-        assert_eq!(snapshot.room, None);
-        assert_eq!(server.connections(), 2);
     }
 
     /// Verifies: REQ-RMT-028

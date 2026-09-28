@@ -226,7 +226,7 @@ async fn leave_room(&self) -> Result<(), SignalingError>;
 
 作成者を含め、誰が退出してもルーム自体は存続し、残りの参加者のセッションは継続される
 （[ADR-016](../adr/ADR-016-remove-host-privilege-concept.md)）。参加者自身による「ルーム終了」
-操作は存在しない。サーバーがルームを閉じた場合は `RoomClosed` が届く（Section 5）。
+操作は存在しない。
 
 ---
 
@@ -407,14 +407,6 @@ enum SignalingMessage {
     PeerUpdated { peer: PeerInfo },
     /// エラー
     Error { message: String },
-    /// サーバーがルームを閉じた。
-    /// ルーム内の全ピアへブロードキャストされ、受信したクライアントは即座に切断する。
-    /// クライアント発の「ルーム終了」メッセージは存在しない（作成者含め参加者に
-    /// ルーム終了の特権はない。[ADR-016](../adr/ADR-016-remove-host-privilege-concept.md)）。
-    RoomClosed { reason: String },
-    /// サーバーがこの参加者（`peer_id`）をルームから外した。ルーム内の全ピアへブロードキャスト
-    /// されるが、`peer_id` が自分自身と一致するクライアントのみ切断すべき。
-    Kicked { peer_id: Uuid, reason: String },
     /// チャットメッセージをルーム内の全ピアへブロードキャストする（送信者本人にも返る）。
     /// 送信者（`sender_id` / `sender_name`）は、サーバーが送ってきた接続の参加者の ID と名前に置き換えて配る。
     /// クライアントが書いた値は使われない
@@ -514,8 +506,6 @@ stateDiagram-v2
     JoiningRoom --> Connected: RoomNotFound / RoomFull / InvalidPassword
 
     InRoom --> Connected: leave_room()
-    InRoom --> Disconnected: RoomClosed
-    InRoom --> Disconnected: Kicked (peer_id matches self)
     InRoom --> Disconnected: Disconnected event
 
     Connected --> Disconnected: Disconnected event
