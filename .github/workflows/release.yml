@@ -305,6 +305,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/publish-beta-channel.sh latest.json
 
+  # Once a beta is out, a previous beta's install-only packages (dmg, msi,
+  # deb) serve no purpose but letting someone install an old build (REQ-UPD-020).
+  # What the updater and the beta-channel rollback (ADR-057) still need from a
+  # past beta - its app.tar.gz, AppImage, nsis setup.exe, their signatures,
+  # and latest.json - is left alone; see scripts/prune-beta-packages.sh.
+  prune-old-beta-packages:
+    name: Prune old beta packages
+    runs-on: ubuntu-latest
+    needs: [prepare, release]
+    if: contains(needs.prepare.outputs.tag, '-')
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Delete install-only packages of older betas
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/prune-beta-packages.sh "${{ needs.prepare.outputs.tag }}"
+
   update-cask:
     name: Update Homebrew Cask
     runs-on: ubuntu-latest
