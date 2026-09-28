@@ -124,10 +124,18 @@ impl UsageState {
     /// included) is a normal exit, so it does not on its own mean the
     /// confirmation screen has asked yet. While reporting is already on,
     /// this is queued at once like a crash and the pending file is cleared;
-    /// while it is off, it is kept (in memory and on disk, so a further
-    /// restart before the screen asks still finds it) until the screen asks
-    /// and answers (`usage_previous_hang`, `usage_send_previous_hang`).
-    pub fn apply_previous_incident(&self, incident: Option<(Hang, String, String)>) {
+    /// if the current version also [`attaches_log`], `jamjam.log` is sent
+    /// the same way `usage_send_previous_hang` does when the user answers
+    /// "send" (ADR-060) - no confirmation is asked, since turning reporting
+    /// on already was one. While it is off, it is kept (in memory and on
+    /// disk, so a further restart before the screen asks still finds it)
+    /// until the screen asks and answers (`usage_previous_hang`,
+    /// `usage_send_previous_hang`).
+    pub fn apply_previous_incident<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        incident: Option<(Hang, String, String)>,
+    ) {
         let dir = self.reporter.state_dir();
         let incident = incident.or_else(|| dir.and_then(watchdog::read_pending_hang));
         let Some((hang, launch_id, app_version)) = incident else {
@@ -138,6 +146,15 @@ impl UsageState {
                 .record_previous_hang(hang, &launch_id, &app_version);
             if let Some(dir) = dir {
                 watchdog::clear_pending_hang(dir);
+            }
+            if attaches_log(app) {
+                let app = app.clone();
+                let comment = hang_report_comment(&hang, &launch_id);
+                spawn_settling(async move {
+                    if let Err(err) = crate::report_problem::send_log_report(&app, &comment).await {
+                        tracing::warn!("automatic hang report: could not attach jamjam.log: {err}");
+                    }
+                });
             }
         } else {
             if let Some(dir) = dir {
@@ -394,11 +411,12 @@ pub fn usage_previous_hang_attaches_log(app: AppHandle) -> bool {
     attaches_log(&app)
 }
 
-/// Before 1.0.0, only verification users run the app, so the automatic hang
-/// report also attaches `jamjam.log` through the "Report a problem" send
-/// path (ADR-059). Revisit this at the 1.0.0 release: decide there whether
-/// `jamjam.log` still goes out unasked, and adjust this together with what
-/// the confirmation screen says it will send.
+/// Before 1.0.0, only verification users run the app, so both the confirmed
+/// hang report (ADR-059) and the automatic one sent while reporting is
+/// already on (ADR-060) also attach `jamjam.log` through the "Report a
+/// problem" send path. Revisit this at the 1.0.0 release: decide there
+/// whether `jamjam.log` still goes out unasked, and adjust this together
+/// with what the confirmation screen says it will send.
 fn major_attaches_log(major: u64) -> bool {
     major < 1
 }
@@ -407,10 +425,11 @@ fn attaches_log<R: Runtime>(app: &AppHandle<R>) -> bool {
     major_attaches_log(app.package_info().version.major)
 }
 
-/// The comment sent with the `jamjam.log` [`attaches_log`] attaches to the
-/// automatic hang report, naming the stage and launch it is about so a
-/// report read on the server side does not need to be matched up with the
-/// structured `hang` event by anything but this text.
+/// The comment sent with the `jamjam.log` [`attaches_log`] attaches to a
+/// hang report - confirmed or automatic - naming the stage and launch it is
+/// about so a report read on the server side does not need to be matched up
+/// with the structured `hang` event by anything but this text (the same
+/// `launch_id` is on both).
 fn hang_report_comment(hang: &Hang, launch_id: &str) -> String {
     format!(
         "(automatic report: did not exit cleanly last time, stuck while {:?}; launch {launch_id})",
@@ -1060,6 +1079,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-021
+    /// Verifies: REQ-TEL-023
     #[test]
     fn a_pre_1_0_0_app_version_attaches_the_log_and_a_1_0_0_or_later_one_does_not() {
         assert!(major_attaches_log(0));
@@ -1068,6 +1088,7 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-021
+    /// Verifies: REQ-TEL-023
     #[test]
     fn the_automatic_hang_reports_comment_names_the_stage_and_launch() {
         let comment = hang_report_comment(
@@ -1182,6 +1203,10 @@ mod tests {
                 false,
             )
         };
+        // Reporting stays off throughout, so `apply_previous_incident` never
+        // takes the branch that needs a real send; the handle only has to
+        // exist.
+        let app = tauri::test::mock_app();
 
         // Launch 1 is force-killed with no stage active: `running.json` is
         // left behind instead of being cleared by `mark_clean_exit`.
@@ -1194,7 +1219,7 @@ mod tests {
         let found = crate::watchdog::previous_incident(&relaunch);
         assert!(found.is_some(), "the killed launch's marker was found");
         let usage2 = UsageState::with_reporter(relaunch.clone());
-        usage2.apply_previous_incident(found);
+        usage2.apply_previous_incident(app.handle(), found);
         let watchdog2 = crate::watchdog::Watchdog::install(relaunch.clone());
 
         // The auto-updater restarts launch 2 before its own screen ever
@@ -1211,9 +1236,8 @@ mod tests {
         let found_next = crate::watchdog::previous_incident(&next);
         assert!(found_next.is_none(), "nothing new happened in launch 2");
         let usage3 = UsageState::with_reporter(next.clone());
-        usage3.apply_previous_incident(found_next);
+        usage3.apply_previous_incident(app.handle(), found_next);
 
-        let app = tauri::test::mock_app();
         app.manage(usage3);
         let hang = usage_previous_hang(app.state::<UsageState>())
             .expect("the incident from launch 1 survived the clean restart");
@@ -1229,5 +1253,49 @@ mod tests {
         assert!(app.state::<UsageState>().take_pending_hang().is_some());
         assert!(usage_previous_hang(app.state::<UsageState>()).is_none());
         assert!(crate::watchdog::read_pending_hang(dir.path()).is_none());
+    }
+
+    /// A device with usage reporting already on never shows the
+    /// confirmation screen: the incident is queued into the structured
+    /// report at once, like a crash, and nothing is left pending for a
+    /// screen to ask about. This is the branch `report_problem::send_log_report`
+    /// is also attempted from when the current version [`attaches_log`]
+    /// (ADR-060); that part needs the real network/log-file path a mock app
+    /// does not have (same boundary `usage_send_previous_hang`'s own tests
+    /// stop at), so it is checked on a real device instead (see the ticket).
+    ///
+    /// Verifies: REQ-TEL-019
+    #[tokio::test]
+    async fn when_reporting_is_already_on_a_previous_incident_is_recorded_without_asking() {
+        let dir = tempfile::tempdir().unwrap();
+        let reporter = UsageReporter::new(
+            Some(dir.path().to_path_buf()),
+            "0.1.0-36",
+            Arc::new(NoTransport),
+            true,
+        );
+        let usage = UsageState::with_reporter(reporter.clone());
+        let app = tauri::test::mock_app();
+
+        usage.apply_previous_incident(
+            app.handle(),
+            Some((
+                Hang {
+                    stage: HangStage::AppExit,
+                    stalled_ms: Some(6000),
+                },
+                "launch-killed-1".to_string(),
+                "0.1.0-36".to_string(),
+            )),
+        );
+
+        let lines = reported_lines(&reporter);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines[0]["event"], "hang");
+        assert_eq!(lines[0]["launch_id"], "launch-killed-1");
+        assert!(
+            usage.pending_hang.lock().unwrap().is_none(),
+            "an already-on device has nothing left for a confirmation screen to ask about"
+        );
     }
 }

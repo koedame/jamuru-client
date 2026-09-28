@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use jamjam::config::{is_http_url, DEFAULT_SERVER_URL};
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 use crate::logging::redact_secrets;
 
@@ -110,7 +110,11 @@ fn capped_comment(comment: &str) -> String {
 /// line (ADR-036 §7) and capped to [`MAX_LOG_BYTES`]. The preview command
 /// and the send command both call this, so what is shown is exactly what is
 /// sent (REQ-RPT-002).
-fn read_log(app: &AppHandle) -> Result<String, String> {
+///
+/// Generic over the runtime so `usage.rs`'s automatic hang report (ADR-060)
+/// can call it too, with the `AppHandle` startup builds directly rather
+/// than one a Tauri command received.
+fn read_log<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
     let dir = app
         .path()
         .app_log_dir()
@@ -128,10 +132,12 @@ pub fn report_problem_preview(app: AppHandle) -> Result<String, String> {
 }
 
 /// Sends `jamjam.log` (masked, capped) and `comment` (capped) to the problem
-/// report intake. Shared by the manual "Report a problem" command below and
-/// by the automatic hang report (`usage.rs`, ADR-059), so both go through
-/// the one send path and there is only one place that builds the body.
-pub async fn send_log_report(app: &AppHandle, comment: &str) -> Result<(), String> {
+/// report intake. Shared by the manual "Report a problem" command below,
+/// the confirmed hang report (`usage.rs`, ADR-059) and the automatic one
+/// sent while reporting is already on (`usage.rs`, ADR-060), so all three go
+/// through the one send path and there is only one place that builds the
+/// body.
+pub async fn send_log_report<R: Runtime>(app: &AppHandle<R>, comment: &str) -> Result<(), String> {
     let log = read_log(app)?;
     let Some(transport) = HttpReportTransport::for_build() else {
         return Err("送信先が分かりません".to_string());
