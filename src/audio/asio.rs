@@ -263,6 +263,14 @@ fn open_duplex(
                             if input { "in" } else { "out" }
                         ))
                     })?;
+                tracing::info!(
+                    "TRACE-1176 channel_info {} {index}: sample_type={:?} is_active={} group={} name={:?}",
+                    if input { "in" } else { "out" },
+                    info.sample_type,
+                    info.is_active,
+                    info.group,
+                    info.name
+                );
                 if !is_supported(info.sample_type) {
                     return Err(AudioError::UnsupportedConfig(format!(
                         "{driver_name} channel ({}, {index}) uses an unsupported sample format",
@@ -439,6 +447,21 @@ impl CallbackState {
                     unsafe { read_sample(buf.sample_type, base, frame) };
             }
         }
+        if !TRACE_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            for (channel, buf) in self.input.iter().enumerate() {
+                let base = buf.ptrs[half].cast::<u8>();
+                let raw: Vec<u8> =
+                    unsafe { std::slice::from_raw_parts(base, 16.min(n * 4)) }.to_vec();
+                let first_decoded: Vec<f32> = (0..n.min(8))
+                    .map(|f| self.decoded[f * in_channels + channel])
+                    .collect();
+                tracing::info!(
+                    "TRACE-1176 input ch{channel}: ptr={:p} sample_type={:?} raw_bytes={raw:02x?} first_decoded={first_decoded:?}",
+                    buf.ptrs[half],
+                    buf.sample_type,
+                );
+            }
+        }
         if in_channels > 0 {
             super::device_loop::on_input(&self.decoded, in_channels);
             pick_channels(
@@ -477,6 +500,10 @@ impl CallbackState {
 }
 
 static CALLBACK: Mutex<Option<CallbackState>> = Mutex::new(None);
+
+/// TRACE-1176: logs the first `bufferSwitch`'s raw input bytes once, then
+/// stays quiet (the callback runs hundreds of times a second).
+static TRACE_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 static CALLBACKS: Callbacks = Callbacks {
     buffer_switch,
