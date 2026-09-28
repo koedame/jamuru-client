@@ -54,6 +54,14 @@ jobs:
       - name: Run cargo check
         run: cargo check --all-targets
 
+      # tests/e2e declares its own [workspace], so the check above never
+      # touches it. Without this step a dependency bump that breaks the e2e
+      # crate's compilation (e.g. ureq 2.x -> 3.x) stays green here and is
+      # only caught by the disabled E2E Tests (PR) workflow, i.e. never.
+      - name: Run cargo check (tests/e2e)
+        working-directory: tests/e2e
+        run: cargo check --all-targets
+
   test:
     name: Test
     runs-on: ubuntu-latest
