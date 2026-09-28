@@ -399,7 +399,8 @@ P2P接続確立のためのシグナリングサーバーを提供する。
 
 | ビルド | サーバー |
 |--------|--------|
-| リリース（`cargo tauri build`） | ビルド時に `JAMJAM_SERVER_URL` で渡した本番のサーバー（無ければビルドが失敗する） |
+| リリース（`vX.Y.Z` タグ） | ビルド時に `JAMJAM_SERVER_URL` で渡した本番のサーバー（無ければビルドが失敗する） |
+| ベータ（`vX.Y.Z-beta.N` タグ） | ビルド時に `JAMJAM_SERVER_URL_BETA` で渡したステージングのサーバー |
 | 開発（`cargo tauri dev`、GUI E2E） | `http://localhost:17890` |
 
 既定値は `jamjam::config::DEFAULT_SERVER_URL` がビルドの種別で選ぶ。`config.toml` の `server_url` があればそれを使う。接続画面と自己診断は同じ値を使う（[ADR-030](./adr/ADR-030-signaling-url-by-build-profile.md)）。

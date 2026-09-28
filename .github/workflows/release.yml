@@ -121,8 +121,10 @@ jobs:
 
       - name: Build Tauri app
         env:
-          # The signaling server the app dials (ADR-030). Kept out of the source.
-          JAMJAM_SERVER_URL: ${{ secrets.JAMJAM_SERVER_URL }}
+          # The signaling server the app dials (ADR-030). Kept out of the
+          # source. A beta (a tag with a `-`) dials the staging server, so a
+          # verification build never reaches production users or their data.
+          JAMJAM_SERVER_URL: ${{ contains(needs.prepare.outputs.tag, '-') && secrets.JAMJAM_SERVER_URL_BETA || secrets.JAMJAM_SERVER_URL }}
           # Signs the update bundles (`createUpdaterArtifacts`); the apps
           # check them against the public key in `tauri.conf.json` (ADR-041).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -143,10 +145,10 @@ jobs:
         # release and a rehearsal (no tag) do not.
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json ${{ contains(needs.prepare.outputs.tag, '-') && format('--config src-tauri/tauri.updater.beta.conf.json --config {0}/build-version.conf.json --features debug-remote', runner.temp) || '' }}
 
-      - name: Check the app dials the production signaling server
+      - name: Check the app dials the signaling server it was built for
         shell: bash
         env:
-          JAMJAM_SERVER_URL: ${{ secrets.JAMJAM_SERVER_URL }}
+          JAMJAM_SERVER_URL: ${{ contains(needs.prepare.outputs.tag, '-') && secrets.JAMJAM_SERVER_URL_BETA || secrets.JAMJAM_SERVER_URL }}
         run: scripts/check-release-server-url.sh "src-tauri/target/${{ matrix.target }}/release/jamjam-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" ui/dist
 
       - name: Check remote debugging is in a beta and only in a beta
