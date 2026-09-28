@@ -98,7 +98,9 @@ impl Driver {
     /// True once the app has started its control channel.
     pub(crate) fn is_healthy(&self) -> bool {
         ureq::get(&format!("{}/e2e/health", self.base))
-            .timeout(Duration::from_secs(1))
+            .config()
+            .timeout_global(Some(Duration::from_secs(1)))
+            .build()
             .call()
             .is_ok()
     }
@@ -108,16 +110,20 @@ impl Driver {
     }
 
     pub(crate) fn dom(&self, window: Option<&str>) -> DriverResult<String> {
-        ureq::post(&format!("{}/e2e/dom", self.base))
-            .timeout(Duration::from_secs(10))
-            .send_json(ureq::json!(DomBody { window }))
-            .map_err(|e| format!("dom failed: {}", e))?
-            .into_string()
+        let mut response = ureq::post(&format!("{}/e2e/dom", self.base))
+            .config()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build()
+            .send_json(DomBody { window })
+            .map_err(|e| format!("dom failed: {}", e))?;
+        response
+            .body_mut()
+            .read_to_string()
             .map_err(|e| format!("dom body unreadable: {}", e))
     }
 
     pub(crate) fn query(&self, selector: &str, window: Option<&str>) -> DriverResult<QueryResult> {
-        self.post_json("/e2e/query", ureq::json!(QueryBody { selector, window }))
+        self.post_json("/e2e/query", QueryBody { selector, window })
     }
 
     /// Reads one attribute off the first match. `None` when the element or
@@ -130,11 +136,11 @@ impl Driver {
     ) -> DriverResult<Option<String>> {
         let result: QueryResult = self.post_json(
             "/e2e/query",
-            ureq::json!(AttributeQueryBody {
+            AttributeQueryBody {
                 selector,
                 window,
-                attribute
-            }),
+                attribute,
+            },
         )?;
         Ok(result.attribute)
     }
@@ -144,7 +150,7 @@ impl Driver {
     /// succeeding would let a test pass against a broken UI.
     pub(crate) fn click(&self, selector: &str, window: Option<&str>) -> DriverResult<()> {
         let result: ActionResult =
-            self.post_json("/e2e/click", ureq::json!(QueryBody { selector, window }))?;
+            self.post_json("/e2e/click", QueryBody { selector, window })?;
         if result.performed {
             Ok(())
         } else {
@@ -163,11 +169,11 @@ impl Driver {
     ) -> DriverResult<()> {
         let result: ActionResult = self.post_json(
             "/e2e/input",
-            ureq::json!(InputBody {
+            InputBody {
                 selector,
                 value,
-                window
-            }),
+                window,
+            },
         )?;
         if result.performed {
             Ok(())
@@ -199,15 +205,19 @@ impl Driver {
         window: Option<&str>,
     ) -> DriverResult<Result<serde_json::Value, String>> {
         // The command's own run time, which the channel allows up to a minute.
-        let result: InvokeResult = ureq::post(&format!("{}/e2e/invoke", self.base))
-            .timeout(Duration::from_secs(70))
-            .send_json(ureq::json!(InvokeBody {
+        let mut response = ureq::post(&format!("{}/e2e/invoke", self.base))
+            .config()
+            .timeout_global(Some(Duration::from_secs(70)))
+            .build()
+            .send_json(InvokeBody {
                 command,
                 args,
-                window
-            }))
-            .map_err(|e| format!("invoking {} failed: {}", command, e))?
-            .into_json()
+                window,
+            })
+            .map_err(|e| format!("invoking {} failed: {}", command, e))?;
+        let result: InvokeResult = response
+            .body_mut()
+            .read_json()
             .map_err(|e| format!("invoking {} returned unexpected JSON: {}", command, e))?;
         Ok(match result {
             InvokeResult::Ok { value } => Ok(value),
@@ -216,24 +226,32 @@ impl Driver {
     }
 
     fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> DriverResult<T> {
-        ureq::get(&format!("{}{}", self.base, path))
-            .timeout(Duration::from_secs(10))
+        let mut response = ureq::get(&format!("{}{}", self.base, path))
+            .config()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build()
             .call()
-            .map_err(|e| format!("GET {} failed: {}", path, e))?
-            .into_json()
+            .map_err(|e| format!("GET {} failed: {}", path, e))?;
+        response
+            .body_mut()
+            .read_json()
             .map_err(|e| format!("GET {} returned unexpected JSON: {}", path, e))
     }
 
     fn post_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
-        body: serde_json::Value,
+        body: impl serde::Serialize,
     ) -> DriverResult<T> {
-        ureq::post(&format!("{}{}", self.base, path))
-            .timeout(Duration::from_secs(10))
+        let mut response = ureq::post(&format!("{}{}", self.base, path))
+            .config()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build()
             .send_json(body)
-            .map_err(|e| format!("POST {} failed: {}", path, e))?
-            .into_json()
+            .map_err(|e| format!("POST {} failed: {}", path, e))?;
+        response
+            .body_mut()
+            .read_json()
             .map_err(|e| format!("POST {} returned unexpected JSON: {}", path, e))
     }
 }
