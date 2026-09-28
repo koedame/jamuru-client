@@ -89,9 +89,11 @@ webview2-com = { version = "0.38", optional = true }
 windows-webview2 = { package = "windows", version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"], optional = true }
 
 # `debug.screenshot` on Linux asks WebKitGTK for a snapshot of the window and
-# writes it as a PNG. The same versions Tauri's own webview uses.
+# writes it as a PNG. cairo-rs is pinned to the version webkit2gtk's own
+# dependency graph (gdk/gtk 0.18.x) pulls in; a newer cairo-rs here would
+# make webkit2gtk's `cairo::Surface` and ours two unrelated types.
 [target.'cfg(target_os = "linux")'.dependencies]
-cairo-rs = { version = "0.22", features = ["png"], optional = true }
+cairo-rs = { version = "0.18", features = ["png"], optional = true }
 webkit2gtk = { version = "2.0", optional = true }
 
 # On macOS the same call goes to WKWebView (`takeSnapshot`), and the NSImage it

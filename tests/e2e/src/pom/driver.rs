@@ -149,8 +149,7 @@ impl Driver {
     /// disabled - a user could not have clicked it either, so silently
     /// succeeding would let a test pass against a broken UI.
     pub(crate) fn click(&self, selector: &str, window: Option<&str>) -> DriverResult<()> {
-        let result: ActionResult =
-            self.post_json("/e2e/click", QueryBody { selector, window })?;
+        let result: ActionResult = self.post_json("/e2e/click", QueryBody { selector, window })?;
         if result.performed {
             Ok(())
         } else {
