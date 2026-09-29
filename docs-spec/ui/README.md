@@ -15,6 +15,7 @@ docs-spec/ui/
 ├── README.md                 # このファイル
 ├── design-guide.md           # デザインガイド（トンマナ）★重要
 ├── personas.md               # ユーザーペルソナ（詳細シナリオ付き）
+├── glossary.md               # UI 用語集（文言の表記規則）
 ├── user-stories.md           # ユーザーストーリー（Epic/Story形式）
 ├── design-tokens.md          # デザイントークン（CSS変数）
 ├── i18n-strategy.md          # 国際化戦略

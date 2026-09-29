@@ -111,6 +111,8 @@ Required story variants:
 - `Error` - Error state (if applicable)
 - Edge cases specific to the component
 
+Which states a component needs (interaction states, and Empty/Loading/Partial/Error for data-dependent UI) is defined in [docs-spec/ui/design-guide.md](../../docs-spec/ui/design-guide.md) (「状態のデザイン規則」). UI wording follows [docs-spec/ui/glossary.md](../../docs-spec/ui/glossary.md).
+
 ### 2. No Environment Detection
 
 Do not use environment detection in Pure components.
@@ -252,7 +254,7 @@ UI のデザインは `ui.pen`（プロジェクトルート）で管理する�
 |------|-----|
 | デザインファイル | `ui.pen`（Git 管理下、約1MB） |
 | 構成 | Atoms / Molecules / Organisms / Screens（アトミックデザイン） |
-| 収録数 | 再利用コンポーネント 48、トップレベルノード 101 |
+| 収録数 | 再利用コンポーネント 47、トップレベルノード 91 |
 
 ### MCP サーバーの設定
 
