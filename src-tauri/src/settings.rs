@@ -1270,8 +1270,20 @@ mod tests {
 
             let dir = tempfile::tempdir().unwrap();
             let app = app(&dir, AppConfig::default());
-            // The listing the settings fall back on once the driver hangs
-            let before = current(app.handle()).await.unwrap();
+            // The listing the settings fall back on once the driver hangs. On
+            // a busy machine the real drivers can take longer than the limit
+            // to list; that call is still out, and would land as the last
+            // listing after this one is taken. So list again until one
+            // answered in time.
+            let before = loop {
+                let listed = current(app.handle()).await.unwrap();
+                if !crate::audio::a_listing_is_hung() {
+                    break listed;
+                }
+                while crate::audio::a_listing_is_hung() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            };
             fault::stall(Call::ListInputs, Duration::from_secs(10));
             fault::stall(Call::ListOutputs, Duration::from_secs(10));
             let started = Instant::now();
