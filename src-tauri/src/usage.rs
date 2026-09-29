@@ -44,7 +44,16 @@ fn spawn_settling(task: impl std::future::Future<Output = ()> + Send + 'static) 
 }
 #[cfg(test)]
 fn spawn_settling(task: impl std::future::Future<Output = ()> + Send + 'static) {
-    tokio::spawn(task);
+    let handle = tokio::spawn(task);
+    SETTLING.with(|tasks| tasks.borrow_mut().push(handle));
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The tasks `spawn_settling` started on this test's thread, for
+    /// `tests::let_the_changes_settle` to wait for.
+    static SETTLING: std::cell::RefCell<Vec<tokio::task::JoinHandle<()>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// How long the audio devices may take to describe. A driver that has hung
@@ -52,7 +61,7 @@ fn spawn_settling(task: impl std::future::Future<Output = ()> + Send + 'static) 
 #[cfg(not(test))]
 const AUDIO_ENV_TIMEOUT: Duration = jamjam::audio::LIST_TIMEOUT;
 #[cfg(test)]
-const AUDIO_ENV_TIMEOUT: Duration = Duration::from_millis(200);
+const AUDIO_ENV_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// The longest the app waits to send the last events when it is closed.
 #[cfg(not(test))]
@@ -698,7 +707,7 @@ mod tests {
         ours.connect(theirs.local_addr()).await.unwrap();
         theirs.connect(ours.local_addr()).await.unwrap();
         theirs.send_audio(&[0.0f32; 64], 0).await.unwrap();
-        for _ in 0..50 {
+        for _ in 0..1000 {
             if ours.link_facts().snapshot().first_audio_ms.is_some() {
                 break;
             }
@@ -840,13 +849,16 @@ mod tests {
         (app, reporter)
     }
 
-    /// Lets the reads of the devices finish. They run on threads of their own,
-    /// in real time, which a paused clock does not wait for: the test's own
-    /// waits would be over before they were.
-    async fn let_the_device_reads_finish() {
-        tokio::task::spawn_blocking(|| std::thread::sleep(AUDIO_ENV_TIMEOUT * 3))
-            .await
-            .unwrap();
+    /// Waits until every change reported so far has been dealt with: settled,
+    /// its devices read (or given up on) and recorded. The reads run on
+    /// threads of their own, in real time, which a paused clock does not
+    /// wait for; waiting for the tasks that started them does not depend on
+    /// how long the machine takes.
+    async fn let_the_changes_settle() {
+        let tasks = SETTLING.with(|tasks| std::mem::take(&mut *tasks.borrow_mut()));
+        for task in tasks {
+            task.await.unwrap();
+        }
     }
 
     /// A reader of the devices that never comes back until the returned
@@ -868,6 +880,23 @@ mod tests {
             input_id: input_id.map(str::to_string),
             output_id: None,
         }
+    }
+
+    /// The state of `app`, reading the devices with `read` instead of from the
+    /// machine's drivers: how long a real listing takes is not what these
+    /// tests are about.
+    fn reading_devices_with(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        read: ReadAudioEnv,
+    ) -> UsageState {
+        let mut usage = app.state::<UsageState>().inner().clone();
+        usage.read_audio_env = read;
+        usage
+    }
+
+    /// A reader of the devices that finds none, whatever is chosen.
+    fn devices_answering_at_once() -> ReadAudioEnv {
+        Arc::new(|input_id, _| unnamed_devices(input_id))
     }
 
     fn reported_lines(reporter: &UsageReporter) -> Vec<serde_json::Value> {
@@ -989,13 +1018,12 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn when_another_device_is_chosen_the_devices_in_use_are_reported() {
         let (app, reporter) = launched(true);
-        let usage = app.state::<UsageState>();
+        let usage = reading_devices_with(&app, devices_answering_at_once());
 
-        // A device the machine does not have reads as none: it differs from
-        // the microphone reported at launch on any machine.
+        // A device that reads as none differs from the microphone reported at
+        // launch.
         usage.devices_selected(Some("no-such-device".to_string()), None);
-        tokio::time::sleep(CHANGE_SETTLE * 4).await;
-        let_the_device_reads_finish().await;
+        let_the_changes_settle().await;
 
         let lines = reported_lines(&reporter);
         assert_eq!(lines.len(), 1, "{lines:?}");
@@ -1007,13 +1035,12 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn when_devices_are_chosen_several_times_in_a_row_they_are_reported_once() {
         let (app, reporter) = launched(true);
-        let usage = app.state::<UsageState>();
+        let usage = reading_devices_with(&app, devices_answering_at_once());
 
         for id in ["no-such-device", "another-missing-device", "a-third-one"] {
             usage.devices_selected(Some(id.to_string()), None);
         }
-        tokio::time::sleep(CHANGE_SETTLE * 4).await;
-        let_the_device_reads_finish().await;
+        let_the_changes_settle().await;
 
         assert_eq!(reported_lines(&reporter).len(), 1);
     }
@@ -1022,13 +1049,12 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn when_the_devices_in_use_are_the_ones_already_reported_nothing_is_reported() {
         let (app, reporter) = launched(true);
-        let usage = app.state::<UsageState>();
-        let now = snapshot::audio_env(Some("no-such-device"), None);
-        *usage.changes.reported_audio_env.lock().unwrap() = Some(now);
+        let usage = reading_devices_with(&app, devices_answering_at_once());
+        *usage.changes.reported_audio_env.lock().unwrap() =
+            Some(unnamed_devices(Some("no-such-device")));
 
         usage.devices_selected(Some("no-such-device".to_string()), None);
-        tokio::time::sleep(CHANGE_SETTLE * 4).await;
-        let_the_device_reads_finish().await;
+        let_the_changes_settle().await;
 
         assert_eq!(reporter.preview_ndjson(), "");
     }
@@ -1038,12 +1064,10 @@ mod tests {
     async fn when_the_driver_hangs_while_the_devices_are_read_nothing_is_reported() {
         let (app, reporter) = launched(true);
         let (read, release) = hung_reader();
-        let mut usage = app.state::<UsageState>().inner().clone();
-        usage.read_audio_env = read;
+        let usage = reading_devices_with(&app, read);
 
         usage.devices_selected(Some("no-such-device".to_string()), None);
-        tokio::time::sleep(CHANGE_SETTLE * 4).await;
-        let_the_device_reads_finish().await;
+        let_the_changes_settle().await;
 
         assert_eq!(reporter.preview_ndjson(), "");
         drop(release);
