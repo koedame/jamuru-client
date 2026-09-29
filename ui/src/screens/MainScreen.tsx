@@ -18,7 +18,7 @@
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { ConnectionPanel, type ConnectionState, type ConnectionErrorKind, type ConnectionHistoryEntry as ConnectionPanelHistoryEntry } from "../components/ConnectionPanel";
+import { ConnectionPanel, type ConnectionState, type ConnectionErrorKind } from "../components/ConnectionPanel";
 import { MixerPanel, MasterSection, type Channel } from "../components/MixerPanel";
 import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
@@ -54,8 +54,6 @@ import {
   MIXER_CHANGED,
   type MixerPeerStrip,
   type MixerSnapshot,
-  configGetConnectionHistory,
-  configRemoveConnectionHistory,
   configGetSampleRate,
   configGetTransmitChannels,
   configGetEffectiveServerUrl,
@@ -63,7 +61,6 @@ import {
   type HelpEvent,
   type NetworkStats,
   type DetailedLatency,
-  type ConnectionHistoryEntry,
   type PeerAudioInfo,
   type DeviceProblem,
 } from "../lib/tauri";
@@ -120,7 +117,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const [delayNoticeVisible, setDelayNoticeVisible] = useState(false);
   const [inputLevel, setInputLevel] = useState(0);
   const [outputLevel, setOutputLevel] = useState(0);
-  const [connectionHistory, setConnectionHistory] = useState<ConnectionHistoryEntry[]>([]);
   const [peerAudio, setPeerAudio] = useState<PeerAudioInfo | null>(null);
   const [localSampleRate, setLocalSampleRate] = useState<number>(48000);
   const [localChannelCount, setLocalChannelCount] = useState<number>(2);
@@ -244,12 +240,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // starts as the app does (ADR-024 - the device identity is created and
   // presented by the Rust side without any user interaction).
   useEffect(() => {
-    // The rooms a person has been in are theirs: a helper is not shown them.
-    if (!helping) {
-      configGetConnectionHistory()
-        .then(setConnectionHistory)
-        .catch((e) => console.log("Failed to load connection history:", e));
-    }
     // Load sample rate (ADR-013)
     configGetSampleRate()
       .then(setLocalSampleRate)
@@ -258,16 +248,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     configGetTransmitChannels()
       .then(setLocalChannelCount)
       .catch((e) => console.log("Failed to load transmit channel count, using default:", e));
-  }, [helping]);
-
-  // The backend saves a room to the history when it is joined.
-  const roomId = room?.room_id;
-  useEffect(() => {
-    if (roomId === undefined || helping) return;
-    configGetConnectionHistory()
-      .then(setConnectionHistory)
-      .catch((e) => console.log("Failed to load connection history:", e));
-  }, [roomId, helping]);
+  }, []);
 
   // Read the URL fresh on every attempt (not just at mount): a retry after
   // changing it in the Settings window must show what it is now dialing, not
@@ -529,21 +510,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     }
   };
 
-  // Handle selecting from connection history
-  const handleHistorySelect = useCallback((roomCode: string) => {
-    setInviteCode(roomCode);
-  }, []);
-
-  // Handle removing from connection history
-  const handleHistoryRemove = useCallback(async (roomCode: string) => {
-    try {
-      await configRemoveConnectionHistory(roomCode);
-      setConnectionHistory((prev) => prev.filter((e) => e.room_code !== roomCode));
-    } catch (e) {
-      console.error("Failed to remove from history:", e);
-    }
-  }, []);
-
   // Handle channel volume change from MixerPanel. The fader moves at once; the
   // backend's announcement then says where it stands.
   const handleChannelVolumeChange = useCallback(async (channelId: string, volume: number) => {
@@ -686,15 +652,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     return undefined;
   };
 
-  // Convert connection history to ConnectionPanel format
-  const getConnectionPanelHistory = (): ConnectionPanelHistoryEntry[] => {
-    return connectionHistory.map((entry) => ({
-      room_code: entry.room_code,
-      label: entry.label ?? undefined, // Convert null to undefined
-      connected_at: entry.connected_at,
-    }));
-  };
-
   // Cancel or retry the connection: drop what there is and connect again. The
   // URL is read again here as well, because cancelling an attempt that is
   // already "connecting" leaves the phase as it was.
@@ -731,9 +688,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
           onCancel={handleCancelConnection}
           onRetry={handleCancelConnection}
           onOpenSettings={handleSettingsClick}
-          connectionHistory={getConnectionPanelHistory()}
-          onHistorySelect={handleHistorySelect}
-          onHistoryRemove={handleHistoryRemove}
           title="jamjam"
           welcomeTitle={t("session.welcome.title")}
           welcomeSubtitle={t("session.welcome.subtitle")}
@@ -750,7 +704,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                 : t("session.join.loading")
           }
           cancelText={t("common.button.cancel", "Cancel")}
-          historyTitle={t("connectionHistory.title")}
           testRoomCode={session?.test_room_invite_code ?? undefined}
           testRoomTitle={t("session.testRoom.title")}
           testRoomDescription={t("session.testRoom.description")}

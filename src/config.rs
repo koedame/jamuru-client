@@ -12,7 +12,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
@@ -78,27 +77,8 @@ pub fn is_http_url(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("https://")
 }
 
-/// Maximum number of connection history entries to keep
-pub const MAX_HISTORY_ENTRIES: usize = 10;
-
 /// UI languages the app ships translations for (ADR-007).
 pub const VALID_LANGUAGES: [&str; 2] = ["en", "ja"];
-
-/// Connection history entry
-///
-/// Records a past connection for quick reconnection.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ConnectionHistoryEntry {
-    /// Room code used for the connection
-    pub room_code: String,
-
-    /// Timestamp of the connection (ISO 8601 format)
-    pub connected_at: DateTime<Utc>,
-
-    /// Optional user-defined label for this connection
-    #[serde(default)]
-    pub label: Option<String>,
-}
 
 /// Available audio presets
 ///
@@ -151,10 +131,6 @@ pub struct AppConfig {
     /// Selected audio preset
     #[serde(default)]
     pub preset: AudioPreset,
-
-    /// Connection history (most recent first)
-    #[serde(default)]
-    pub connection_history: Vec<ConnectionHistoryEntry>,
 
     /// User's display name for sessions
     #[serde(default = "default_peer_name")]
@@ -222,7 +198,6 @@ impl Default for AppConfig {
             buffer_size: DEFAULT_BUFFER_SIZE,
             server_url: None,
             preset: AudioPreset::default(),
-            connection_history: Vec::new(),
             peer_name: DEFAULT_PEER_NAME.to_string(),
             sample_rate: DEFAULT_SAMPLE_RATE,
             input_channel_l: 1,
@@ -390,6 +365,17 @@ mod tests {
         assert_eq!(config.output_device_id, None);
         assert_eq!(config.buffer_size, 64);
         assert_eq!(config.server_url, None);
+    }
+
+    #[test]
+    fn when_the_file_still_holds_the_removed_room_history_it_loads_without_it() {
+        let config: AppConfig = toml::from_str(
+            "buffer_size = 128\n\n[[connection_history]]\nroom_code = \"ABC234\"\nconnected_at = \"2026-09-01T00:00:00Z\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(config.buffer_size, 128);
+        assert!(!toml::to_string(&config).unwrap().contains("ABC234"));
     }
 
     /// Verifies: REQ-UPD-001

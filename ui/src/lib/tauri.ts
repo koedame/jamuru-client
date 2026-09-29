@@ -622,18 +622,6 @@ export async function mixerSetPeerMuted(peerId: string, muted: boolean): Promise
 // ============================================================================
 
 /**
- * Connection history entry
- */
-export interface ConnectionHistoryEntry {
-  /** Room code used for the connection */
-  room_code: string;
-  /** Timestamp of the connection (ISO 8601 format) */
-  connected_at: string;
-  /** Optional user-defined label for this connection */
-  label: string | null;
-}
-
-/**
  * Application configuration
  */
 export interface AppConfig {
@@ -647,8 +635,6 @@ export interface AppConfig {
   server_url: string | null;
   /** Selected audio preset */
   preset: AudioPresetId;
-  /** Connection history (most recent first) */
-  connection_history: ConnectionHistoryEntry[];
   /** Audio sample rate in Hz. Valid values: 44100, 48000, 96000 (ADR-013) */
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
@@ -738,64 +724,6 @@ export async function configListPresets(): Promise<PresetInfo[]> {
  */
 export async function configGetPreset(): Promise<AudioPresetId> {
   return invoke("config_get_preset");
-}
-
-// ============================================================================
-// Connection History API
-// ============================================================================
-
-/**
- * Get connection history
- * @returns List of past connections, most recent first
- */
-export async function configGetConnectionHistory(): Promise<
-  ConnectionHistoryEntry[]
-> {
-  return invoke("config_get_connection_history");
-}
-
-/**
- * Add a connection to history
- * @param roomCode Room code that was used
- * @param label Optional label for this connection
- */
-export async function configAddConnectionHistory(
-  roomCode: string,
-  label?: string
-): Promise<void> {
-  return invoke("config_add_connection_history", {
-    roomCode,
-    label: label ?? null,
-  });
-}
-
-/**
- * Remove a connection from history
- * @param roomCode Room code to remove
- */
-export async function configRemoveConnectionHistory(
-  roomCode: string
-): Promise<void> {
-  return invoke("config_remove_connection_history", { roomCode });
-}
-
-/**
- * Clear all connection history
- */
-export async function configClearConnectionHistory(): Promise<void> {
-  return invoke("config_clear_connection_history");
-}
-
-/**
- * Update connection history entry label
- * @param roomCode Room code to update
- * @param label New label (or null to remove label)
- */
-export async function configUpdateConnectionHistoryLabel(
-  roomCode: string,
-  label: string | null
-): Promise<void> {
-  return invoke("config_update_connection_history_label", { roomCode, label });
 }
 
 /**

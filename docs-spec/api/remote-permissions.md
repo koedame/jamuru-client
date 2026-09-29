@@ -60,7 +60,7 @@
 
 ## できない操作
 
-チャットの送信・リアクション、退室とルームの移動、接続先と利用状況の送信の設定、入ったことのあるルームの履歴、
+チャットの送信・リアクション、退室とルームの移動、接続先と利用状況の送信の設定、
 ウィンドウの操作、ほかの人への手伝いの申し出は、手伝う人にはできない。診断ログや画面を読み書きする操作は、
 この手伝いには無い。
 
@@ -84,11 +84,6 @@
 | `config_get_server_url` | 接続先のサーバーを読む |
 | `config_set_server_url` | 接続先のサーバーを変える |
 | `config_get_effective_server_url` | 実際に使う接続先を読む |
-| `config_get_connection_history` | 入ったことのあるルームの履歴を読む |
-| `config_add_connection_history` | 入ったことのあるルームの履歴に足す |
-| `config_remove_connection_history` | 入ったことのあるルームの履歴から消す |
-| `config_clear_connection_history` | 入ったことのあるルームの履歴を全部消す |
-| `config_update_connection_history_label` | 入ったことのあるルームの履歴の名前を変える |
 | `window_open_settings` | 設定ウィンドウを開く |
 | `window_close_settings` | 設定ウィンドウを閉じる |
 | `window_toggle_chat` | チャットウィンドウを開閉する |

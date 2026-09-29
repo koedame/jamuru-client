@@ -4,7 +4,6 @@
  */
 import { useState, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { formatConnectedAt } from "../../i18n/formatConnectedAt";
 import { isValidInviteCode } from "../../lib/inviteCode";
 import "./ConnectionPanel.css";
 
@@ -17,13 +16,6 @@ export type ConnectionState = "idle" | "connecting" | "error";
  * connection exists yet at all).
  */
 export type ConnectionErrorKind = "room" | "server";
-
-/** Connection history entry type */
-export interface ConnectionHistoryEntry {
-  room_code: string;
-  label?: string;
-  connected_at: string;
-}
 
 export interface ConnectionPanelProps {
   /** Current state */
@@ -60,12 +52,6 @@ export interface ConnectionPanelProps {
   onRetry?: () => void;
   /** Callback when settings button is clicked */
   onOpenSettings?: () => void;
-  /** Connection history entries */
-  connectionHistory?: ConnectionHistoryEntry[];
-  /** Callback when history entry is selected */
-  onHistorySelect?: (roomCode: string) => void;
-  /** Callback when history entry is removed */
-  onHistoryRemove?: (roomCode: string) => void;
   /** Title text (header logo) */
   title?: string;
   /** Welcome heading shown above the create/join form */
@@ -86,8 +72,6 @@ export interface ConnectionPanelProps {
   connectingText?: string;
   /** Cancel button text */
   cancelText?: string;
-  /** History title text */
-  historyTitle?: string;
   /** Invite code of the test room; the test room card shows only when given */
   testRoomCode?: string;
   /** Test room title (shown next to the code) */
@@ -111,9 +95,6 @@ export function ConnectionPanel({
   onCancel,
   onRetry,
   onOpenSettings,
-  connectionHistory = [],
-  onHistorySelect,
-  onHistoryRemove,
   title = "jamjam",
   welcomeTitle: welcomeTitleProp,
   welcomeSubtitle: welcomeSubtitleProp,
@@ -124,12 +105,11 @@ export function ConnectionPanel({
   joinText: joinTextProp,
   connectingText: connectingTextProp,
   cancelText: cancelTextProp,
-  historyTitle: historyTitleProp,
   testRoomCode,
   testRoomTitle: testRoomTitleProp,
   testRoomDescription: testRoomDescriptionProp,
 }: ConnectionPanelProps) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const welcomeTitle = welcomeTitleProp ?? t("session.welcome.title");
   const welcomeSubtitle = welcomeSubtitleProp ?? t("session.welcome.subtitle");
   const createRoomText = createRoomTextProp ?? t("session.create.button");
@@ -139,7 +119,6 @@ export function ConnectionPanel({
   const joinText = joinTextProp ?? t("session.join.button");
   const connectingText = connectingTextProp ?? t("session.join.loading");
   const cancelText = cancelTextProp ?? t("common.button.cancel");
-  const historyTitle = historyTitleProp ?? t("connectionHistory.title");
   const testRoomTitle = testRoomTitleProp ?? t("session.testRoom.title");
   const testRoomDescription = testRoomDescriptionProp ?? t("session.testRoom.description");
   const [internalCode, setInternalCode] = useState("");
@@ -361,40 +340,6 @@ export function ConnectionPanel({
             </button>
           )}
 
-          {/* Connection History */}
-          {connectionHistory.length > 0 && onHistorySelect && (
-            <div className="connection-panel__history">
-              <h3 className="connection-panel__history-title">{historyTitle}</h3>
-              <ul className="connection-panel__history-list">
-                {connectionHistory.map((entry) => (
-                  <li key={entry.room_code} className="connection-panel__history-item">
-                    <button
-                      type="button"
-                      className="connection-panel__history-select"
-                      onClick={() => onHistorySelect(entry.room_code)}
-                    >
-                      <span className="connection-panel__history-code">
-                        {entry.room_code}
-                      </span>
-                      <span className="connection-panel__history-date">
-                        {formatConnectedAt(entry.connected_at, t, i18n.language)}
-                      </span>
-                    </button>
-                    {onHistoryRemove && (
-                      <button
-                        type="button"
-                        className="connection-panel__history-remove"
-                        onClick={() => onHistoryRemove(entry.room_code)}
-                        aria-label={t("connectionHistory.remove")}
-                      >
-                        <RemoveIcon />
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </form>
       </main>
     </div>
@@ -434,24 +379,6 @@ function SettingsIcon() {
     >
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}
-
-function RemoveIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 }
