@@ -197,6 +197,20 @@ fn log_devices(kind: &str, devices: &[AudioDeviceInfo]) {
     tracing::info!("Found {}", line);
 }
 
+/// Whether a listing call that hung is still out, in either direction. A
+/// test that needs the listings to answer in time waits for this to be false.
+#[cfg(test)]
+pub(crate) fn a_listing_is_hung() -> bool {
+    [&INPUTS, &OUTPUTS].into_iter().any(|listing| {
+        listing
+            .hung
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|ended| !ended.load(Ordering::SeqCst))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

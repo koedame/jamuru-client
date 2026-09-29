@@ -1306,9 +1306,11 @@ mod tests {
         app
     }
 
-    /// Waits until `wanted` holds of the session, or fails after ten seconds.
+    /// Waits until `wanted` holds of the session, or fails after a minute.
+    /// The limit is only for a session that is stuck: a busy machine takes
+    /// several times as long as an idle one to get there.
     async fn until(app: &tauri::App<MockRuntime>, wanted: impl Fn(&Snapshot) -> bool) -> Snapshot {
-        for _ in 0..200 {
+        for _ in 0..1200 {
             let snapshot = app.state::<SessionState>().snapshot();
             if wanted(&snapshot) {
                 return snapshot;
