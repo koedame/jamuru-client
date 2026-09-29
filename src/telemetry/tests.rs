@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::*;
-use crate::config::{config_dir, AppConfig, ConnectionHistoryEntry};
+use crate::config::{config_dir, AppConfig};
 use crate::network::{AddressCandidate, LinkFacts, LinkSnapshot};
 
 // -- helpers ------------------------------------------------------------
@@ -508,14 +508,9 @@ fn settings_line_for(config: &AppConfig) -> (String, Value) {
 
 /// Verifies: REQ-TEL-004
 #[test]
-fn when_settings_are_sent_the_name_and_the_room_history_are_not_in_the_line() {
+fn when_settings_are_sent_the_name_is_not_in_the_line() {
     let config = AppConfig {
         peer_name: "Alice Anderson".into(),
-        connection_history: vec![ConnectionHistoryEntry {
-            room_code: "ROOMCODE123".into(),
-            connected_at: chrono::Utc::now(),
-            label: Some("band practice".into()),
-        }],
         ..AppConfig::default()
     };
 
@@ -527,27 +522,20 @@ fn when_settings_are_sent_the_name_and_the_room_history_are_not_in_the_line() {
             "{name} is in the settings: {body}"
         );
     }
-    for value in ["Alice Anderson", "ROOMCODE123", "band practice"] {
-        assert!(!body.contains(value), "{value} reached the line: {body}");
-    }
+    assert!(
+        !body.contains("Alice Anderson"),
+        "the name reached the line: {body}"
+    );
     assert_valid(&line);
 }
 
 /// Verifies: REQ-TEL-004
 #[test]
-fn when_the_left_out_list_is_read_it_is_exactly_the_four_named_items() {
+fn when_the_left_out_list_is_read_it_is_exactly_the_three_named_items() {
     let mut names = settings::LEFT_OUT.to_vec();
     names.sort_unstable();
 
-    assert_eq!(
-        names,
-        [
-            "connection_history",
-            "input_device_id",
-            "output_device_id",
-            "peer_name"
-        ]
-    );
+    assert_eq!(names, ["input_device_id", "output_device_id", "peer_name"]);
 }
 
 /// Verifies: REQ-TEL-004

@@ -163,11 +163,6 @@ app_commands! {
     [Access::ALL] "プリセットの一覧を読む" crate::config::config_list_presets;
     [Access::ALL] "プリセットの内容を読む" crate::config::config_get_preset;
     // The rooms a person has been in is personal.
-    [Access::NO_HELP] "入ったことのあるルームの履歴を読む" crate::config::config_get_connection_history;
-    [Access::NO_HELP] "入ったことのあるルームの履歴に足す" crate::config::config_add_connection_history;
-    [Access::NO_HELP] "入ったことのあるルームの履歴から消す" crate::config::config_remove_connection_history;
-    [Access::NO_HELP] "入ったことのあるルームの履歴を全部消す" crate::config::config_clear_connection_history;
-    [Access::NO_HELP] "入ったことのあるルームの履歴の名前を変える" crate::config::config_update_connection_history_label;
     [Access::ALL] "自分の表示名を読む" crate::config::config_get_peer_name;
     [Access::ALL] "自分の表示名を変える" crate::config::config_set_peer_name;
     [Access::ALL] "サンプルレートの設定を読む" crate::config::config_get_sample_rate;
@@ -258,7 +253,7 @@ mod tests {
     const MIDDLE: &str = "
 ## できない操作
 
-チャットの送信・リアクション、退室とルームの移動、接続先と利用状況の送信の設定、入ったことのあるルームの履歴、
+チャットの送信・リアクション、退室とルームの移動、接続先と利用状況の送信の設定、
 ウィンドウの操作、ほかの人への手伝いの申し出は、手伝う人にはできない。診断ログや画面を読み書きする操作は、
 この手伝いには無い。
 
@@ -380,7 +375,6 @@ mod tests {
             "session_reconnect",
             "config_set_server_url",
             "config_set_usage_reporting",
-            "config_get_connection_history",
             "settings_help_request",
             "settings_help_answer",
             "settings_help_stop",

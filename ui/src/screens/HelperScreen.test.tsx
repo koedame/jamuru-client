@@ -155,7 +155,6 @@ describe('HelperScreen', () => {
     expect(screen.queryByRole('textbox', { name: /message/i })).not.toBeInTheDocument();
     const methods = asked.map((c) => c.method);
     for (const forbidden of [
-      'config_get_connection_history',
       'config_get_effective_server_url',
       'signaling_send_chat',
       'session_leave',
