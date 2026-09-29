@@ -12,6 +12,12 @@ use crate::protocol::Packet;
 
 use super::error::NetworkError;
 
+/// Bytes a datagram is read into. A packet is the 12-byte header and its
+/// payload: a 256-frame stereo frame of 32-bit samples alone is 2048 bytes.
+/// A datagram that fills the buffer may have been cut short, so it is refused
+/// rather than played with its end missing.
+const RECV_BUFFER_SIZE: usize = 4096;
+
 /// UDP transport for sending and receiving packets
 pub struct UdpTransport {
     socket: Arc<UdpSocket>,
@@ -93,8 +99,12 @@ impl UdpTransport {
 
     /// Receive a packet (returns packet and sender address)
     pub async fn recv_from(&self) -> Result<(Packet, SocketAddr), NetworkError> {
-        let mut buf = vec![0u8; 2048];
+        let mut buf = vec![0u8; RECV_BUFFER_SIZE];
         let (len, addr) = self.socket.recv_from(&mut buf).await?;
+        if len == RECV_BUFFER_SIZE {
+            debug!("Dropping a datagram from {addr} that fills the receive buffer");
+            return Err(NetworkError::InvalidPacket);
+        }
         buf.truncate(len);
 
         let packet = Packet::from_bytes(&buf).ok_or(NetworkError::InvalidPacket)?;
@@ -105,7 +115,7 @@ impl UdpTransport {
 
     /// Receive raw bytes (for connectivity probing without packet parsing)
     pub async fn recv_raw(&self) -> Result<(Vec<u8>, SocketAddr), NetworkError> {
-        let mut buf = vec![0u8; 2048];
+        let mut buf = vec![0u8; RECV_BUFFER_SIZE];
         let (len, addr) = self.socket.recv_from(&mut buf).await?;
         buf.truncate(len);
         trace!("Received {} raw bytes from {}", len, addr);
@@ -168,6 +178,39 @@ mod tests {
         assert_eq!(received.timestamp, 100);
         assert_eq!(received.payload, vec![1, 2, 3, 4]);
         assert_eq!(from_addr, transport1.local_addr());
+    }
+
+    #[tokio::test]
+    async fn test_transport_receives_a_packet_carrying_a_256_frame_stereo_frame() {
+        let transport1 = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+        let transport2 = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+
+        let payload: Vec<u8> = (0..2048).map(|i| i as u8).collect();
+        let packet = Packet::audio(1, 0, payload.clone());
+        transport1
+            .send_to(&packet, transport2.local_addr())
+            .await
+            .unwrap();
+
+        let (received, _) = transport2.recv_from().await.unwrap();
+        assert_eq!(received.payload, payload);
+    }
+
+    #[tokio::test]
+    async fn test_transport_refuses_a_datagram_that_may_have_been_cut_short() {
+        let transport1 = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+        let transport2 = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+
+        let packet = Packet::audio(1, 0, vec![0; RECV_BUFFER_SIZE]);
+        transport1
+            .send_to(&packet, transport2.local_addr())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            transport2.recv_from().await,
+            Err(NetworkError::InvalidPacket)
+        ));
     }
 
     /// Test SO_REUSEADDR allows rebinding to same port after drop
