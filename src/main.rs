@@ -899,12 +899,14 @@ async fn run_room_session(
             password: None,
             peer_name: peer_name.clone(),
             features: vec![],
+            client_info: None,
         },
         RoomEntry::Join { room_id } => SignalingMessage::JoinRoom {
             room_id: room_id.clone(),
             password: None,
             peer_name: peer_name.clone(),
             features: vec![],
+            client_info: None,
         },
     };
     conn.send(request).await?;
