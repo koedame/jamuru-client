@@ -1085,6 +1085,8 @@ mod tests {
     struct ServerLog {
         /// The message types each connection sent, oldest first.
         received: Vec<(usize, String)>,
+        /// The `data` of every `CreateRoom` and `JoinRoom` received.
+        entered: Vec<serde_json::Value>,
         /// Ways to talk to each open connection.
         connections: Vec<mpsc::UnboundedSender<Say>>,
         /// A message type that makes the server drop the connection instead
@@ -1151,6 +1153,11 @@ mod tests {
                 .iter()
                 .filter(|(_, k)| k == kind)
                 .count()
+        }
+
+        /// The `data` of the `CreateRoom` and `JoinRoom` messages received, oldest first.
+        fn entering_messages(&self) -> Vec<serde_json::Value> {
+            self.log.lock().unwrap().entered.clone()
         }
 
         fn say(&self, connection: usize, message: String) {
@@ -1239,6 +1246,9 @@ mod tests {
                     let closing = {
                         let mut log = log.lock().unwrap();
                         log.received.push((me, kind.clone()));
+                        if kind == "CreateRoom" || kind == "JoinRoom" {
+                            log.entered.push(value["data"].clone());
+                        }
                         log.close_on.as_deref() == Some(kind.as_str())
                     };
                     if closing {
@@ -1502,6 +1512,37 @@ mod tests {
 
         for key in ["candidates", "public_addr", "local_addr"] {
             assert!(!json.contains(key), "{key} is in {json}");
+        }
+    }
+
+    /// Verifies: REQ-CON-032
+    #[tokio::test]
+    async fn creating_and_joining_a_room_tell_the_server_what_the_app_is_without_the_display_name_or_the_room_history(
+    ) {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = connected_to_the_server(&server, &dir).await;
+        crate::config::config_set_peer_name("Taro's secret display name".to_string(), app.state())
+            .unwrap();
+        crate::config::config_add_connection_history("SECRET".to_string(), None, app.state())
+            .unwrap();
+        create(app.handle()).await.unwrap();
+        leave(app.handle()).await.unwrap();
+        join(app.handle(), "ABC234".to_string()).await.unwrap();
+
+        let entering = server.entering_messages();
+        assert_eq!(entering.len(), 2);
+        for data in &entering {
+            let info = &data["client_info"];
+            assert_eq!(info["app_version"], "test");
+            assert_eq!(info["os"], std::env::consts::OS);
+            assert_eq!(info["arch"], std::env::consts::ARCH);
+            assert!(info["settings"].is_object(), "{}", info);
+            let text = info.to_string();
+            assert!(!text.contains("Taro's secret display name"), "{}", text);
+            assert!(!text.contains("SECRET"), "{}", text);
+            assert!(!text.contains("peer_name"), "{}", text);
+            assert!(!text.contains("connection_history"), "{}", text);
         }
     }
 
