@@ -626,14 +626,11 @@ fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it(
         "the lines should carry the install ID:\n{}",
         shown
     );
-    for left_out in ["peer_name"] {
-        assert!(
-            !shown.contains(left_out),
-            "{} must not be in what is sent:\n{}",
-            left_out,
-            shown
-        );
-    }
+    assert!(
+        !shown.contains("peer_name"),
+        "peer_name must not be in what is sent:\n{}",
+        shown
+    );
     assert!(
         shown.contains("\"server_is_default\":true"),
         "the launch report should say the server is the built-in one:\n{}",
