@@ -115,8 +115,6 @@ beforeEach(() => {
         return mixerNow;
       case 'streaming_status':
         return { is_active: false, device_problems: statusDeviceProblems };
-      case 'config_get_connection_history':
-        return [];
       case 'config_get_sample_rate':
         return 48000;
       case 'config_get_transmit_channels':
