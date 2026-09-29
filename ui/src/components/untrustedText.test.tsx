@@ -7,10 +7,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 
 import { ChatMessage } from './ChatPanel/ChatMessage';
-import { ConnectionHistory } from './ConnectionHistory';
 
 const PAYLOAD = '<img src=x onerror=alert(1)>';
 
@@ -46,21 +45,5 @@ describe('ChatMessage', () => {
       expect(container.querySelector('.chat-message__system-content')).toHaveTextContent(PAYLOAD);
       unmount();
     }
-  });
-});
-
-describe('ConnectionHistory', () => {
-  // Verifies: REQ-GUI-023
-  it('ルームの表示名が HTML を含むとき、要素にならず文字として表示されること', () => {
-    const { container } = render(
-      <ConnectionHistory
-        history={[{ room_code: 'ABC123', label: PAYLOAD, connected_at: '2026-09-24T00:00:00Z' }]}
-        onSelect={() => {}}
-        onRemove={() => {}}
-      />
-    );
-
-    expect(container.querySelector('img')).toBeNull();
-    expect(screen.getByText(PAYLOAD)).toHaveClass('connection-history__label');
   });
 });

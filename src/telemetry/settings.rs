@@ -22,15 +22,9 @@ use crate::config::AppConfig;
 /// Settings that are never sent.
 ///
 /// - `peer_name`: the user's display name
-/// - `connection_history`: rooms the user has been in
 /// - `input_device_id` / `output_device_id`: sent in `audio_env` instead, so
 ///   that choosing a device is one change and one line, not two
-pub const LEFT_OUT: [&str; 4] = [
-    "peer_name",
-    "connection_history",
-    "input_device_id",
-    "output_device_id",
-];
+pub const LEFT_OUT: [&str; 3] = ["peer_name", "input_device_id", "output_device_id"];
 
 /// The setting that holds a URL. It is sent as [`origin_of`] its value.
 const SERVER_URL: &str = "server_url";

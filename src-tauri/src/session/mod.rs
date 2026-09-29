@@ -682,19 +682,6 @@ async fn join<R: Runtime>(app: &AppHandle<R>, code: String) -> Result<Snapshot, 
         Err(e) => return fail(app, e),
     };
 
-    // Saved under the code the person could join with again. `code` is what
-    // they typed, which is either that code already or a room id from a link.
-    let history_code = if result.invite_code.is_empty() {
-        code.as_str()
-    } else {
-        result.invite_code.as_str()
-    };
-    if let Err(e) =
-        crate::config::config_add_connection_history(history_code.to_string(), None, app.state())
-    {
-        tracing::error!("Failed to save to history: {}", e);
-    }
-
     let audio = enter_room(app, conn, result, name, "");
     run_audio(app, conn, audio).await;
     Ok(state.snapshot())
@@ -1489,7 +1476,7 @@ mod tests {
 
     /// Verifies: REQ-RMT-028
     #[tokio::test]
-    async fn a_room_is_joined_lists_who_is_in_it_and_remembers_the_code_in_the_history() {
+    async fn a_room_is_joined_lists_who_is_in_it() {
         let server = FakeServer::start().await;
         let dir = tempfile::tempdir().unwrap();
         let app = connected_to_the_server(&server, &dir).await;
@@ -1502,8 +1489,6 @@ mod tests {
         assert_eq!(room.participants.len(), 1);
         assert_eq!(room.participants[0].name, "Aki");
         assert_eq!(room.participants[0].features, vec!["peer_message"]);
-        let history = app.state::<ConfigState>().get().unwrap().connection_history;
-        assert_eq!(history[0].room_code, "ABC234");
     }
 
     /// Verifies: REQ-RMT-028

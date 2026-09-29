@@ -7,14 +7,12 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 pub use jamjam::config::{
     config_path, load_config, load_config_from, save_config_to, AppConfig, AudioPreset,
-    ConnectionHistoryEntry, DEFAULT_SAMPLE_RATE, DEFAULT_SERVER_URL, MAX_HISTORY_ENTRIES,
-    VALID_SAMPLE_RATES,
+    DEFAULT_SAMPLE_RATE, DEFAULT_SERVER_URL, VALID_SAMPLE_RATES,
 };
 
 /// Called with the new configuration after each successful save
@@ -220,96 +218,6 @@ pub fn config_list_presets() -> Vec<PresetInfo> {
             jitter_buffer_frames: p.jitter_buffer_frames(),
         })
         .collect()
-}
-
-// =============================================================================
-// Connection History Commands
-// =============================================================================
-
-/// Get connection history
-///
-/// Returns the list of past connections, most recent first.
-#[tauri::command]
-pub fn config_get_connection_history(
-    state: tauri::State<'_, ConfigState>,
-) -> Result<Vec<ConnectionHistoryEntry>, String> {
-    let config = state.get()?;
-    Ok(config.connection_history)
-}
-
-/// Add a connection to history
-///
-/// Adds a new entry to the connection history. If the room code already exists,
-/// it updates the timestamp and moves it to the top. Limits history to MAX_HISTORY_ENTRIES.
-#[tauri::command]
-pub fn config_add_connection_history(
-    room_code: String,
-    label: Option<String>,
-    state: tauri::State<'_, ConfigState>,
-) -> Result<(), String> {
-    state.modify(|config| {
-        // Remove existing entry with same room code (if any)
-        config
-            .connection_history
-            .retain(|e| e.room_code != room_code);
-
-        // Add new entry at the beginning
-        config.connection_history.insert(
-            0,
-            ConnectionHistoryEntry {
-                room_code,
-                connected_at: Utc::now(),
-                label,
-            },
-        );
-
-        // Trim to max entries
-        config.connection_history.truncate(MAX_HISTORY_ENTRIES);
-    })?;
-    Ok(())
-}
-
-/// Remove a connection from history
-///
-/// Removes the entry with the specified room code from history.
-#[tauri::command]
-pub fn config_remove_connection_history(
-    room_code: String,
-    state: tauri::State<'_, ConfigState>,
-) -> Result<(), String> {
-    state.modify(|config| {
-        config
-            .connection_history
-            .retain(|e| e.room_code != room_code)
-    })?;
-    Ok(())
-}
-
-/// Clear all connection history
-#[tauri::command]
-pub fn config_clear_connection_history(state: tauri::State<'_, ConfigState>) -> Result<(), String> {
-    state.modify(|config| config.connection_history.clear())?;
-    Ok(())
-}
-
-/// Update a connection history entry label
-#[tauri::command]
-pub fn config_update_connection_history_label(
-    room_code: String,
-    label: Option<String>,
-    state: tauri::State<'_, ConfigState>,
-) -> Result<(), String> {
-    state.update_with(|current| {
-        let mut next = current.clone();
-        let entry = next
-            .connection_history
-            .iter_mut()
-            .find(|e| e.room_code == room_code)
-            .ok_or_else(|| format!("Room code not found in history: {}", room_code))?;
-        entry.label = label;
-        Ok::<_, String>((next, ()))
-    })?;
-    Ok(())
 }
 
 // =============================================================================

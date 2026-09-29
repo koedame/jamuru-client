@@ -612,13 +612,6 @@
       }
     }
   },
-  "connectionHistory": {
-    "title": "Recent Connections",
-    "remove": "Remove",
-    "empty": "No connection history",
-    "yesterday": "Yesterday",
-    "daysAgo": "{{days}} days ago"
-  },
   "diagnostics": {
     "title": "Self-Diagnostics",
     "tabs": {

@@ -83,7 +83,7 @@
    margin:auto (not justify-content:center on the parent) so the form is
    vertically centered like ui.pen's JoinRoom screen when it's shorter than
    the available height, but gracefully top-aligns without clipping the
-   welcome section when connection history makes it taller. */
+   welcome section when the content is taller than the window. */
 .connection-panel__form {
   display: flex;
   flex-direction: column;
@@ -336,84 +336,6 @@
 .connection-panel__loading-text {
   font-size: var(--font-size-body);
   color: var(--color-text-secondary);
-}
-
-/* Connection History */
-.connection-panel__history {
-  margin-top: 0;
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--color-border);
-}
-
-.connection-panel__history-title {
-  font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-medium, 500);
-  color: var(--color-text-secondary);
-  margin: 0 0 var(--space-sm) 0;
-}
-
-.connection-panel__history-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.connection-panel__history-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-.connection-panel__history-select {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: border-color 0.15s ease;
-  text-align: left;
-}
-
-.connection-panel__history-select:hover {
-  border-color: var(--color-text-primary);
-}
-
-.connection-panel__history-code {
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-caption);
-  letter-spacing: 0.05em;
-}
-
-.connection-panel__history-date {
-  font-size: var(--font-size-small, 11px);
-  color: var(--color-text-secondary);
-}
-
-.connection-panel__history-remove {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  color: var(--color-text-tertiary);
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
-}
-
-.connection-panel__history-remove:hover {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
 }
 
 /* Test Room Card */

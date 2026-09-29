@@ -542,53 +542,6 @@ function App() {
 
 ## 追加機能
 
-### 接続履歴（ConnectionHistory）
-
-過去に接続したルームの履歴を表示・管理。
-
-```typescript
-interface ConnectionHistoryEntry {
-  room_code: string;
-  label?: string;
-  connected_at: string; // ISO 8601 format
-}
-
-interface ConnectionPanelProps {
-  // ... 既存のProps
-  /** 接続履歴 */
-  connectionHistory?: ConnectionHistoryEntry[];
-  /** 履歴選択時のコールバック */
-  onHistorySelect?: (roomCode: string) => void;
-  /** 履歴削除時のコールバック */
-  onHistoryRemove?: (roomCode: string) => void;
-  /** 履歴タイトル */
-  historyTitle?: string;
-}
-```
-
-#### 日付表示フォーマット
-
-| 条件 | 表示形式 |
-|------|---------|
-| 今日 | `HH:MM` |
-| 昨日 | `Yesterday` |
-| 7日以内 | `N days ago` |
-| 7日以上 | `MMM D` (例: Jan 15) |
-
-#### ビジュアル
-
-```
-┌────────────────────────────────┐
-│         履歴                   │
-├────────────────────────────────┤
-│ ABC-123          14:30    [✕]   │
-│ XYZ789          Yesterday [✕]  │
-│ DEF456          Jan 15    [✕]  │
-└────────────────────────────────┘
-```
-
----
-
 ### テストルーム機能
 
 サーバーが示す、接続を試すためのルームへのクイックアクセス。アプリはコードを持たない。サーバーのルーム一覧で `test_room` の印が付いたルームがあれば、そのコードを `MainScreen` が渡す（[api/signaling.md](../../api/signaling.md)）。
@@ -645,11 +598,6 @@ export interface ConnectionPanelProps {
   onCancel?: () => void;
   onOpenSettings?: () => void;
 
-  // 履歴機能
-  connectionHistory?: ConnectionHistoryEntry[];
-  onHistorySelect?: (roomCode: string) => void;
-  onHistoryRemove?: (roomCode: string) => void;
-
   // テストルーム機能
   testRoomCode?: string;
   testRoomTitle?: string;
@@ -666,7 +614,6 @@ export interface ConnectionPanelProps {
   joinText?: string;
   connectingText?: string;
   cancelText?: string;
-  historyTitle?: string;
 }
 ```
 
@@ -681,9 +628,7 @@ export interface ConnectionPanelProps {
   "session.welcome.title": "jamjam へようこそ",
   "session.welcome.subtitle": "低遅延で高品質な音声セッションを始めましょう",
   "session.testRoom.title": "テストルーム",
-  "session.testRoom.description": "動作確認用のテストルームに接続します",
-  "connectionHistory.title": "履歴",
-  "connectionHistory.remove": "削除"
+  "session.testRoom.description": "動作確認用のテストルームに接続します"
 }
 ```
 
