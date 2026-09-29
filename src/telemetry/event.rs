@@ -55,7 +55,7 @@ pub fn format_ts(time: DateTime<Utc>) -> String {
 ///
 /// A value the app could not find out is left out of the line rather than
 /// written as a placeholder: absent means "not known".
-#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppStart {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub os_version: Option<String>,
@@ -74,10 +74,11 @@ pub struct AppStart {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_is_default: Option<bool>,
     /// The settings file's items, minus the ones [`super::settings`] leaves out.
+    #[serde(default)]
     pub settings: serde_json::Map<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioHost {
     Coreaudio,
@@ -94,7 +95,7 @@ pub enum AudioHost {
 /// holds them: absent for a side left on the OS default. They are here rather
 /// than in the settings so that they are sent with the device they name, also
 /// when that device could not be found.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AudioEnv {
     pub input: Option<Device>,
     pub output: Option<Device>,
@@ -105,7 +106,7 @@ pub struct AudioEnv {
 }
 
 /// One audio device.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Device {
     /// Exactly what the OS reports.
     pub name: String,
@@ -117,7 +118,7 @@ pub struct Device {
     pub is_default: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceKind {
     Usb,

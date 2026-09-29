@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use jamjam::audio::bounded;
 use jamjam::config::AppConfig;
-use jamjam::network::{NetworkError, SignalingFailure};
+use jamjam::network::{ClientInfo, NetworkError, SignalingFailure};
 use jamjam::telemetry::{
     snapshot, AppStart, AudioEnv, Component, EndReason, ErrorCode, EventBody, Hang, HttpTransport,
     NoTransport, SessionMode, Transport, UsageReporter,
@@ -184,6 +184,26 @@ impl UsageState {
 
     pub fn reporter(&self) -> &UsageReporter {
         &self.reporter
+    }
+
+    /// What this app tells the server about itself when it enters a room
+    /// ([`ClientInfo`]), whether or not usage reporting is on. Read fresh, so
+    /// it shows the settings and devices of this moment. A driver that does not
+    /// answer in time leaves the devices out; the rest is still sent.
+    pub async fn client_info(&self, config: &AppConfig) -> ClientInfo {
+        let audio = audio_env_within(
+            self.read_audio_env.clone(),
+            config.input_device_id.clone(),
+            config.output_device_id.clone(),
+        )
+        .await
+        .unwrap_or(AudioEnv {
+            input: None,
+            output: None,
+            input_id: config.input_device_id.clone(),
+            output_id: config.output_device_id.clone(),
+        });
+        ClientInfo::new(self.reporter.app_version(), app_start_of(config), audio)
     }
 
     /// Reports this launch: the crash of the last one if there was one, then
