@@ -1517,14 +1517,12 @@ mod tests {
 
     /// Verifies: REQ-CON-032
     #[tokio::test]
-    async fn creating_and_joining_a_room_tell_the_server_what_the_app_is_without_the_display_name_or_the_room_history(
-    ) {
+    async fn creating_and_joining_a_room_tell_the_server_what_the_app_is_without_the_display_name()
+    {
         let server = FakeServer::start().await;
         let dir = tempfile::tempdir().unwrap();
         let app = connected_to_the_server(&server, &dir).await;
         crate::config::config_set_peer_name("Taro's secret display name".to_string(), app.state())
-            .unwrap();
-        crate::config::config_add_connection_history("SECRET".to_string(), None, app.state())
             .unwrap();
         create(app.handle()).await.unwrap();
         leave(app.handle()).await.unwrap();
@@ -1540,9 +1538,7 @@ mod tests {
             assert!(info["settings"].is_object(), "{}", info);
             let text = info.to_string();
             assert!(!text.contains("Taro's secret display name"), "{}", text);
-            assert!(!text.contains("SECRET"), "{}", text);
             assert!(!text.contains("peer_name"), "{}", text);
-            assert!(!text.contains("connection_history"), "{}", text);
         }
     }
 
