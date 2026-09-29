@@ -12,8 +12,8 @@ use tokio::sync::Mutex;
 use tokio::time::Duration;
 
 use jamjam::network::{
-    gather_host_candidates, AddressCandidate, NetworkError, PeerInfo, RoomInfo, SignalingClient,
-    SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
+    gather_host_candidates, AddressCandidate, ClientInfo, NetworkError, PeerInfo, RoomInfo,
+    SignalingClient, SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
 };
 use uuid::Uuid;
 
@@ -248,6 +248,15 @@ pub async fn signaling_list_rooms(
     }
 }
 
+/// What to tell the server about this app when entering a room: for the people
+/// who run the service, never passed on to the other participants. `None` when
+/// the settings cannot be read, which enters the room as an app that tells
+/// nothing.
+async fn client_info_of<R: Runtime>(app: &AppHandle<R>, usage: &UsageState) -> Option<ClientInfo> {
+    let config = app.try_state::<ConfigState>()?.get().ok()?;
+    Some(usage.client_info(&config).await)
+}
+
 /// Join a room
 pub async fn signaling_join_room<R: Runtime>(
     conn_id: u32,
@@ -264,12 +273,14 @@ pub async fn signaling_join_room<R: Runtime>(
 
     // `room_id` is what the user typed - usually an invite code, which lets
     // whoever reads the log file join the room - so it is not logged here.
+    let client_info = client_info_of(&app, &usage).await;
     tracing::info!("Joining a room (conn_id={})", conn_id);
     conn.send(SignalingMessage::JoinRoom {
         room_id: room_id.clone(),
         password: None,
         peer_name: peer_name.clone(),
         features: vec![PEER_MESSAGE_FEATURE.to_string()],
+        client_info,
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -462,12 +473,14 @@ pub async fn signaling_create_room<R: Runtime>(
         .get_mut(&conn_id)
         .ok_or("Connection not found")?;
 
+    let client_info = client_info_of(&app, &usage).await;
     tracing::info!("Creating a room (conn_id={})", conn_id);
     conn.send(SignalingMessage::CreateRoom {
         room_name,
         password: None,
         peer_name: peer_name.clone(),
         features: vec![PEER_MESSAGE_FEATURE.to_string()],
+        client_info,
     })
     .await
     .map_err(|e| e.to_string())?;

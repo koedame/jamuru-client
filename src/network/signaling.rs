@@ -17,6 +17,7 @@ use super::device_identity::DeviceIdentity;
 use super::discovery::discover_signaling_url;
 use super::error::{NetworkError, SignalingFailure};
 use super::link_facts::route_preference;
+use crate::telemetry::{AppStart, AudioEnv};
 
 /// The four `X-Device-*` handshake headers proving `identity` to a server
 /// (ADR-024), signed for the current time.
@@ -180,6 +181,80 @@ pub struct RoomInfo {
     pub test_room: bool,
 }
 
+/// What the app tells the server about itself when it enters a room, for the
+/// people who run the service to read. The server keeps it with the seat and
+/// hands it to nobody else: it is not part of [`PeerInfo`], so the other
+/// participants never receive it, and this app never reads it back.
+///
+/// Built from what the usage log already collects ([`AppStart`], [`AudioEnv`]),
+/// so the display name and everything else [`crate::telemetry`] leaves out of
+/// the settings is left out here too.
+///
+/// The server refuses a message whose `client_info` is outside its definition,
+/// and a refused message is a room that cannot be entered, so every string is
+/// cut to the length the definition allows ([`ClientInfo::new`]).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ClientInfo {
+    pub app_version: String,
+    pub os: String,
+    pub arch: String,
+    #[serde(flatten)]
+    pub machine: AppStart,
+    #[serde(flatten)]
+    pub audio: AudioEnv,
+}
+
+/// The longest an app version or an OS version may be.
+const MAX_VERSION_TEXT: usize = 32;
+/// The longest a language or a WebView version may be.
+const MAX_SHORT_TEXT: usize = 16;
+/// The longest a device name, a device ID or a settings value may be.
+const MAX_LONG_TEXT: usize = 128;
+/// The most items of the settings file the server takes.
+const MAX_SETTINGS: usize = 64;
+
+impl ClientInfo {
+    pub fn new(app_version: &str, mut machine: AppStart, mut audio: AudioEnv) -> Self {
+        for (text, max) in [
+            (&mut machine.os_version, MAX_VERSION_TEXT),
+            (&mut machine.webview_version, MAX_SHORT_TEXT),
+            (&mut machine.language, MAX_SHORT_TEXT),
+            (&mut audio.input_id, MAX_LONG_TEXT),
+            (&mut audio.output_id, MAX_LONG_TEXT),
+        ] {
+            if let Some(text) = text {
+                cut(text, max);
+            }
+        }
+        machine.settings = std::mem::take(&mut machine.settings)
+            .into_iter()
+            .filter(|(_, value)| {
+                !matches!(value, serde_json::Value::String(s) if s.chars().count() > MAX_LONG_TEXT)
+            })
+            .take(MAX_SETTINGS)
+            .collect();
+        for device in [&mut audio.input, &mut audio.output].into_iter().flatten() {
+            cut(&mut device.name, MAX_LONG_TEXT);
+        }
+        let mut app_version = app_version.to_string();
+        cut(&mut app_version, MAX_VERSION_TEXT);
+        Self {
+            app_version,
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+            machine,
+            audio,
+        }
+    }
+}
+
+/// `text` shortened to at most `max` characters.
+fn cut(text: &mut String, max: usize) {
+    if let Some((end, _)) = text.char_indices().nth(max) {
+        text.truncate(end);
+    }
+}
+
 /// Signaling message types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -193,6 +268,10 @@ pub enum SignalingMessage {
         /// in its [`PeerInfo`]. Left out when empty, as an older app does.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         features: Vec<String>,
+        /// What this app is, for the server's operators. Left out by an app
+        /// that has nothing to tell (the CLI). Never passed on to the others.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_info: Option<ClientInfo>,
     },
     JoinRoom {
         room_id: String,
@@ -201,6 +280,9 @@ pub enum SignalingMessage {
         /// As [`SignalingMessage::CreateRoom`]'s.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         features: Vec<String>,
+        /// As [`SignalingMessage::CreateRoom`]'s.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_info: Option<ClientInfo>,
     },
     LeaveRoom,
     /// Update peer connection information with multiple candidates
@@ -823,6 +905,7 @@ mod tests {
             password: None,
             peer_name: "Bob".to_string(),
             features: vec![],
+            client_info: None,
         })
         .unwrap();
         assert!(json["data"].get("features").is_none(), "{}", json);
@@ -832,11 +915,170 @@ mod tests {
             password: None,
             peer_name: "Alice".to_string(),
             features: vec![PEER_MESSAGE_FEATURE.to_string()],
+            client_info: None,
         })
         .unwrap();
         assert_eq!(
             json["data"]["features"],
             serde_json::json!(["peer_message"])
+        );
+    }
+
+    fn info_for_test() -> ClientInfo {
+        let mut settings = serde_json::Map::new();
+        settings.insert("preset".to_string(), serde_json::json!("ultra"));
+        settings.insert("buffer_size".to_string(), serde_json::json!(64));
+        ClientInfo::new(
+            "0.4.0-beta.2",
+            AppStart {
+                os_version: Some("14.6".to_string()),
+                cpu_cores: Some(12),
+                ram_gb: Some(32),
+                settings,
+                ..AppStart::default()
+            },
+            AudioEnv {
+                input: None,
+                output: None,
+                input_id: Some("alsa:mic".to_string()),
+                output_id: None,
+            },
+        )
+    }
+
+    /// The app's own information goes in the entering message beside the other
+    /// fields as a flat object, and an app with nothing to tell (the CLI) sends
+    /// no such field.
+    ///
+    /// Verifies: REQ-CON-032
+    #[test]
+    fn the_app_information_is_sent_in_the_entering_message_and_left_out_when_there_is_none() {
+        let json = serde_json::to_value(SignalingMessage::JoinRoom {
+            room_id: "ABC234".to_string(),
+            password: None,
+            peer_name: "Bob".to_string(),
+            features: vec![],
+            client_info: Some(info_for_test()),
+        })
+        .unwrap();
+        let info = &json["data"]["client_info"];
+        assert_eq!(info["app_version"], "0.4.0-beta.2");
+        assert_eq!(info["os"], std::env::consts::OS);
+        assert_eq!(info["os_version"], "14.6");
+        assert_eq!(info["cpu_cores"], 12);
+        assert_eq!(info["settings"]["preset"], "ultra");
+        assert_eq!(info["input"], serde_json::Value::Null);
+        assert_eq!(info["input_id"], "alsa:mic");
+        assert!(info.get("output_id").is_none(), "{}", info);
+
+        let json = serde_json::to_value(SignalingMessage::CreateRoom {
+            room_name: "Jam".to_string(),
+            password: None,
+            peer_name: "Alice".to_string(),
+            features: vec![],
+            client_info: None,
+        })
+        .unwrap();
+        assert!(json["data"].get("client_info").is_none(), "{}", json);
+    }
+
+    /// The server refuses a message whose information is outside its
+    /// definition, and then the room cannot be entered. What the app cannot
+    /// control the length of is cut to what the definition allows.
+    ///
+    /// Verifies: REQ-CON-032
+    #[test]
+    fn app_information_with_text_longer_than_the_server_accepts_is_cut_to_the_limit() {
+        let long = "x".repeat(300);
+        let mut settings = serde_json::Map::new();
+        settings.insert("server_url".to_string(), serde_json::json!(long));
+        settings.insert("preset".to_string(), serde_json::json!("ultra"));
+        for i in 0..80 {
+            settings.insert(format!("item_{i:02}"), serde_json::json!(i));
+        }
+        let info = ClientInfo::new(
+            &long,
+            AppStart {
+                os_version: Some(long.clone()),
+                language: Some(long.clone()),
+                webview_version: Some(long.clone()),
+                settings,
+                ..AppStart::default()
+            },
+            AudioEnv {
+                input: Some(crate::telemetry::Device {
+                    name: "あ".repeat(300),
+                    kind: crate::telemetry::DeviceKind::Usb,
+                    channels: 2,
+                    sample_rates: vec![48000],
+                    min_buffer_frames: None,
+                    is_default: false,
+                }),
+                output: None,
+                input_id: Some(long.clone()),
+                output_id: Some(long.clone()),
+            },
+        );
+
+        assert_eq!(info.app_version.chars().count(), 32);
+        assert_eq!(
+            info.machine.os_version.as_ref().unwrap().chars().count(),
+            32
+        );
+        assert_eq!(info.machine.language.as_ref().unwrap().chars().count(), 16);
+        assert_eq!(
+            info.machine
+                .webview_version
+                .as_ref()
+                .unwrap()
+                .chars()
+                .count(),
+            16
+        );
+        assert_eq!(info.audio.input.as_ref().unwrap().name.chars().count(), 128);
+        assert_eq!(info.audio.input_id.as_ref().unwrap().chars().count(), 128);
+        assert_eq!(info.audio.output_id.as_ref().unwrap().chars().count(), 128);
+        assert!(info.machine.settings.len() <= 64);
+        assert!(
+            !info.machine.settings.contains_key("server_url"),
+            "a settings value longer than the definition allows is left out, not cut"
+        );
+    }
+
+    /// What the server hands to the other participants has no place for the
+    /// app's information, so it cannot reach another app through it.
+    ///
+    /// Verifies: REQ-CON-032
+    #[test]
+    fn a_participant_as_the_others_receive_it_has_no_app_information() {
+        let peer = PeerInfo {
+            id: Uuid::nil(),
+            name: "Alice".to_string(),
+            candidates: vec![],
+            public_addr: None,
+            local_addr: None,
+            joined_at: 0,
+            features: vec![],
+        };
+        let mut keys: Vec<String> = serde_json::to_value(&peer)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "candidates",
+                "features",
+                "id",
+                "joined_at",
+                "local_addr",
+                "name",
+                "public_addr"
+            ]
         );
     }
 
@@ -919,6 +1161,7 @@ mod tests {
             password: None,
             peer_name: "Alice".to_string(),
             features: vec![],
+            client_info: None,
         };
 
         let json = serde_json::to_string(&msg).unwrap();

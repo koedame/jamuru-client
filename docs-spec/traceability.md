@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 234 |
-| うち must | 228 |
+| 要求 総数 | 235 |
+| うち must | 229 |
 | うち should | 6 |
-| 検証済み | 205 |
+| 検証済み | 206 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -76,6 +76,7 @@
 | REQ-CON-029 | must | 問い合わせの答えが `ws://` / `wss://` の URL でなければ繋がない。`https://` で問い合わせたのに暗号化されない `ws://` が返ったときも繋がない | `docs-spec/requirements.md` | `src/network/discovery.rs`::a_server_asked_over_https_cannot_send_the_app_to_an_unencrypted_websocket<br/>`src/network/discovery.rs`::an_answer_that_is_not_a_websocket_url_is_refused<br/>`src/network/discovery.rs`::when_the_server_names_something_other_than_a_websocket_the_app_does_not_connect |
 | REQ-CON-030 | must | シグナリングサーバーから知らない種類のメッセージが届いても、接続が切れたことにはならず、読み飛ばして続きのメッセージを受け取る（サーバーにメッセージの種類を足しても、配布済みのアプリがルームから落ちない）。知っている種類なのに読めないメッセージは、これまでどおり失敗として報告する | `docs-spec/requirements.md` | `src-tauri/src/signaling.rs`::a_server_message_of_a_type_this_app_does_not_know_is_skipped_not_reported_as_a_lost_connection<br/>`src/network/signaling.rs`::a_known_message_carrying_an_unknown_value_deep_inside_is_not_classified_as_unknown<br/>`src/network/signaling.rs`::a_known_message_type_with_a_malformed_field_is_not_classified_as_unknown<br/>`src/network/signaling.rs`::a_message_of_a_type_the_protocol_gained_later_is_classified_as_unknown |
 | REQ-CON-031 | must | シグナリングのメッセージの形: ルームを作る・入るときに知らせる追加の機能（`features`）は、無ければ項目ごと送らない（知らない頃のアプリと同じ形）。参加者の情報に `features` が無ければ、その参加者は相手あてのメッセージを受け取れないものとして読む。相手あてのメッセージ（`PeerMessage`）は宛先と中身（JSON のオブジェクト）だけを送る形で、届いたものからはサーバーが付けた送り主を読む | `docs-spec/requirements.md` | `src/network/signaling.rs`::a_participant_listed_without_features_takes_no_peer_messages<br/>`src/network/signaling.rs`::a_peer_message_is_sent_without_a_sender_and_arrives_with_the_one_the_server_stamped<br/>`src/network/signaling.rs`::an_app_that_announces_no_features_sends_no_features_field |
+| REQ-CON-032 | must | ルームを作る・入るときに、アプリは自分の版・OS・機材・設定の値（`client_info`）をサーバーに 1 回知らせる（利用状況の送信の設定に関わらず）。サーバーは保存するだけで、ほかの参加者には渡さない（参加者の情報・チャット・相手あてのメッセージのどれにも入れない）。中身は利用状況の送信と同じ集め方で、表示名は含めず、サーバーが受け付ける長さに収める（外れるとルームに入れなくなるため）。知らせる情報を持たないアプリ（CLI）は項目ごと送らない | `docs-spec/requirements.md` | `src-tauri/src/session/mod.rs`::creating_and_joining_a_room_tell_the_server_what_the_app_is_without_the_display_name<br/>`src/network/signaling.rs`::a_participant_as_the_others_receive_it_has_no_app_information<br/>`src/network/signaling.rs`::app_information_with_text_longer_than_the_server_accepts_is_cut_to_the_limit<br/>`src/network/signaling.rs`::the_app_information_is_sent_in_the_entering_message_and_left_out_when_there_is_none |
 | REQ-CON-101 | must | ルームを作成する | `docs-spec/behavior/connection.feature` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CON-102 | must | パスワード付きルームを作成する | `docs-spec/behavior/connection.feature` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CON-103 | must | 招待URLでルームに参加する | `docs-spec/behavior/connection.feature` | `tests/connection_test.rs`::test_invite_url_round_trips<br/>`ui/src/lib/deepLink.test.ts`::extracts the code from a well-formed link<br/>`ui/src/lib/deepLink.test.ts`::wrong scheme |
