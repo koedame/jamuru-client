@@ -187,8 +187,8 @@ pub struct RoomInfo {
 /// participants never receive it, and this app never reads it back.
 ///
 /// Built from what the usage log already collects ([`AppStart`], [`AudioEnv`]),
-/// so the display name, the rooms the user has been in and everything else
-/// [`crate::telemetry`] leaves out of the settings is left out here too.
+/// so the display name and everything else [`crate::telemetry`] leaves out of
+/// the settings is left out here too.
 ///
 /// The server refuses a message whose `client_info` is outside its definition,
 /// and a refused message is a room that cannot be entered, so every string is
