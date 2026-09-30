@@ -164,9 +164,9 @@ fn typing_an_invite_code_updates_the_field() {
     let (_guard, app) = launch();
     let screen = app.connection_screen();
 
-    screen.invite_code_input().type_text("ABC234").unwrap();
+    screen.invite_code_input().type_text("ABC234XYZ").unwrap();
 
-    assert_eq!(screen.invite_code_input().value().unwrap(), "ABC234");
+    assert_eq!(screen.invite_code_input().value().unwrap(), "ABC234XYZ");
 }
 
 // ---------------------------------------------------------------------------

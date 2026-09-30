@@ -21,28 +21,28 @@ import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link';
 describe('parseInviteUrl', () => {
   // Verifies: REQ-CON-103
   it('extracts the code from a well-formed link', () => {
-    expect(parseInviteUrl('jamjam://join/ABC234')).toBe('ABC234');
+    expect(parseInviteUrl('jamjam://join/ABC234XYZ')).toBe('ABC234XYZ');
   });
 
   it('upper-cases, because mail and chat clients lower-case links', () => {
-    expect(parseInviteUrl('jamjam://join/abc234')).toBe('ABC234');
+    expect(parseInviteUrl('jamjam://join/abc234xyz')).toBe('ABC234XYZ');
   });
 
   it('tolerates a query string and a trailing slash', () => {
-    expect(parseInviteUrl('jamjam://join/ABC234?from=chat')).toBe('ABC234');
-    expect(parseInviteUrl('jamjam://join/ABC234/')).toBe('ABC234');
-    expect(parseInviteUrl('  jamjam://join/ABC234  ')).toBe('ABC234');
+    expect(parseInviteUrl('jamjam://join/ABC234XYZ?from=chat')).toBe('ABC234XYZ');
+    expect(parseInviteUrl('jamjam://join/ABC234XYZ/')).toBe('ABC234XYZ');
+    expect(parseInviteUrl('  jamjam://join/ABC234XYZ  ')).toBe('ABC234XYZ');
   });
 
   // Verifies: REQ-CON-103
   it.each([
-    ['wrong scheme', 'https://example.com/join/ABC234'],
-    ['wrong action', 'jamjam://leave/ABC234'],
+    ['wrong scheme', 'https://example.com/join/ABC234XYZ'],
+    ['wrong action', 'jamjam://leave/ABC234XYZ'],
     ['too short', 'jamjam://join/ABC'],
     ['too long', 'jamjam://join/ABC2345'],
     ['excluded confusable characters', 'jamjam://join/ABC01I'],
     ['no code', 'jamjam://join/'],
-    ['deeper path', 'jamjam://join/ABC234/extra'],
+    ['deeper path', 'jamjam://join/ABC234XYZ/extra'],
     ['empty', ''],
   ])('rejects %s rather than guessing', (_label, url) => {
     expect(parseInviteUrl(url)).toBeNull();
@@ -51,20 +51,20 @@ describe('parseInviteUrl', () => {
   it('accepts every character of the invite alphabet', () => {
     // The alphabet excludes 0, O, I, 1 and L as confusable, so a code built
     // from it must parse while one containing an excluded character must not.
-    expect(parseInviteUrl('jamjam://join/ZYXW98')).toBe('ZYXW98');
-    expect(parseInviteUrl('jamjam://join/ZYXW9O')).toBeNull();
+    expect(parseInviteUrl('jamjam://join/ZYXW98765')).toBe('ZYXW98765');
+    expect(parseInviteUrl('jamjam://join/ZYXW9876O')).toBeNull();
   });
 });
 
 describe('registerInviteLinkHandler', () => {
   it('handles a link that started the app before listening for more', async () => {
-    vi.mocked(getCurrent).mockResolvedValueOnce(['jamjam://join/ABC234']);
+    vi.mocked(getCurrent).mockResolvedValueOnce(['jamjam://join/ABC234XYZ']);
     const onCode = vi.fn();
     const onInvalidLink = vi.fn();
 
     await registerInviteLinkHandler(onCode, onInvalidLink);
 
-    expect(onCode).toHaveBeenCalledWith('ABC234');
+    expect(onCode).toHaveBeenCalledWith('ABC234XYZ');
     expect(onInvalidLink).not.toHaveBeenCalled();
     expect(onOpenUrl).toHaveBeenCalled();
   });
@@ -93,8 +93,8 @@ describe('registerInviteLinkHandler', () => {
 
   it('joins only the first invite link in a batch', async () => {
     vi.mocked(getCurrent).mockResolvedValueOnce([
-      'jamjam://join/ABC234',
-      'jamjam://join/ZYXW98',
+      'jamjam://join/ABC234XYZ',
+      'jamjam://join/ZYXW98765',
     ]);
     const onCode = vi.fn();
     const onInvalidLink = vi.fn();
@@ -102,7 +102,7 @@ describe('registerInviteLinkHandler', () => {
     await registerInviteLinkHandler(onCode, onInvalidLink);
 
     expect(onCode).toHaveBeenCalledTimes(1);
-    expect(onCode).toHaveBeenCalledWith('ABC234');
+    expect(onCode).toHaveBeenCalledWith('ABC234XYZ');
     expect(onInvalidLink).not.toHaveBeenCalled();
   });
 
