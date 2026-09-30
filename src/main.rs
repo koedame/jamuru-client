@@ -17,8 +17,8 @@ use tracing_subscriber::FmtSubscriber;
 use jamjam::audio::{driver_name_of, is_asio_id, AsioDuplex, OutputRoute, OPEN_TIMEOUT};
 use jamjam::audio::{
     list_input_devices, list_output_devices, mono_to_wire, AudioConfig, AudioEngine, AudioPreset,
-    BurstProbe, BurstSignal, DeviceId, LocalMonitor, PeerRateChange, PlayoutStats, ReceivePath,
-    RoundTripReport, ADAPT_INTERVAL, WIRE_CHANNELS,
+    BurstProbe, BurstSignal, DeviceId, GainRamp, LocalMonitor, PeerRateChange, PlayoutStats,
+    ReceivePath, RoundTripReport, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 use jamjam::network::{
     candidates_to_addrs, gather_candidates, AudioEncodingConfig, Connection, ConnectionState,
@@ -1229,16 +1229,26 @@ impl AudioSession {
             },
         )?;
 
+        let sample_rate = settings.sample_rate;
         let connection = Arc::new(tokio::sync::Mutex::new(connection));
         let connection_for_send = connection.clone();
         let send_task = tokio::spawn(async move {
             let mut stereo = Vec::new();
+            // Muting fades the microphone out (and unmuting in) rather than
+            // cutting it, so the other side does not hear a click.
+            let mut mute_ramp = GainRamp::new(sample_rate);
             while let Some((samples, timestamp)) = rx_capture.recv().await {
-                if is_muted.load(Ordering::SeqCst) {
+                let mute_target = if is_muted.load(Ordering::SeqCst) {
+                    0.0
+                } else {
+                    1.0
+                };
+                if mute_ramp.is_silent_at(mute_target) {
                     continue;
                 }
                 stereo.resize(samples.len() * WIRE_CHANNELS, 0.0);
                 mono_to_wire(&samples, 1.0, 0, &mut stereo);
+                mute_ramp.apply(&mut stereo, WIRE_CHANNELS, mute_target);
                 let conn = connection_for_send.lock().await;
                 if conn.is_connected() {
                     if let Some(probe) = &probe {

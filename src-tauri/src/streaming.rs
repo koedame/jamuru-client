@@ -21,9 +21,9 @@ use tokio::sync::Mutex;
 
 use jamjam::audio::{
     capture_attempts, capture_to_wire, pan_received, AudioConfig, AudioEngine, AudioError,
-    AudioPreset, DeviceId, FlightKind, FlightRecorder, LocalMonitor, MonitorTap, OutputRoute,
-    PeerRateChange, PlayoutResult, ReceivePath, RecordingFeed, RecordingTap, ADAPT_INTERVAL,
-    WIRE_CHANNELS,
+    AudioPreset, DeviceId, FlightKind, FlightRecorder, GainRamp, LocalMonitor, MonitorTap,
+    OutputRoute, PeerRateChange, PlayoutResult, ReceivePath, RecordingFeed, RecordingTap,
+    ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
 use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
@@ -1360,6 +1360,7 @@ fn playout_source(
     recording: Option<(RecordingTap, RecordingTap)>,
 ) -> impl FnMut(&mut [f32]) -> usize + Send + 'static {
     let mut recording = recording;
+    let mut peer_gain = GainRamp::new(receive.sample_rate());
     move |out: &mut [f32]| {
         let (b_tap, c_tap) = match recording.as_mut() {
             Some((b, c)) => (Some(b), Some(c)),
@@ -1372,6 +1373,7 @@ fn playout_source(
             &peer_pan,
             &output_level,
             &underrun_count,
+            &mut peer_gain,
             out,
             b_tap,
         );
@@ -1442,6 +1444,7 @@ fn mix_peers(
     peer_pan: &std::sync::atomic::AtomicI32,
     output_level: &AtomicU32,
     underrun_count: &AtomicU64,
+    peer_gain: &mut GainRamp,
     out: &mut [f32],
     dry_tap: Option<&mut RecordingTap>,
 ) -> usize {
@@ -1471,7 +1474,10 @@ fn mix_peers(
 
     let pan = peer_pan.load(Ordering::Relaxed);
     let samples = &mut out[..read.samples];
-    pan_received(samples, receive.peer_channels(), combined_vol, pan);
+    pan_received(samples, receive.peer_channels(), 1.0, pan);
+    // The fader and mute move to their new gain over a few milliseconds, so
+    // muting a participant does not click.
+    peer_gain.apply(samples, WIRE_CHANNELS, combined_vol);
 
     output_level.store(rms_level(samples), Ordering::Relaxed);
     read.samples
@@ -2172,6 +2178,9 @@ async fn run_audio_streaming(
         let mut send_buffer = vec![0.0f32; send_buffer_size * WIRE_CHANNELS];
         // Stereo buffer for pan-converted output (2x mono size)
         let mut stereo_send_buffer = vec![0.0f32; send_buffer_size * 2];
+        // Muting fades the microphone out (and unmuting in) rather than cutting
+        // it, so the other side does not hear a click.
+        let mut mute_ramp = GainRamp::new(sample_rate);
 
         while send_thread_running_ref.load(Ordering::SeqCst) {
             // Try to read a frame from capture ring buffer. Yields the channel
@@ -2204,8 +2213,13 @@ async fn run_audio_streaming(
             };
 
             if let Some(channels) = channels_read {
-                // Skip sending if muted
-                if !is_muted_send_ref.load(Ordering::SeqCst) {
+                let mute_target = if is_muted_send_ref.load(Ordering::SeqCst) {
+                    0.0
+                } else {
+                    1.0
+                };
+                // Nothing is sent once the fade-out has finished
+                if !mute_ramp.is_silent_at(mute_target) {
                     let volume = local_volume_send_ref.load(Ordering::SeqCst) as f32 / 100.0;
                     let pan = local_pan_send_ref.load(Ordering::SeqCst);
                     capture_to_wire(
@@ -2215,6 +2229,7 @@ async fn run_audio_streaming(
                         pan,
                         &mut stereo_send_buffer,
                     );
+                    mute_ramp.apply(&mut stereo_send_buffer, WIRE_CHANNELS, mute_target);
                     #[cfg(feature = "debug-tools")]
                     {
                         use crate::audio_tap::{inject, observe, Point};
@@ -2923,6 +2938,7 @@ mod tests {
             &std::sync::atomic::AtomicI32::new(100), // hard right pan
             &AtomicU32::new(0),
             &AtomicU64::new(0),
+            &mut GainRamp::new(48_000),
             &mut out,
             Some(&mut dry_tap),
         );
@@ -2942,6 +2958,46 @@ mod tests {
             &sent[..],
             "the dry tap keeps exactly what the peer sent"
         );
+    }
+
+    /// Muting a participant must not cut their audio off in one sample: that
+    /// step is the click.
+    /// Verifies: REQ-AUD-034
+    #[test]
+    fn mix_peers_fades_a_muted_participant_out_instead_of_cutting_them() {
+        const FRAME: u32 = 480;
+        let receive = ReceivePath::new(AudioPreset::ZeroLatency.codec_type(), 48_000, FRAME, 0)
+            .expect("a PCM receive path");
+        receive.follow_peer_channels(2);
+        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.5_f32, 0.5_f32]).collect();
+        assert!(receive.receive(0, &pcm(&sent)));
+
+        let mut gain = GainRamp::new(48_000);
+        gain.apply(&mut [0.0; 4], WIRE_CHANNELS, 1.0);
+        let mut out = vec![0.0f32; receive.frame_samples()];
+        let samples = mix_peers(
+            &receive,
+            &AtomicU32::new(0), // the participant is muted
+            &AtomicU32::new(100),
+            &std::sync::atomic::AtomicI32::new(0),
+            &AtomicU32::new(0),
+            &AtomicU64::new(0),
+            &mut gain,
+            &mut out,
+            None,
+        );
+
+        assert_eq!(samples, sent.len());
+        let left: Vec<f32> = out[..samples].iter().step_by(2).copied().collect();
+        assert!(
+            left[0] > 0.45,
+            "the first sample is still nearly full level"
+        );
+        assert!(
+            left.windows(2).all(|pair| pair[1] <= pair[0]),
+            "the level only goes down"
+        );
+        assert_eq!(left[FRAME as usize - 1], 0.0, "and it ends silent");
     }
 
     /// `C` (recording/streaming output) must carry exactly what is played:

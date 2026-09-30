@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 235 |
-| うち must | 229 |
+| 要求 総数 | 236 |
+| うち must | 230 |
 | うち should | 6 |
-| 検証済み | 206 |
+| 検証済み | 207 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -33,6 +33,7 @@
 | REQ-AUD-031 | must | 出力コールバックは、デバイスが直前のフレームを使い切ったときにだけ再生バッファへ次のフレームを求める（先読みしない）。デバイスの要求量がフレーム長と違っても余りを次の要求へ繰り越し、欠落・重複させない。供給元が空なら無音を出す | `docs-spec/requirements.md` | `src/audio/engine.rs`::test_a_source_with_nothing_to_say_plays_silence<br/>`src/audio/engine.rs`::test_device_requests_of_any_size_receive_the_source_in_order<br/>`src/audio/engine.rs`::test_source_is_asked_only_when_the_device_has_used_up_the_last_frame |
 | REQ-AUD-032 | must | ローカルモニタリングの遅延は、キャプチャ 1 フレーム + 余裕 1 フレーム + 再生 1 フレームで、ネットワークにもジッタバッファ段数にも依存しない。入力と出力のクロックがずれても、溜まる量は余裕の 1 フレーム内に収まり、増え続けない（[ADR-033](./adr/ADR-033-local-monitoring.md)） | `docs-spec/requirements.md` | `src/audio/monitor.rs`::test_monitor_does_not_grow_a_backlog_when_capture_runs_ahead_of_output<br/>`src/audio/monitor.rs`::test_monitor_holds_the_margin_and_no_more_when_the_clocks_agree<br/>`src/audio/monitor.rs`::test_monitor_recovers_after_capture_stalls |
 | REQ-AUD-033 | must | 音声のセッションは、保存されている音声の設定（入出力デバイス・入出力チャンネル・バッファサイズ・サンプルレート・プリセット）で始まる。値は画面から渡さない（画面が渡し忘れた値が既定値に戻らない。[ADR-043](./adr/ADR-043-remote-operation-rpc.md)） | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
+| REQ-AUD-034 | must | ミュートの切り替えと参加者の音量の変更は、数ミリ秒かけて音量が動く。自分のマイクのミュートは送る音を、参加者のミュートは聞こえる音を、切り替えた瞬間に無音へ落とさない（クリックを出さない）。フェードアウトが終わったマイクは送らない | `docs-spec/requirements.md` | `src-tauri/src/streaming.rs`::mix_peers_fades_a_muted_participant_out_instead_of_cutting_them<br/>`src/audio/stream.rs`::a_gain_ramp_moves_to_silence_over_the_ramp_time_not_at_once<br/>`src/audio/stream.rs`::a_gain_ramp_never_steps_by_more_than_one_ramp_step_between_frames |
 | REQ-AUD-101 | must | 非圧縮PCMコーデックを使用する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_pcm_codec_is_uncompressed |
 | REQ-AUD-104 | must | サンプルレート48kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_48khz |
 | REQ-AUD-105 | must | サンプルレート96kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_96khz |
