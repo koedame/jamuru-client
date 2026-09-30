@@ -5,7 +5,7 @@
  * scheme is declared in `src-tauri/tauri.conf.json` under `plugins.deep-link`.
  *
  * Parsing mirrors `parse_invite_url` in `src/network/signaling.rs`: same scheme,
- * same action, same 6-character alphabet (`./inviteCode`). Both reject rather
+ * same action, same alphabet and lengths (`./inviteCode`). Both reject rather
  * than guess, so a malformed link fails here with a clear cause instead of
  * reaching the server as "room not found".
  */

@@ -4,7 +4,7 @@
  */
 import { useState, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { isValidInviteCode } from "../../lib/inviteCode";
+import { INVITE_CODE_LENGTH, isValidInviteCode } from "../../lib/inviteCode";
 import "./ConnectionPanel.css";
 
 export type ConnectionState = "idle" | "connecting" | "error";
@@ -129,7 +129,7 @@ export function ConnectionPanel({
 
   const handleCodeChange = useCallback(
     (value: string) => {
-      const upperValue = value.toUpperCase().slice(0, 6);
+      const upperValue = value.toUpperCase().slice(0, INVITE_CODE_LENGTH);
       if (controlledCode === undefined) {
         setInternalCode(upperValue);
       }
@@ -297,7 +297,7 @@ export function ConnectionPanel({
                 value={code}
                 onChange={(e) => handleCodeChange(e.target.value)}
                 placeholder={codePlaceholder}
-                maxLength={6}
+                maxLength={INVITE_CODE_LENGTH}
                 autoComplete="off"
                 spellCheck={false}
                 aria-invalid={hasError ? "true" : undefined}

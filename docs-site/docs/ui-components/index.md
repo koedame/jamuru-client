@@ -195,7 +195,7 @@ interface ComponentProps {
 
 **タイプ**:
 - text: 通常のテキスト
-- code: 招待コード入力（6文字、大文字変換）
+- code: 招待コード入力（9文字、大文字変換）
 - password: パスワード入力
 
 **状態**:

@@ -169,7 +169,7 @@ pub struct RoomInfo {
     pub peer_count: usize,
     pub max_peers: usize,
     pub has_password: bool,
-    /// 6-character invite code for easy room sharing
+    /// Invite code for easy room sharing
     pub invite_code: String,
     /// True for the room the server offers for trying a connection. The app
     /// shows a shortcut into it only when the server lists one, so which room
@@ -303,7 +303,7 @@ pub enum SignalingMessage {
     RoomCreated {
         room_id: String,
         peer_id: Uuid,
-        /// 6-character invite code for easy room sharing
+        /// Invite code for easy room sharing
         invite_code: String,
     },
     RoomJoined {
@@ -386,10 +386,16 @@ pub fn ensure_crypto_provider_installed() {
 /// Excludes visually confusing characters: 0, O, I, 1, L
 const INVITE_CODE_CHARS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-/// Length of invite codes
-const INVITE_CODE_LENGTH: usize = 6;
+/// Length of the invite codes the server generates
+const INVITE_CODE_LENGTH: usize = 9;
 
-/// Generate a 6-character invite code using readable characters.
+/// Length of the fixed codes a deployment sets for its own rooms (the test room,
+/// for one), which predate [`INVITE_CODE_LENGTH`]. Still accepted so those rooms
+/// stay reachable. Must differ from the 8-character room ID, which shares the
+/// join field with invite codes.
+const FIXED_INVITE_CODE_LENGTH: usize = 6;
+
+/// Generate a 9-character invite code using readable characters.
 /// Uses characters A-H, J-N, P-Z, 2-9 (excludes 0, O, I, 1, L for readability).
 pub fn generate_invite_code() -> String {
     use rand::RngExt;
@@ -402,12 +408,14 @@ pub fn generate_invite_code() -> String {
         .collect()
 }
 
-/// Check if a string matches the invite code format (6 uppercase alphanumeric characters).
+/// Check if a string matches the invite code format (9 uppercase alphanumeric
+/// characters, or 6 for a deployment's fixed room codes).
 pub fn is_invite_code_format(s: &str) -> bool {
-    s.len() == INVITE_CODE_LENGTH && s.chars().all(|c| INVITE_CODE_CHARS.contains(&(c as u8)))
+    (s.len() == INVITE_CODE_LENGTH || s.len() == FIXED_INVITE_CODE_LENGTH)
+        && s.chars().all(|c| INVITE_CODE_CHARS.contains(&(c as u8)))
 }
 
-/// URL scheme used by invite links (`jamjam://join/ABC123`)
+/// URL scheme used by invite links (`jamjam://join/ABC234XYZ`)
 pub const INVITE_URL_SCHEME: &str = "jamjam";
 
 /// Path segment that identifies a join link
@@ -1237,22 +1245,31 @@ mod tests {
             let code = generate_invite_code();
             codes.insert(code);
         }
-        // With 29^6 possible codes (~594M), 100 codes should all be unique
+        // With 31^9 possible codes (~2.6e13), 100 codes should all be unique
         assert_eq!(codes.len(), 100);
     }
 
     #[test]
     fn test_is_invite_code_format_valid() {
+        assert!(is_invite_code_format("ABC234XYZ"));
+        assert!(is_invite_code_format("HJKMNPQRS"));
+        assert!(is_invite_code_format("TUVWXY789"));
+    }
+
+    /// Verifies: REQ-CON-021
+    #[test]
+    fn test_is_invite_code_format_accepts_fixed_six_character_codes() {
         assert!(is_invite_code_format("ABC234"));
         assert!(is_invite_code_format("HJKMNP"));
-        assert!(is_invite_code_format("QRSTUV"));
         assert!(is_invite_code_format("WXY789"));
     }
 
     #[test]
     fn test_is_invite_code_format_invalid_length() {
         assert!(!is_invite_code_format("ABC23")); // Too short
-        assert!(!is_invite_code_format("ABC2345")); // Too long
+        assert!(!is_invite_code_format("ABC2345")); // Between the two accepted lengths
+        assert!(!is_invite_code_format("ABC234XY")); // 8 characters is a room ID
+        assert!(!is_invite_code_format("ABC234XYZ2")); // Too long
         assert!(!is_invite_code_format("")); // Empty
     }
 
