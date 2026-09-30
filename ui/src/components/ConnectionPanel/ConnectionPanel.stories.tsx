@@ -40,7 +40,7 @@ export const Default: Story = {
 export const WithCode: Story = {
   args: {
     state: "idle",
-    code: "ABC234",
+    code: "ABC234XYZ",
     onCreateRoom: fn(),
     onJoinRoom: fn(),
     onOpenSettings: fn(),
@@ -76,7 +76,7 @@ export const Connecting: Story = {
 export const Error: Story = {
   args: {
     state: "error",
-    code: "ABC234",
+    code: "ABC234XYZ",
     errorMessage: "無効なコードです",
     onCreateRoom: fn(),
     onJoinRoom: fn(),
@@ -90,7 +90,7 @@ export const Error: Story = {
 export const ErrorRoomNotFound: Story = {
   args: {
     state: "error",
-    code: "XYZ999",
+    code: "XYZ999HJK",
     errorMessage: "ルームが見つかりません",
     onCreateRoom: fn(),
     onJoinRoom: fn(),
@@ -104,7 +104,7 @@ export const ErrorRoomNotFound: Story = {
 export const ErrorRoomFull: Story = {
   args: {
     state: "error",
-    code: "ABC234",
+    code: "ABC234XYZ",
     errorMessage: "ルームが満員です",
     onCreateRoom: fn(),
     onJoinRoom: fn(),
@@ -151,7 +151,7 @@ export const EnglishConnecting: Story = {
 export const EnglishError: Story = {
   args: {
     state: "error",
-    code: "ABC234",
+    code: "ABC234XYZ",
     errorMessage: "Invalid code",
     onCreateRoom: fn(),
     onJoinRoom: fn(),
@@ -247,7 +247,7 @@ export const WithTestRoom: Story = {
     onCreateRoom: fn(),
     onJoinRoom: fn(),
     onOpenSettings: fn(),
-    testRoomCode: "ABC234",
+    testRoomCode: "ABC234XYZ",
   },
 };
 
@@ -260,7 +260,7 @@ export const WithTestRoomEnglish: Story = {
     onCreateRoom: fn(),
     onJoinRoom: fn(),
     onOpenSettings: fn(),
-    testRoomCode: "ABC234",
+    testRoomCode: "ABC234XYZ",
     title: "jamjam",
     welcomeTitle: "Welcome to jamjam",
     welcomeSubtitle: "Start a low-latency, high-quality audio session",

@@ -108,7 +108,7 @@ Tauri は Windows で `eval_with_callback` の例外が無視されると文書�
 
 ```rust
 let screen = app.connection_screen();
-screen.invite_code_input().type_text("ABC234")?;
+screen.invite_code_input().type_text("ABC234XYZ")?;
 assert!(screen.join_button().is_enabled()?);
 ```
 

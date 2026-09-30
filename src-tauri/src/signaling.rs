@@ -316,7 +316,7 @@ pub async fn signaling_join_room<R: Runtime>(
             Ok(JoinResult {
                 room_id,
                 peer_id: peer_id_str,
-                invite_code,
+                invite_code: invite_code.map(String::from).unwrap_or_default(),
                 peers,
             })
         }
@@ -507,7 +507,7 @@ pub async fn signaling_create_room<R: Runtime>(
             Ok(JoinResult {
                 room_id,
                 peer_id: peer_id_str,
-                invite_code,
+                invite_code: invite_code.into(),
                 peers: vec![],
             })
         }

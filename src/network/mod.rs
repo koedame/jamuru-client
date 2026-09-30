@@ -51,11 +51,11 @@ pub use sequence_tracker::SequenceTracker;
 pub use session::{Session, SessionConfig};
 pub use signaling::{
     candidates_to_addrs, ensure_crypto_provider_installed, gather_candidates,
-    gather_candidates_using, gather_host_candidates, generate_invite_code, invite_url,
-    is_invite_code_format, parse_invite_url, AddressCandidate, CandidateType, ClientInfo, PeerInfo,
-    RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, DEVICE_ID_HEADER,
-    DEVICE_PUBKEY_HEADER, DEVICE_SIGNATURE_HEADER, DEVICE_TIMESTAMP_HEADER, INVITE_URL_SCHEME,
-    MAX_PEERS_PER_ROOM, PEER_MESSAGE_FEATURE,
+    gather_candidates_using, gather_host_candidates, invite_url, parse_invite_url,
+    AddressCandidate, CandidateType, ClientInfo, InvalidInviteCode, InviteCode, PeerInfo, RoomInfo,
+    SignalingClient, SignalingConnection, SignalingMessage, DEVICE_ID_HEADER, DEVICE_PUBKEY_HEADER,
+    DEVICE_SIGNATURE_HEADER, DEVICE_TIMESTAMP_HEADER, INVITE_URL_SCHEME, MAX_PEERS_PER_ROOM,
+    PEER_MESSAGE_FEATURE,
 };
 pub use stun::{StunClient, StunResult, DEFAULT_STUN_SERVERS};
 pub use transport::{bind_std, UdpTransport};

@@ -170,7 +170,7 @@ pub struct RoomInfo {
     pub max_peers: usize,
     pub has_password: bool,
     /// Invite code for easy room sharing
-    pub invite_code: String,
+    pub invite_code: InviteCode,
     /// True for the room the server offers for trying a connection. The app
     /// shows a shortcut into it only when the server lists one, so which room
     /// that is - and whether there is one at all - is the server's to decide.
@@ -304,7 +304,7 @@ pub enum SignalingMessage {
         room_id: String,
         peer_id: Uuid,
         /// Invite code for easy room sharing
-        invite_code: String,
+        invite_code: InviteCode,
     },
     RoomJoined {
         room_id: String,
@@ -316,8 +316,8 @@ pub enum SignalingMessage {
         /// Defaulted so a client still parses the reply from a server that
         /// predates this field; it then has no code to show, rather than
         /// failing the join outright.
-        #[serde(default)]
-        invite_code: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invite_code: Option<InviteCode>,
         peers: Vec<PeerInfo>,
     },
     PeerJoined {
@@ -386,33 +386,86 @@ pub fn ensure_crypto_provider_installed() {
 /// Excludes visually confusing characters: 0, O, I, 1, L
 const INVITE_CODE_CHARS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-/// Length of the invite codes the server generates
+/// Length of an invite code. Must differ from the 8-character room ID, which
+/// shares the join field with invite codes.
 const INVITE_CODE_LENGTH: usize = 9;
 
-/// Length of the fixed codes a deployment sets for its own rooms (the test room,
-/// for one), which predate [`INVITE_CODE_LENGTH`]. Still accepted so those rooms
-/// stay reachable. Must differ from the 8-character room ID, which shares the
-/// join field with invite codes.
-const FIXED_INVITE_CODE_LENGTH: usize = 6;
+/// A room's invite code: exactly [`INVITE_CODE_LENGTH`] upper-case characters
+/// from the invite alphabet. There is no other way to make one than
+/// [`InviteCode::generate`] or parsing, so a room cannot be given a code of
+/// another shape - not by the server, not by a deployment's setting for its
+/// own rooms.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct InviteCode(String);
 
-/// Generate a 9-character invite code using readable characters.
-/// Uses characters A-H, J-N, P-Z, 2-9 (excludes 0, O, I, 1, L for readability).
-pub fn generate_invite_code() -> String {
-    use rand::RngExt;
-    let mut rng = rand::rng();
-    (0..INVITE_CODE_LENGTH)
-        .map(|_| {
-            let idx = rng.random_range(0..INVITE_CODE_CHARS.len());
-            INVITE_CODE_CHARS[idx] as char
-        })
-        .collect()
+/// The text was not a well-formed invite code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidInviteCode;
+
+impl std::fmt::Display for InvalidInviteCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "not an invite code ({} characters from the invite alphabet)",
+            INVITE_CODE_LENGTH
+        )
+    }
 }
 
-/// Check if a string matches the invite code format (9 uppercase alphanumeric
-/// characters, or 6 for a deployment's fixed room codes).
-pub fn is_invite_code_format(s: &str) -> bool {
-    (s.len() == INVITE_CODE_LENGTH || s.len() == FIXED_INVITE_CODE_LENGTH)
-        && s.chars().all(|c| INVITE_CODE_CHARS.contains(&(c as u8)))
+impl std::error::Error for InvalidInviteCode {}
+
+impl InviteCode {
+    /// Generate a code using readable characters.
+    /// Uses characters A-H, J-N, P-Z, 2-9 (excludes 0, O, I, 1, L for readability).
+    pub fn generate() -> Self {
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        Self(
+            (0..INVITE_CODE_LENGTH)
+                .map(|_| {
+                    let idx = rng.random_range(0..INVITE_CODE_CHARS.len());
+                    INVITE_CODE_CHARS[idx] as char
+                })
+                .collect(),
+        )
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::str::FromStr for InviteCode {
+    type Err = InvalidInviteCode;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() == INVITE_CODE_LENGTH && s.bytes().all(|b| INVITE_CODE_CHARS.contains(&b)) {
+            Ok(Self(s.to_string()))
+        } else {
+            Err(InvalidInviteCode)
+        }
+    }
+}
+
+impl TryFrom<String> for InviteCode {
+    type Error = InvalidInviteCode;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl From<InviteCode> for String {
+    fn from(code: InviteCode) -> Self {
+        code.0
+    }
+}
+
+impl std::fmt::Display for InviteCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 /// URL scheme used by invite links (`jamjam://join/ABC234XYZ`)
@@ -425,7 +478,7 @@ const INVITE_URL_PATH: &str = "join";
 ///
 /// ```
 /// use jamjam::network::invite_url;
-/// assert_eq!(invite_url("ABC234"), "jamjam://join/ABC234");
+/// assert_eq!(invite_url("ABC234XYZ"), "jamjam://join/ABC234XYZ");
 /// ```
 pub fn invite_url(invite_code: &str) -> String {
     format!(
@@ -437,7 +490,7 @@ pub fn invite_url(invite_code: &str) -> String {
 /// Extract the invite code from an invite URL (REQ-CON-103)
 ///
 /// Returns `None` unless the URL uses the `jamjam` scheme, names the `join`
-/// path, and carries a code that passes [`is_invite_code_format`]. Rejecting a
+/// path, and carries a code that parses as an [`InviteCode`]. Rejecting a
 /// malformed code here means the join attempt fails locally with a clear cause
 /// rather than as a "room not found" from the server.
 ///
@@ -446,15 +499,15 @@ pub fn invite_url(invite_code: &str) -> String {
 ///
 /// ```
 /// use jamjam::network::parse_invite_url;
-/// assert_eq!(parse_invite_url("jamjam://join/ABC234"), Some("ABC234".to_string()));
-/// assert_eq!(parse_invite_url("https://example.com/join/ABC234"), None);
+/// assert_eq!(parse_invite_url("jamjam://join/ABC234XYZ"), Some("ABC234XYZ".to_string()));
+/// assert_eq!(parse_invite_url("https://example.com/join/ABC234XYZ"), None);
 /// ```
 pub fn parse_invite_url(url: &str) -> Option<String> {
     let prefix = format!("{}://{}/", INVITE_URL_SCHEME, INVITE_URL_PATH);
     let rest = url.trim().strip_prefix(&prefix)?;
 
     // Tolerate a trailing slash or query string, but nothing further down a path:
-    // `jamjam://join/ABC234/extra` is not a code this function should guess at.
+    // `jamjam://join/ABC234XYZ/extra` is not a code this function should guess at.
     let code = rest
         .split(['?', '#'])
         .next()
@@ -465,7 +518,7 @@ pub fn parse_invite_url(url: &str) -> Option<String> {
     }
 
     let code = code.to_ascii_uppercase();
-    if is_invite_code_format(&code) {
+    if code.parse::<InviteCode>().is_ok() {
         Some(code)
     } else {
         None
@@ -839,7 +892,7 @@ mod tests {
 
     #[test]
     fn a_room_list_from_a_server_that_marks_no_test_room_parses_with_none_marked() {
-        let json = r#"{"type":"RoomList","data":{"rooms":[{"id":"r1","name":"Jam","peer_count":1,"max_peers":10,"has_password":false,"invite_code":"ABC234"}]}}"#;
+        let json = r#"{"type":"RoomList","data":{"rooms":[{"id":"r1","name":"Jam","peer_count":1,"max_peers":10,"has_password":false,"invite_code":"ABC234XYZ"}]}}"#;
 
         let SignalingMessage::RoomList { rooms } = serde_json::from_str(json).unwrap() else {
             panic!("not a RoomList");
@@ -849,13 +902,13 @@ mod tests {
 
     #[test]
     fn a_room_the_server_marks_as_its_test_room_parses_as_one() {
-        let json = r#"{"type":"RoomList","data":{"rooms":[{"id":"r1","name":"Test Room","peer_count":0,"max_peers":10,"has_password":false,"invite_code":"ABC234","test_room":true}]}}"#;
+        let json = r#"{"type":"RoomList","data":{"rooms":[{"id":"r1","name":"Test Room","peer_count":0,"max_peers":10,"has_password":false,"invite_code":"ABC234XYZ","test_room":true}]}}"#;
 
         let SignalingMessage::RoomList { rooms } = serde_json::from_str(json).unwrap() else {
             panic!("not a RoomList");
         };
         assert!(rooms[0].test_room);
-        assert_eq!(rooms[0].invite_code, "ABC234");
+        assert_eq!(rooms[0].invite_code.as_str(), "ABC234XYZ");
     }
 
     /// Verifies: REQ-CON-030
@@ -909,7 +962,7 @@ mod tests {
     #[test]
     fn an_app_that_announces_no_features_sends_no_features_field() {
         let json = serde_json::to_value(SignalingMessage::JoinRoom {
-            room_id: "ABC234".to_string(),
+            room_id: "ABC234XYZ".to_string(),
             password: None,
             peer_name: "Bob".to_string(),
             features: vec![],
@@ -962,7 +1015,7 @@ mod tests {
     #[test]
     fn the_app_information_is_sent_in_the_entering_message_and_left_out_when_there_is_none() {
         let json = serde_json::to_value(SignalingMessage::JoinRoom {
-            room_id: "ABC234".to_string(),
+            room_id: "ABC234XYZ".to_string(),
             password: None,
             peer_name: "Bob".to_string(),
             features: vec![],
@@ -1193,10 +1246,10 @@ mod tests {
     /// Verifies: REQ-CON-021
     #[test]
     fn test_generate_invite_code_length() {
-        let code = generate_invite_code();
-        assert_eq!(code.len(), INVITE_CODE_LENGTH);
+        let code = InviteCode::generate();
+        assert_eq!(code.as_str().len(), INVITE_CODE_LENGTH);
         assert!(
-            is_invite_code_format(&code),
+            code.as_str().parse::<InviteCode>().is_ok(),
             "{:?} fails the format check",
             code
         );
@@ -1206,8 +1259,8 @@ mod tests {
     fn test_generate_invite_code_valid_chars() {
         // Generate multiple codes to test character validity
         for _ in 0..100 {
-            let code = generate_invite_code();
-            for c in code.chars() {
+            let code = InviteCode::generate();
+            for c in code.as_str().chars() {
                 assert!(
                     INVITE_CODE_CHARS.contains(&(c as u8)),
                     "Invalid character '{}' in invite code",
@@ -1222,10 +1275,10 @@ mod tests {
         // Generate many codes and verify excluded characters never appear
         let excluded_chars = ['0', 'O', 'I', '1', 'L'];
         for _ in 0..1000 {
-            let code = generate_invite_code();
+            let code = InviteCode::generate();
             for c in excluded_chars {
                 assert!(
-                    !code.contains(c),
+                    !code.as_str().contains(c),
                     "Invite code '{}' contains excluded character '{}'",
                     code,
                     c
@@ -1242,52 +1295,67 @@ mod tests {
         use std::collections::HashSet;
         let mut codes = HashSet::new();
         for _ in 0..100 {
-            let code = generate_invite_code();
+            let code = InviteCode::generate();
             codes.insert(code);
         }
         // With 31^9 possible codes (~2.6e13), 100 codes should all be unique
         assert_eq!(codes.len(), 100);
     }
 
+    fn is_code(s: &str) -> bool {
+        s.parse::<InviteCode>().is_ok()
+    }
+
     #[test]
-    fn test_is_invite_code_format_valid() {
-        assert!(is_invite_code_format("ABC234XYZ"));
-        assert!(is_invite_code_format("HJKMNPQRS"));
-        assert!(is_invite_code_format("TUVWXY789"));
+    fn test_an_invite_code_of_nine_alphabet_characters_parses() {
+        assert!(is_code("ABC234XYZ"));
+        assert!(is_code("HJKMNPQRS"));
+        assert!(is_code("TUVWXY789"));
     }
 
     /// Verifies: REQ-CON-021
     #[test]
-    fn test_is_invite_code_format_accepts_fixed_six_character_codes() {
-        assert!(is_invite_code_format("ABC234"));
-        assert!(is_invite_code_format("HJKMNP"));
-        assert!(is_invite_code_format("WXY789"));
+    fn test_an_invite_code_of_six_characters_does_not_parse() {
+        assert!(!is_code("HJK567"));
+        assert!(!is_code("ABC234"));
+        assert!(!is_code("HJKMNP"));
     }
 
     #[test]
-    fn test_is_invite_code_format_invalid_length() {
-        assert!(!is_invite_code_format("ABC23")); // Too short
-        assert!(!is_invite_code_format("ABC2345")); // Between the two accepted lengths
-        assert!(!is_invite_code_format("ABC234XY")); // 8 characters is a room ID
-        assert!(!is_invite_code_format("ABC234XYZ2")); // Too long
-        assert!(!is_invite_code_format("")); // Empty
+    fn test_an_invite_code_of_any_other_length_does_not_parse() {
+        assert!(!is_code("ABC23")); // Too short
+        assert!(!is_code("ABC2345")); // Between six and nine
+        assert!(!is_code("ABC234XY")); // 8 characters is a room ID
+        assert!(!is_code("ABC234XYZ2")); // Too long
+        assert!(!is_code("")); // Empty
     }
 
     #[test]
-    fn test_is_invite_code_format_invalid_chars() {
-        assert!(!is_invite_code_format("ABC230")); // Contains '0'
-        assert!(!is_invite_code_format("ABCDE1")); // Contains '1'
-        assert!(!is_invite_code_format("ABCDEO")); // Contains 'O'
-        assert!(!is_invite_code_format("ABCDEI")); // Contains 'I'
-        assert!(!is_invite_code_format("ABCDEL")); // Contains 'L'
-        assert!(!is_invite_code_format("abc234")); // Lowercase
+    fn test_an_invite_code_with_a_character_outside_the_alphabet_does_not_parse() {
+        assert!(!is_code("ABC234XY0")); // Contains '0'
+        assert!(!is_code("ABCDEFGH1")); // Contains '1'
+        assert!(!is_code("ABCDEFGHO")); // Contains 'O'
+        assert!(!is_code("ABCDEFGHI")); // Contains 'I'
+        assert!(!is_code("ABCDEFGHL")); // Contains 'L'
+        assert!(!is_code("abc234xyz")); // Lowercase
     }
 
     #[test]
-    fn test_is_invite_code_format_uuid_like_strings() {
-        // UUID-like strings should not match invite code format
-        assert!(!is_invite_code_format("a1b2c3d4")); // 8-char UUID prefix
-        assert!(!is_invite_code_format("a1b2c3d4-e5f6"));
+    fn test_uuid_like_strings_do_not_parse_as_an_invite_code() {
+        assert!(!is_code("a1b2c3d4")); // 8-char UUID prefix
+        assert!(!is_code("a1b2c3d4-e5f6"));
+    }
+
+    #[test]
+    fn test_a_room_message_with_a_six_character_code_is_refused() {
+        let json = r#"{"type":"RoomCreated","data":{"room_id":"r1","peer_id":"00000000-0000-0000-0000-000000000001","invite_code":"HJK567"}}"#;
+        assert!(serde_json::from_str::<SignalingMessage>(json).is_err());
+    }
+
+    #[test]
+    fn test_an_invite_code_serializes_as_its_text() {
+        let code: InviteCode = "ABC234XYZ".parse().unwrap();
+        assert_eq!(serde_json::to_string(&code).unwrap(), "\"ABC234XYZ\"");
     }
 
     #[test]

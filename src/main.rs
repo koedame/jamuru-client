@@ -933,7 +933,7 @@ async fn run_room_session(
             peers,
         } => {
             println!("\nJoined room: {}", room_id);
-            if !invite_code.is_empty() {
+            if let Some(invite_code) = invite_code {
                 println!("Invite code:  {}", invite_code);
             }
             println!("Your peer ID: {}", peer_id);
