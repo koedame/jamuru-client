@@ -140,7 +140,7 @@ describe('HelperScreen', () => {
     await screen.findByTestId('room-code');
 
     expect(askedOf('session_get')).toHaveLength(1);
-    expect(askedOf('streaming_status').length).toBeGreaterThan(0);
+    await waitFor(() => expect(askedOf('streaming_status').length).toBeGreaterThan(0));
     // The window's own business is answered here; nothing else is.
     expect(own.filter((cmd) => cmd !== 'help_call' && cmd !== 'help_window_info')).toEqual([]);
   });

@@ -24,7 +24,7 @@ jamjam ブランドガイド準拠（ui.pen Screens/JoinRoom、2026-07-18 刷新
 - 1px ボーダー、`--radius-control`（8px）角丸
 - Primary ボタンは `--shadow-button` 程度の控えめな浮き上がりのみ（過剰なシャドウ禁止）
 - コード表示・入力は3文字区切りの見た目（例: `ABC-123`）で表示するが、実際の招待コードの値
-  自体はハイフンを含まない6文字英数字のまま（表示専用の `letter-spacing`/グルーピング）
+  自体はハイフンを含まない9文字英数字のまま（表示専用の `letter-spacing`/グルーピング）
 
 ---
 
@@ -476,13 +476,13 @@ stateDiagram-v2
 
 | ルール | 説明 |
 |--------|------|
-| 長さ | 6文字 |
+| 長さ | 9文字（デプロイごとに固定する6文字のコードも受け付ける） |
 | 文字種 | 英数字（大文字小文字を区別しない） |
 | 自動変換 | 入力は自動で大文字に変換 |
 
 ```typescript
 function validateCode(code: string): boolean {
-  return /^[A-Z0-9]{6}$/i.test(code);
+  return /^[A-Z0-9]{9}$/i.test(code) || /^[A-Z0-9]{6}$/i.test(code);
 }
 ```
 

@@ -384,13 +384,13 @@ stateDiagram-v2
 
 | ルール | 説明 |
 |--------|------|
-| 長さ | 6文字 |
+| 長さ | 9文字（デプロイごとに固定する6文字のコードも受け付ける） |
 | 文字種 | 英数字（大文字小文字を区別しない） |
 | 自動変換 | 入力は自動で大文字に変換 |
 
 ```typescript
 function validateCode(code: string): boolean {
-  return /^[A-Z0-9]{6}$/i.test(code);
+  return /^[A-Z0-9]{9}$/i.test(code) || /^[A-Z0-9]{6}$/i.test(code);
 }
 ```
 
