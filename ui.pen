@@ -1,5 +1,5 @@
 {
-  "version": "2.14",
+  "version": "2.17",
   "children": [
     {
       "type": "frame",
@@ -478,15 +478,15 @@
           "descendants": {
             "zoCUB": {
               "x": 8,
-              "y": 4
+              "y": 3.5
             },
             "qIzNY": {
-              "x": 43,
-              "y": 4
+              "x": 41,
+              "y": 3.5
             },
             "mffLe": {
-              "x": 54,
-              "y": 4
+              "x": 49,
+              "y": 3.5
             }
           }
         },
@@ -531,7 +531,7 @@
                   "ref": "KAyrk",
                   "name": "fader",
                   "x": 0,
-                  "y": 17,
+                  "y": 18,
                   "width": 44,
                   "height": "fill_container",
                   "descendants": {
@@ -2082,6 +2082,7 @@
             "bottom": 1
           },
           "strokeAlignment": "inner",
+          "strokeLinejoin": "round",
           "padding": [
             12,
             16
@@ -2149,6 +2150,7 @@
                 "right": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 16,
               "padding": 16,
@@ -2202,7 +2204,7 @@
                           "id": "DcW94",
                           "name": "RoomCodeText",
                           "fill": "$accent-blue",
-                          "content": "ABC-123",
+                          "content": "ABC234XYZ",
                           "fontFamily": "$font-mono",
                           "fontSize": 16,
                           "fontWeight": "700"
@@ -3055,6 +3057,7 @@
                 "left": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 12,
               "padding": 16,
@@ -3440,6 +3443,7 @@
             "top": 1
           },
           "strokeAlignment": "inner",
+          "strokeLinejoin": "round",
           "padding": [
             8,
             16
@@ -3512,6 +3516,7 @@
                 "bottom": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "padding": [
                 12,
                 16
@@ -3579,6 +3584,7 @@
                     "right": 1
                   },
                   "strokeAlignment": "inner",
+                  "strokeLinejoin": "round",
                   "layout": "vertical",
                   "gap": 16,
                   "padding": 16,
@@ -3631,7 +3637,7 @@
                               "id": "Otsfv",
                               "name": "RoomCodeText",
                               "fill": "$accent-blue",
-                              "content": "ABC123",
+                              "content": "ABC234XYZ",
                               "fontFamily": "$font-mono",
                               "fontSize": 16,
                               "fontWeight": "700"
@@ -4248,6 +4254,7 @@
                     "left": 1
                   },
                   "strokeAlignment": "inner",
+                  "strokeLinejoin": "round",
                   "layout": "vertical",
                   "gap": 12,
                   "padding": 16,
@@ -4651,6 +4658,7 @@
                 "top": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "padding": [
                 8,
                 16
@@ -6425,6 +6433,7 @@
             "bottom": 1
           },
           "strokeAlignment": "inner",
+          "strokeLinejoin": "round",
           "padding": [
             12,
             16
@@ -6644,7 +6653,7 @@
                               "id": "73sAP",
                               "name": "Placeholder",
                               "fill": "$gray-400",
-                              "content": "ABC-123",
+                              "content": "ABC234XYZ",
                               "fontFamily": "$font-mono",
                               "fontSize": 16,
                               "fontWeight": "normal",
@@ -6719,7 +6728,7 @@
                           "id": "g9J8x",
                           "name": "TestTitle",
                           "fill": "$color-meter-low",
-                          "content": "テストルーム (ABC234)",
+                          "content": "テストルーム (ABC234XYZ)",
                           "fontFamily": "$font-heading",
                           "fontSize": 12,
                           "fontWeight": "700"
@@ -9806,7 +9815,7 @@
                   "id": "9LVLS",
                   "name": "RoomCodeText",
                   "fill": "$yellow-primary",
-                  "content": "ABC-123",
+                  "content": "ABC234XYZ",
                   "fontFamily": "$font-mono",
                   "fontSize": 16,
                   "fontWeight": "700"
@@ -9864,7 +9873,7 @@
                   "id": "XLnV2",
                   "name": "RoomCodeText",
                   "fill": "$yellow-primary",
-                  "content": "ABC-123",
+                  "content": "ABC234XYZ",
                   "fontFamily": "$font-mono",
                   "fontSize": 16,
                   "fontWeight": "700"
@@ -9923,7 +9932,7 @@
                   "id": "xEjYA",
                   "name": "RoomCodeText",
                   "fill": "$yellow-primary",
-                  "content": "ABC-123",
+                  "content": "ABC234XYZ",
                   "fontFamily": "$font-mono",
                   "fontSize": 16,
                   "fontWeight": "700"
@@ -9982,7 +9991,7 @@
                   "id": "gohT0",
                   "name": "RoomCodeText",
                   "fill": "$color-meter-low",
-                  "content": "ABC-123",
+                  "content": "ABC234XYZ",
                   "fontFamily": "$font-mono",
                   "fontSize": 16,
                   "fontWeight": "700"
@@ -12093,7 +12102,7 @@
                       "id": "OgLwy",
                       "name": "TestTitle",
                       "fill": "$color-meter-low",
-                      "content": "テストルーム (ABC234)",
+                      "content": "テストルーム (ABC234XYZ)",
                       "fontFamily": "$font-heading",
                       "fontSize": 12,
                       "fontWeight": "700"
@@ -12170,7 +12179,7 @@
                       "id": "yjzEo",
                       "name": "TestTitle",
                       "fill": "$color-meter-low",
-                      "content": "テストルーム (ABC234)",
+                      "content": "テストルーム (ABC234XYZ)",
                       "fontFamily": "$font-heading",
                       "fontSize": 12,
                       "fontWeight": "700"
@@ -12247,7 +12256,7 @@
                       "id": "stjpP",
                       "name": "TestTitle",
                       "fill": "$color-meter-low",
-                      "content": "テストルーム (ABC234)",
+                      "content": "テストルーム (ABC234XYZ)",
                       "fontFamily": "$font-heading",
                       "fontSize": 12,
                       "fontWeight": "700"
@@ -12325,7 +12334,7 @@
                       "id": "K8lwT",
                       "name": "TestTitle",
                       "fill": "$gray-400",
-                      "content": "テストルーム (ABC234)",
+                      "content": "テストルーム (ABC234XYZ)",
                       "fontFamily": "$font-heading",
                       "fontSize": 12,
                       "fontWeight": "700"
@@ -12576,7 +12585,7 @@
                       "id": "XWF9r",
                       "name": "InputText",
                       "fill": "$text-light",
-                      "content": "ABC-123",
+                      "content": "ABC234XYZ",
                       "fontFamily": "$font-heading",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -13065,7 +13074,7 @@
                           "id": "a1Iz0",
                           "name": "InputText",
                           "fill": "$text-light",
-                          "content": "ABC-123",
+                          "content": "ABC234XYZ",
                           "fontFamily": "$font-heading",
                           "fontSize": 12,
                           "fontWeight": "normal"
@@ -13360,6 +13369,7 @@
                 "right": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 16,
               "padding": 16,
@@ -13413,7 +13423,7 @@
                           "id": "SvQAu",
                           "name": "RoomCodeText",
                           "fill": "$yellow-primary",
-                          "content": "ABC123",
+                          "content": "ABC234XYZ",
                           "fontFamily": "$font-mono",
                           "fontSize": 16,
                           "fontWeight": "700"
@@ -14035,6 +14045,7 @@
                 "right": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 16,
               "padding": 16,
@@ -14088,7 +14099,7 @@
                           "id": "KsLGz",
                           "name": "RoomCodeText",
                           "fill": "$yellow-primary",
-                          "content": "ABC123",
+                          "content": "ABC234XYZ",
                           "fontFamily": "$font-mono",
                           "fontSize": 16,
                           "fontWeight": "700"
@@ -14264,6 +14275,7 @@
                 "right": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 16,
               "padding": 16,
@@ -14317,7 +14329,7 @@
                           "id": "PbSlD",
                           "name": "RoomCodeText",
                           "fill": "$yellow-primary",
-                          "content": "ABC123",
+                          "content": "ABC234XYZ",
                           "fontFamily": "$font-mono",
                           "fontSize": 16,
                           "fontWeight": "700"
@@ -14486,6 +14498,7 @@
                 "right": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 16,
               "padding": 16,
@@ -14539,7 +14552,7 @@
                           "id": "RymVA",
                           "name": "RoomCodeText",
                           "fill": "$yellow-primary",
-                          "content": "ABC123",
+                          "content": "ABC234XYZ",
                           "fontFamily": "$font-mono",
                           "fontSize": 16,
                           "fontWeight": "700"
@@ -14683,6 +14696,7 @@
                 "left": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 12,
               "padding": 16,
@@ -15121,6 +15135,7 @@
                 "left": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 12,
               "padding": 16,
@@ -15287,6 +15302,7 @@
                 "left": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 12,
               "padding": 16,
@@ -15675,7 +15691,7 @@
                           "id": "JNdr9",
                           "name": "TestTitle",
                           "fill": "$color-meter-low",
-                          "content": "テストルーム (ABC234)",
+                          "content": "テストルーム (ABC234XYZ)",
                           "fontFamily": "$font-heading",
                           "fontSize": 12,
                           "fontWeight": "700"
@@ -15952,7 +15968,7 @@
                           "id": "UPM38",
                           "name": "TestTitle",
                           "fill": "$gray-400",
-                          "content": "テストルーム (ABC234)",
+                          "content": "テストルーム (ABC234XYZ)",
                           "fontFamily": "$font-heading",
                           "fontSize": 12,
                           "fontWeight": "700"
@@ -16236,7 +16252,7 @@
                           "id": "88upp",
                           "name": "TestTitle",
                           "fill": "$color-meter-low",
-                          "content": "テストルーム (ABC234)",
+                          "content": "テストルーム (ABC234XYZ)",
                           "fontFamily": "$font-heading",
                           "fontSize": 12,
                           "fontWeight": "700"
@@ -16561,6 +16577,7 @@
             "bottom": 1
           },
           "strokeAlignment": "inner",
+          "strokeLinejoin": "round",
           "padding": [
             12,
             24
@@ -16608,6 +16625,7 @@
                 "right": 1
               },
               "strokeAlignment": "inner",
+              "strokeLinejoin": "round",
               "layout": "vertical",
               "gap": 4,
               "padding": 16,

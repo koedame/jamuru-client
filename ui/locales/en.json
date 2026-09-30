@@ -55,7 +55,7 @@
     },
     "join": {
       "button": "Join",
-      "placeholder": "ABC234",
+      "placeholder": "ABC234XYZ",
       "loading": "Connecting..."
     },
     "leave": {

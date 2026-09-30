@@ -48,7 +48,7 @@ function inRoom(): SessionSnapshot {
     error: null,
     room: {
       room_id: 'room-1',
-      invite_code: 'ABC234',
+      invite_code: 'ABC234XYZ',
       peer_id: 'bo-id',
       peer_name: 'Bo',
       participants: [{ id: 'aki-id', name: 'Aki', features: ['peer_message'] }],
@@ -130,7 +130,7 @@ describe('HelperScreen', () => {
     expect(await screen.findByTestId('settings-help-window-banner')).toHaveTextContent(
       "You are working in Bo's app."
     );
-    expect(await screen.findByTestId('room-code')).toHaveTextContent('ABC234');
+    expect(await screen.findByTestId('room-code')).toHaveTextContent('ABC234XYZ');
     expect(await screen.findByTestId('participant-list')).toHaveTextContent('Aki');
   });
 
