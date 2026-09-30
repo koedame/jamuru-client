@@ -54,8 +54,8 @@ pub use resampler::{
     FastResampler, PassthroughResampler, ResamplerError,
 };
 pub use stream::{
-    balance_gains, capture_to_wire, mono_to_wire, pan_received, PeerRateChange, ReceivePath,
-    ADAPT_INTERVAL, WIRE_CHANNELS,
+    balance_gains, capture_to_wire, mono_to_wire, pan_received, GainRamp, PeerRateChange,
+    ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 pub use virtual_output::{
     RecordingFeed, RecordingTap, VirtualOutputSink, CHANNELS as VIRTUAL_OUTPUT_CHANNELS,
