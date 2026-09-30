@@ -170,7 +170,7 @@ async fn test_session_repeated_recreate() {
 // ---------------------------------------------------------------------------
 
 /// Given the creator has created a room
-/// When the user opens the invite URL "jamjam://join/ABC234"
+/// When the user opens the invite URL "jamjam://join/ABC234XYZ"
 /// Then the room code is recovered so the join can start
 ///
 /// The OS-level registration that hands the URL to the app is platform plumbing;
@@ -180,45 +180,45 @@ async fn test_session_repeated_recreate() {
 /// Verifies: REQ-CON-103
 #[test]
 fn test_invite_url_round_trips() {
-    use jamjam::network::{generate_invite_code, invite_url, parse_invite_url};
+    use jamjam::network::{invite_url, parse_invite_url, InviteCode};
 
     // A link the app built must parse back to the same code.
     for _ in 0..20 {
-        let code = generate_invite_code();
-        let url = invite_url(&code);
+        let code = InviteCode::generate();
+        let url = invite_url(code.as_str());
         assert!(
             url.starts_with("jamjam://join/"),
             "unexpected invite URL: {}",
             url
         );
-        assert_eq!(parse_invite_url(&url), Some(code));
+        assert_eq!(parse_invite_url(&url), Some(code.to_string()));
     }
 
     // A lower-cased link still works: mail clients and chat apps do this.
     assert_eq!(
-        parse_invite_url("jamjam://join/abc234"),
-        Some("ABC234".to_string())
+        parse_invite_url("jamjam://join/abc234xyz"),
+        Some("ABC234XYZ".to_string())
     );
 
     // Query strings and a trailing slash are tolerated.
     assert_eq!(
-        parse_invite_url("jamjam://join/ABC234?from=chat"),
-        Some("ABC234".to_string())
+        parse_invite_url("jamjam://join/ABC234XYZ?from=chat"),
+        Some("ABC234XYZ".to_string())
     );
     assert_eq!(
-        parse_invite_url("jamjam://join/ABC234/"),
-        Some("ABC234".to_string())
+        parse_invite_url("jamjam://join/ABC234XYZ/"),
+        Some("ABC234XYZ".to_string())
     );
 
     // Anything else must be refused rather than half-interpreted.
     for rejected in [
-        "https://example.com/join/ABC234", // wrong scheme
-        "jamjam://leave/ABC234",           // wrong action
-        "jamjam://join/ABC",               // too short
-        "jamjam://join/ABC2345",           // too long
-        "jamjam://join/ABC01I",            // excluded confusing characters
-        "jamjam://join/",                  // no code
-        "jamjam://join/ABC234/extra",      // deeper path
+        "https://example.com/join/ABC234XYZ", // wrong scheme
+        "jamjam://leave/ABC234XYZ",           // wrong action
+        "jamjam://join/ABC",                  // too short
+        "jamjam://join/ABC2345",              // too long
+        "jamjam://join/ABC01I",               // excluded confusing characters
+        "jamjam://join/",                     // no code
+        "jamjam://join/ABC234XYZ/extra",      // deeper path
         "",
     ] {
         assert_eq!(

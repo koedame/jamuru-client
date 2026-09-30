@@ -10,20 +10,12 @@
 /** Characters used by invite codes. Excludes 0, O, I, 1, L as confusable. */
 export const INVITE_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-/** Invite codes the server generates are exactly this long. */
+/** Invite codes are exactly this long. Must differ from the 8-character room ID, which shares the join field. */
 export const INVITE_CODE_LENGTH = 9;
-
-/**
- * Length of the fixed codes a deployment sets for its own rooms (the test room,
- * for one), which predate `INVITE_CODE_LENGTH`. Still accepted so those rooms
- * stay reachable. Must differ from the 8-character room ID, which shares the
- * join field with invite codes.
- */
-const FIXED_INVITE_CODE_LENGTH = 6;
 
 /** Whether `code` is a well-formed invite code, regardless of case. */
 export function isValidInviteCode(code: string): boolean {
-  if (code.length !== INVITE_CODE_LENGTH && code.length !== FIXED_INVITE_CODE_LENGTH) {
+  if (code.length !== INVITE_CODE_LENGTH) {
     return false;
   }
   for (const char of code.toUpperCase()) {

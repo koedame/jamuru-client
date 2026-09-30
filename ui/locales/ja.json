@@ -55,7 +55,7 @@
     },
     "join": {
       "button": "参加",
-      "placeholder": "ABC234",
+      "placeholder": "ABC234XYZ",
       "loading": "接続中..."
     },
     "leave": {

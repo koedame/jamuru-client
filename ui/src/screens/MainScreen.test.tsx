@@ -58,7 +58,7 @@ function inRoom(changes: Partial<SessionSnapshot> = {}): SessionSnapshot {
     phase: 'connected',
     room: {
       room_id: 'room-1',
-      invite_code: 'ABC234',
+      invite_code: 'ABC234XYZ',
       peer_id: 'me',
       peer_name: 'Me',
       participants: [{ id: 'b', name: 'Aki', features: ['peer_message'] }],
@@ -150,15 +150,15 @@ describe('MainScreen の接続の表示', () => {
     render(<MainScreen />);
 
     fireEvent.change(await screen.findByTestId('connection-panel-invite-code'), {
-      target: { value: 'ABC234' },
+      target: { value: 'ABC234XYZ' },
     });
     fireEvent.click(screen.getByTestId('connection-panel-join'));
 
-    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234' }]);
+    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ' }]);
   });
 
   it('サーバーがテストルームを示しているとき、そのコードへのショートカットを出すこと', async () => {
-    current = snapshot({ test_room_invite_code: 'TEST22' });
+    current = snapshot({ test_room_invite_code: 'HJK567MNP' });
 
     render(<MainScreen />);
 
@@ -204,7 +204,7 @@ describe('MainScreen のルームの表示', () => {
 
     announce(inRoom({ revision: 2 }));
 
-    expect(await screen.findByTestId('room-code')).toHaveTextContent('ABC234');
+    expect(await screen.findByTestId('room-code')).toHaveTextContent('ABC234XYZ');
     expect(screen.getByTestId('participant-list')).toHaveTextContent('Aki');
     expect(screen.getByTestId('participant-list')).toHaveTextContent('Me');
   });
@@ -437,9 +437,9 @@ describe('MainScreen の招待リンク', () => {
   it('招待リンクが届いたとき、そのコードで session_join を呼ぶこと', async () => {
     await withConnection();
 
-    act(() => openUrl.handler!(['jamjam://join/abc234']));
+    act(() => openUrl.handler!(['jamjam://join/abc234xyz']));
 
-    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234' }]);
+    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ' }]);
   });
 
   it('コードが壊れた招待リンクが届いたとき、エラーを出して参加しないこと', async () => {

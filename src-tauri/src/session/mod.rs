@@ -395,7 +395,7 @@ fn test_room_code_of(rooms: &[RoomInfo]) -> Option<String> {
     rooms
         .iter()
         .find(|room| room.test_room)
-        .map(|room| room.invite_code.clone())
+        .map(|room| room.invite_code.to_string())
 }
 
 fn peer_name<R: Runtime>(app: &AppHandle<R>) -> String {
@@ -1256,18 +1256,18 @@ mod tests {
                     }
                     let reply = match kind.as_str() {
                         "ListRooms" => Some(
-                            r#"{"type":"RoomList","data":{"rooms":[{"id":"t","name":"Test Room","peer_count":0,"max_peers":10,"has_password":false,"invite_code":"TEST22","test_room":true}]}}"#
+                            r#"{"type":"RoomList","data":{"rooms":[{"id":"t","name":"Test Room","peer_count":0,"max_peers":10,"has_password":false,"invite_code":"HJK567MNP","test_room":true}]}}"#
                                 .to_string(),
                         ),
                         "CreateRoom" => Some(format!(
-                            r#"{{"type":"RoomCreated","data":{{"room_id":"room-1","peer_id":"{}","invite_code":"ABC234"}}}}"#,
+                            r#"{{"type":"RoomCreated","data":{{"room_id":"room-1","peer_id":"{}","invite_code":"ABC234XYZ"}}}}"#,
                             Uuid::from_u128(ME)
                         )),
                         "JoinRoom" if value["data"]["room_id"] == "NOPE22" => Some(
                             r#"{"type":"Error","data":{"message":"room not found"}}"#.to_string(),
                         ),
                         "JoinRoom" => Some(format!(
-                            r#"{{"type":"RoomJoined","data":{{"room_id":"room-1","peer_id":"{}","invite_code":"ABC234","peers":[{}]}}}}"#,
+                            r#"{{"type":"RoomJoined","data":{{"room_id":"room-1","peer_id":"{}","invite_code":"ABC234XYZ","peers":[{}]}}}}"#,
                             Uuid::from_u128(ME),
                             peer_json(OTHER, "Aki")
                         )),
@@ -1335,7 +1335,7 @@ mod tests {
 
     async fn in_a_room(server: &FakeServer, dir: &tempfile::TempDir) -> tauri::App<MockRuntime> {
         let app = connected_to_the_server(server, dir).await;
-        join(app.handle(), "ABC234".to_string()).await.unwrap();
+        join(app.handle(), "ABC234XYZ".to_string()).await.unwrap();
         app
     }
 
@@ -1355,7 +1355,7 @@ mod tests {
         let snapshot = until(&app, |s| s.phase == Phase::ServerConnected).await;
 
         assert!(snapshot.connection_id.is_some());
-        assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("TEST22"));
+        assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("HJK567MNP"));
         assert_eq!(snapshot.room, None);
     }
 
@@ -1419,7 +1419,7 @@ mod tests {
 
         assert!(snapshot.connection_id.is_some());
         assert_eq!(snapshot.error, None);
-        assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("TEST22"));
+        assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("HJK567MNP"));
     }
 
     /// Verifies: REQ-IDT-010
@@ -1477,7 +1477,7 @@ mod tests {
 
         assert_eq!(snapshot.phase, Phase::Connected);
         let room = snapshot.room.unwrap();
-        assert_eq!(room.invite_code, "ABC234");
+        assert_eq!(room.invite_code, "ABC234XYZ");
         assert_eq!(room.peer_id, Uuid::from_u128(ME).to_string());
         assert_eq!(
             room.peer_name,
@@ -1493,11 +1493,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = connected_to_the_server(&server, &dir).await;
 
-        let snapshot = join(app.handle(), "abc234".to_string()).await.unwrap();
+        let snapshot = join(app.handle(), "abc234xyz".to_string()).await.unwrap();
 
         assert_eq!(snapshot.phase, Phase::Connected);
         let room = snapshot.room.unwrap();
-        assert_eq!(room.invite_code, "ABC234");
+        assert_eq!(room.invite_code, "ABC234XYZ");
         assert_eq!(room.participants.len(), 1);
         assert_eq!(room.participants[0].name, "Aki");
         assert_eq!(room.participants[0].features, vec!["peer_message"]);
@@ -1528,7 +1528,7 @@ mod tests {
             .unwrap();
         create(app.handle()).await.unwrap();
         leave(app.handle()).await.unwrap();
-        join(app.handle(), "ABC234".to_string()).await.unwrap();
+        join(app.handle(), "ABC234XYZ".to_string()).await.unwrap();
 
         let entering = server.entering_messages();
         assert_eq!(entering.len(), 2);
@@ -1551,7 +1551,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = in_a_room(&server, &dir).await;
 
-        let joined = join(app.handle(), "ZZZ999".to_string()).await;
+        let joined = join(app.handle(), "ZZZ999ZZZ".to_string()).await;
         let created = create(app.handle()).await;
 
         assert!(joined.is_err() && created.is_err());
@@ -1626,7 +1626,7 @@ mod tests {
         assert_eq!(snapshot.phase, Phase::ServerConnected);
         assert_eq!(snapshot.room, None);
         assert_eq!(snapshot.connection_id, connection);
-        assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("TEST22"));
+        assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("HJK567MNP"));
         assert_eq!(server.count("LeaveRoom"), 1);
     }
 
@@ -1661,7 +1661,7 @@ mod tests {
         })
         .await;
 
-        assert_eq!(snapshot.room.unwrap().invite_code, "ABC234");
+        assert_eq!(snapshot.room.unwrap().invite_code, "ABC234XYZ");
         assert_eq!(server.count("JoinRoom"), 2);
     }
 
