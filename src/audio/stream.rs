@@ -118,6 +118,53 @@ pub fn capture_to_wire(captured: &[f32], channels: usize, volume: f32, pan: i32,
     }
 }
 
+/// How long a gain takes to move across its whole range. Short enough that
+/// the fade is not heard as one, long enough that the step it replaces is not
+/// heard as a click.
+const GAIN_RAMP_MS: u64 = 5;
+
+/// A gain that moves to a new value over [`GAIN_RAMP_MS`] instead of jumping,
+/// so muting or moving a fader does not leave a click in the audio.
+pub struct GainRamp {
+    step: f32,
+    /// Where the gain stands; `None` until the first frame, which starts at its
+    /// target.
+    current: Option<f32>,
+}
+
+impl GainRamp {
+    pub fn new(sample_rate: u32) -> Self {
+        let frames = (sample_rate as u64 * GAIN_RAMP_MS / 1000).max(1);
+        Self {
+            step: 1.0 / frames as f32,
+            current: None,
+        }
+    }
+
+    /// Scales interleaved `samples` of `channels` channels by a gain that
+    /// moves toward `target` one step per frame.
+    pub fn apply(&mut self, samples: &mut [f32], channels: usize, target: f32) {
+        let mut gain = self.current.unwrap_or(target);
+        for frame in samples.chunks_mut(channels) {
+            if gain < target {
+                gain = (gain + self.step).min(target);
+            } else if gain > target {
+                gain = (gain - self.step).max(target);
+            }
+            for sample in frame {
+                *sample *= gain;
+            }
+        }
+        self.current = Some(gain);
+    }
+
+    /// Whether the gain has reached silence and `target` keeps it there, so
+    /// there is nothing left to send or play.
+    pub fn is_silent_at(&self, target: f32) -> bool {
+        target == 0.0 && self.current == Some(0.0)
+    }
+}
+
 /// What following the peer's sample rate changed.
 #[derive(Debug)]
 pub enum PeerRateChange {
@@ -248,6 +295,11 @@ impl ReceivePath {
     /// The recorder this path writes to, for whoever wants to report on it.
     pub fn flight(&self) -> &Arc<FlightRecorder> {
         &self.flight
+    }
+
+    /// The rate the path plays at.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
     }
 
     /// Length of one frame at the session's rate, in microseconds.
@@ -718,6 +770,59 @@ mod tests {
             path.follow_peer_rate(48000),
             PeerRateChange::Passthrough
         ));
+    }
+
+    /// Verifies: REQ-AUD-034
+    #[test]
+    fn a_gain_ramp_moves_to_silence_over_the_ramp_time_not_at_once() {
+        let mut ramp = GainRamp::new(48_000);
+        let mut warm = vec![1.0; 2 * 8];
+        ramp.apply(&mut warm, 2, 1.0);
+        assert!(warm.iter().all(|&s| s == 1.0), "a steady gain is unity");
+
+        let mut fade = vec![1.0; 2 * 480];
+        ramp.apply(&mut fade, 2, 0.0);
+        assert!(fade[0] > 0.99, "the first frame is barely turned down");
+        assert!(
+            fade.windows(2).all(|pair| pair[1] <= pair[0]),
+            "the fade only goes down"
+        );
+        assert_eq!(fade[2 * 245], 0.0, "silent once the ramp time has passed");
+        assert!(ramp.is_silent_at(0.0));
+        assert!(
+            !ramp.is_silent_at(1.0),
+            "unmuting has to start sending again"
+        );
+    }
+
+    /// Verifies: REQ-AUD-034
+    #[test]
+    fn a_gain_ramp_never_steps_by_more_than_one_ramp_step_between_frames() {
+        let mut ramp = GainRamp::new(48_000);
+        let mut steady = vec![1.0; 2 * 4];
+        ramp.apply(&mut steady, 2, 1.0);
+
+        let mut down = vec![1.0; 2 * 480];
+        ramp.apply(&mut down, 2, 0.0);
+        let mut up = vec![1.0; 2 * 480];
+        ramp.apply(&mut up, 2, 1.0);
+        let left: Vec<f32> = down.iter().chain(&up).step_by(2).copied().collect();
+        let biggest_step = left
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f32::max);
+        assert!(
+            biggest_step <= 1.0 / 240.0 + 1e-6,
+            "step was {biggest_step}"
+        );
+    }
+
+    #[test]
+    fn a_gain_ramp_starts_at_its_target_so_a_new_session_does_not_fade_in() {
+        let mut ramp = GainRamp::new(48_000);
+        let mut frames = vec![1.0; 2 * 4];
+        ramp.apply(&mut frames, 2, 0.5);
+        assert!(frames.iter().all(|&s| s == 0.5));
     }
 
     /// A centred source is equal on both sides, and a hard pan silences the
