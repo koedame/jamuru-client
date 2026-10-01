@@ -145,6 +145,24 @@ jobs:
         # release and a rehearsal (no tag) do not.
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json ${{ contains(needs.prepare.outputs.tag, '-') && format('--config src-tauri/tauri.updater.beta.conf.json --config {0}/build-version.conf.json --features debug-remote', runner.temp) || '' }}
 
+      # The notices bundled into the installers are generated from the lock
+      # files (scripts/third-party-licenses.py). Stops the release when a
+      # dependency changed without regenerating them.
+      - name: Check the third-party license notices are up to date
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 scripts/third-party-licenses.py --check
+
+      # The AppImage carries system libraries (GTK, WebKitGTK, ... mostly LGPL).
+      # Which ones depends on the build, so their notice is made from the
+      # AppImage itself and released next to it. Fails when a library cannot be
+      # matched to a package: the notice would be missing it.
+      - name: List the libraries bundled in the AppImage
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -euo pipefail
+          dir="src-tauri/target/${{ matrix.target }}/release/bundle/appimage"
+          python3 scripts/appimage-bundled-libraries.py "${dir}"/*.AppImage "${dir}/jamjam-linux-bundled-libraries.txt"
+
       - name: Check the app dials the signaling server it was built for
         shell: bash
         env:
@@ -175,6 +193,7 @@ jobs:
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/jamjam-linux-bundled-libraries.txt
             src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
 
       - name: Upload artifacts (macOS)
@@ -270,6 +289,7 @@ jobs:
           files: |
             artifacts/jamjam-linux-x64/**/*.AppImage
             artifacts/jamjam-linux-x64/**/*.AppImage.sig
+            artifacts/jamjam-linux-x64/**/jamjam-linux-bundled-libraries.txt
             artifacts/jamjam-linux-x64/**/*.deb
             artifacts/jamjam-macos-x64/**/*.dmg
             artifacts/jamjam-macos-x64/**/*.app.tar.gz

@@ -223,3 +223,31 @@ jobs:
 
       - name: Run tests
         run: npm run test:run
+
+  # Every dependency's license is on the allow list in deny.toml (no GPL, AGPL
+  # or LGPL-only crate, no unknown license), and the notices bundled into the
+  # installers are the ones the current lock files produce
+  # (scripts/third-party-licenses.py regenerates them).
+  licenses:
+    name: Licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Check the license notices are up to date
+        run: python3 scripts/third-party-licenses.py --check
+
+      - name: Check dependency licenses (app)
+        run: cargo deny --manifest-path src-tauri/Cargo.toml --all-features check licenses
+
+      - name: Check dependency licenses (core library)
+        run: cargo deny --all-features check licenses
