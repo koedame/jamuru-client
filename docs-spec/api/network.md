@@ -412,6 +412,11 @@ struct ConnectionStats {
     packets_received: u64,
     /// 接続時間（秒）
     uptime_seconds: u64,
+    /// 音声が暗号化されているか。`Negotiating`（鍵を合わせている最中）/ `Encrypted` /
+    /// `Unencrypted`（相手のアプリが暗号化に対応していない。ADR-063）
+    security: LinkSecurity,
+    /// 偽造・再送・状態に合わないものとして受け付けなかったパケット数
+    packets_refused: u64,
 }
 ```
 
