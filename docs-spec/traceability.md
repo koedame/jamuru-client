@@ -12,9 +12,9 @@
 | 要求 総数 | 242 |
 | うち must | 235 |
 | うち should | 7 |
-| 検証済み | 212 |
+| 検証済み | 213 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
-| 未検証（should のみ許容） | 4 |
+| 未検証（should のみ許容） | 3 |
 
 ## 対応表
 
@@ -218,7 +218,7 @@
 | REQ-SEC-003 | must | 鍵は接続ごとの一時鍵から両端が導き、両端の公開鍵を混ぜ、向きごとに別の鍵を使う。同じ鍵で同じ nonce を二度使わず（パケットの種類・送り手によらず 1 つのカウンタから取る）、自分の鍵を送り返されても、相手向けのパケットを送り手に返されても受け付けない。同じ入力からは、独立に作った暗号文と同じバイト列ができる | `docs-spec/requirements.md` | `src/network/encryption.rs`::a_packet_sealed_for_another_peer_is_refused<br/>`src/network/encryption.rs`::a_packet_sent_to_the_peer_cannot_be_played_back_to_its_sender<br/>`src/network/encryption.rs`::our_own_key_played_back_to_us_is_refused<br/>`src/network/encryption.rs`::packets_of_every_type_sharing_a_sequence_number_are_sealed_under_different_nonces<br/>`src/network/encryption.rs`::the_sealed_bytes_for_fixed_keys_match_the_known_answer |
 | REQ-SEC-004 | must | 暗号化できない相手（この版より前のアプリ）は、相手の住所から平文の音声・ping が届いたことで見分け、平文で繋がり、接続の状態に「暗号化されていない」と出す。相手の住所以外から届いたパケット・鍵は、暗号化するかどうかの判断にも鍵にも使わない | `docs-spec/requirements.md` | `src/network/encryption.rs`::a_peer_that_sends_plain_audio_before_any_key_cannot_encrypt_and_the_link_goes_plain<br/>`tests/wire_encryption_test.rs`::when_a_stranger_sends_a_key_it_is_not_taken<br/>`tests/wire_encryption_test.rs`::when_a_stranger_sends_plain_audio_the_link_keeps_negotiating<br/>`tests/wire_encryption_test.rs`::when_the_peer_cannot_encrypt_the_link_carries_plain_packets_and_says_so |
 | REQ-SEC-005 | must | 相手が鍵を持っていると示すまで（暗号化されたパケットが届くまで）、音声・FEC・ping・遅延の情報は送らない（keep-alive と鍵だけが出る。送る前に捨てると、相手に損失として見える）。待たせた遅延の情報は、そのあとすぐ送る | `docs-spec/requirements.md` | `src/network/encryption.rs`::before_the_keys_are_agreed_only_keep_alives_may_be_sent<br/>`src/network/encryption.rs`::until_the_peer_has_shown_it_has_the_keys_only_keep_alives_may_be_sent_and_they_are_sealed<br/>`tests/wire_encryption_test.rs`::when_the_peer_has_not_answered_the_keys_no_audio_is_sent |
-| REQ-SEC-006 | should | 暗号化されていない接続のとき、画面に「この相手との音声は暗号化されていません」と出る | `docs-spec/requirements.md` | **未検証** |
+| REQ-SEC-006 | should | 暗号化されていない接続のとき、画面に「この相手との音声は暗号化されていません」と出る | `docs-spec/requirements.md` | `ui/src/screens/MainScreen.test.tsx`::相手のアプリが暗号化できないとき、この相手との音声は暗号化されていないと知らせること |
 | REQ-TEL-001 | must | 設定 `usage_reporting` の既定はオフである。オフの間は何も収集せず、何も送らず、インストール ID も作らない | `docs-spec/requirements.md` | `src-tauri/src/usage.rs`::when_reporting_is_off_a_change_of_settings_or_devices_reports_nothing<br/>`src-tauri/src/usage.rs`::when_reporting_is_off_a_room_records_nothing_and_starts_no_sampler<br/>`src/telemetry/tests.rs`::when_the_user_config_defaults_are_used_usage_reporting_is_off<br/>`src/telemetry/tests.rs`::when_there_is_no_place_to_keep_the_install_id_reporting_stays_off<br/>`src/telemetry/tests.rs`::when_usage_reporting_is_off_no_install_id_is_made<br/>`src/telemetry/tests.rs`::when_usage_reporting_is_off_nothing_is_collected_or_sent<br/>`tests/e2e/tests/gui.rs`::on_the_first_launch_usage_reporting_is_off_and_nothing_asks_about_it |
 | REQ-TEL-002 | must | オンにすると 16 バイトの乱数のインストール ID を作り、設定ファイルとは別の場所に保存する。オフにすると未送信のイベントとインストール ID を捨て、オンにし直すと別の ID になる | `docs-spec/requirements.md` | `src/telemetry/tests.rs`::when_reporting_is_turned_off_the_unsent_events_and_the_install_id_are_thrown_away<br/>`src/telemetry/tests.rs`::when_reporting_is_turned_on_a_random_16_byte_install_id_is_stored<br/>`src/telemetry/tests.rs`::when_the_app_starts_with_reporting_off_a_leftover_install_id_is_removed<br/>`src/telemetry/tests.rs`::when_the_app_starts_with_reporting_still_on_the_same_install_id_is_kept<br/>`src/telemetry/tests.rs`::when_the_install_id_is_kept_it_is_not_in_the_settings_file_directory<br/>`tests/e2e/tests/gui.rs`::turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it |
 | REQ-TEL-003 | must | 送る行はすべて `schema.json` に適合する。`event` / `code` / `end_reason` / `kind` は列挙で閉じ、定義に無い項目や値の行は適合しない。全行が同じ外枠（`v` `ts` `seq` `event` `install_id` `launch_id` `session_id` `app_version` `os` `arch`）を持つ | `docs-spec/requirements.md` | `src/telemetry/tests.rs`::when_a_device_or_a_session_end_has_a_value_outside_the_schema_it_is_refused<br/>`src/telemetry/tests.rs`::when_a_line_has_a_value_outside_the_schema_it_is_refused<br/>`src/telemetry/tests.rs`::when_a_line_is_written_it_carries_the_whole_envelope<br/>`src/telemetry/tests.rs`::when_a_line_of_another_event_is_mixed_in_the_fields_of_one_event_are_refused<br/>`src/telemetry/tests.rs`::when_a_session_end_carries_the_fec_share_the_line_satisfies_schema_json<br/>`src/telemetry/tests.rs`::when_any_event_is_recorded_its_line_satisfies_schema_json<br/>`src/telemetry/tests.rs`::when_events_are_recorded_seq_counts_up_within_the_launch<br/>`src/telemetry/tests.rs`::when_the_real_machine_is_described_the_lines_satisfy_schema_json |
@@ -273,4 +273,3 @@
 | REQ-CORE-004 | 日本国内光回線（RTT 20ms）で総片道遅延が 12ms 以下になる | `docs-spec/requirements.md` |
 | REQ-LAT-102 | 複数参加者の遅延を個別表示する | `docs-spec/behavior/latency.feature` |
 | REQ-LAT-123 | ASIO使用時の低遅延 | `docs-spec/behavior/latency.feature` |
-| REQ-SEC-006 | 暗号化されていない接続のとき、画面に「この相手との音声は暗号化されていません」と出る | `docs-spec/requirements.md` |

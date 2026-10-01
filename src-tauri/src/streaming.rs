@@ -629,6 +629,9 @@ pub struct NetworkStats {
     pub packets_sent: u64,
     /// Total packets received
     pub packets_received: u64,
+    /// Whether the audio to this peer is encrypted: "encrypted", "negotiating" while the
+    /// keys are being agreed, or "unencrypted" when the peer's app cannot encrypt
+    pub encryption: String,
     /// Total bytes sent
     pub bytes_sent: u64,
     /// Total bytes received
@@ -1135,6 +1138,7 @@ pub async fn streaming_status(
             uptime_seconds: s.uptime_seconds,
             packets_sent: s.packets_sent,
             packets_received: s.packets_received,
+            encryption: s.security.as_str().to_string(),
             bytes_sent: s.bytes_sent,
             bytes_received: s.bytes_received,
         };

@@ -23,6 +23,7 @@ const network: NetworkStats = {
   uptime_seconds: 125,
   packets_sent: 1000,
   packets_received: 998,
+  encryption: 'encrypted',
   bytes_sent: 512_000,
   bytes_received: 511_000,
 };
