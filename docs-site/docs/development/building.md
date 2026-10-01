@@ -11,7 +11,7 @@ description: jamjamのビルド方法
 
 # ビルド
 
-jamjamをソースからビルドする方法を説明します。
+jamjamをソースからビルドする方法を説明します。権利者（開発者）向けの手順です。[ライセンス](https://github.com/koedame/jamjam-client/blob/main/LICENSE)は、権利者以外がソースからビルド・実行することを許可していません。利用するときは、GitHub Releases の公式バイナリを使ってください。
 
 ## 前提条件
 
