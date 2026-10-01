@@ -29,7 +29,7 @@ DPKG_QUERY = os.environ.get("DPKG_QUERY", "dpkg-query")
 SHARE_DIR = Path(os.environ.get("SHARE_DIR", "/usr/share"))
 SOURCE_URL = "https://launchpad.net/ubuntu/+source"
 SO_NAME = re.compile(r"\.so(\.|$)")
-COMMON_LICENSE = re.compile(r"/usr/share/common-licenses/([A-Za-z0-9.+-]+)")
+COMMON_LICENSE = re.compile(r"/usr/share/common-licenses/([A-Za-z0-9.+-]*[A-Za-z0-9+-])")
 
 
 def is_elf(path: Path) -> bool:
@@ -100,7 +100,12 @@ def main(argv: list) -> int:
     for pkg in by_package:
         path = SHARE_DIR / "doc" / pkg / "copyright"
         copyrights[pkg] = read_text(path) if path.exists() else None
-    common = sorted({m for t in copyrights.values() if t for m in COMMON_LICENSE.findall(t)})
+    # `GPL` and `GPL-3` are the same file on the system: print each text once.
+    texts: dict = {}
+    for name in sorted({m for t in copyrights.values() if t for m in COMMON_LICENSE.findall(t)}):
+        path = SHARE_DIR / "common-licenses" / name
+        text = read_text(path) if path.exists() else "(not available on the build system)"
+        texts.setdefault(text, []).append(name)
 
     out: list = []
     out.append(
@@ -138,10 +143,9 @@ def main(argv: list) -> int:
         out.append(copyrights[pkg] if copyrights[pkg] else "(the package has no copyright file on the build system)")
 
     out.append("\n\nLicense texts referred to above\n" + "=" * 70)
-    for name in common:
-        path = SHARE_DIR / "common-licenses" / name
-        out.append(f"\n--- {name} ---\n")
-        out.append(read_text(path) if path.exists() else "(not available on the build system)")
+    for text, names in sorted(texts.items(), key=lambda kv: kv[1]):
+        out.append(f"\n--- {', '.join(names)} ---\n")
+        out.append(text)
 
     out_path.write_bytes(("\n".join(out).rstrip("\n") + "\n").encode("utf-8"))
     print(f"{len(libs)} libraries, {len(by_package)} packages -> {out_path}")
