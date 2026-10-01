@@ -28,7 +28,6 @@ import hashlib
 import json
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -110,6 +109,8 @@ def inputs_hash() -> str:
 
 def check_policy_sync() -> None:
     """about.toml accepts exactly what deny.toml allows."""
+    import tomllib  # Python 3.11+; only regenerating needs it, `--check` runs on older ones too
+
     about = tomllib.loads((ROOT / "about.toml").read_text())
     deny = tomllib.loads((ROOT / "deny.toml").read_text())
     pairs = [
@@ -187,7 +188,7 @@ def npm_licenses() -> dict:
         repo = repo.removeprefix("git+").removesuffix(".git")
         lid = pkg.get("license") or meta.get("license") or "UNKNOWN"
         for f in files:
-            name = lid if len(files) == 1 else f"{lid} ({f.name})"
+            name = lid if len(files) == 1 else f.name
             users = groups.setdefault((lid, name, normalize(f.read_text(encoding="utf-8"))), {})
             users[(meta["name"], meta["version"])] = repo
     return groups
@@ -327,7 +328,6 @@ def txt_body(rendered: str) -> str:
 
 
 def check() -> int:
-    check_policy_sync()
     want = inputs_hash()
     bad = []
     for path, fmt in ((MD_OUT, "md"), (TXT_OUT, "txt")):
