@@ -122,6 +122,14 @@ impl UdpTransport {
         Ok((buf, addr))
     }
 
+    /// Receive raw bytes if a datagram is already waiting, without blocking
+    pub fn try_recv_raw(&self) -> Option<(Vec<u8>, SocketAddr)> {
+        let mut buf = vec![0u8; RECV_BUFFER_SIZE];
+        let (len, addr) = self.socket.try_recv_from(&mut buf).ok()?;
+        buf.truncate(len);
+        Some((buf, addr))
+    }
+
     /// Start a receive loop that sends packets to a channel
     pub fn start_receive_loop(
         self: Arc<Self>,
