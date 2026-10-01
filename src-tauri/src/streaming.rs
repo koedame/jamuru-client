@@ -2939,7 +2939,11 @@ mod tests {
         assert_eq!(consumer.slots(), 0, "the old audio is gone");
 
         producer.push(5.0).unwrap();
-        assert_eq!(consumer.pop().unwrap(), 5.0, "what follows is the live audio");
+        assert_eq!(
+            consumer.pop().unwrap(),
+            5.0,
+            "what follows is the live audio"
+        );
     }
 
     /// A PCM payload as `ReceivePath::receive` expects it: `f32` samples as
