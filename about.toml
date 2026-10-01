@@ -1,0 +1,43 @@
+# cargo-about config. `./scripts/third-party-licenses.py` runs it for the notices
+# shipped with the app (THIRD_PARTY_LICENSES.md and src-tauri/resources/LICENSES.txt).
+# `accepted` must equal `[licenses] allow` in deny.toml; the script checks that.
+
+accepted = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+# Dev-dependencies (test crates) never reach a release build.
+ignore-dev-dependencies = true
+
+# The app's own crates.
+private = { ignore = true }
+
+# libopus is bundled by opusic-sys (the `opus-codec` feature). Without this,
+# cargo-about reports the license header of every one of its source files.
+[opusic-sys.clarify]
+license = "BSD-3-Clause"
+
+[[opusic-sys.clarify.files]]
+path = "opus/COPYING"
+checksum = "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
