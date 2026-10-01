@@ -35,16 +35,21 @@ async fn connection_stats_respond_to_traffic() {
         .await
         .expect("receiver socket");
     let receiver_addr = receiver.local_addr();
+    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
     receiver
-        .connect(receiver_addr)
+        .connect(sender.local_addr())
         .await
         .expect("receiver starts its loop");
-
-    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
     sender
         .connect(receiver_addr)
         .await
         .expect("sender connects");
+    // Traffic goes once the two have agreed keys.
+    while sender.security() != jamjam::network::LinkSecurity::Encrypted
+        || receiver.security() != jamjam::network::LinkSecurity::Encrypted
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let before = sender.stats();
 

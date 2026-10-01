@@ -489,20 +489,26 @@ async fn fec_recovers_a_dropped_frame_over_the_transport() {
     });
 
     let receiver_addr = receiver.local_addr();
-    receiver
-        .connect(receiver_addr)
-        .await
-        .expect("receiver starts its loop");
 
     // Sender: same encoding, pointed at the receiver.
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
     sender
         .set_audio_encoding(encoding)
         .expect("sender encoding");
+    receiver
+        .connect(sender.local_addr())
+        .await
+        .expect("receiver starts its loop");
     sender
         .connect(receiver_addr)
         .await
         .expect("sender connects");
+    // Audio goes once the two have agreed keys.
+    while sender.security() != jamjam::network::LinkSecurity::Encrypted
+        || receiver.security() != jamjam::network::LinkSecurity::Encrypted
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 
     // Send one full group. Every frame differs so a recovered payload cannot be
     // confused with a neighbour.

@@ -9,8 +9,12 @@
 //! "decoding untrusted bytes is total" — it returns `None`/`Err` or a bounded
 //! value, and never panics.
 
-use jamjam::network::{EncryptionContext, FecDecoder, FecPacket, KeyPair, SequenceTracker};
-use jamjam::protocol::{LatencyInfoMessage, LatencyPing, LatencyPong, Packet, HEADER_SIZE};
+use jamjam::network::{
+    FecDecoder, FecPacket, LinkSecurity, Opened, SecureLink, SequenceTracker, SEAL_OVERHEAD,
+};
+use jamjam::protocol::{
+    LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, HEADER_SIZE,
+};
 
 /// Small deterministic PRNG so the fuzz corpus is reproducible across runs and
 /// machines (a security regression must fail the same way everywhere, and we do
@@ -164,87 +168,149 @@ fn fec_decoder_does_not_grow_without_bound() {
     }
 }
 
-/// Decrypting attacker-supplied bytes must fail cleanly (authentication) and
-/// never panic, for any sequence number and any length — including inputs
-/// shorter than the GCM tag.
+/// Two links that have agreed keys, as two peers have once they are connected
+fn agreed_links() -> (SecureLink, SecureLink) {
+    let (a, b) = (SecureLink::new(), SecureLink::new());
+    let _ = a.open(b.key_exchange_packet());
+    let _ = b.open(a.key_exchange_packet());
+    // Each shows the other it has the keys with the first thing it sends
+    let from_a = a.seal(Packet::keep_alive(0)).expect("a keep-alive goes");
+    let from_b = b.seal(Packet::keep_alive(0)).expect("a keep-alive goes");
+    assert!(matches!(b.open(from_a), Opened::Packet(_)));
+    assert!(matches!(a.open(from_b), Opened::Packet(_)));
+    assert_eq!(a.security(), LinkSecurity::Encrypted);
+    assert_eq!(b.security(), LinkSecurity::Encrypted);
+    (a, b)
+}
+
+/// Opening attacker-supplied bytes marked as encrypted must fail cleanly
+/// (authentication) and never panic, for any counter and any length - including
+/// inputs shorter than the counter and the GCM tag.
 #[test]
-fn decrypt_rejects_arbitrary_ciphertext_without_panicking() {
-    let ctx = EncryptionContext::from_shared_secret(&[0x42u8; 32], true);
+fn opening_arbitrary_ciphertext_never_succeeds_and_never_panics() {
+    let (_, link) = agreed_links();
     let mut rng = XorShift::new(0xBADC0DE);
 
     for _ in 0..20_000 {
-        let seq = rng.next_u64() as u32;
-        let ct = rng.bytes(64);
+        let mut packet = Packet::audio(rng.next_u64() as u32, rng.next_u64() as u32, rng.bytes(64));
+        packet.flags.encrypted = true;
         assert!(
-            ctx.decrypt(seq, &ct).is_err(),
-            "unauthenticated ciphertext must never decrypt (seq={seq}, len={})",
-            ct.len()
+            matches!(link.open(packet), Opened::Dropped(_)),
+            "unauthenticated ciphertext must never open"
         );
     }
 }
 
-/// A tampered or replayed-to-wrong-slot audio packet must be rejected: GCM
-/// authentication binds the ciphertext, and the nonce is derived from the
-/// sequence number, so flipping a bit or reusing the ciphertext under a
-/// different sequence both fail. (Reinforces the encryption unit tests at the
-/// level a peer actually attacks: same key context, hostile inputs.)
+/// A tampered or replayed audio packet must be rejected: GCM authentication
+/// binds the ciphertext and the header, so flipping a bit, giving the packet
+/// another sequence number or timestamp, or sending it twice all fail.
 #[test]
-fn tampered_or_resequenced_audio_is_rejected() {
-    let ctx = EncryptionContext::from_shared_secret(&[0x07u8; 32], true);
-    let plaintext = b"live audio frame";
-    let seq = 4242u32;
-    let ciphertext = ctx.encrypt(seq, plaintext).expect("encrypt");
+fn tampered_resequenced_or_repeated_audio_is_rejected() {
+    let (a, b) = agreed_links();
+    let sealed = a
+        .seal(Packet::audio(4242, 99, b"live audio frame".to_vec()))
+        .expect("seal");
+    assert_eq!(
+        sealed.payload.len(),
+        b"live audio frame".len() + SEAL_OVERHEAD
+    );
 
-    // Correct decrypt as a control.
-    assert_eq!(ctx.decrypt(seq, &ciphertext).unwrap(), plaintext);
-
-    // Flip each byte in turn: every single-bit... actually single-byte tamper
-    // must break authentication.
-    for i in 0..ciphertext.len() {
-        let mut t = ciphertext.clone();
-        t[i] ^= 0xFF;
+    // Every single-byte tamper of the payload must break authentication.
+    for i in 0..sealed.payload.len() {
+        let mut t = sealed.clone();
+        t.payload[i] ^= 0xFF;
         assert!(
-            ctx.decrypt(seq, &t).is_err(),
+            matches!(b.open(t), Opened::Dropped(_)),
             "tampering byte {i} must fail authentication"
         );
     }
 
-    // Replay the exact ciphertext under a different sequence number: the nonce
-    // no longer matches, so it must fail.
-    assert!(
-        ctx.decrypt(seq.wrapping_add(1), &ciphertext).is_err(),
-        "a captured frame replayed under a different sequence must fail"
-    );
+    // The same bytes under another sequence number, timestamp or type.
+    let mut resequenced = sealed.clone();
+    resequenced.sequence += 1;
+    assert!(matches!(b.open(resequenced), Opened::Dropped(_)));
+    let mut retimed = sealed.clone();
+    retimed.timestamp += 1;
+    assert!(matches!(b.open(retimed), Opened::Dropped(_)));
+    let mut retyped = sealed.clone();
+    retyped.packet_type = PacketType::Fec;
+    assert!(matches!(b.open(retyped), Opened::Dropped(_)));
 
     // Truncated ciphertext (shorter than the tag) must fail, not panic.
-    assert!(ctx
-        .decrypt(seq, &ciphertext[..ciphertext.len() / 2])
-        .is_err());
+    let mut truncated = sealed.clone();
+    truncated.payload.truncate(sealed.payload.len() / 2);
+    assert!(matches!(b.open(truncated), Opened::Dropped(_)));
+
+    // The genuine packet opens once; a replay of it does not.
+    assert!(matches!(b.open(sealed.clone()), Opened::Packet(_)));
+    assert!(matches!(b.open(sealed), Opened::Dropped(_)));
 }
 
 /// A key-exchange message from a peer carries a raw 32-byte public key. Any
-/// 32-byte value is a syntactically valid X25519 public key, but deriving a
-/// shared secret from a hostile or degenerate key (all-zero, low-order) must not
-/// panic — at worst it yields a shared secret we then fail to use.
+/// 32-byte value is a syntactically valid X25519 public key, but a hostile or
+/// degenerate one (all-zero, low-order) must not panic, and must not give a
+/// secret an eavesdropper could compute: the link keeps negotiating.
 #[test]
 fn key_agreement_survives_hostile_public_keys() {
     let hostile_keys: [[u8; 32]; 3] = [
-        [0u8; 32],    // all zero
-        [0xFFu8; 32], // all ones
+        [0u8; 32], // all zero
         {
             // Known low-order point for Curve25519.
             let mut k = [0u8; 32];
             k[0] = 1;
             k
         },
+        {
+            // The other low-order point of order 8.
+            let mut k = [0u8; 32];
+            k[0] = 0xe0;
+            k[1] = 0xeb;
+            k[2] = 0x7a;
+            k[3] = 0x7c;
+            k[4] = 0x3b;
+            k[5] = 0x41;
+            k[6] = 0xb8;
+            k[7] = 0xae;
+            k[8] = 0x16;
+            k[9] = 0x56;
+            k[10] = 0xe3;
+            k[11] = 0xfa;
+            k[12] = 0xf1;
+            k[13] = 0x9f;
+            k[14] = 0xc4;
+            k[15] = 0x6a;
+            k[16] = 0xda;
+            k[17] = 0x09;
+            k[18] = 0x8d;
+            k[19] = 0xeb;
+            k[20] = 0x9c;
+            k[21] = 0x32;
+            k[22] = 0xb1;
+            k[23] = 0xfd;
+            k[24] = 0x86;
+            k[25] = 0x62;
+            k[26] = 0x05;
+            k[27] = 0x16;
+            k[28] = 0x5f;
+            k[29] = 0x49;
+            k[30] = 0xb8;
+            k
+        },
     ];
 
     for peer_public in hostile_keys {
-        let ours = KeyPair::generate();
-        let shared = ours.derive_shared_secret(&peer_public);
-        // Just touching the bytes must not panic; contributory behaviour is a
-        // separate concern, this test only asserts totality.
-        let _ = shared.as_bytes();
+        let link = SecureLink::new();
+        let mut payload = vec![0x01, 0x01];
+        payload.extend_from_slice(&peer_public);
+        let _ = link.open(Packet::control(0, payload));
+        assert_eq!(link.security(), LinkSecurity::Negotiating);
+    }
+
+    // Garbage of every length in the key-exchange packet type must not panic either.
+    let mut rng = XorShift::new(0xFEED);
+    for _ in 0..5_000 {
+        let link = SecureLink::new();
+        let _ = link.open(Packet::control(0, rng.bytes(80)));
     }
 }
 

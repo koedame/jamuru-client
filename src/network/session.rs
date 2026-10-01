@@ -6,15 +6,20 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use super::encryption::{LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::signaling::PeerInfo;
 use super::transport::UdpTransport;
 use crate::protocol::{Packet, PacketType};
+
+/// How often our key is sent to a peer that has not shown it has it
+const KEY_EXCHANGE_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Session configuration
 #[derive(Debug, Clone)]
@@ -44,6 +49,9 @@ struct Peer {
     connected: AtomicBool,
     packets_received: AtomicU32,
     last_audio: Option<Vec<f32>>,
+    /// The encryption of the link to this peer: nothing is sent to it, or taken from it,
+    /// without going through this
+    link: Arc<SecureLink>,
 }
 
 /// Audio callback for received audio from a peer
@@ -65,6 +73,8 @@ pub struct Session {
     receive_handle: Option<tokio::task::JoinHandle<()>>,
     /// Inner receive loop handle from UdpTransport (must be aborted to release socket)
     inner_recv_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Sends our key to the peers that have not shown they have it
+    key_exchange_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Session {
@@ -84,6 +94,7 @@ impl Session {
             mixed_audio_callback: None,
             receive_handle: None,
             inner_recv_handle: None,
+            key_exchange_handle: None,
         })
     }
 
@@ -119,6 +130,7 @@ impl Session {
                 connected: AtomicBool::new(true),
                 packets_received: AtomicU32::new(0),
                 last_audio: None,
+                link: Arc::new(SecureLink::new()),
             },
         );
 
@@ -131,6 +143,12 @@ impl Session {
         if let Some(peer) = peers.remove(&peer_id) {
             info!("Removed peer {} ({})", peer.info.name, peer_id);
         }
+    }
+
+    /// Whether what is sent to and taken from `peer_id` is encrypted
+    pub async fn peer_security(&self, peer_id: Uuid) -> Option<LinkSecurity> {
+        let peers = self.peers.read().await;
+        peers.get(&peer_id).map(|peer| peer.link.security())
     }
 
     /// Get list of connected peers
@@ -167,6 +185,7 @@ impl Session {
 
         self.running.store(true, Ordering::SeqCst);
         self.start_receive_loop();
+        self.start_key_exchange_loop();
         info!("Session started on {}", self.transport.local_addr());
     }
 
@@ -189,6 +208,10 @@ impl Session {
             handle.abort();
         }
 
+        if let Some(handle) = self.key_exchange_handle.take() {
+            handle.abort();
+        }
+
         info!("Session stopped");
     }
 
@@ -203,11 +226,15 @@ impl Session {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         let packet = Packet::audio(sequence, timestamp, bytes);
 
-        // Send to all peers
+        // Send to all peers, each through its own link: a peer whose keys are not agreed
+        // yet gets nothing.
         let peers = self.peers.read().await;
         for peer in peers.values() {
             if peer.connected.load(Ordering::SeqCst) {
-                if let Err(e) = self.transport.send_to(&packet, peer.addr).await {
+                let Some(sealed) = peer.link.seal(packet.clone()) else {
+                    continue;
+                };
+                if let Err(e) = self.transport.send_to(&sealed, peer.addr).await {
                     warn!("Failed to send to peer {}: {}", peer.info.id, e);
                 }
             }
@@ -232,8 +259,44 @@ impl Session {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         let packet = Packet::audio(sequence, timestamp, bytes);
 
-        self.transport.send_to(&packet, peer.addr).await?;
+        if let Some(sealed) = peer.link.seal(packet) {
+            self.transport.send_to(&sealed, peer.addr).await?;
+        }
         Ok(())
+    }
+
+    /// Sends our key to each peer that has not shown it has it, until it has
+    fn start_key_exchange_loop(&mut self) {
+        let transport = self.transport.clone();
+        let peers = self.peers.clone();
+        let running = self.running.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(KEY_EXCHANGE_INTERVAL);
+            while running.load(Ordering::SeqCst) {
+                ticker.tick().await;
+                let waiting: Vec<(SocketAddr, Arc<SecureLink>)> = peers
+                    .read()
+                    .await
+                    .values()
+                    .filter(|peer| peer.link.wants_key_exchange())
+                    .map(|peer| (peer.addr, peer.link.clone()))
+                    .collect();
+                for (addr, link) in waiting {
+                    if let Err(e) = transport.send_to(&link.key_exchange_packet(), addr).await {
+                        warn!("Failed to send our key to {}: {}", addr, e);
+                    }
+                    // With the keys ours, something encrypted shows the peer it has them too
+                    if let Some(keep_alive) =
+                        link.seal(Packet::keep_alive(0)).filter(|_| link.has_keys())
+                    {
+                        let _ = transport.send_to(&keep_alive, addr).await;
+                    }
+                }
+            }
+        });
+
+        self.key_exchange_handle = Some(handle);
     }
 
     fn start_receive_loop(&mut self) {
@@ -254,16 +317,43 @@ impl Session {
                     break;
                 }
 
-                if packet.packet_type != PacketType::Audio {
-                    continue;
-                }
-
                 // Find peer by address
                 let mut peers_guard = peers.write().await;
                 let peer_id = {
                     let peer = peers_guard.values().find(|p| p.addr == addr);
                     peer.map(|p| p.info.id)
                 };
+
+                // Only a peer's own packets are taken, and they go through its link: one
+                // that fails to open, or that repeats an earlier packet, is dropped there.
+                let packet = match peer_id.and_then(|id| peers_guard.get(&id)) {
+                    Some(peer) => match peer.link.open(packet) {
+                        Opened::Packet(packet) => packet,
+                        Opened::KeyExchange { answer } => {
+                            if answer {
+                                let key = peer.link.key_exchange_packet();
+                                if let Err(e) = transport.send_to(&key, addr).await {
+                                    warn!("Failed to answer {}'s key: {}", addr, e);
+                                }
+                                if let Some(keep_alive) = peer.link.seal(Packet::keep_alive(0)) {
+                                    let _ = transport.send_to(&keep_alive, addr).await;
+                                }
+                            }
+                            continue;
+                        }
+                        Opened::Dropped(reason) => {
+                            debug!("Dropped a packet from {}: {}", addr, reason);
+                            continue;
+                        }
+                    },
+                    None => {
+                        debug!("Received a packet from unknown address: {}", addr);
+                        continue;
+                    }
+                };
+                if packet.packet_type != PacketType::Audio {
+                    continue;
+                }
 
                 if let Some(peer_id) = peer_id {
                     // Convert bytes to f32 samples
@@ -295,8 +385,6 @@ impl Session {
                             }
                         }
                     }
-                } else {
-                    debug!("Received audio from unknown address: {}", addr);
                 }
             }
         });

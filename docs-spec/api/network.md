@@ -29,7 +29,7 @@ Network モジュールは以下の責務を持つ:
 ```
 network/
 ├── connection.rs       # 接続管理
-├── encryption.rs       # 暗号化レイヤー（AES-GCM, X25519）
+├── encryption.rs       # 暗号化レイヤー（SecureLink: X25519, AES-256-GCM。ADR-063）
 ├── transport.rs        # UDPトランスポート
 ├── session.rs          # セッション管理
 ├── signaling.rs        # シグナリング
@@ -125,8 +125,6 @@ struct ConnectionConfig {
     stun_servers: Vec<String>,
     /// TURN サーバー（認証情報付き）
     turn_servers: Vec<TurnServer>,
-    /// 暗号化を有効にするか
-    enable_encryption: bool,
     /// 接続タイムアウト（ms）
     timeout_ms: u32,
     /// 自動再接続を有効にするか
@@ -839,8 +837,6 @@ enum NetworkError {
     ConnectionTimeout,
     /// ICE失敗
     IceFailed(String),
-    /// DTLS失敗
-    DtlsFailed(String),
     /// 切断された
     Disconnected,
     /// 送信バッファ満杯
@@ -900,7 +896,6 @@ enum ConnectionError {
 let config = ConnectionConfig {
     stun_servers: vec!["stun:stun.l.google.com:19302".into()],
     turn_servers: vec![],
-    enable_encryption: true,
     timeout_ms: 10000,
     auto_reconnect: true,
 };

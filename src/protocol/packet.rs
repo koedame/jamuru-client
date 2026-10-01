@@ -126,6 +126,22 @@ impl Packet {
         }
     }
 
+    /// Create a new control packet
+    ///
+    /// `payload` starts with a byte saying what the message is. A peer that
+    /// does not know the message ignores the packet, so a message can be added
+    /// without breaking an older app.
+    pub fn control(sequence: u32, payload: Vec<u8>) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            packet_type: PacketType::Control,
+            sequence,
+            timestamp: 0,
+            flags: PacketFlags::default(),
+            payload,
+        }
+    }
+
     /// Create a new keep-alive packet
     pub fn keep_alive(sequence: u32) -> Self {
         Self {
@@ -174,15 +190,22 @@ impl Packet {
         }
     }
 
+    /// The header as it goes on the wire
+    pub fn header_bytes(&self) -> [u8; HEADER_SIZE] {
+        let mut header = [0u8; HEADER_SIZE];
+        header[0] = self.version;
+        header[1] = self.packet_type as u8;
+        header[2..6].copy_from_slice(&self.sequence.to_be_bytes());
+        header[6..10].copy_from_slice(&self.timestamp.to_be_bytes());
+        header[10..12].copy_from_slice(&self.flags.to_u16().to_be_bytes());
+        header
+    }
+
     /// Serialize the packet to bytes
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(HEADER_SIZE + self.payload.len());
 
-        buf.push(self.version);
-        buf.push(self.packet_type as u8);
-        buf.extend_from_slice(&self.sequence.to_be_bytes());
-        buf.extend_from_slice(&self.timestamp.to_be_bytes());
-        buf.extend_from_slice(&self.flags.to_u16().to_be_bytes());
+        buf.extend_from_slice(&self.header_bytes());
         buf.extend_from_slice(&self.payload);
 
         buf
