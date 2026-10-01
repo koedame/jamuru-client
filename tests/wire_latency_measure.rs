@@ -111,6 +111,11 @@ fn how_long_sealing_and_opening_one_packet_takes() {
     let (a, b) = (SecureLink::new(), SecureLink::new());
     let _ = a.open(b.key_exchange_packet());
     let _ = b.open(a.key_exchange_packet());
+    // Each shows the other it has the keys, which is when audio may go
+    let hello_from_a = a.seal(Packet::keep_alive(0)).expect("a keep-alive goes");
+    let hello_from_b = b.seal(Packet::keep_alive(0)).expect("a keep-alive goes");
+    let _ = b.open(hello_from_a);
+    let _ = a.open(hello_from_b);
 
     for payload_bytes in [FRAME * 2 * 4, 2048] {
         let packet = Packet::audio(1, 0, vec![0x5a; payload_bytes]);
