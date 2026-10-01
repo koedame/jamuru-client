@@ -86,6 +86,7 @@
       "title": "Test Room",
       "description": "Connect to a standing room for testing"
     },
+    "unencrypted": "Audio with this peer is not encrypted (their app is an older version)",
     "bandwidth": {
       "insufficient": "Bandwidth is insufficient (about {{required}} Mbps needed)",
       "marginal": "Bandwidth headroom is running low",

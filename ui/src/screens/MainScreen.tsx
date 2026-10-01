@@ -400,6 +400,11 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     return t("session.bandwidth.marginal");
   }, [networkStats, t]);
 
+  // The peer's app is older than the encryption, so what is said and played between the two is
+  // not encrypted. The user is told rather than left to assume it is (REQ-SEC-006).
+  const encryptionWarning =
+    networkStats?.encryption === "unencrypted" ? t("session.unencrypted") : null;
+
   // Warn once per band change rather than on every poll.
   useEffect(() => {
     const status = networkStats?.bandwidth_status ?? null;
@@ -870,6 +875,11 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                 type="success"
                 message={t("notification.delayAdjusted")}
               />
+            </div>
+          )}
+          {encryptionWarning && (
+            <div className="main-footer__warning">
+              <Toast type="warning" message={encryptionWarning} />
             </div>
           )}
           {bandwidthWarning && (

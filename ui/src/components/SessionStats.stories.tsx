@@ -37,6 +37,7 @@ const goodNetworkStats: NetworkStats = {
   uptime_seconds: 3600,
   packets_sent: 54000,
   packets_received: 53950,
+  encryption: 'encrypted',
   bytes_sent: 12582912,
   bytes_received: 12345678,
 };
@@ -186,6 +187,7 @@ export const PacketLoss: Story = {
       required_bps: 3_100_000,
       bandwidth_status: 'insufficient',
       packets_received: 51300,
+      encryption: 'encrypted',
     },
     latency: goodLatency,
     underrunRate: 1.2,
@@ -202,6 +204,7 @@ export const LongSession: Story = {
       uptime_seconds: 7200,
       packets_sent: 432000,
       packets_received: 431800,
+      encryption: 'encrypted',
       bytes_sent: 100663296,
       bytes_received: 99614720,
     },
