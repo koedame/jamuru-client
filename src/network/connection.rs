@@ -189,6 +189,25 @@ async fn next_probe_answer(
     }
 }
 
+/// Store the peer's latency info and tell the callback about it.
+fn note_peer_latency_info(
+    payload: &[u8],
+    callback: &Option<Arc<LatencyInfoCallback>>,
+    store: &RwLock<Option<PeerLatencyInfo>>,
+) {
+    if let Some(info) = LatencyInfoMessage::from_bytes(payload) {
+        let peer_info: PeerLatencyInfo = info.into();
+        debug!(
+            "Received peer latency info: capture={:.2}ms, playback={:.2}ms, jitter={:.2}ms",
+            peer_info.capture_buffer_ms, peer_info.playback_buffer_ms, peer_info.jitter_buffer_ms
+        );
+        if let Some(callback) = callback {
+            callback(peer_info.clone());
+        }
+        *store.write() = Some(peer_info);
+    }
+}
+
 /// RTT measurement state
 #[derive(Debug)]
 struct RttMeasurement {
@@ -830,6 +849,7 @@ impl Connection {
 
                 self.link_facts.link_up(selected_addr, true, started);
                 self.set_state(ConnectionState::Connected);
+                self.discard_audio_queued_while_probing();
                 self.start_receive_loop();
                 self.start_keepalive_loop();
                 self.start_liveness_monitor();
@@ -861,6 +881,7 @@ impl Connection {
 
                 self.link_facts.link_up(fallback, false, started);
                 self.set_state(ConnectionState::Connected);
+                self.discard_audio_queued_while_probing();
                 self.start_receive_loop();
                 self.start_keepalive_loop();
                 self.start_liveness_monitor();
@@ -1231,6 +1252,30 @@ impl Connection {
         self.audio_sequence.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Drops the audio that reached the socket while connectivity was being
+    /// probed.
+    ///
+    /// The probes go out one candidate at a time and nothing is read until the
+    /// last is sent. A peer that is already connected sends audio all that time,
+    /// so it piles up in the socket and, read at once when the receive loop
+    /// starts, overflows the play-out buffer (REQ-CON-116). Audio that old is
+    /// not worth playing. The peer's latency info is kept.
+    fn discard_audio_queued_while_probing(&self) {
+        while let Some((bytes, _)) = self.transport.try_recv_raw() {
+            if let Some(packet) = Packet::from_bytes(&bytes) {
+                // An encrypted one cannot be read before the keys are agreed, and a peer that
+                // encrypts sends none until it knows we have them
+                if packet.packet_type == PacketType::LatencyInfo && !packet.flags.encrypted {
+                    note_peer_latency_info(
+                        &packet.payload,
+                        &self.latency_info_callback,
+                        &self.peer_latency_info,
+                    );
+                }
+            }
+        }
+    }
+
     fn start_receive_loop(&mut self) {
         let transport = self.transport.clone();
         let state = self.state.clone();
@@ -1430,20 +1475,11 @@ impl Connection {
                         }
                     }
                     PacketType::LatencyInfo => {
-                        // Store peer's latency info
-                        if let Some(info) = LatencyInfoMessage::from_bytes(&packet.payload) {
-                            let peer_info: PeerLatencyInfo = info.into();
-                            debug!(
-                                "Received peer latency info: capture={:.2}ms, playback={:.2}ms, jitter={:.2}ms",
-                                peer_info.capture_buffer_ms,
-                                peer_info.playback_buffer_ms,
-                                peer_info.jitter_buffer_ms
-                            );
-                            if let Some(ref callback) = latency_info_callback {
-                                callback(peer_info.clone());
-                            }
-                            *peer_latency_info.write() = Some(peer_info);
-                        }
+                        note_peer_latency_info(
+                            &packet.payload,
+                            &latency_info_callback,
+                            &peer_latency_info,
+                        );
                     }
                     _ => {}
                 }
@@ -1778,6 +1814,72 @@ mod tests {
         assert_eq!(snapshot.route_confirmed, Some(true));
         assert!(snapshot.connect_ms.is_some());
         assert_eq!(snapshot.first_audio_ms, None);
+    }
+
+    /// A peer that already sends audio while we probe is one that does not encrypt: a peer
+    /// that does holds its audio back until we have shown it we have the keys.
+    ///
+    /// Verifies: REQ-CON-116
+    #[tokio::test]
+    async fn when_audio_arrived_while_probing_it_is_not_played_but_the_latency_info_is_kept() {
+        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        let old_app = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let heard = Arc::new(AtomicU32::new(0));
+        let counted = heard.clone();
+        conn1.set_audio_callback(move |_, _, _| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        // The peer is up first: it opens with a keep-alive, which is the answer to conn1's
+        // probe, and sends audio and its latency info while conn1 has not started reading.
+        let to = conn1.local_addr();
+        old_app
+            .send_to(&Packet::keep_alive(0).to_bytes(), to)
+            .await
+            .unwrap();
+        for sequence in 0..20 {
+            old_app
+                .send_to(&Packet::audio(sequence, 0, vec![0u8; 256]).to_bytes(), to)
+                .await
+                .unwrap();
+        }
+        let info = LatencyInfoMessage {
+            capture_buffer_ms: 1.0,
+            playback_buffer_ms: 2.0,
+            encode_ms: 0.0,
+            decode_ms: 0.0,
+            jitter_buffer_ms: 3.0,
+            frame_size: 64,
+            sample_rate: 48_000,
+            codec: "pcm".to_string(),
+            channel_count: 1,
+        };
+        old_app
+            .send_to(&Packet::latency_info(1, &info).to_bytes(), to)
+            .await
+            .unwrap();
+        let candidates = vec![
+            "127.0.0.1:59999".parse().unwrap(),
+            old_app.local_addr().unwrap(),
+        ];
+
+        conn1.connect_with_candidates(&candidates).await.unwrap();
+        old_app
+            .send_to(&Packet::audio(20, 0, vec![0u8; 256]).to_bytes(), to)
+            .await
+            .unwrap();
+        for _ in 0..50 {
+            if heard.load(Ordering::SeqCst) > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        assert_eq!(
+            heard.load(Ordering::SeqCst),
+            1,
+            "only the audio sent after the connection was up"
+        );
+        assert!(conn1.peer_latency_info().is_some());
     }
 
     /// Verifies: REQ-CON-115
