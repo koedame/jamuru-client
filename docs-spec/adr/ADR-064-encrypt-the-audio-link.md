@@ -1,9 +1,9 @@
 ---
-sidebar_label: "ADR-063: Encrypt the Audio Link"
-sidebar_position: 63
+sidebar_label: "ADR-064: Encrypt the Audio Link"
+sidebar_position: 64
 ---
 
-# ADR-063: 相手との UDP の通信を、1 本のリンクとして暗号化する
+# ADR-064: 相手との UDP の通信を、1 本のリンクとして暗号化する
 
 ## Status
 
