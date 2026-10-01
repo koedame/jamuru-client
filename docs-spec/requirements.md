@@ -286,8 +286,14 @@ REQ-RMT-001〜003・007・030・031 の「2 台のアプリの間で実際に動
 | REQ-DIST-004 | webview に Tauri API のグローバル（`window.__TAURI__`）を公開しない | must |
 | REQ-DIST-005 | リリースビルドは本番のサーバー（`https://`、ループバックでないホスト）を使い、開発ビルドはローカルのサーバー（`http://localhost:17890`）を使う。使うサーバーはコアライブラリの 1 か所で決まり、UI と Tauri コマンドはサーバーの URL を持たない。本番のサーバーはソースに書かず、リリースのビルド時に渡す（渡さなければビルドが失敗する）。シグナリングの接続先はそのサーバーに問い合わせる（REQ-CON-028） | must |
 | REQ-DIST-006 | webview に渡す Tauri の権限は、UI が実際に呼ぶプラグインのコマンド（イベントの購読と解除、起動時の招待リンクの取得）だけに限る。リモートのページには IPC を開かない | must |
+| REQ-DIST-007 | インストーラーに同梱する第三者ライセンスの表示（`src-tauri/resources/LICENSES.txt`。リポジトリの `THIRD_PARTY_LICENSES.md` も同じもの）は、アプリが実際に使う Rust のクレート（全機能・リリース対象の全プラットフォーム）と UI の npm パッケージのロックファイルから生成し、各依存の著作権表示とライセンス本文を含む。MPL-2.0 の依存にはソースの入手先を添える。依存を足す・上げる・消すのにこの表示を作り直さなければ、`cargo test` と CI が落ちる。許可するライセンスは `deny.toml` の一覧だけで、GPL・AGPL・LGPL 単独・ライセンス不明の依存が入れば CI が止める | must |
+| REQ-DIST-008 | Linux の AppImage に同梱するシステムのライブラリ（GTK・WebKitGTK・GLib など。LGPL が多い）は、ビルドした AppImage そのものから、どのパッケージのどの版かを引き、パッケージごとの著作権ファイル・それが参照するライセンス本文・ソースの入手先を書いた表示を作って、同じリリースに添える。パッケージに引けないライブラリがあればリリースを止める | must |
 
 REQ-DIST-005 の決定は [ADR-030](./adr/ADR-030-signaling-url-by-build-profile.md)。`cargo test` は開発側の選択と、ソースに本番の接続先が無いことを検証する。リリース側の接続先の検査はアプリのビルドスクリプト（`src-tauri/build.rs`）が行い、配布物そのもの（バイナリと `ui/dist`）は `build.yml` / `release.yml` が `scripts/check-release-server-url.sh` で検査する。
+
+REQ-DIST-007 の生成は `scripts/third-party-licenses.py`（cargo-about が Rust のクレート、`ui/package-lock.json` が npm を読む）。`--check` は生成物と、それを作った入力（ロックファイル・`about.toml`・`deny.toml`・`packaging/third-party/`・このスクリプト）のハッシュを突き合わせる。生成物の手編集も落ちる。`tests/third_party_licenses_test.rs` が `--check` と、MPL-2.0 の 5 件（`cssparser` `cssparser-macros` `dtoa-short` `option-ext` `selectors`）にソースの入手先があることを検証する。許可リストの検査は CI の `licenses` ジョブ（`cargo deny check licenses`）。
+
+REQ-DIST-008 の表示は `scripts/appimage-bundled-libraries.py` が `release.yml` の Ubuntu のビルドで作り、`jamjam-linux-bundled-libraries.txt` として AppImage と同じリリースに置く（アプリに同梱する `LICENSES.txt` がその場所を案内する）。どのライブラリが入るかはビルドの環境で変わるため、一覧を手で持たない。`tests/appimage_bundled_libraries_test.rs` が、`dpkg-query` と `/usr/share` を差し替えて、パッケージ名・版・ソースの入手先・著作権ファイル・ライセンス本文が表示に入ることと、引けないライブラリがあれば失敗することを検証する。実際の AppImage での引き当ては、リリースのワークフローの実行で確かめる。
 
 REQ-DIST-001 の宣言が実行時に効くこと（マイク許可ダイアログに説明が出て、プロセスが終了しないこと）は macOS 実機でしか確かめられない。本要求は宣言の存在までを検証範囲とする。
 

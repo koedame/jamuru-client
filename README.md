@@ -24,6 +24,8 @@ Low-latency peer-to-peer audio communication application for macOS, Windows, and
 
 ## Development
 
+This section is for the copyright holder's development work. The [LICENSE](./LICENSE) does not permit anyone else to build or run the software from source; use the official binaries from GitHub Releases.
+
 See the [documentation site](https://koedame.github.io/jamjam-client/) for detailed development guides.
 
 ### Quick Start
