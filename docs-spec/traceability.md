@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 236 |
-| うち must | 230 |
+| 要求 総数 | 237 |
+| うち must | 231 |
 | うち should | 6 |
-| 検証済み | 207 |
+| 検証済み | 208 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -34,6 +34,7 @@
 | REQ-AUD-032 | must | ローカルモニタリングの遅延は、キャプチャ 1 フレーム + 余裕 1 フレーム + 再生 1 フレームで、ネットワークにもジッタバッファ段数にも依存しない。入力と出力のクロックがずれても、溜まる量は余裕の 1 フレーム内に収まり、増え続けない（[ADR-033](./adr/ADR-033-local-monitoring.md)） | `docs-spec/requirements.md` | `src/audio/monitor.rs`::test_monitor_does_not_grow_a_backlog_when_capture_runs_ahead_of_output<br/>`src/audio/monitor.rs`::test_monitor_holds_the_margin_and_no_more_when_the_clocks_agree<br/>`src/audio/monitor.rs`::test_monitor_recovers_after_capture_stalls |
 | REQ-AUD-033 | must | 音声のセッションは、保存されている音声の設定（入出力デバイス・入出力チャンネル・バッファサイズ・サンプルレート・プリセット）で始まる。値は画面から渡さない（画面が渡し忘れた値が既定値に戻らない。[ADR-043](./adr/ADR-043-remote-operation-rpc.md)） | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-AUD-034 | must | ミュートの切り替えと参加者の音量の変更は、数ミリ秒かけて音量が動く。自分のマイクのミュートは送る音を、参加者のミュートは聞こえる音を、切り替えた瞬間に無音へ落とさない（クリックを出さない）。フェードアウトが終わったマイクは送らない | `docs-spec/requirements.md` | `src-tauri/src/streaming.rs`::mix_peers_fades_a_muted_participant_out_instead_of_cutting_them<br/>`src/audio/stream.rs`::a_gain_ramp_moves_to_silence_over_the_ramp_time_not_at_once<br/>`src/audio/stream.rs`::a_gain_ramp_never_steps_by_more_than_one_ramp_step_between_frames |
+| REQ-AUD-035 | must | 接続ができる前に取り込んだ音は送らない。ルームの最初の参加者は 2 人目を待つあいだも入力を取り込み続けるが、音声の送信が始まるときには、そのあいだに溜まった古い音を捨て、接続後に取り込んだ音から送る。古い音が 1 つの束になって相手の再生バッファに届き、再同期や読み捨てを起こさない | `docs-spec/requirements.md` | `src-tauri/src/streaming.rs`::audio_captured_before_the_connection_is_not_sent_once_it_is_up |
 | REQ-AUD-101 | must | 非圧縮PCMコーデックを使用する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_pcm_codec_is_uncompressed |
 | REQ-AUD-104 | must | サンプルレート48kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_48khz |
 | REQ-AUD-105 | must | サンプルレート96kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_96khz |
