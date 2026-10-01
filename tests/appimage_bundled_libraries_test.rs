@@ -55,10 +55,15 @@ fn build_system(dir: &Path) -> PathBuf {
     );
     write(
         &share.join("doc/libbar2/copyright"),
-        b"Copyright 2010 Bar Authors. Permission is hereby granted ...\n",
+        b"Copyright 2010 Bar Authors. Permission is hereby granted ...\nSee /usr/share/common-licenses/LGPL.\n",
     );
     write(
         &share.join("common-licenses/LGPL-2.1"),
+        b"GNU LESSER GENERAL PUBLIC LICENSE fixture text",
+    );
+    // `LGPL` is another name for the same file on a real system.
+    write(
+        &share.join("common-licenses/LGPL"),
         b"GNU LESSER GENERAL PUBLIC LICENSE fixture text",
     );
     let stub = dir.join("dpkg-query");
@@ -106,6 +111,14 @@ fn when_every_library_belongs_to_a_package_the_notice_names_each_with_its_copyri
         notice.contains("GNU LESSER GENERAL PUBLIC LICENSE fixture text"),
         "the license text a copyright file refers to is part of the notice"
     );
+    assert_eq!(
+        notice
+            .matches("GNU LESSER GENERAL PUBLIC LICENSE fixture text")
+            .count(),
+        1,
+        "two names of one license text are printed once, and a trailing full stop is not part of a name"
+    );
+    assert!(notice.contains("--- LGPL, LGPL-2.1 ---"), "{notice}");
     assert!(!notice.contains("libnot"), "a text file is not a library");
 }
 
