@@ -3,6 +3,7 @@ name = "jamjam"
 version = "0.1.0"
 edition = "2021"
 license-file = "LICENSE"
+publish = false
 description = "Low-latency P2P audio communication for musicians"
 repository = "https://github.com/koedame/jamjam-client"
 

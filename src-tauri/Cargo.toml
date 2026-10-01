@@ -5,6 +5,7 @@ description = "Low-latency P2P audio communication for musicians"
 authors = ["jamjam developers"]
 edition = "2021"
 license-file = "../LICENSE"
+publish = false
 
 [lib]
 name = "jamjam_app_lib"

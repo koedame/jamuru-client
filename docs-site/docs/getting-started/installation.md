@@ -111,36 +111,6 @@ chmod +x jamjam_*.AppImage
 ./jamjam_*.AppImage
 ```
 
-### ソースからのビルド
-
-開発版を使用する場合は、ソースからビルドします。
-
-```bash
-# リポジトリをクローン
-git clone https://github.com/koedame/jamjam-client.git
-cd jamjam-client
-
-# Rustコアのビルド
-cargo build --release
-
-# Tauri GUIビルド（プロジェクトルートから実行。使うサーバーを渡す）
-JAMJAM_SERVER_URL=https://<サーバー> cargo tauri build
-```
-
-#### ビルド依存関係
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install -y libasound2-dev libssl-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-```
-
-**macOS:**
-- Xcode Command Line Tools
-
-**Windows:**
-- Visual Studio Build Tools (MSVC)
-
 ## 次のステップ
 
 インストールが完了したら、[クイックスタート](/docs/getting-started/quick-start)に進んでください。
