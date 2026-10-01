@@ -173,6 +173,25 @@ async fn next_probe_answer(
     }
 }
 
+/// Store the peer's latency info and tell the callback about it.
+fn note_peer_latency_info(
+    payload: &[u8],
+    callback: &Option<Arc<LatencyInfoCallback>>,
+    store: &RwLock<Option<PeerLatencyInfo>>,
+) {
+    if let Some(info) = LatencyInfoMessage::from_bytes(payload) {
+        let peer_info: PeerLatencyInfo = info.into();
+        debug!(
+            "Received peer latency info: capture={:.2}ms, playback={:.2}ms, jitter={:.2}ms",
+            peer_info.capture_buffer_ms, peer_info.playback_buffer_ms, peer_info.jitter_buffer_ms
+        );
+        if let Some(callback) = callback {
+            callback(peer_info.clone());
+        }
+        *store.write() = Some(peer_info);
+    }
+}
+
 /// RTT measurement state
 #[derive(Debug)]
 struct RttMeasurement {
@@ -786,6 +805,7 @@ impl Connection {
 
                 self.link_facts.link_up(selected_addr, true, started);
                 self.set_state(ConnectionState::Connected);
+                self.discard_audio_queued_while_probing();
                 self.start_receive_loop();
                 self.start_keepalive_loop();
                 self.start_liveness_monitor();
@@ -816,6 +836,7 @@ impl Connection {
 
                 self.link_facts.link_up(fallback, false, started);
                 self.set_state(ConnectionState::Connected);
+                self.discard_audio_queued_while_probing();
                 self.start_receive_loop();
                 self.start_keepalive_loop();
                 self.start_liveness_monitor();
@@ -1155,6 +1176,28 @@ impl Connection {
         self.audio_sequence.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Drops the audio that reached the socket while connectivity was being
+    /// probed.
+    ///
+    /// The probes go out one candidate at a time and nothing is read until the
+    /// last is sent. A peer that is already connected sends audio all that time,
+    /// so it piles up in the socket and, read at once when the receive loop
+    /// starts, overflows the play-out buffer (REQ-CON-116). Audio that old is
+    /// not worth playing. The peer's latency info is kept.
+    fn discard_audio_queued_while_probing(&self) {
+        while let Some((bytes, _)) = self.transport.try_recv_raw() {
+            if let Some(packet) = Packet::from_bytes(&bytes) {
+                if let PacketType::LatencyInfo = packet.packet_type {
+                    note_peer_latency_info(
+                        &packet.payload,
+                        &self.latency_info_callback,
+                        &self.peer_latency_info,
+                    );
+                }
+            }
+        }
+    }
+
     fn start_receive_loop(&mut self) {
         let transport = self.transport.clone();
         let state = self.state.clone();
@@ -1286,20 +1329,11 @@ impl Connection {
                         }
                     }
                     PacketType::LatencyInfo => {
-                        // Store peer's latency info
-                        if let Some(info) = LatencyInfoMessage::from_bytes(&packet.payload) {
-                            let peer_info: PeerLatencyInfo = info.into();
-                            debug!(
-                                "Received peer latency info: capture={:.2}ms, playback={:.2}ms, jitter={:.2}ms",
-                                peer_info.capture_buffer_ms,
-                                peer_info.playback_buffer_ms,
-                                peer_info.jitter_buffer_ms
-                            );
-                            if let Some(ref callback) = latency_info_callback {
-                                callback(peer_info.clone());
-                            }
-                            *peer_latency_info.write() = Some(peer_info);
-                        }
+                        note_peer_latency_info(
+                            &packet.payload,
+                            &latency_info_callback,
+                            &peer_latency_info,
+                        );
                     }
                     _ => {}
                 }
@@ -1577,6 +1611,56 @@ mod tests {
         assert_eq!(snapshot.route_confirmed, Some(true));
         assert!(snapshot.connect_ms.is_some());
         assert_eq!(snapshot.first_audio_ms, None);
+    }
+
+    /// Verifies: REQ-CON-116
+    #[tokio::test]
+    async fn when_audio_arrived_while_probing_it_is_not_played_but_the_latency_info_is_kept() {
+        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        let heard = Arc::new(AtomicU32::new(0));
+        let counted = heard.clone();
+        conn1.set_audio_callback(move |_, _, _| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        // conn2 is up first: it opens with a keep-alive, which is the answer to
+        // conn1's probe, and sends audio and its latency info while conn1 has
+        // not started reading.
+        conn2.connect(conn1.local_addr()).await.unwrap();
+        for _ in 0..20 {
+            conn2.send_audio(&[0.0f32; 64], 0).await.unwrap();
+        }
+        conn2
+            .send_latency_info(&LatencyInfoMessage {
+                capture_buffer_ms: 1.0,
+                playback_buffer_ms: 2.0,
+                encode_ms: 0.0,
+                decode_ms: 0.0,
+                jitter_buffer_ms: 3.0,
+                frame_size: 64,
+                sample_rate: 48_000,
+                codec: "pcm".to_string(),
+                channel_count: 1,
+            })
+            .await
+            .unwrap();
+        let candidates = vec!["127.0.0.1:59999".parse().unwrap(), conn2.local_addr()];
+
+        conn1.connect_with_candidates(&candidates).await.unwrap();
+        conn2.send_audio(&[0.0f32; 64], 0).await.unwrap();
+        for _ in 0..50 {
+            if heard.load(Ordering::SeqCst) > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        assert_eq!(
+            heard.load(Ordering::SeqCst),
+            1,
+            "only the audio sent after the connection was up"
+        );
+        assert!(conn1.peer_latency_info().is_some());
     }
 
     /// Verifies: REQ-CON-115
