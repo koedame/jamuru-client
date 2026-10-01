@@ -28,8 +28,11 @@
 ## 依存ライブラリのライセンス管理
 
 - 新規ライブラリ導入時は、そのライセンスを確認する
-- GPL/LGPL 系のライブラリは導入禁止（Source Available ライセンスと非互換）
-- 依存ライブラリの帰属表示は [THIRD_PARTY_LICENSES.md](../../THIRD_PARTY_LICENSES.md) で管理
+- GPL/LGPL 系のライブラリは導入禁止（Source Available ライセンスと非互換）。許可するライセンスは `deny.toml` の一覧だけで、CI の `licenses` ジョブ（`cargo deny check licenses`）が止める
+- 依存ライブラリの帰属表示（[THIRD_PARTY_LICENSES.md](../../THIRD_PARTY_LICENSES.md) と `src-tauri/resources/LICENSES.txt`）は**生成物**。
+  手で編集せず、依存を足す・上げる・消したら `scripts/third-party-licenses.py` で作り直してコミットする（[ADR-063](../../docs-spec/adr/ADR-063-third-party-license-notices.md)）。
+  許可するライセンスを足すときは `deny.toml` と `about.toml` の両方を同じ内容にする
+- ソースに写したコード（アイコンなど）は `packaging/third-party/` に本文を置く
 
 ## 秘匿情報
 

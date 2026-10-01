@@ -116,6 +116,12 @@ cd ui && npm run test:run              # UI単体テスト（i18n要求はここ
 # 要求と検証の対応表を再生成（要求・テストを増減させたら必須）
 JAMJAM_UPDATE_TRACEABILITY=1 cargo test --test traceability_test
 
+# 依存を足す・上げる・消したら、第三者ライセンスの表示を作り直す（cargo-about が要る）。
+# 許可リスト（deny.toml）の検査は cargo-deny
+python3 scripts/third-party-licenses.py
+cargo deny --manifest-path src-tauri/Cargo.toml --all-features check licenses
+cargo deny --all-features check licenses
+
 # ビルド
 cargo build                # コアライブラリ + CLI
 cargo build --release      # リリースビルド
