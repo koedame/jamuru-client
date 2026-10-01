@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 238 |
-| うち must | 232 |
+| 要求 総数 | 240 |
+| うち must | 234 |
 | うち should | 6 |
-| 検証済み | 209 |
+| 検証済み | 211 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -34,6 +34,7 @@
 | REQ-AUD-032 | must | ローカルモニタリングの遅延は、キャプチャ 1 フレーム + 余裕 1 フレーム + 再生 1 フレームで、ネットワークにもジッタバッファ段数にも依存しない。入力と出力のクロックがずれても、溜まる量は余裕の 1 フレーム内に収まり、増え続けない（[ADR-033](./adr/ADR-033-local-monitoring.md)） | `docs-spec/requirements.md` | `src/audio/monitor.rs`::test_monitor_does_not_grow_a_backlog_when_capture_runs_ahead_of_output<br/>`src/audio/monitor.rs`::test_monitor_holds_the_margin_and_no_more_when_the_clocks_agree<br/>`src/audio/monitor.rs`::test_monitor_recovers_after_capture_stalls |
 | REQ-AUD-033 | must | 音声のセッションは、保存されている音声の設定（入出力デバイス・入出力チャンネル・バッファサイズ・サンプルレート・プリセット）で始まる。値は画面から渡さない（画面が渡し忘れた値が既定値に戻らない。[ADR-043](./adr/ADR-043-remote-operation-rpc.md)） | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-AUD-034 | must | ミュートの切り替えと参加者の音量の変更は、数ミリ秒かけて音量が動く。自分のマイクのミュートは送る音を、参加者のミュートは聞こえる音を、切り替えた瞬間に無音へ落とさない（クリックを出さない）。フェードアウトが終わったマイクは送らない | `docs-spec/requirements.md` | `src-tauri/src/streaming.rs`::mix_peers_fades_a_muted_participant_out_instead_of_cutting_them<br/>`src/audio/stream.rs`::a_gain_ramp_moves_to_silence_over_the_ramp_time_not_at_once<br/>`src/audio/stream.rs`::a_gain_ramp_never_steps_by_more_than_one_ramp_step_between_frames |
+| REQ-AUD-035 | must | 接続ができる前に取り込んだ音は送らない。ルームの最初の参加者は 2 人目を待つあいだも入力を取り込み続けるが、音声の送信が始まるときには、そのあいだに溜まった古い音を捨て、接続後に取り込んだ音から送る。古い音が 1 つの束になって相手の再生バッファに届き、再同期や読み捨てを起こさない | `docs-spec/requirements.md` | `src-tauri/src/streaming.rs`::audio_captured_before_the_connection_is_not_sent_once_it_is_up |
 | REQ-AUD-101 | must | 非圧縮PCMコーデックを使用する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_pcm_codec_is_uncompressed |
 | REQ-AUD-104 | must | サンプルレート48kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_48khz |
 | REQ-AUD-105 | must | サンプルレート96kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_96khz |
@@ -93,6 +94,7 @@
 | REQ-CON-113 | must | 同一LAN内のアプリ同士が接続する | `docs-spec/behavior/connection.feature` | `src-tauri/src/session/roster.rs`::a_peer_in_the_room_has_already_published_an_address_when_entering_advertises_ours_and_starts_with_them<br/>`src-tauri/src/session/roster.rs`::a_peer_on_the_same_network_is_tried_on_its_lan_address_before_its_public_one<br/>`src-tauri/src/session/roster.rs`::a_peer_that_published_its_bind_address_as_the_legacy_local_one_is_not_sent_to_it<br/>`src-tauri/src/session/roster.rs`::a_peer_that_published_legacy_addresses_too_has_them_appended_when_not_already_listed<br/>`src-tauri/src/session/roster.rs`::a_peer_with_only_a_legacy_public_address_is_reached_on_it<br/>`src-tauri/src/streaming.rs`::merge_candidate_addrs_puts_the_lan_candidate_before_the_public_one<br/>`src-tauri/src/streaming.rs`::merge_candidate_addrs_when_no_other_candidates_falls_back_to_addr |
 | REQ-CON-114 | must | 相手に届かない経路を選ばず、応答が無ければ相手の声が届く候補へ送り先を移す | `docs-spec/behavior/connection.feature` | `src/network/connection.rs`::when_a_candidate_we_could_not_send_to_answers_the_answer_is_not_taken<br/>`src/network/connection.rs`::when_a_packet_comes_from_an_address_that_is_not_the_peers_the_route_stays_where_it_is<br/>`src/network/connection.rs`::when_no_candidate_answers_the_first_one_we_could_send_to_is_used<br/>`src/network/connection.rs`::when_the_answer_comes_from_no_candidate_it_is_not_taken<br/>`src/network/connection.rs`::when_the_packet_from_a_candidate_is_not_a_keep_alive_it_is_not_an_answer<br/>`src/network/connection.rs`::when_the_peer_answered_recently_the_route_stays_where_it_is<br/>`src/network/connection.rs`::when_the_peer_answers_nothing_on_the_chosen_address_but_is_heard_elsewhere_sends_go_there<br/>`src/network/connection.rs`::when_the_peer_has_not_answered_a_packet_from_another_address_moves_the_route_there<br/>`src/network/connection.rs`::when_we_could_not_send_to_the_address_the_peer_is_heard_from_the_route_stays_where_it_is |
 | REQ-CON-115 | must | 応答した候補のうち、近い経路を選ぶ | `docs-spec/behavior/connection.feature` | `src/network/connection.rs`::when_the_first_answer_is_on_the_nearest_kind_of_route_the_connection_does_not_wait_for_others<br/>`src/network/link_facts.rs`::when_the_address_is_in_the_tailscale_range_it_is_an_overlay_in_both_families<br/>`src/network/link_facts.rs`::when_the_address_is_on_the_lan_it_is_preferred_to_an_overlay_and_to_a_public_one<br/>`src/network/signaling.rs`::when_the_interfaces_are_listed_overlay_first_the_lan_candidate_is_still_probed_first |
+| REQ-CON-116 | must | 接続の確認のあいだに届いた古い音は再生せず、接続できてからの音だけを再生する | `docs-spec/behavior/connection.feature` | `src/network/connection.rs`::when_audio_arrived_while_probing_it_is_not_played_but_the_latency_info_is_kept |
 | REQ-CORE-001 | must | `zero-latency` プリセットのアプリ起因片道遅延が 2.0ms 以下である | `docs-spec/requirements.md` | `tests/latency_test.rs`::zero_latency_preset_stays_within_two_milliseconds |
 | REQ-CORE-002 | must | 既定コーデックは非圧縮 PCM 32-bit float であり、コーデック起因の遅延が 0ms である | `docs-spec/requirements.md` | `tests/audio_quality_test.rs`::test_pcm_codec_is_uncompressed |
 | REQ-CORE-003 | must | 音声処理（AEC / NS / AGC）を一切適用せず、入力サンプルをビット単位で保存する | `docs-spec/requirements.md` | `tests/audio_quality_test.rs`::test_audio_is_transmitted_without_processing |

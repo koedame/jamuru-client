@@ -1498,6 +1498,14 @@ impl CaptureRing {
     }
 }
 
+/// Throws away what is waiting in a capture ring.
+fn discard_queued(consumer: &mut Consumer<f32>) {
+    let queued = consumer.slots();
+    if let Ok(chunk) = consumer.read_chunk(queued) {
+        chunk.commit_all();
+    }
+}
+
 /// Delivers one just-captured, already channel-picked frame: feeds the "hear
 /// yourself" monitor, updates the input level meter, and queues it for the
 /// network send thread. Shared between the two capture backends - `cpal`'s
@@ -2181,6 +2189,15 @@ async fn run_audio_streaming(
         // Muting fades the microphone out (and unmuting in) rather than cutting
         // it, so the other side does not hear a click.
         let mut mute_ramp = GainRamp::new(sample_rate);
+
+        // Capture opens before the connection does, so the ring has been
+        // filling for as long as the connecting took (the room's first member
+        // waits for the second). Sent now, that would be a burst of old audio
+        // ahead of the live frames, and the other side's play-out buffer
+        // overflows on it.
+        if let Ok(mut ring) = capture_ring_for_send.lock() {
+            discard_queued(&mut ring.consumer);
+        }
 
         while send_thread_running_ref.load(Ordering::SeqCst) {
             // Try to read a frame from capture ring buffer. Yields the channel
@@ -2908,6 +2925,25 @@ mod tests {
 
         assert_eq!(ring.channels, 2);
         assert!(problems.read().unwrap().is_empty());
+    }
+
+    /// Verifies: REQ-AUD-035
+    #[test]
+    fn audio_captured_before_the_connection_is_not_sent_once_it_is_up() {
+        let (mut producer, mut consumer) = RingBuffer::<f32>::new(8);
+        for sample in [1.0_f32, 2.0, 3.0, 4.0] {
+            producer.push(sample).unwrap();
+        }
+
+        discard_queued(&mut consumer);
+        assert_eq!(consumer.slots(), 0, "the old audio is gone");
+
+        producer.push(5.0).unwrap();
+        assert_eq!(
+            consumer.pop().unwrap(),
+            5.0,
+            "what follows is the live audio"
+        );
     }
 
     /// A PCM payload as `ReceivePath::receive` expects it: `f32` samples as
