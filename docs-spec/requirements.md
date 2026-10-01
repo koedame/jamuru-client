@@ -163,7 +163,7 @@ REQ-IDT-006 を `should` とするのは、Windows に 0600 相当のモード�
 
 ## REQ-SEC: 通信の安全性要求
 
-相手との UDP の通信（音声・FEC・遅延の測定・設定の通知）の暗号化に対する要求。鍵は接続のたびに作る X25519 の一時鍵から両端が導き、パケットは AES-256-GCM で暗号化する。判断は [ADR-063](./adr/ADR-063-encrypt-the-audio-link.md)、実装は `src/network/encryption.rs`（鍵・暗号化・再送の検出）と `src/network/connection.rs`（すべての送受信がここを通る）。
+相手との UDP の通信（音声・FEC・遅延の測定・遅延の情報）の暗号化に対する要求。鍵は接続のたびに作る X25519 の一時鍵から両端が導き、パケットは AES-256-GCM で暗号化する。判断は [ADR-063](./adr/ADR-063-encrypt-the-audio-link.md)、実装は `src/network/encryption.rs`（鍵・暗号化・再送の検出）と `src/network/connection.rs`（すべての送受信がここを通る）。
 
 この要求は、部品の単体テストでなく、**実際にソケットから出るパケット**で確かめる（`tests/wire_encryption_test.rs`）。部品だけを確かめて「暗号化済み」と説明し、送受信の経路からは一度も呼ばれていなかったことがあったため（ADR-063）。
 
