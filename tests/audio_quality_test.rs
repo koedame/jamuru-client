@@ -7,6 +7,8 @@ use jamjam::audio::{
     AudioPreset, BitDepth, CaptureConfig, CodecConfig, CodecType, LocalMonitor, PcmCodec,
     PlaybackConfig, WIRE_CHANNELS,
 };
+mod common;
+
 use jamjam::protocol::Packet;
 
 /// Test: Operates at 48kHz sample rate
@@ -54,9 +56,7 @@ async fn send_captured_frame(
     use jamjam::protocol::PacketType;
 
     let frame_size = captured.len() / channels;
-    let peer = std::net::UdpSocket::bind("127.0.0.1:0").expect("peer socket");
-    peer.set_read_timeout(Some(std::time::Duration::from_secs(2)))
-        .expect("read timeout");
+    let peer = common::Peer::bind();
 
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
     sender
@@ -69,19 +69,17 @@ async fn send_captured_frame(
             fec_group_size: None,
         })
         .expect("encoding");
-    sender
-        .connect(peer.local_addr().expect("peer address"))
-        .await
-        .expect("connect");
+    sender.connect(peer.local_addr()).await.expect("connect");
+    // The audio goes once the keys are agreed, which the sender starts and the peer answers.
+    let sender_addr = sender.local_addr();
+    peer.agree_keys_with(sender_addr);
+    common::wait_until_encrypted(&[&sender]).await;
 
     let mut wire = vec![0.0f32; frame_size * WIRE_CHANNELS];
     capture_to_wire(captured, channels, volume, pan, &mut wire);
-    sender.send_audio(&wire, 0).await.expect("send audio");
-
-    let mut buf = [0u8; 4096];
     let payload = loop {
-        let len = peer.recv(&mut buf).expect("the sender's packet arrives");
-        let packet = Packet::from_bytes(&buf[..len]).expect("a valid packet");
+        sender.send_audio(&wire, 0).await.expect("send audio");
+        let (packet, _) = peer.recv_packet();
         if packet.packet_type == PacketType::Audio {
             break packet.payload;
         }
@@ -103,7 +101,7 @@ async fn send_captured_frame(
 /// Then the mono capture is what is transmitted
 /// And the receiving side plays both channels the same
 /// Verifies: REQ-AUD-107
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_mono_input() {
     let captured = [0.5f32, -0.25, 0.75, 0.125];
 
@@ -125,7 +123,7 @@ async fn test_mono_input() {
 /// Then 2-channel audio is transmitted
 /// And the receiving side plays it in stereo
 /// Verifies: REQ-AUD-108
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_stereo_input() {
     // Left and right carry different audio, so mixing them across would show.
     let captured = [0.5f32, -0.25, 0.75, 0.125, -0.5, 0.0];
@@ -149,7 +147,7 @@ async fn test_stereo_input() {
 ///
 /// Verifies: REQ-AUD-108
 /// Verifies: REQ-AUD-120
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_stereo_input_is_played_back_in_stereo() {
     let captured = [0.5f32, 0.0, -0.25, 0.0, 0.75, 0.0];
 

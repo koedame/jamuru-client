@@ -1,207 +1,456 @@
-//! Encryption layer for P2P audio data
+//! Encryption of the link to one peer
 //!
-//! Uses X25519 for key exchange and AES-256-GCM for symmetric encryption.
-//! The nonce is derived from the packet sequence number to avoid nonce reuse.
+//! Every packet that leaves a [`SecureLink`] is encrypted with AES-256-GCM, under a
+//! key both ends derive from an X25519 exchange made over the same UDP path the audio
+//! takes. A link is one pair of peers: one [`SecureLink`] for each peer an app talks to.
+//!
+//! The exchange is a single message each way (a [`PacketType::Control`] packet holding
+//! the sender's ephemeral public key), sent again every few hundred milliseconds until
+//! the peer has answered with something encrypted. Both sides derive two keys, one for
+//! each direction, from the shared secret and both public keys, so a packet sent to the
+//! peer cannot be played back to its sender.
+//!
+//! A sealed packet keeps its header and carries `counter (8 bytes) | ciphertext | tag
+//! (16 bytes)` as its payload. The counter is the nonce and is taken from one count for
+//! the whole link, whatever the packet type and whoever sends it, so a nonce is never
+//! used twice under a key. The header is authenticated too, so a packet cannot be given
+//! another type, sequence number or timestamp. The receiver refuses a counter it has
+//! already accepted and one that is further behind than [`REPLAY_WINDOW`].
+//!
+//! What this does not do is say who the peer is: the exchange is not signed, so someone
+//! who can alter packets on the path while the link is being set up could sit between
+//! the two ends. Listening to the audio on its way is not possible without that.
+//!
+//! A peer that knows nothing of this (an older app) is recognised by what it sends -
+//! plain audio and pings, never a key - and the link then carries plain packets, which
+//! [`SecureLink::security`] reports so the user can be told.
 
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use hkdf::Hkdf;
+use parking_lot::Mutex;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
 use sha2::Sha256;
-use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
+use x25519_dalek::{PublicKey, StaticSecret};
 
-use crate::protocol::Packet;
+use crate::protocol::{Packet, PacketType};
 
-use super::error::NetworkError;
-use super::transport::UdpTransport;
+/// First byte of a control packet that carries a key exchange
+const KEY_EXCHANGE: u8 = 0x01;
 
-/// Size of the authentication tag (AES-GCM)
-#[allow(dead_code)]
+/// Second byte of a key exchange: X25519, HKDF-SHA256, AES-256-GCM
+const SUITE: u8 = 0x01;
+
+/// Size of a key exchange payload: message, suite, public key
+const KEY_EXCHANGE_LEN: usize = 2 + 32;
+
+/// Bytes of counter at the front of a sealed payload
+const COUNTER_SIZE: usize = 8;
+
+/// Bytes of authentication tag at the end of a sealed payload
 const TAG_SIZE: usize = 16;
 
-/// Size of the nonce (96 bits for AES-GCM)
-const NONCE_SIZE: usize = 12;
+/// How many bytes sealing adds to a payload
+pub const SEAL_OVERHEAD: usize = COUNTER_SIZE + TAG_SIZE;
 
-/// Encryption key pair for ECDH key exchange
-pub struct KeyPair {
-    secret: EphemeralSecret,
-    public: PublicKey,
+/// How far behind the newest counter a packet may arrive and still be accepted. A packet
+/// further behind than this is too late to play, and refusing it keeps the record of what
+/// has been seen small.
+const REPLAY_WINDOW: u64 = 128;
+
+/// Mixed into every key, so the keys of another protocol or version are different keys
+const KEY_SALT: &[u8] = b"jamjam-audio-link-v1";
+
+/// What a link is doing about encryption
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LinkSecurity {
+    /// The keys are not agreed yet, or are but the peer has not yet shown it has them. Only
+    /// keep-alives go out.
+    #[default]
+    Negotiating,
+    /// Both ends have the keys: everything is encrypted, and only encrypted packets are
+    /// accepted
+    Encrypted,
+    /// The peer does not encrypt (an older app), so nothing is: plain packets in both
+    /// directions
+    Unencrypted,
 }
 
-impl KeyPair {
-    /// Generate a new random key pair
-    pub fn generate() -> Self {
-        let secret = EphemeralSecret::random_from_rng(&mut UnwrapErr(SysRng));
-        let public = PublicKey::from(&secret);
-        Self { secret, public }
-    }
-
-    /// Get the public key bytes for sharing
-    pub fn public_key_bytes(&self) -> [u8; 32] {
-        self.public.to_bytes()
-    }
-
-    /// Derive a shared secret from the peer's public key
-    pub fn derive_shared_secret(self, peer_public: &[u8; 32]) -> SharedSecret {
-        let peer_key = PublicKey::from(*peer_public);
-        self.secret.diffie_hellman(&peer_key)
+impl LinkSecurity {
+    /// The name the screen is given: `encrypted`, `negotiating` or `unencrypted`
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LinkSecurity::Negotiating => "negotiating",
+            LinkSecurity::Encrypted => "encrypted",
+            LinkSecurity::Unencrypted => "unencrypted",
+        }
     }
 }
 
-/// Encryption context for a session
-pub struct EncryptionContext {
-    cipher: Aes256Gcm,
-    /// Used to derive unique nonces from sequence numbers
-    nonce_prefix: [u8; 4],
+/// What became of a packet that arrived
+#[derive(Debug)]
+pub enum Opened {
+    /// A packet to act on. If it was encrypted it has been decrypted.
+    Packet(Packet),
+    /// The peer's key exchange. When `answer` is set the peer may not have our key yet:
+    /// send [`SecureLink::key_exchange_packet`].
+    KeyExchange { answer: bool },
+    /// Not acted on, and why. Anything that fails to decrypt, repeats an earlier packet or
+    /// is not what the link is ready for ends up here.
+    Dropped(&'static str),
 }
 
-impl EncryptionContext {
-    /// Create a new encryption context from a shared secret
-    pub fn from_shared_secret(shared_secret: &[u8], is_initiator: bool) -> Self {
-        // Use HKDF to derive the encryption key
-        let hk = Hkdf::<Sha256>::new(None, shared_secret);
-        let mut key_bytes = [0u8; 32];
-        let info = if is_initiator {
-            b"jamjam-session-key-initiator"
-        } else {
-            b"jamjam-session-key-responder"
-        };
-        hk.expand(info, &mut key_bytes)
-            .expect("HKDF expand should not fail");
+/// The keys of an agreed link, and what has been seen of the peer
+struct Keys {
+    send: Aes256Gcm,
+    receive: Aes256Gcm,
+    /// The counter of the next packet sent
+    next_counter: u64,
+    peer_public: [u8; 32],
+    window: ReplayWindow,
+    /// Whether an encrypted packet from the peer has been accepted, which shows it has our
+    /// key
+    confirmed: bool,
+}
 
-        let key = Key::<Aes256Gcm>::from(key_bytes);
-        let cipher = Aes256Gcm::new(&key);
+enum State {
+    Negotiating,
+    Encrypted(Box<Keys>),
+    Unencrypted,
+}
 
-        // Derive nonce prefix
-        let mut nonce_prefix = [0u8; 4];
-        let nonce_info = if is_initiator {
-            b"jamjam-nonce-prefix-initiator"
-        } else {
-            b"jamjam-nonce-prefix-responder"
-        };
-        let mut nonce_bytes = [0u8; 4];
-        hk.expand(nonce_info, &mut nonce_bytes)
-            .expect("HKDF expand should not fail");
-        nonce_prefix.copy_from_slice(&nonce_bytes);
+/// The encryption of one link: the keys, the exchange that makes them and the packets
+/// sealed and opened with them
+///
+/// Cheap to share (`Arc<SecureLink>`): every method takes `&self`.
+pub struct SecureLink {
+    secret: StaticSecret,
+    public: [u8; 32],
+    state: Mutex<State>,
+    /// Packets turned away as forged, repeated or from the wrong state
+    refused: AtomicU64,
+}
 
+impl Default for SecureLink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SecureLink {
+    /// A link with a new key pair, not yet agreed with anyone
+    pub fn new() -> Self {
+        Self::with_secret(StaticSecret::random_from_rng(&mut UnwrapErr(SysRng)))
+    }
+
+    fn with_secret(secret: StaticSecret) -> Self {
+        let public = PublicKey::from(&secret).to_bytes();
         Self {
-            cipher,
-            nonce_prefix,
+            secret,
+            public,
+            state: Mutex::new(State::Negotiating),
+            refused: AtomicU64::new(0),
         }
     }
 
-    /// Encrypt a packet payload
-    pub fn encrypt(&self, sequence: u32, plaintext: &[u8]) -> Result<Vec<u8>, NetworkError> {
-        let nonce = self.derive_nonce(sequence);
-        let nonce = Nonce::from(nonce);
-
-        self.cipher
-            .encrypt(&nonce, plaintext)
-            .map_err(|_| NetworkError::EncryptionError("Encryption failed".to_string()))
-    }
-
-    /// Decrypt a packet payload
-    pub fn decrypt(&self, sequence: u32, ciphertext: &[u8]) -> Result<Vec<u8>, NetworkError> {
-        let nonce = self.derive_nonce(sequence);
-        let nonce = Nonce::from(nonce);
-
-        self.cipher
-            .decrypt(&nonce, ciphertext)
-            .map_err(|_| NetworkError::EncryptionError("Decryption failed".to_string()))
-    }
-
-    /// Derive a nonce from sequence number
-    /// Nonce format: [4 bytes prefix][4 bytes sequence][4 bytes zero padding]
-    fn derive_nonce(&self, sequence: u32) -> [u8; NONCE_SIZE] {
-        let mut nonce = [0u8; NONCE_SIZE];
-        nonce[0..4].copy_from_slice(&self.nonce_prefix);
-        nonce[4..8].copy_from_slice(&sequence.to_be_bytes());
-        // Last 4 bytes remain zero
-        nonce
-    }
-}
-
-/// Encrypted transport wrapper
-pub struct EncryptedTransport {
-    inner: Arc<UdpTransport>,
-    encryption: EncryptionContext,
-}
-
-impl EncryptedTransport {
-    /// Create a new encrypted transport
-    pub fn new(transport: Arc<UdpTransport>, encryption: EncryptionContext) -> Self {
-        Self {
-            inner: transport,
-            encryption,
+    /// What the link is doing about encryption. It is `Encrypted` once the peer has shown it
+    /// has the keys too, which is when audio may go.
+    pub fn security(&self) -> LinkSecurity {
+        match &*self.state.lock() {
+            State::Negotiating => LinkSecurity::Negotiating,
+            State::Encrypted(keys) if keys.confirmed => LinkSecurity::Encrypted,
+            State::Encrypted(_) => LinkSecurity::Negotiating,
+            State::Unencrypted => LinkSecurity::Unencrypted,
         }
     }
 
-    /// Get the local address
-    pub fn local_addr(&self) -> SocketAddr {
-        self.inner.local_addr()
+    /// How many packets were turned away as forged, repeated or out of place
+    pub fn refused(&self) -> u64 {
+        self.refused.load(Ordering::Relaxed)
     }
 
-    /// Send an encrypted packet
-    pub async fn send_to(&self, packet: &Packet, addr: SocketAddr) -> Result<(), NetworkError> {
-        // Encrypt the payload
-        let encrypted_payload = self.encryption.encrypt(packet.sequence, &packet.payload)?;
-
-        // Create a new packet with encrypted payload and encrypted flag set
-        let mut flags = packet.flags;
-        flags.encrypted = true;
-
-        let encrypted_packet = Packet {
-            version: packet.version,
-            packet_type: packet.packet_type,
-            sequence: packet.sequence,
-            timestamp: packet.timestamp,
-            flags,
-            payload: encrypted_payload,
-        };
-
-        self.inner.send_to(&encrypted_packet, addr).await
+    /// Our half of the key exchange
+    pub fn key_exchange_packet(&self) -> Packet {
+        let mut payload = Vec::with_capacity(KEY_EXCHANGE_LEN);
+        payload.push(KEY_EXCHANGE);
+        payload.push(SUITE);
+        payload.extend_from_slice(&self.public);
+        Packet::control(0, payload)
     }
 
-    /// Receive and decrypt a packet
-    pub async fn recv_from(&self) -> Result<(Packet, SocketAddr), NetworkError> {
-        let (encrypted_packet, addr) = self.inner.recv_from().await?;
+    /// Whether our key should be sent (again): the link has no keys, or the peer has not
+    /// yet shown it has ours
+    pub fn wants_key_exchange(&self) -> bool {
+        match &*self.state.lock() {
+            State::Negotiating => true,
+            State::Encrypted(keys) => !keys.confirmed,
+            State::Unencrypted => false,
+        }
+    }
 
-        // Decrypt the payload
-        let decrypted_payload = self
-            .encryption
-            .decrypt(encrypted_packet.sequence, &encrypted_packet.payload)?;
+    /// Whether the keys are made on our side, whether or not the peer has shown it has them
+    pub fn has_keys(&self) -> bool {
+        matches!(&*self.state.lock(), State::Encrypted(_))
+    }
 
-        // Create decrypted packet with encrypted flag cleared
-        let mut flags = encrypted_packet.flags;
-        flags.encrypted = false;
+    /// Whether it is settled that the link is encrypted (keys made) or is not (the peer cannot).
+    /// Until then what the peer sends decides which it is.
+    pub fn is_decided(&self) -> bool {
+        !matches!(&*self.state.lock(), State::Negotiating)
+    }
 
-        let packet = Packet {
-            version: encrypted_packet.version,
-            packet_type: encrypted_packet.packet_type,
-            sequence: encrypted_packet.sequence,
-            timestamp: encrypted_packet.timestamp,
-            flags,
-            payload: decrypted_payload,
+    /// Whether audio and everything else but keep-alives may be sent: the link has settled
+    /// how it carries them, and the peer has shown it can take them (it has sent something
+    /// encrypted, so it has the keys; or it cannot encrypt, and takes plain)
+    pub fn can_send_media(&self) -> bool {
+        self.security() != LinkSecurity::Negotiating
+    }
+
+    /// Prepares `packet` for the wire: encrypted when the link is, as it is when the peer
+    /// does not encrypt, and `None` when it must not go yet. Until the peer has shown it has
+    /// the keys only keep-alives go (sealed once there are keys): they hold nothing, and they
+    /// are what shows the peer.
+    pub fn seal(&self, mut packet: Packet) -> Option<Packet> {
+        match &mut *self.state.lock() {
+            State::Unencrypted => Some(packet),
+            State::Negotiating => (packet.packet_type == PacketType::KeepAlive).then_some(packet),
+            State::Encrypted(keys) => {
+                if !keys.confirmed && packet.packet_type != PacketType::KeepAlive {
+                    return None;
+                }
+                let counter = keys.next_counter;
+                keys.next_counter = counter.checked_add(1)?;
+
+                packet.flags.encrypted = true;
+                let header = packet.header_bytes();
+                let sealed = keys
+                    .send
+                    .encrypt(
+                        &Nonce::from(nonce(counter)),
+                        Payload {
+                            msg: &packet.payload,
+                            aad: &header,
+                        },
+                    )
+                    .ok()?;
+
+                let mut payload = Vec::with_capacity(COUNTER_SIZE + sealed.len());
+                payload.extend_from_slice(&counter.to_be_bytes());
+                payload.extend_from_slice(&sealed);
+                packet.payload = payload;
+                Some(packet)
+            }
+        }
+    }
+
+    /// Takes a packet that arrived and says what to do with it
+    pub fn open(&self, packet: Packet) -> Opened {
+        let opened = if packet.packet_type == PacketType::Control {
+            self.receive_control(&packet)
+        } else {
+            self.receive(packet)
+        };
+        if matches!(opened, Opened::Dropped(_)) {
+            self.refused.fetch_add(1, Ordering::Relaxed);
+        }
+        opened
+    }
+
+    fn receive(&self, packet: Packet) -> Opened {
+        let mut state = self.state.lock();
+        match &mut *state {
+            State::Unencrypted if packet.flags.encrypted => {
+                Opened::Dropped("encrypted packet on an unencrypted link")
+            }
+            State::Unencrypted => Opened::Packet(packet),
+            State::Negotiating if packet.flags.encrypted => {
+                Opened::Dropped("encrypted packet before the keys are agreed")
+            }
+            State::Negotiating if packet.packet_type == PacketType::KeepAlive => {
+                Opened::Packet(packet)
+            }
+            State::Negotiating => {
+                // A peer with the keys sends nothing but keep-alives plain before it has
+                // agreed them with us. One that sends more plain is one that cannot
+                // encrypt.
+                *state = State::Unencrypted;
+                Opened::Packet(packet)
+            }
+            State::Encrypted(keys) => match open_encrypted(keys, packet) {
+                Ok(packet) => Opened::Packet(packet),
+                Err(reason) => Opened::Dropped(reason),
+            },
+        }
+    }
+
+    fn receive_control(&self, packet: &Packet) -> Opened {
+        let Some(peer_public) = parse_key_exchange(&packet.payload) else {
+            // Not a message this app knows: from a newer app
+            return Opened::Dropped("control message of another kind");
+        };
+        if peer_public == self.public {
+            return Opened::Dropped("our own key exchange played back");
+        }
+
+        let mut state = self.state.lock();
+        let answer = match &*state {
+            State::Unencrypted => {
+                return Opened::Dropped("key exchange on an unencrypted link");
+            }
+            State::Encrypted(keys) if keys.peer_public == peer_public => false,
+            // Until the peer has shown it has our key, a key different from the one first
+            // heard is as likely to be the peer's own (a stale copy of the app before it)
+            // as a forgery, and ignoring it would leave the link without a peer. Once it
+            // has been shown, the keys stand.
+            State::Encrypted(keys) if keys.confirmed => {
+                return Opened::Dropped("another key after the link was confirmed");
+            }
+            State::Negotiating | State::Encrypted(_) => true,
         };
 
-        Ok((packet, addr))
+        if answer {
+            let shared = self.secret.diffie_hellman(&PublicKey::from(peer_public));
+            if !shared.was_contributory() {
+                return Opened::Dropped("key exchange with a weak key");
+            }
+            *state = State::Encrypted(Box::new(derive_keys(
+                shared.as_bytes(),
+                &self.public,
+                &peer_public,
+            )));
+        }
+        Opened::KeyExchange { answer }
     }
 }
 
-/// Helper to perform key exchange via signaling
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct KeyExchangeMessage {
-    pub public_key: [u8; 32],
+/// Decrypts `packet` under `keys`, refusing one that repeats or is too far behind
+fn open_encrypted(keys: &mut Keys, mut packet: Packet) -> Result<Packet, &'static str> {
+    if !packet.flags.encrypted {
+        return Err("plain packet on an encrypted link");
+    }
+    if packet.payload.len() < SEAL_OVERHEAD {
+        return Err("encrypted packet too short");
+    }
+    let (counter, sealed) = packet.payload.split_at(COUNTER_SIZE);
+    let counter = u64::from_be_bytes(counter.try_into().expect("split at the counter's size"));
+    if !keys.window.is_new(counter) {
+        return Err("repeated or too old");
+    }
+
+    let header = packet.header_bytes();
+    let plain = keys
+        .receive
+        .decrypt(
+            &Nonce::from(nonce(counter)),
+            Payload {
+                msg: sealed,
+                aad: &header,
+            },
+        )
+        .map_err(|_| "does not authenticate")?;
+
+    keys.window.accept(counter);
+    keys.confirmed = true;
+    packet.flags.encrypted = false;
+    packet.payload = plain;
+    Ok(packet)
 }
 
-impl KeyExchangeMessage {
-    /// Create a new key exchange message
-    pub fn new(public_key: [u8; 32]) -> Self {
-        Self { public_key }
+fn parse_key_exchange(payload: &[u8]) -> Option<[u8; 32]> {
+    if payload.len() != KEY_EXCHANGE_LEN || payload[0] != KEY_EXCHANGE || payload[1] != SUITE {
+        return None;
+    }
+    payload[2..].try_into().ok()
+}
+
+/// The two keys of a link. The one end whose public key is the smaller sends under the
+/// first and receives under the second; the other end does the reverse. The public keys
+/// are mixed in, so a key is bound to the pair it was made for.
+fn derive_keys(shared: &[u8; 32], ours: &[u8; 32], theirs: &[u8; 32]) -> Keys {
+    let we_are_low = ours < theirs;
+    let (low, high) = if we_are_low {
+        (ours, theirs)
+    } else {
+        (theirs, ours)
+    };
+    let mut salt = Vec::with_capacity(KEY_SALT.len() + 64);
+    salt.extend_from_slice(KEY_SALT);
+    salt.extend_from_slice(low);
+    salt.extend_from_slice(high);
+
+    let hkdf = Hkdf::<Sha256>::new(Some(&salt), shared);
+    let mut low_to_high = [0u8; 32];
+    let mut high_to_low = [0u8; 32];
+    hkdf.expand(b"low to high", &mut low_to_high)
+        .expect("32 bytes is a valid HKDF-SHA256 output length");
+    hkdf.expand(b"high to low", &mut high_to_low)
+        .expect("32 bytes is a valid HKDF-SHA256 output length");
+
+    let cipher = |key: [u8; 32]| Aes256Gcm::new(&Key::<Aes256Gcm>::from(key));
+    let (send, receive) = if we_are_low {
+        (cipher(low_to_high), cipher(high_to_low))
+    } else {
+        (cipher(high_to_low), cipher(low_to_high))
+    };
+
+    Keys {
+        send,
+        receive,
+        next_counter: 0,
+        peer_public: *theirs,
+        window: ReplayWindow::default(),
+        confirmed: false,
+    }
+}
+
+/// The nonce of the packet with `counter`. Each direction has its own key, so a counter
+/// need only be unique within one.
+fn nonce(counter: u64) -> [u8; 12] {
+    let mut nonce = [0u8; 12];
+    nonce[4..].copy_from_slice(&counter.to_be_bytes());
+    nonce
+}
+
+/// Which counters have been accepted, within [`REPLAY_WINDOW`] of the newest
+#[derive(Default)]
+struct ReplayWindow {
+    started: bool,
+    newest: u64,
+    /// Bit `n` is set when the counter `newest - n` has been accepted
+    seen: u128,
+}
+
+impl ReplayWindow {
+    /// Whether `counter` has not been accepted and is not too far behind
+    fn is_new(&self, counter: u64) -> bool {
+        if !self.started || counter > self.newest {
+            return true;
+        }
+        let behind = self.newest - counter;
+        behind < REPLAY_WINDOW && self.seen & (1u128 << behind) == 0
+    }
+
+    fn accept(&mut self, counter: u64) {
+        if !self.started {
+            *self = Self {
+                started: true,
+                newest: counter,
+                seen: 1,
+            };
+        } else if counter > self.newest {
+            let ahead = counter - self.newest;
+            self.seen = if ahead >= REPLAY_WINDOW {
+                1
+            } else {
+                (self.seen << ahead) | 1
+            };
+            self.newest = counter;
+        } else {
+            self.seen |= 1u128 << (self.newest - counter);
+        }
     }
 }
 
@@ -209,157 +458,445 @@ impl KeyExchangeMessage {
 mod tests {
     use super::*;
 
+    fn link_with(secret_byte: u8) -> SecureLink {
+        SecureLink::with_secret(StaticSecret::from([secret_byte; 32]))
+    }
+
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    /// Two links that have exchanged keys, each told the other's, and not yet heard anything
+    /// of each other that is encrypted
+    fn exchanged() -> (SecureLink, SecureLink) {
+        let (a, b) = (SecureLink::new(), SecureLink::new());
+        assert!(matches!(
+            a.open(b.key_exchange_packet()),
+            Opened::KeyExchange { answer: true }
+        ));
+        assert!(matches!(
+            b.open(a.key_exchange_packet()),
+            Opened::KeyExchange { answer: true }
+        ));
+        (a, b)
+    }
+
+    /// Two links that have exchanged keys and heard each other's keep-alive, so each knows the
+    /// other has the keys and audio may go either way
+    fn agreed() -> (SecureLink, SecureLink) {
+        let (a, b) = exchanged();
+        let from_a = a.seal(Packet::keep_alive(0)).unwrap();
+        let from_b = b.seal(Packet::keep_alive(0)).unwrap();
+        assert!(opened(&b, from_a).is_some());
+        assert!(opened(&a, from_b).is_some());
+        (a, b)
+    }
+
+    fn audio(sequence: u32, payload: &[u8]) -> Packet {
+        Packet::audio(sequence, 7, payload.to_vec())
+    }
+
+    fn opened(link: &SecureLink, packet: Packet) -> Option<Packet> {
+        match link.open(packet) {
+            Opened::Packet(packet) => Some(packet),
+            _ => None,
+        }
+    }
+
+    /// Verifies: REQ-SEC-001
     #[test]
-    fn test_key_exchange() {
-        // Simulate two peers
-        let alice = KeyPair::generate();
-        let bob = KeyPair::generate();
+    fn when_the_keys_are_agreed_audio_sealed_by_one_end_opens_at_the_other() {
+        let (a, b) = agreed();
 
-        let alice_public = alice.public_key_bytes();
-        let bob_public = bob.public_key_bytes();
+        let sealed = a.seal(audio(5, b"some audio")).unwrap();
+        let received = opened(&b, sealed).unwrap();
 
-        // Derive shared secrets
-        let alice_shared = alice.derive_shared_secret(&bob_public);
-        let bob_shared = bob.derive_shared_secret(&alice_public);
-
-        // Shared secrets should be equal
-        assert_eq!(alice_shared.as_bytes(), bob_shared.as_bytes());
+        assert_eq!(received.payload, b"some audio");
+        assert_eq!(received.sequence, 5);
+        assert_eq!(received.timestamp, 7);
+        assert!(!received.flags.encrypted);
     }
 
     #[test]
-    fn test_encryption_roundtrip() {
-        let shared_secret = [0x42u8; 32]; // Dummy shared secret
+    fn when_the_keys_are_agreed_each_direction_works() {
+        let (a, b) = agreed();
 
-        let sender_ctx = EncryptionContext::from_shared_secret(&shared_secret, true);
-        let _receiver_ctx = EncryptionContext::from_shared_secret(&shared_secret, false);
+        let from_a = opened(&b, a.seal(audio(1, b"to b")).unwrap()).unwrap();
+        let from_b = opened(&a, b.seal(audio(1, b"to a")).unwrap()).unwrap();
 
-        let plaintext = b"Hello, encrypted world!";
-        let sequence = 12345u32;
-
-        // Note: sender and receiver use different contexts (different keys/nonces)
-        // In practice, both sides would use the same shared secret but different roles
-        let sender_ctx2 = EncryptionContext::from_shared_secret(&shared_secret, true);
-
-        let ciphertext = sender_ctx.encrypt(sequence, plaintext).unwrap();
-        let decrypted = sender_ctx2.decrypt(sequence, &ciphertext).unwrap();
-
-        assert_eq!(plaintext.as_slice(), decrypted.as_slice());
-    }
-
-    /// Ciphertexts produced by aes-gcm 0.10 / hkdf 0.12 for the same input, so a
-    /// dependency upgrade cannot silently change the wire format.
-    #[test]
-    fn test_ciphertext_matches_known_answer() {
-        let shared_secret = [0x42u8; 32];
-        let plaintext = b"Hello, encrypted world!";
-
-        let initiator = EncryptionContext::from_shared_secret(&shared_secret, true);
-        assert_eq!(
-            hex(&initiator.encrypt(12345, plaintext).unwrap()),
-            "937d8c1a1ad47893af608314d40b4c6c27d1970f5428383dfc96dda656be65a5041997081e0943"
-        );
-
-        let responder = EncryptionContext::from_shared_secret(&shared_secret, false);
-        assert_eq!(
-            hex(&responder.encrypt(12345, plaintext).unwrap()),
-            "32edfa7b0c420affb9389570a98ddb41739273c282e4007c1510396e7f3eca6fc51036b864e58e"
-        );
+        assert_eq!(from_a.payload, b"to b");
+        assert_eq!(from_b.payload, b"to a");
     }
 
     #[test]
-    fn test_different_sequences_different_ciphertext() {
-        let shared_secret = [0x42u8; 32];
-        let ctx = EncryptionContext::from_shared_secret(&shared_secret, true);
+    fn a_sealed_packet_carries_no_plain_payload_and_says_it_is_encrypted() {
+        let (a, _b) = agreed();
+        let payload = b"a recognisable run of bytes, 0123456789abcdef".to_vec();
 
-        let plaintext = b"Same plaintext";
+        let sealed = a.seal(audio(1, &payload)).unwrap();
 
-        let ct1 = ctx.encrypt(1, plaintext).unwrap();
-        let ct2 = ctx.encrypt(2, plaintext).unwrap();
-
-        // Different sequences should produce different ciphertext
-        assert_ne!(ct1, ct2);
+        assert!(sealed.flags.encrypted);
+        assert_eq!(sealed.payload.len(), payload.len() + SEAL_OVERHEAD);
+        let wire = sealed.to_bytes();
+        assert!(!wire.windows(payload.len()).any(|w| w == payload.as_slice()));
+        assert!(!wire.windows(8).any(|w| w == &payload[..8]));
     }
 
     #[test]
-    fn test_full_key_exchange_and_encryption() {
-        // Simulate complete key exchange between initiator and responder
-        let initiator_keypair = KeyPair::generate();
-        let responder_keypair = KeyPair::generate();
+    fn the_same_payload_sealed_twice_looks_different_on_the_wire() {
+        let (a, _b) = agreed();
 
-        let initiator_public = initiator_keypair.public_key_bytes();
-        let responder_public = responder_keypair.public_key_bytes();
+        let first = a.seal(audio(1, b"same")).unwrap();
+        let second = a.seal(audio(1, b"same")).unwrap();
 
-        // Derive shared secrets on both sides
-        let initiator_shared = initiator_keypair.derive_shared_secret(&responder_public);
-        let responder_shared = responder_keypair.derive_shared_secret(&initiator_public);
+        assert_ne!(first.payload, second.payload);
+    }
 
-        // Both should derive the same secret
-        assert_eq!(initiator_shared.as_bytes(), responder_shared.as_bytes());
+    /// Verifies: REQ-SEC-003
+    #[test]
+    fn packets_of_every_type_sharing_a_sequence_number_are_sealed_under_different_nonces() {
+        let (a, _b) = agreed();
+        let mut counters = std::collections::HashSet::new();
 
-        // Create encryption contexts
-        let initiator_ctx =
-            EncryptionContext::from_shared_secret(initiator_shared.as_bytes(), true);
-        let responder_ctx =
-            EncryptionContext::from_shared_secret(responder_shared.as_bytes(), false);
+        for sequence in [0, 0, 1, 1] {
+            for packet in [
+                Packet::audio(sequence, 0, b"x".to_vec()),
+                Packet::fec(sequence, 0, b"x".to_vec()),
+                Packet::keep_alive(sequence),
+            ] {
+                let sealed = a.seal(packet).unwrap();
+                assert!(counters.insert(sealed.payload[..COUNTER_SIZE].to_vec()));
+            }
+        }
+    }
 
-        // Initiator sends to responder
-        let plaintext = b"Audio data from initiator";
-        let sequence = 42u32;
-        let ciphertext = initiator_ctx.encrypt(sequence, plaintext).unwrap();
+    /// Verifies: REQ-SEC-002
+    #[test]
+    fn a_packet_changed_on_the_way_is_refused() {
+        let (a, b) = agreed();
+        let sealed = a.seal(audio(1, b"some audio")).unwrap();
 
-        // Note: This test shows that with role-based derivation, each side uses
-        // different keys. For proper bidirectional communication, both sides need
-        // to maintain encryption contexts for both directions.
+        for index in 0..sealed.payload.len() {
+            let mut changed = sealed.clone();
+            changed.payload[index] ^= 0x01;
+            assert!(opened(&b, changed).is_none(), "byte {index}");
+        }
+        let mut shorter = sealed.clone();
+        shorter.payload.pop();
+        assert!(opened(&b, shorter).is_none());
+        assert!(opened(&b, sealed).is_some(), "the unchanged packet opens");
+    }
 
-        // Same role should be able to decrypt
-        let initiator_ctx2 =
-            EncryptionContext::from_shared_secret(initiator_shared.as_bytes(), true);
-        let decrypted = initiator_ctx2.decrypt(sequence, &ciphertext).unwrap();
-        assert_eq!(plaintext.as_slice(), decrypted.as_slice());
+    /// Verifies: REQ-SEC-002
+    #[test]
+    fn a_packet_given_another_header_is_refused() {
+        let (a, b) = agreed();
+        let sealed = a.seal(audio(1, b"some audio")).unwrap();
 
-        // Responder sends to initiator
-        let resp_plaintext = b"Audio data from responder";
-        let resp_ciphertext = responder_ctx.encrypt(sequence, resp_plaintext).unwrap();
+        let mut other_sequence = sealed.clone();
+        other_sequence.sequence = 2;
+        let mut other_timestamp = sealed.clone();
+        other_timestamp.timestamp += 1;
+        let mut other_type = sealed.clone();
+        other_type.packet_type = PacketType::Fec;
 
-        let responder_ctx2 =
-            EncryptionContext::from_shared_secret(responder_shared.as_bytes(), false);
-        let resp_decrypted = responder_ctx2.decrypt(sequence, &resp_ciphertext).unwrap();
-        assert_eq!(resp_plaintext.as_slice(), resp_decrypted.as_slice());
+        assert!(opened(&b, other_sequence).is_none());
+        assert!(opened(&b, other_timestamp).is_none());
+        assert!(opened(&b, other_type).is_none());
+        assert!(opened(&b, sealed).is_some());
+    }
+
+    /// Verifies: REQ-SEC-002
+    #[test]
+    fn a_packet_that_arrives_twice_is_accepted_once() {
+        let (a, b) = agreed();
+        let sealed = a.seal(audio(1, b"some audio")).unwrap();
+
+        assert!(opened(&b, sealed.clone()).is_some());
+        assert!(opened(&b, sealed).is_none());
     }
 
     #[test]
-    fn test_decrypt_with_wrong_sequence_fails() {
-        let shared_secret = [0x42u8; 32];
-        let ctx = EncryptionContext::from_shared_secret(&shared_secret, true);
+    fn packets_that_arrive_out_of_order_are_accepted() {
+        let (a, b) = agreed();
+        let sealed: Vec<Packet> = (0..10).map(|i| a.seal(audio(i, b"x")).unwrap()).collect();
 
-        let plaintext = b"Secret message";
-        let ciphertext = ctx.encrypt(100, plaintext).unwrap();
-
-        // Decryption with wrong sequence should fail
-        let result = ctx.decrypt(101, &ciphertext);
-        assert!(result.is_err());
+        for index in [3, 1, 9, 0, 2, 8, 5, 4, 7, 6] {
+            assert!(opened(&b, sealed[index].clone()).is_some(), "{index}");
+        }
     }
 
+    /// Verifies: REQ-SEC-002
     #[test]
-    fn test_tampered_ciphertext_fails() {
-        let shared_secret = [0x42u8; 32];
-        let ctx = EncryptionContext::from_shared_secret(&shared_secret, true);
-
-        let plaintext = b"Secret message";
-        let sequence = 1u32;
-        let mut ciphertext = ctx.encrypt(sequence, plaintext).unwrap();
-
-        // Tamper with ciphertext
-        if !ciphertext.is_empty() {
-            ciphertext[0] ^= 0xFF;
+    fn a_packet_further_behind_than_the_window_is_refused() {
+        let (a, b) = agreed();
+        let first = a.seal(audio(0, b"first")).unwrap();
+        for sequence in 1..=REPLAY_WINDOW as u32 {
+            let packet = a.seal(audio(sequence, b"x")).unwrap();
+            assert!(opened(&b, packet).is_some());
         }
 
-        // Decryption should fail due to authentication
-        let result = ctx.decrypt(sequence, &ciphertext);
-        assert!(result.is_err());
+        assert!(opened(&b, first).is_none());
+    }
+
+    /// Verifies: REQ-SEC-003
+    #[test]
+    fn a_packet_sent_to_the_peer_cannot_be_played_back_to_its_sender() {
+        let (a, _b) = agreed();
+        let sealed = a.seal(audio(1, b"some audio")).unwrap();
+
+        assert!(opened(&a, sealed).is_none());
+    }
+
+    /// Verifies: REQ-SEC-003
+    #[test]
+    fn a_packet_sealed_for_another_peer_is_refused() {
+        let (a, _b) = agreed();
+        let (_c, d) = agreed();
+        let sealed = a.seal(audio(1, b"some audio")).unwrap();
+
+        assert!(opened(&d, sealed).is_none());
+    }
+
+    /// Verifies: REQ-SEC-005
+    #[test]
+    fn before_the_keys_are_agreed_only_keep_alives_may_be_sent() {
+        let link = SecureLink::new();
+
+        assert!(link.seal(Packet::keep_alive(0)).is_some());
+        assert!(link.seal(audio(0, b"x")).is_none());
+        assert!(link.seal(Packet::fec(0, 0, b"x".to_vec())).is_none());
+        assert_eq!(link.security(), LinkSecurity::Negotiating);
+        assert!(!link.can_send_media());
+    }
+
+    /// Verifies: REQ-SEC-002
+    /// Verifies: REQ-SEC-005
+    #[test]
+    fn until_the_peer_has_shown_it_has_the_keys_only_keep_alives_may_be_sent_and_they_are_sealed() {
+        let (a, b) = exchanged();
+
+        assert!(!a.can_send_media());
+        assert_eq!(a.security(), LinkSecurity::Negotiating);
+        assert!(a.seal(audio(0, b"x")).is_none());
+        let keep_alive = a.seal(Packet::keep_alive(0)).expect("a keep-alive may go");
+        assert!(keep_alive.flags.encrypted);
+
+        assert!(opened(&b, keep_alive).is_some());
+        assert!(b.can_send_media(), "b has now heard that a has the keys");
+        assert!(!a.can_send_media(), "a has not heard anything of b yet");
+    }
+
+    #[test]
+    fn when_the_keys_are_agreed_a_plain_packet_is_refused_whatever_it_is() {
+        let (_a, b) = agreed();
+
+        assert!(opened(&b, audio(1, b"plain")).is_none());
+        assert!(opened(&b, Packet::keep_alive(1)).is_none());
+        assert_eq!(b.security(), LinkSecurity::Encrypted);
+    }
+
+    #[test]
+    fn before_the_keys_are_agreed_a_peers_keep_alive_is_taken_and_the_link_keeps_negotiating() {
+        let link = SecureLink::new();
+
+        assert!(opened(&link, Packet::keep_alive(1)).is_some());
+        assert_eq!(link.security(), LinkSecurity::Negotiating);
+    }
+
+    /// Verifies: REQ-SEC-004
+    #[test]
+    fn a_peer_that_sends_plain_audio_before_any_key_cannot_encrypt_and_the_link_goes_plain() {
+        let link = SecureLink::new();
+
+        let received = opened(&link, audio(1, b"plain"));
+
+        assert_eq!(received.unwrap().payload, b"plain");
+        assert_eq!(link.security(), LinkSecurity::Unencrypted);
+        assert!(link.seal(audio(2, b"out")).unwrap().payload == b"out");
+        assert!(!link.wants_key_exchange());
+    }
+
+    #[test]
+    fn on_a_plain_link_a_key_exchange_and_an_encrypted_packet_are_refused() {
+        let link = SecureLink::new();
+        opened(&link, audio(1, b"plain"));
+        let (a, _b) = agreed();
+
+        assert!(matches!(
+            link.open(a.key_exchange_packet()),
+            Opened::Dropped(_)
+        ));
+        let sealed = a.seal(audio(1, b"x")).unwrap();
+        assert!(opened(&link, sealed).is_none());
+        assert_eq!(link.security(), LinkSecurity::Unencrypted);
+    }
+
+    #[test]
+    fn the_peers_key_is_answered_once_and_repeats_of_it_are_not() {
+        let (a, b) = (SecureLink::new(), SecureLink::new());
+
+        assert!(matches!(
+            a.open(b.key_exchange_packet()),
+            Opened::KeyExchange { answer: true }
+        ));
+        assert!(matches!(
+            a.open(b.key_exchange_packet()),
+            Opened::KeyExchange { answer: false }
+        ));
+    }
+
+    #[test]
+    fn a_link_asks_for_its_key_to_be_sent_until_the_peer_has_shown_it_has_it() {
+        let (a, b) = (SecureLink::new(), SecureLink::new());
+        assert!(a.wants_key_exchange());
+
+        a.open(b.key_exchange_packet());
+        assert!(a.wants_key_exchange(), "keys agreed, peer not heard yet");
+
+        b.open(a.key_exchange_packet());
+        opened(&a, b.seal(Packet::keep_alive(1)).unwrap()).unwrap();
+        assert!(!a.wants_key_exchange());
+    }
+
+    /// Verifies: REQ-SEC-003
+    #[test]
+    fn our_own_key_played_back_to_us_is_refused() {
+        let link = SecureLink::new();
+
+        assert!(matches!(
+            link.open(link.key_exchange_packet()),
+            Opened::Dropped(_)
+        ));
+        assert_eq!(link.security(), LinkSecurity::Negotiating);
+    }
+
+    /// Verifies: REQ-SEC-002
+    #[test]
+    fn a_key_that_gives_no_secret_is_refused() {
+        let link = SecureLink::new();
+        let mut payload = vec![KEY_EXCHANGE, SUITE];
+        payload.extend_from_slice(&[0u8; 32]);
+
+        assert!(matches!(
+            link.open(Packet::control(0, payload)),
+            Opened::Dropped(_)
+        ));
+        assert_eq!(link.security(), LinkSecurity::Negotiating);
+    }
+
+    #[test]
+    fn a_control_packet_that_is_not_a_key_exchange_is_ignored() {
+        let link = SecureLink::new();
+
+        for payload in [
+            vec![],
+            vec![KEY_EXCHANGE],
+            vec![9, 9, 9],
+            vec![KEY_EXCHANGE, 2, 0],
+        ] {
+            assert!(matches!(
+                link.open(Packet::control(0, payload)),
+                Opened::Dropped(_)
+            ));
+        }
+        let mut with_another_suite = vec![KEY_EXCHANGE, SUITE + 1];
+        with_another_suite.extend_from_slice(&[7u8; 32]);
+        assert!(matches!(
+            link.open(Packet::control(0, with_another_suite)),
+            Opened::Dropped(_)
+        ));
+        assert_eq!(link.security(), LinkSecurity::Negotiating);
+    }
+
+    #[test]
+    fn a_different_key_before_the_peer_is_confirmed_replaces_the_first() {
+        let (a, first) = (SecureLink::new(), SecureLink::new());
+        let second = SecureLink::new();
+        a.open(first.key_exchange_packet());
+
+        assert!(matches!(
+            a.open(second.key_exchange_packet()),
+            Opened::KeyExchange { answer: true }
+        ));
+        second.open(a.key_exchange_packet());
+
+        assert!(opened(&a, second.seal(Packet::keep_alive(1)).unwrap()).is_some());
+    }
+
+    #[test]
+    fn a_different_key_after_the_peer_is_confirmed_is_refused() {
+        let (a, b) = agreed();
+        opened(&a, b.seal(audio(1, b"x")).unwrap()).unwrap();
+        let intruder = SecureLink::new();
+
+        assert!(matches!(
+            a.open(intruder.key_exchange_packet()),
+            Opened::Dropped(_)
+        ));
+        assert!(opened(&a, b.seal(audio(2, b"x")).unwrap()).is_some());
+    }
+
+    #[test]
+    fn a_link_counts_the_packets_it_turns_away() {
+        let (a, b) = agreed();
+        let sealed = a.seal(audio(1, b"x")).unwrap();
+        opened(&b, sealed.clone());
+        let before = b.refused();
+
+        opened(&b, sealed);
+        opened(&b, audio(2, b"plain"));
+
+        assert_eq!(b.refused(), before + 2);
+    }
+
+    /// Sealed bytes for fixed keys, so a dependency upgrade cannot silently change the
+    /// wire format. The expected bytes were made independently, with Python's `cryptography`
+    /// (X25519, HKDF-SHA256 over the salt described in [`derive_keys`], AES-256-GCM).
+    /// Verifies: REQ-SEC-003
+    #[test]
+    fn the_sealed_bytes_for_fixed_keys_match_the_known_answer() {
+        let (a, b) = (link_with(0x11), link_with(0x22));
+        a.open(b.key_exchange_packet());
+        b.open(a.key_exchange_packet());
+        // The first packet of each is the keep-alive that shows the other it has the keys
+        let hello_a = a.seal(Packet::keep_alive(0)).unwrap();
+        let hello_b = b.seal(Packet::keep_alive(0)).unwrap();
+        assert!(opened(&b, hello_a).is_some());
+        assert!(opened(&a, hello_b).is_some());
+
+        let from_a = a.seal(audio(12345, b"Hello, encrypted world!")).unwrap();
+        let from_b = b.seal(audio(12345, b"Hello, encrypted world!")).unwrap();
+
+        assert_eq!(
+            hex(&from_a.to_bytes()),
+            "0101000030390000000700010000000000000001fe048d6a64edd154e96d6ea7e2f79484984b5ac3e92473ab82c512d4969f540f429c7afd0857e8"
+        );
+        assert_eq!(
+            hex(&from_b.to_bytes()),
+            "01010000303900000007000100000000000000019fd57190c6c29b9e0229087e1cde4b4ecab5d0180ef4d896b32ce91f8842ab7207e6cfa0491ae6"
+        );
+        assert!(opened(&b, from_a).is_some());
+        assert!(opened(&a, from_b).is_some());
+    }
+
+    #[test]
+    fn the_replay_window_forgets_what_is_further_behind_than_it_reaches() {
+        let mut window = ReplayWindow::default();
+        assert!(window.is_new(5));
+        window.accept(5);
+        assert!(!window.is_new(5));
+        assert!(window.is_new(4));
+        window.accept(4);
+        assert!(!window.is_new(4));
+
+        window.accept(5 + REPLAY_WINDOW);
+        assert!(!window.is_new(5), "5 is now a full window behind");
+        assert!(window.is_new(6));
+        assert!(!window.is_new(5 + REPLAY_WINDOW));
+
+        window.accept(u64::MAX / 2);
+        assert!(!window.is_new(6));
+        assert!(window.is_new(u64::MAX / 2 + 1));
     }
 }

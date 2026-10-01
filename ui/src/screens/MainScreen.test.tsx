@@ -12,7 +12,7 @@ import { act, render, screen, waitFor, fireEvent, within } from '@testing-librar
 
 import i18n from '../i18n';
 import { MainScreen } from './MainScreen';
-import type { DeviceProblem, MixerSnapshot, SessionSnapshot } from '../lib/tauri';
+import type { AudioEncryption, DeviceProblem, MixerSnapshot, SessionSnapshot } from '../lib/tauri';
 
 const invoke = vi.hoisted(() => vi.fn());
 /** What the screen listens for, by event name. */
@@ -73,6 +73,8 @@ let current: SessionSnapshot | Promise<SessionSnapshot>;
 let mixerNow: MixerSnapshot;
 /** The devices the backend says it could not open, for `streaming_status`. */
 let statusDeviceProblems: DeviceProblem[];
+/** Whether the backend says the audio to the peer is encrypted, for `streaming_status`; `null` while no session runs. */
+let statusEncryption: AudioEncryption | null;
 /** Commands the screen sent to the backend, in order, with their arguments. */
 let calls: Array<{ cmd: string; args: Record<string, unknown> | undefined }>;
 
@@ -101,6 +103,7 @@ beforeAll(async () => {
 beforeEach(() => {
   calls = [];
   statusDeviceProblems = [];
+  statusEncryption = null;
   current = snapshot();
   mixerNow = faders();
   openUrl.handler = null;
@@ -114,6 +117,22 @@ beforeEach(() => {
       case 'mixer_get':
         return mixerNow;
       case 'streaming_status':
+        if (statusEncryption) {
+          return {
+            is_active: true,
+            device_problems: statusDeviceProblems,
+            network: { encryption: statusEncryption, bandwidth_status: 'sufficient', required_bps: 0 },
+            latency: null,
+            audio_quality: null,
+            peer_audio: null,
+            connection_state: 'connected',
+            connection_error: null,
+            is_muted: false,
+            is_monitoring: false,
+            input_level: 0,
+            output_level: 0,
+          };
+        }
         return { is_active: false, device_problems: statusDeviceProblems };
       case 'config_get_sample_rate':
         return 48000;
@@ -279,6 +298,38 @@ describe('MainScreen のルームの表示', () => {
 
     expect(callsTo('session_reconnect')).toHaveLength(1);
     expect(screen.getByText(/no route to host/)).toBeInTheDocument();
+  });
+});
+
+describe('MainScreen の暗号化の表示', () => {
+  /** Verifies: REQ-SEC-006 */
+  it('相手のアプリが暗号化できないとき、この相手との音声は暗号化されていないと知らせること', async () => {
+    current = inRoom();
+    statusEncryption = 'unencrypted';
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText(/Audio with this peer is not encrypted/)).toBeInTheDocument();
+  });
+
+  it('相手との音声が暗号化されているとき、暗号化についての知らせは出さないこと', async () => {
+    current = inRoom();
+    statusEncryption = 'encrypted';
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThan(0));
+    expect(screen.queryByText(/not encrypted/)).not.toBeInTheDocument();
+  });
+
+  it('鍵を合わせている最中のとき、暗号化されていないとは知らせないこと', async () => {
+    current = inRoom();
+    statusEncryption = 'negotiating';
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThan(0));
+    expect(screen.queryByText(/not encrypted/)).not.toBeInTheDocument();
   });
 });
 
