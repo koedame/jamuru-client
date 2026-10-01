@@ -29,7 +29,7 @@ Network モジュールは以下の責務を持つ:
 ```
 network/
 ├── connection.rs       # 接続管理
-├── encryption.rs       # 暗号化レイヤー（SecureLink: X25519, AES-256-GCM。ADR-063）
+├── encryption.rs       # 暗号化レイヤー（SecureLink: X25519, AES-256-GCM。ADR-064）
 ├── transport.rs        # UDPトランスポート
 ├── session.rs          # セッション管理
 ├── signaling.rs        # シグナリング
@@ -413,7 +413,7 @@ struct ConnectionStats {
     /// 接続時間（秒）
     uptime_seconds: u64,
     /// 音声が暗号化されているか。`Negotiating`（鍵を合わせている最中）/ `Encrypted` /
-    /// `Unencrypted`（相手のアプリが暗号化に対応していない。ADR-063）
+    /// `Unencrypted`（相手のアプリが暗号化に対応していない。ADR-064）
     security: LinkSecurity,
     /// 偽造・再送・状態に合わないものとして受け付けなかったパケット数
     packets_refused: u64,
