@@ -2,6 +2,8 @@
 //!
 //! Tests for session connection functionality.
 
+mod common;
+
 use jamjam::network::{Connection, Session, SessionConfig};
 
 /// Test: Create a session
@@ -238,7 +240,7 @@ fn test_invite_url_round_trips() {
 #[tokio::test]
 async fn test_direct_connection_without_signaling() {
     // Two sockets on loopback, connected by address alone.
-    let listener = Connection::new("127.0.0.1:0")
+    let mut listener = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create listener");
     let listener_addr = listener.local_addr();
@@ -249,17 +251,18 @@ async fn test_direct_connection_without_signaling() {
         .expect("Failed to create caller");
     assert!(!caller.is_connected(), "must start disconnected");
 
-    caller
-        .connect(listener_addr)
-        .await
-        .expect("direct connection by address should succeed");
+    // The listener learns who is calling from the first packet that reaches it.
+    let (accepted, called) = tokio::join!(listener.accept(), caller.connect(listener_addr));
+    accepted.expect("the listener takes the call");
+    called.expect("direct connection by address should succeed");
 
     assert!(
         caller.is_connected(),
         "connection state must reflect the direct connect"
     );
 
-    // Audio can be sent straight away: no signaling exchange was involved.
+    // Audio goes as soon as the two agree keys: no signaling exchange is involved.
+    common::wait_until_encrypted(&[&caller, &listener]).await;
     caller
         .send_audio(&[0.25f32; 64], 0)
         .await
@@ -457,14 +460,18 @@ async fn test_packet_loss_is_measured_not_assumed() {
         .await
         .expect("Failed to create receiver");
     let receiver_addr = receiver.local_addr();
-    receiver
-        .connect(receiver_addr)
-        .await
-        .expect("receiver starts its loop");
-
-    let sender = Connection::new("127.0.0.1:0")
+    let mut sender = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create sender");
+    receiver
+        .connect(sender.local_addr())
+        .await
+        .expect("receiver starts its loop");
+    sender
+        .connect(receiver_addr)
+        .await
+        .expect("sender connects");
+    common::wait_until_encrypted(&[&sender, &receiver]).await;
 
     // A clean stream must report no loss.
     assert_eq!(
@@ -522,7 +529,7 @@ async fn test_packet_loss_is_measured_not_assumed() {
 /// "recovered" frame was the XOR of unrelated frames: a burst of noise.
 ///
 /// Verifies: REQ-AUD-026
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fec_groups_line_up_with_audio_sequences_across_control_packets() {
     use jamjam::audio::CodecType;
     use jamjam::network::{AudioEncodingConfig, FecDecoder, FecPacket};
@@ -531,9 +538,7 @@ async fn fec_groups_line_up_with_audio_sequences_across_control_packets() {
     const GROUP: usize = 4;
     const FRAME: usize = 8;
 
-    let peer = std::net::UdpSocket::bind("127.0.0.1:0").expect("peer socket");
-    peer.set_read_timeout(Some(std::time::Duration::from_secs(2)))
-        .expect("read timeout");
+    let peer = common::Peer::bind();
 
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
     sender
@@ -546,10 +551,9 @@ async fn fec_groups_line_up_with_audio_sequences_across_control_packets() {
             fec_group_size: Some(GROUP),
         })
         .expect("encoding");
-    sender
-        .connect(peer.local_addr().expect("peer address"))
-        .await
-        .expect("connect");
+    sender.connect(peer.local_addr()).await.expect("connect");
+    peer.agree_keys_with(sender.local_addr());
+    common::wait_until_encrypted(&[&sender]).await;
 
     // Two frames, a control packet in between, then the rest of two groups.
     let frame = |i: usize| vec![(i as f32 + 1.0) / 16.0; FRAME];
@@ -576,10 +580,8 @@ async fn fec_groups_line_up_with_audio_sequences_across_control_packets() {
 
     let mut audio: Vec<Packet> = Vec::new();
     let mut fec: Vec<FecPacket> = Vec::new();
-    let mut buf = [0u8; 2048];
     while audio.len() < GROUP * 2 || fec.len() < 2 {
-        let len = peer.recv(&mut buf).expect("the sender's packets arrive");
-        let packet = Packet::from_bytes(&buf[..len]).expect("a valid packet");
+        let (packet, _) = peer.recv_packet();
         match packet.packet_type {
             PacketType::Audio => audio.push(packet),
             PacketType::Fec => fec.push(FecPacket::from_bytes(&packet.payload).expect("FEC")),
@@ -655,32 +657,45 @@ async fn send_frames_through_a_relay_that_drops_one(
         delivered_for_callback.lock().unwrap().push(sequence);
     });
     let receiver_addr = receiver.local_addr();
-    receiver
-        .connect(receiver_addr)
-        .await
-        .expect("receiver starts its loop");
 
+    // A relay between the two that carries every packet in both directions, the keys
+    // included, and swallows the audio frame numbered `dropped`. The header stays readable
+    // when a packet is encrypted, which is what lets it pick that frame out.
     let relay = tokio::net::UdpSocket::bind("127.0.0.1:0")
         .await
         .expect("relay socket");
     let relay_addr = relay.local_addr().expect("relay address");
     tokio::spawn(async move {
-        let mut buf = [0u8; 2048];
-        while let Ok((len, _)) = relay.recv_from(&mut buf).await {
+        let mut buf = [0u8; 4096];
+        let mut sender_addr = None;
+        while let Ok((len, from)) = relay.recv_from(&mut buf).await {
             let swallowed = Packet::from_bytes(&buf[..len]).is_some_and(|packet| {
                 matches!(packet.packet_type, PacketType::Audio) && Some(packet.sequence) == dropped
             });
-            if !swallowed {
+            if swallowed {
+                continue;
+            }
+            if from == receiver_addr {
+                if let Some(to) = sender_addr {
+                    let _ = relay.send_to(&buf[..len], to).await;
+                }
+            } else {
+                sender_addr = Some(from);
                 let _ = relay.send_to(&buf[..len], receiver_addr).await;
             }
         }
     });
 
+    receiver
+        .connect(relay_addr)
+        .await
+        .expect("receiver starts its loop");
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender");
     sender
         .set_audio_encoding(encoding())
         .expect("sender encoding");
     sender.connect(relay_addr).await.expect("sender connects");
+    common::wait_until_encrypted(&[&sender, &receiver]).await;
     for i in 0..frames {
         let frame = vec![(i as f32 + 1.0) / 16.0; FRAME];
         sender.send_audio(&frame, 0).await.expect("send audio");

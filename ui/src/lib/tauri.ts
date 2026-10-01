@@ -367,6 +367,14 @@ export type ConnectionQualityBand = 'good' | 'fair' | 'poor';
 export type BandwidthStatus = 'sufficient' | 'marginal' | 'insufficient' | 'no_signal';
 
 /**
+ * Whether the audio to the peer is encrypted (REQ-SEC-001, REQ-SEC-004, REQ-SEC-006)
+ *
+ * negotiating: the keys are being agreed, which takes a moment after connecting
+ * unencrypted: the peer's app is older than the encryption and cannot do it
+ */
+export type AudioEncryption = 'encrypted' | 'negotiating' | 'unencrypted';
+
+/**
  * Network statistics
  */
 export interface NetworkStats {
@@ -401,6 +409,8 @@ export interface NetworkStats {
   packets_sent: number;
   /** Total packets received */
   packets_received: number;
+  /** Whether the audio to the peer is encrypted */
+  encryption: AudioEncryption;
   /** Total bytes sent */
   bytes_sent: number;
   /** Total bytes received */

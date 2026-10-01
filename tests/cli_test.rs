@@ -8,6 +8,8 @@
 //! `$HOME` is redirected per test, because the CLI writes the same config file
 //! the app uses and a test must not touch the developer's own settings.
 
+mod common;
+
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -423,45 +425,43 @@ fn a_cli_without_monitoring_does_not_play_its_own_input() {
     );
 }
 
-/// A UDP peer that sends every datagram straight back, except audio, which it
-/// holds for `hold` first - what a peer that replays what it hears does. Runs until dropped.
+/// A peer that sends every packet straight back, except audio, which it holds for `hold`
+/// first - what a peer that replays what it hears does. It agrees keys with whoever talks to it,
+/// as an app does, and opens and seals what it carries. Runs until dropped.
 struct EchoPeer {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl EchoPeer {
-    /// Byte 1 of a jamjam packet is its type; 0x01 is audio.
-    const AUDIO_TYPE_BYTE: usize = 1;
-    const AUDIO_TYPE: u8 = 0x01;
-
-    fn start(socket: std::net::UdpSocket, hold: Duration) -> Self {
+    fn start(peer: common::Peer, hold: Duration) -> Self {
         use std::sync::atomic::Ordering;
 
-        socket
+        peer.socket
             .set_read_timeout(Some(Duration::from_millis(2)))
             .expect("set a read timeout");
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopping = stop.clone();
         let thread = std::thread::spawn(move || {
-            let mut buffer = [0u8; 2048];
-            let mut held: std::collections::VecDeque<(Instant, std::net::SocketAddr, Vec<u8>)> =
-                Default::default();
+            let mut held: std::collections::VecDeque<(
+                Instant,
+                std::net::SocketAddr,
+                jamjam::protocol::Packet,
+            )> = Default::default();
             while !stopping.load(Ordering::SeqCst) {
-                if let Ok((length, from)) = socket.recv_from(&mut buffer) {
-                    let datagram = buffer[..length].to_vec();
-                    if datagram.get(Self::AUDIO_TYPE_BYTE) == Some(&Self::AUDIO_TYPE) {
-                        held.push_back((Instant::now() + hold, from, datagram));
+                if let Ok(Some((packet, from))) = peer.recv() {
+                    if packet.packet_type == jamjam::protocol::PacketType::Audio {
+                        held.push_back((Instant::now() + hold, from, packet));
                     } else {
-                        let _ = socket.send_to(&datagram, from);
+                        peer.send(packet, from);
                     }
                 }
                 while held
                     .front()
                     .is_some_and(|(due, _, _)| *due <= Instant::now())
                 {
-                    let (_, to, datagram) = held.pop_front().expect("front was just seen");
-                    let _ = socket.send_to(&datagram, to);
+                    let (_, to, packet) = held.pop_front().expect("front was just seen");
+                    peer.send(packet, to);
                 }
             }
         });
@@ -491,9 +491,9 @@ impl Drop for EchoPeer {
 #[test]
 fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
     const HOLD_MS: u64 = 200;
-    let echo_socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind the echo peer");
-    let address = echo_socket.local_addr().expect("echo address").to_string();
-    let _echo = EchoPeer::start(echo_socket, Duration::from_millis(HOLD_MS));
+    let echo_peer = common::Peer::bind();
+    let address = echo_peer.local_addr().to_string();
+    let _echo = EchoPeer::start(echo_peer, Duration::from_millis(HOLD_MS));
 
     let home = tempfile::tempdir().expect("temp HOME");
     let report_path = home.path().join("report.json");

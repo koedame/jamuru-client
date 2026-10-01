@@ -23,6 +23,9 @@
 use std::time::{Duration, Instant};
 
 use crate::audio::AudioPreset;
+use crate::protocol::HEADER_SIZE;
+
+use super::encryption::SEAL_OVERHEAD;
 
 /// Bits in a byte, spelled out so the bitrate arithmetic reads clearly
 const BITS_PER_BYTE: f64 = 8.0;
@@ -32,10 +35,11 @@ const BYTES_PER_SAMPLE: f64 = 4.0;
 /// is the jamjam packet; the link carries these on top.
 pub const UDP_IP_OVERHEAD_BYTES: u64 = 20 + 8;
 
-/// UDP + IP + jamjam header bytes per packet
+/// UDP + IP + jamjam header bytes per packet, and what encrypting it adds
 ///
-/// [`UDP_IP_OVERHEAD_BYTES`] + [`crate::protocol::HEADER_SIZE`].
-const PACKET_OVERHEAD_BYTES: f64 = UDP_IP_OVERHEAD_BYTES as f64 + 12.0;
+/// [`UDP_IP_OVERHEAD_BYTES`] + [`crate::protocol::HEADER_SIZE`] + [`SEAL_OVERHEAD`].
+const PACKET_OVERHEAD_BYTES: f64 =
+    UDP_IP_OVERHEAD_BYTES as f64 + HEADER_SIZE as f64 + SEAL_OVERHEAD as f64;
 
 /// Share of the peer's audio packets lost, from which a link is called marginal
 ///
@@ -328,8 +332,10 @@ mod tests {
             "{} must exceed the payload-only figure once headers count",
             mono
         );
+        // The smallest frames carry the most overhead: 40 bytes of headers and 24 of encryption
+        // on 128 bytes of audio.
         assert!(
-            mono < 2_200_000.0,
+            mono < 2_400_000.0,
             "{} is implausibly far above 1.5 Mbps for one channel",
             mono
         );
