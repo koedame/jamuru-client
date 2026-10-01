@@ -1,0 +1,45 @@
+# Dependency license policy (cargo-deny). `./scripts/third-party-licenses.py`
+# builds the notices shipped in the app from the same graph and refuses to run
+# when `about.toml` accepts a different list than the one below.
+#
+# Run from the repository root:
+#   cargo deny --manifest-path src-tauri/Cargo.toml --all-features check licenses
+#   cargo deny --all-features check licenses
+#
+# The app's license is source-available, so a dependency under GPL, AGPL or
+# LGPL alone is not allowed. A crate offering a permissive choice
+# (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`) passes through that choice.
+
+[graph]
+# Platform-specific crates (windows, objc2, gtk, ...) only appear for their
+# target, so check every platform the app is released for.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+[licenses]
+unused-allowed-license = "allow"
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[licenses.private]
+# jamjam / jamjam-app are this project's own crates (publish = false).
+ignore = true
