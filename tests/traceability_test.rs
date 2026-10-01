@@ -462,7 +462,9 @@ fn collect_verifications(root: &Path) -> Vec<Verification> {
                 .trim_start_matches("///")
                 .trim_start_matches("//!")
                 .trim_start_matches("//")
+                .trim_start_matches("/**")
                 .trim_start_matches('*')
+                .trim_end_matches("*/")
                 .trim();
             let Some(after) = stripped.strip_prefix("Verifies:") else {
                 continue;

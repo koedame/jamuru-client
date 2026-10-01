@@ -35,7 +35,7 @@ pub use discovery::{
     check_signaling_url, discover_signaling_url, server_clock_offset_secs, signaling_endpoint_url,
     SignalingEndpoint, SIGNALING_ENDPOINT_PATH,
 };
-pub use encryption::{EncryptedTransport, EncryptionContext, KeyExchangeMessage, KeyPair};
+pub use encryption::{LinkSecurity, Opened, SecureLink, SEAL_OVERHEAD};
 pub use error::{NetworkError, SignalingFailure};
 pub use fec::{FecDecoder, FecEncoder, FecPacket, RecoveredPacket, FEC_GROUP_SIZE};
 pub use latency::{

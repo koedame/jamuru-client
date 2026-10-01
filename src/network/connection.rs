@@ -11,9 +11,12 @@ use tokio::time::interval;
 use tracing::{debug, info, trace, warn};
 
 use crate::audio::{create_codec, AudioCodec, CodecConfig, CodecType};
-use crate::protocol::{LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType};
+use crate::protocol::{
+    LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, HEADER_SIZE,
+};
 
 use super::bandwidth::UDP_IP_OVERHEAD_BYTES;
+use super::encryption::{LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
 use super::link_facts::{route_preference, LinkFacts, NEAREST_ROUTE_PREFERENCE};
@@ -26,6 +29,9 @@ const RTT_SAMPLE_COUNT: usize = 10;
 
 /// Maximum pending pings before discarding old ones
 const MAX_PENDING_PINGS: usize = 10;
+
+/// How often our key is sent while the peer has not shown it has it
+const KEY_EXCHANGE_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Connection statistics
 #[derive(Debug, Clone, Default)]
@@ -56,6 +62,11 @@ pub struct ConnectionStats {
     pub fec_recovered: Option<u64>,
     /// Connection uptime in seconds
     pub uptime_seconds: u64,
+    /// Whether what this link carries is encrypted
+    pub security: LinkSecurity,
+    /// Packets turned away because they were forged, repeated or from a peer that is not
+    /// encrypting while the link is
+    pub packets_refused: u64,
 }
 
 impl ConnectionStats {
@@ -102,6 +113,11 @@ impl Route {
             others,
             answered_at: Instant::now(),
         }
+    }
+
+    /// Whether `addr` is one of the peer's addresses
+    fn knows(&self, addr: SocketAddr) -> bool {
+        addr == self.current || self.others.iter().any(|&(other, _)| other == addr)
     }
 
     /// The peer answered a ping, so what we send reaches it
@@ -551,6 +567,30 @@ pub struct Connection {
     connection_start: Arc<std::sync::Mutex<Option<Instant>>>,
     /// How the link came up, for the usage log
     link_facts: Arc<LinkFacts>,
+    /// The encryption of this link: every packet goes out through it and comes in through it
+    secure_link: Arc<SecureLink>,
+    /// The latest latency info, kept while the link is still agreeing keys and sent when it
+    /// settles
+    pending_latency_info: Arc<Mutex<Option<LatencyInfoMessage>>>,
+    /// Sends our key until the peer has it, and what waited for the keys
+    secure_link_handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// Sends `packet` as the link allows: encrypted when the keys are agreed, and not at all
+/// while they are not, apart from keep-alives. Returns the bytes put on the wire, `0` for a
+/// packet that had to wait.
+async fn send_sealed(
+    transport: &UdpTransport,
+    link: &SecureLink,
+    packet: Packet,
+    addr: SocketAddr,
+) -> Result<usize, NetworkError> {
+    let Some(sealed) = link.seal(packet) else {
+        return Ok(0);
+    };
+    let len = HEADER_SIZE + sealed.payload.len();
+    transport.send_to(&sealed, addr).await?;
+    Ok(len)
 }
 
 impl Connection {
@@ -601,6 +641,9 @@ impl Connection {
             latency_info_callback: None,
             connection_start: Arc::new(std::sync::Mutex::new(None)),
             link_facts: Arc::new(LinkFacts::new()),
+            secure_link: Arc::new(SecureLink::new()),
+            pending_latency_info: Arc::new(Mutex::new(None)),
+            secure_link_handle: None,
         })
     }
 
@@ -641,7 +684,7 @@ impl Connection {
 
         // Send initial keep-alive to establish connection
         let packet = Packet::keep_alive(self.next_sequence());
-        self.transport.send_to(&packet, remote_addr).await?;
+        send_sealed(&self.transport, &self.secure_link, packet, remote_addr).await?;
 
         // Record connection start time
         if let Ok(mut start) = self.connection_start.lock() {
@@ -653,6 +696,7 @@ impl Connection {
         self.start_receive_loop();
         self.start_keepalive_loop();
         self.start_liveness_monitor();
+        self.start_secure_link_task();
 
         info!("Connected to {}", remote_addr);
         Ok(())
@@ -716,7 +760,7 @@ impl Connection {
         let mut sendable = vec![false; candidates.len()];
         for (i, &addr) in candidates.iter().enumerate() {
             let packet = Packet::keep_alive(self.next_sequence());
-            if let Err(e) = self.transport.send_to(&packet, addr).await {
+            if let Err(e) = send_sealed(&self.transport, &self.secure_link, packet, addr).await {
                 debug!("Failed to send probe to candidate {}: {}", addr, e);
                 continue;
             }
@@ -789,6 +833,7 @@ impl Connection {
                 self.start_receive_loop();
                 self.start_keepalive_loop();
                 self.start_liveness_monitor();
+                self.start_secure_link_task();
 
                 Ok(())
             }
@@ -819,6 +864,7 @@ impl Connection {
                 self.start_receive_loop();
                 self.start_keepalive_loop();
                 self.start_liveness_monitor();
+                self.start_secure_link_task();
 
                 Ok(())
             }
@@ -836,6 +882,9 @@ impl Connection {
             handle.abort();
         }
         if let Some(handle) = self.liveness_handle.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.secure_link_handle.take() {
             handle.abort();
         }
 
@@ -1016,9 +1065,23 @@ impl Connection {
             return Err(NetworkError::NotConnected);
         }
 
-        let packet = Packet::latency_info(self.next_sequence(), info);
         let remote_addr = self.remote_addr();
-        self.transport.send_to(&packet, remote_addr).await?;
+        let packet = Packet::latency_info(self.next_sequence(), info);
+        let sent = send_sealed(&self.transport, &self.secure_link, packet, remote_addr).await?;
+        if sent == 0 {
+            // The keys are not agreed yet. The peer is told as soon as they are.
+            *self.pending_latency_info.lock() = Some(info.clone());
+            if self.secure_link.can_send_media() {
+                // They were agreed while this was being put aside, and the task that
+                // sends what waited may already have looked.
+                let waiting = self.pending_latency_info.lock().take();
+                if let Some(info) = waiting {
+                    let packet = Packet::latency_info(self.next_sequence(), &info);
+                    send_sealed(&self.transport, &self.secure_link, packet, remote_addr).await?;
+                }
+            }
+            return Ok(());
+        }
 
         debug!("Sent latency info to {}", remote_addr);
         Ok(())
@@ -1044,6 +1107,11 @@ impl Connection {
     pub async fn send_audio(&self, data: &[f32], timestamp: u32) -> Result<(), NetworkError> {
         if !self.state().can_transmit() {
             return Err(NetworkError::NotConnected);
+        }
+        // Until the keys are agreed there is nothing that may be sent, and audio that is
+        // encoded now would take sequence numbers the peer then sees as lost.
+        if !self.secure_link.can_send_media() {
+            return Ok(());
         }
 
         // Encode with the configured codec. Without `set_audio_encoding` this
@@ -1077,11 +1145,10 @@ impl Connection {
         };
 
         let packet = Packet::audio(sequence, timestamp, bytes);
-        let packet_bytes = packet.to_bytes();
-        let len = packet_bytes.len() as u64;
 
         let remote_addr = self.remote_addr();
-        self.transport.send_to(&packet, remote_addr).await?;
+        let len =
+            send_sealed(&self.transport, &self.secure_link, packet, remote_addr).await? as u64;
 
         self.packets_sent.fetch_add(1, Ordering::Relaxed);
         self.bytes_sent.fetch_add(len, Ordering::Relaxed);
@@ -1089,8 +1156,8 @@ impl Connection {
         // FEC covers the group this packet completes.
         if let Some(fec) = generated {
             let fec_packet = Packet::fec(sequence, timestamp, fec.to_bytes());
-            let fec_len = fec_packet.to_bytes().len() as u64;
-            self.transport.send_to(&fec_packet, remote_addr).await?;
+            let fec_len = send_sealed(&self.transport, &self.secure_link, fec_packet, remote_addr)
+                .await? as u64;
             self.bytes_sent.fetch_add(fec_len, Ordering::Relaxed);
             trace!("Sent FEC packet for group {}", fec.group_sequence);
         }
@@ -1104,7 +1171,9 @@ impl Connection {
     /// reproduce a gap. This exists so loss handling can be exercised with an
     /// exact sequence pattern.
     pub async fn send_raw_to(&self, packet: &Packet, addr: SocketAddr) -> Result<(), NetworkError> {
-        self.transport.send_to(packet, addr).await
+        send_sealed(&self.transport, &self.secure_link, packet.clone(), addr)
+            .await
+            .map(|_| ())
     }
 
     /// Get connection statistics
@@ -1144,7 +1213,14 @@ impl Connection {
                 .as_ref()
                 .map(|_| self.fec_recovered.load(Ordering::Relaxed)),
             uptime_seconds: uptime,
+            security: self.secure_link.security(),
+            packets_refused: self.secure_link.refused(),
         }
+    }
+
+    /// Whether what this connection carries is encrypted
+    pub fn security(&self) -> LinkSecurity {
+        self.secure_link.security()
     }
 
     fn next_sequence(&self) -> u32 {
@@ -1171,6 +1247,8 @@ impl Connection {
         let latency_info_callback = self.latency_info_callback.clone();
         let link_facts = self.link_facts.clone();
         let route = self.route.clone();
+        let secure_link = self.secure_link.clone();
+        let pending_latency_info = self.pending_latency_info.clone();
         let follow_after = self.reconnect_config.detect_after;
         let sequence = Arc::new(AtomicU32::new(1_000_000)); // Separate sequence for pong responses
 
@@ -1183,8 +1261,33 @@ impl Connection {
                     break;
                 }
 
+                // What the packet took on the wire, before it is opened
+                let wire_len = (HEADER_SIZE + packet.payload.len()) as u64;
+
+                // The keys, and whether the peer encrypts at all, are settled by what the
+                // peer sends, so only what comes from where the peer is expected may settle
+                // them. Anyone who learns our port could otherwise send one plain packet
+                // and have the link give up encrypting.
+                let from_a_peer_address = route.lock().knows(addr);
+                if !from_a_peer_address
+                    && (packet.packet_type == PacketType::Control || !secure_link.is_decided())
+                {
+                    continue;
+                }
+
+                // Nothing below acts on a packet that has not been through the link: it is
+                // decrypted there, and a forged or repeated one stops there.
+                let opened = secure_link.open(packet);
+                if let Opened::Dropped(reason) = &opened {
+                    debug!("Dropped a packet from {}: {}", addr, reason);
+                    continue;
+                }
+
                 // The peer is heard from an address other than the one we send
                 // to, and has not answered us there: send to where it is heard.
+                // Its key counts: until the keys are agreed nothing else it sends
+                // is accepted, and no key can come back to it before the route
+                // is there.
                 let followed = route.lock().follow(addr, follow_after);
                 if let Some(left) = followed {
                     info!(
@@ -1194,9 +1297,47 @@ impl Connection {
                     link_facts.route_moved(addr);
                 }
 
+                let packet = match opened {
+                    Opened::Packet(packet) => packet,
+                    Opened::KeyExchange { answer } => {
+                        if answer {
+                            let key = secure_link.key_exchange_packet();
+                            if let Err(e) = transport.send_to(&key, addr).await {
+                                warn!("Failed to answer the peer's key exchange: {}", e);
+                            }
+                            // The keys are ours now: something encrypted shows the peer it has
+                            // ours too, without waiting for the next keep-alive
+                            let keep_alive =
+                                Packet::keep_alive(sequence.fetch_add(1, Ordering::Relaxed));
+                            if let Err(e) =
+                                send_sealed(&transport, &secure_link, keep_alive, addr).await
+                            {
+                                warn!("Failed to send keep-alive: {}", e);
+                            }
+                        }
+                        continue;
+                    }
+                    Opened::Dropped(_) => continue,
+                };
+
                 *last_received.lock().unwrap() = Instant::now();
                 packets_received.fetch_add(1, Ordering::Relaxed);
-                bytes_received.fetch_add(packet.payload.len() as u64 + 12, Ordering::Relaxed);
+                bytes_received.fetch_add(wire_len, Ordering::Relaxed);
+
+                // What waited for the peer to show it has the keys goes as soon as it has
+                if secure_link.can_send_media() {
+                    let waiting = pending_latency_info.lock().take();
+                    if let Some(info) = waiting {
+                        let packet =
+                            Packet::latency_info(sequence.fetch_add(1, Ordering::Relaxed), &info);
+                        let remote_addr = route.lock().current;
+                        if let Err(e) =
+                            send_sealed(&transport, &secure_link, packet, remote_addr).await
+                        {
+                            warn!("Failed to send latency info: {}", e);
+                        }
+                    }
+                }
 
                 match packet.packet_type {
                     PacketType::Audio => {
@@ -1272,7 +1413,10 @@ impl Connection {
                                 &pong,
                             );
                             let remote_addr = route.lock().current;
-                            if let Err(e) = transport.send_to(&pong_packet, remote_addr).await {
+                            if let Err(e) =
+                                send_sealed(&transport, &secure_link, pong_packet, remote_addr)
+                                    .await
+                            {
                                 warn!("Failed to send latency pong: {}", e);
                             }
                             trace!("Responded to latency ping seq={}", ping.ping_sequence);
@@ -1419,6 +1563,7 @@ impl Connection {
         let route = self.route.clone();
         let sequence = AtomicU32::new(0);
         let rtt_measurement = self.rtt_measurement.clone();
+        let secure_link = self.secure_link.clone();
         let keep_alive_interval = self.reconnect_config.keep_alive_interval;
         let probe_others_after = self.reconnect_config.detect_after;
 
@@ -1437,18 +1582,22 @@ impl Connection {
 
                 // Send keep-alive
                 let packet = Packet::keep_alive(sequence.fetch_add(1, Ordering::Relaxed));
-                if let Err(e) = transport.send_to(&packet, remote_addr).await {
+                if let Err(e) = send_sealed(&transport, &secure_link, packet, remote_addr).await {
                     warn!("Failed to send keep-alive: {}", e);
                 }
 
-                // Send latency ping for RTT measurement
-                let ping = rtt_measurement.write().create_ping();
-                let ping_packet =
-                    Packet::latency_ping(sequence.fetch_add(1, Ordering::Relaxed), &ping);
-                if let Err(e) = transport.send_to(&ping_packet, remote_addr).await {
-                    warn!("Failed to send latency ping: {}", e);
+                // Send latency ping for RTT measurement, once the keys allow it
+                if secure_link.can_send_media() {
+                    let ping = rtt_measurement.write().create_ping();
+                    let ping_packet =
+                        Packet::latency_ping(sequence.fetch_add(1, Ordering::Relaxed), &ping);
+                    if let Err(e) =
+                        send_sealed(&transport, &secure_link, ping_packet, remote_addr).await
+                    {
+                        warn!("Failed to send latency ping: {}", e);
+                    }
+                    trace!("Sent latency ping seq={}", ping.ping_sequence);
                 }
-                trace!("Sent latency ping seq={}", ping.ping_sequence);
 
                 // No answer to our pings: the peer may not be reached on this
                 // address. Let it hear from us on its other ones too, so that
@@ -1463,13 +1612,65 @@ impl Connection {
                 };
                 for addr in others {
                     let packet = Packet::keep_alive(sequence.fetch_add(1, Ordering::Relaxed));
-                    let sent = transport.send_to(&packet, addr).await.is_ok();
+                    let sent = send_sealed(&transport, &secure_link, packet, addr)
+                        .await
+                        .is_ok();
                     route.lock().note_send(addr, sent);
                 }
             }
         });
 
         self.keepalive_handle = Some(handle);
+    }
+
+    /// Sends our key to the peer until it has shown it has it
+    ///
+    /// Every peer sends its key as soon as it is connected and again every
+    /// [`KEY_EXCHANGE_INTERVAL`], so one that comes up later, or a packet lost on the way,
+    /// does not leave the link without keys.
+    fn start_secure_link_task(&mut self) {
+        if let Some(handle) = self.secure_link_handle.take() {
+            handle.abort();
+        }
+
+        let transport = self.transport.clone();
+        let state = self.state.clone();
+        let route = self.route.clone();
+        let secure_link = self.secure_link.clone();
+        let sequence = AtomicU32::new(2_000_000);
+
+        let handle = tokio::spawn(async move {
+            let mut ticker = interval(KEY_EXCHANGE_INTERVAL);
+
+            loop {
+                ticker.tick().await;
+
+                let current_state = ConnectionState::from_u8(state.load(Ordering::SeqCst));
+                if !current_state.can_transmit() {
+                    break;
+                }
+                let remote_addr = route.lock().current;
+
+                if secure_link.wants_key_exchange() {
+                    let key = secure_link.key_exchange_packet();
+                    if let Err(e) = transport.send_to(&key, remote_addr).await {
+                        warn!("Failed to send our key exchange: {}", e);
+                    }
+                    // With the keys ours, something encrypted shows the peer it has them too
+                    // (the answer to its key can be lost on the way).
+                    if secure_link.has_keys() {
+                        let packet = Packet::keep_alive(sequence.fetch_add(1, Ordering::Relaxed));
+                        if let Err(e) =
+                            send_sealed(&transport, &secure_link, packet, remote_addr).await
+                        {
+                            warn!("Failed to send keep-alive: {}", e);
+                        }
+                    }
+                }
+            }
+        });
+
+        self.secure_link_handle = Some(handle);
     }
 }
 
@@ -1783,8 +1984,9 @@ mod tests {
         conn2.connect(conn1.local_addr()).await.unwrap();
         assert_eq!(conn1.link_facts().snapshot().first_audio_ms, None);
 
-        conn2.send_audio(&[0.0f32; 64], 0).await.unwrap();
+        // Audio waits for the keys to be agreed, so keep sending until one arrives.
         for _ in 0..50 {
+            conn2.send_audio(&[0.0f32; 64], 0).await.unwrap();
             if conn1.link_facts().snapshot().first_audio_ms.is_some() {
                 break;
             }

@@ -706,8 +706,9 @@ mod tests {
             .unwrap();
         ours.connect(theirs.local_addr()).await.unwrap();
         theirs.connect(ours.local_addr()).await.unwrap();
-        theirs.send_audio(&[0.0f32; 64], 0).await.unwrap();
+        // Audio goes once the two have agreed keys, so keep sending until one arrives.
         for _ in 0..1000 {
+            theirs.send_audio(&[0.0f32; 64], 0).await.unwrap();
             if ours.link_facts().snapshot().first_audio_ms.is_some() {
                 break;
             }

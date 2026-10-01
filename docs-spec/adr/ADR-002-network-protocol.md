@@ -27,6 +27,10 @@ sidebar_position: 2
 
 NAT越えにはICE（STUN/TURN）を使用する。暗号化にはDTLSを使用する。
 
+> **追記（2026-10-01、[ADR-063](./ADR-063-encrypt-the-audio-link.md)）:** 暗号化は DTLS では実装しなかった。X25519 の鍵交換と AES-256-GCM を、
+> jamjam のパケットの中でそのまま使う。上の決定の暗号化の部分は、ADR-063 に置き換わった。DTLS を使うと書いたまま、実際には暗号化の部品が
+> 送受信の経路に繋がっておらず、音声は平文で送られていた。
+
 ## Consequences
 
 ### メリット
