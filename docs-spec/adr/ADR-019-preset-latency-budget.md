@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-019 Preset Latency Budget
-sidebar_position: 19
----
-
 # ADR-019: プリセット遅延バジェットの確定
 
 ## Status

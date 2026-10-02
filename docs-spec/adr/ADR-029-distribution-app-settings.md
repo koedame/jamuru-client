@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-029: Distribution App Settings"
-sidebar_position: 29
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-029: 配布前に固めるアプリ設定（識別子・CSP・マイク使用の説明）

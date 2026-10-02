@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-041: Self Update"
-sidebar_position: 41
----
-
 # ADR-041: 新しい正式版は、利用者の操作なしにアプリ自身が入れる
 
 ## Status

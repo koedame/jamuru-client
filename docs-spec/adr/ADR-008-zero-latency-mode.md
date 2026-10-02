@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-008 Zero-Latency Mode
-sidebar_position: 8
----
-
 # ADR-008: Zero-Latency Mode
 
 ## Context

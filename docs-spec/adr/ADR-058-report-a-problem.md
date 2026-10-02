@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-058: Report a Problem"
-sidebar_position: 58
----
-
 # ADR-058: 設定に「問題を報告」を置き、`jamjam.log` と一言のコメントを、利用状況の送信とは別の経路で送る
 
 ## Status

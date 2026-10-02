@@ -1,8 +1,3 @@
----
-sidebar_label: E2E Control Channel
-sidebar_position: 8
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # E2E Control Channel Specification（GUI E2E 制御チャネル）

@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-064: Encrypt the Audio Link"
-sidebar_position: 64
----
-
 # ADR-064: 相手との UDP の通信を、1 本のリンクとして暗号化する
 
 ## Status

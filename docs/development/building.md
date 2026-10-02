@@ -1,17 +1,10 @@
----
-sidebar_position: 1
-title: ビルド
-description: jamjamのビルド方法
----
-
-:::note
-このドキュメントは開発者向けの解説資料です。
-正確な仕様・制約・判断は [docs-spec/](https://github.com/koedame/jamjam-client/tree/main/docs-spec) を参照してください。
-:::
+> [!NOTE]
+> このドキュメントは開発者向けの解説資料です。
+> 正確な仕様・制約・判断は [docs-spec/](../../docs-spec) を参照してください。
 
 # ビルド
 
-jamjamをソースからビルドする方法を説明します。権利者（開発者）向けの手順です。[ライセンス](https://github.com/koedame/jamjam-client/blob/main/LICENSE)は、権利者以外がソースからビルド・実行することを許可していません。利用するときは、GitHub Releases の公式バイナリを使ってください。
+jamjamをソースからビルドする方法を説明します。権利者（開発者）向けの手順です。[ライセンス](../../LICENSE)は、権利者以外がソースからビルド・実行することを許可していません。利用するときは、GitHub Releases の公式バイナリを使ってください。
 
 ## 前提条件
 
@@ -67,9 +60,8 @@ cargo build --release
 
 ### Tauri GUI (デスクトップアプリ)
 
-:::caution
-Tauriコマンドは必ず**プロジェクトルート**から実行してください。`src-tauri` ディレクトリからの実行はサポートされていません（[ADR-009](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-009-tauri-build-commands.md) 参照）。
-:::
+> [!CAUTION]
+> Tauriコマンドは必ず**プロジェクトルート**から実行してください。`src-tauri` ディレクトリからの実行はサポートされていません（[ADR-009](../../docs-spec/adr/ADR-009-tauri-build-commands.md) 参照）。
 
 ```bash
 # 開発サーバー起動（プロジェクトルートから実行）
@@ -79,9 +71,8 @@ cargo tauri dev
 JAMJAM_SERVER_URL=https://<サーバー> cargo tauri build
 ```
 
-:::note
-開発ビルド（`cargo tauri dev`）は `http://localhost:17890` のサーバーを使います。リリースビルドは `JAMJAM_SERVER_URL` で渡したサーバーを使い、渡さなければビルドが失敗します。どちらも、シグナリングサーバーの接続先は繋ぐたびにそのサーバーへ問い合わせます。
-:::
+> [!NOTE]
+> 開発ビルド（`cargo tauri dev`）は `http://localhost:17890` のサーバーを使います。リリースビルドは `JAMJAM_SERVER_URL` で渡したサーバーを使い、渡さなければビルドが失敗します。どちらも、シグナリングサーバーの接続先は繋ぐたびにそのサーバーへ問い合わせます。
 
 ### 成果物の場所
 
@@ -109,5 +100,5 @@ sudo apt-get install libwebkit2gtk-4.1-dev
 
 ## 関連情報
 
-- [テスト](/docs/development/testing) - テストの実行方法
-- [CI/CD](/docs/development/ci) - 継続的インテグレーション
+- [テスト](testing.md) - テストの実行方法
+- [CI/CD](ci.md) - 継続的インテグレーション

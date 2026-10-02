@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-021 Preset Codec and FEC
-sidebar_position: 21
----
-
 # ADR-021: プリセットのコーデックと FEC 設定
 
 ## Status

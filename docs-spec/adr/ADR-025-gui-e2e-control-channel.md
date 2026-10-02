@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-025: GUI E2E Control Channel"
-sidebar_position: 25
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-025: GUI E2E 制御チャネルとページオブジェクトモデルの導入
