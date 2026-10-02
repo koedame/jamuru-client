@@ -1,9 +1,9 @@
 ---
-sidebar_label: "ADR-065: Check the Peer in the Key Exchange"
-sidebar_position: 65
+sidebar_label: "ADR-067: Check the Peer in the Key Exchange"
+sidebar_position: 67
 ---
 
-# ADR-065: 鍵交換で、ルームの相手が本人であることを確かめる
+# ADR-067: 鍵交換で、ルームの相手が本人であることを確かめる
 
 ## Status
 

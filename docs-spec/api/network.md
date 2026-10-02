@@ -112,7 +112,7 @@ async fn connect_direct(
 ) -> Result<Connection, ConnectionError>;
 ```
 
-ルームで繋ぐ相手とは、`connect` の前に相手を確かめる（ADR-065）:
+ルームで繋ぐ相手とは、`connect` の前に相手を確かめる（ADR-067）:
 
 ```rust
 /// 相手との鍵交換を、サーバーが渡した相手の鍵で署名されたものだけにする
@@ -428,7 +428,7 @@ struct ConnectionStats {
     /// 音声が暗号化されているか。`Negotiating`（鍵を合わせている最中）/ `Encrypted` /
     /// `Unencrypted`（相手のアプリが暗号化に対応していない。ADR-064）
     security: LinkSecurity,
-    /// 鍵が、シグナリングのサーバーが渡した相手の鍵に結び付いているか（ADR-065）。
+    /// 鍵が、シグナリングのサーバーが渡した相手の鍵に結び付いているか（ADR-067）。
     /// `false` は、相手のアプリが鍵を知らせない古い版のとき・サーバーを使わない直接接続のとき:
     /// 暗号化はされるが、相手が本人かは確かめていない
     peer_checked: bool,
