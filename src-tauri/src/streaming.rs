@@ -30,7 +30,7 @@ use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
     BandwidthVerdict, Connection, ConnectionState, ConnectionStats, LatencyBreakdown, LinkFacts,
-    LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
+    LinkIdentity, LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
@@ -632,6 +632,9 @@ pub struct NetworkStats {
     /// Whether the audio to this peer is encrypted: "encrypted", "negotiating" while the
     /// keys are being agreed, or "unencrypted" when the peer's app cannot encrypt
     pub encryption: String,
+    /// Whether the keys of the link are bound to the peer's key from the server, so the peer is
+    /// known to be who the server said. False for a peer whose app predates the check.
+    pub peer_checked: bool,
     /// Total bytes sent
     pub bytes_sent: u64,
     /// Total bytes received
@@ -841,6 +844,10 @@ pub async fn streaming_start(
     // `remote_addr` so a peer on the same network is reached directly
     // instead of only through its public address (REQ-CON-113).
     remote_candidates: Option<Vec<String>>,
+    // Our key in the room and the key the server gave for the peer: with them the link to
+    // the peer is checked to be that peer's (`Connection::verify_peer`). `None` for a peer
+    // reached without a room.
+    link: Option<(LinkIdentity, Option<String>)>,
     state: tauri::State<'_, StreamingState>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
     settings_state: tauri::State<'_, crate::settings::SettingsState>,
@@ -1008,6 +1015,7 @@ pub async fn streaming_start(
         rt.block_on(async move {
             if let Err(e) = run_audio_streaming(
                 candidate_addrs,
+                link,
                 prepared_socket,
                 input_device_id,
                 output_device_id,
@@ -1139,6 +1147,7 @@ pub async fn streaming_status(
             packets_sent: s.packets_sent,
             packets_received: s.packets_received,
             encryption: s.security.as_str().to_string(),
+            peer_checked: s.peer_checked,
             bytes_sent: s.bytes_sent,
             bytes_received: s.bytes_received,
         };
@@ -1785,6 +1794,7 @@ fn open_asio(
 #[allow(clippy::too_many_arguments)]
 async fn run_audio_streaming(
     remote_candidates: Vec<SocketAddr>,
+    link: Option<(LinkIdentity, Option<String>)>,
     prepared_socket: Option<std::net::UdpSocket>,
     input_device_id: Option<String>,
     output_device_id: Option<String>,
@@ -1844,6 +1854,12 @@ async fn run_audio_streaming(
             .await
             .map_err(|e| format!("Failed to create connection: {}", e))?,
     };
+
+    if let Some((ours, peer_key)) = &link {
+        connection
+            .verify_peer(ours, peer_key.as_deref())
+            .map_err(|e| format!("Failed to set up the link to the peer: {}", e))?;
+    }
 
     // Create separate audio engines for capture (mono) and playback (stereo)
     let mut capture_engine = AudioEngine::new(capture_config.clone());

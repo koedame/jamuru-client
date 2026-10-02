@@ -11,7 +11,9 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use jamjam::network::{AudioEncodingConfig, Connection, LinkSecurity, Session, SessionConfig};
+use jamjam::network::{
+    AudioEncodingConfig, Connection, LinkIdentity, LinkSecurity, Session, SessionConfig,
+};
 use jamjam::protocol::{Packet, PacketType, HEADER_SIZE};
 
 use common::{wait_until_encrypted, Rewrite, Tap};
@@ -470,14 +472,41 @@ async fn when_a_stranger_sends_a_key_it_is_not_taken() {
 /// Verifies: REQ-SEC-001
 #[tokio::test]
 async fn when_a_session_broadcasts_each_peer_gets_audio_it_alone_can_open() {
+    let heard = broadcast_among_three(false).await;
+
+    assert!(heard[0].is_empty(), "not sent to itself");
+    assert_eq!(heard[1], known_signal());
+    assert_eq!(heard[2], known_signal());
+}
+
+/// The same among participants who know each other by the keys the server gave
+///
+/// Verifies: REQ-SEC-001, REQ-SEC-007
+#[tokio::test]
+async fn when_a_session_checks_its_peers_each_gets_audio_it_alone_can_open() {
+    let heard = broadcast_among_three(true).await;
+
+    assert!(heard[0].is_empty(), "not sent to itself");
+    assert_eq!(heard[1], known_signal());
+    assert_eq!(heard[2], known_signal());
+}
+
+/// What each of three sessions heard when the first broadcast the known signal, once the keys
+/// among all three were agreed
+async fn broadcast_among_three(check_peers: bool) -> Vec<Vec<f32>> {
+    let identities: Vec<LinkIdentity> = (0..3).map(|_| LinkIdentity::generate()).collect();
     let ids = [
         uuid::Uuid::new_v4(),
         uuid::Uuid::new_v4(),
         uuid::Uuid::new_v4(),
     ];
     let mut sessions = Vec::new();
-    for _ in 0..3 {
-        sessions.push(Session::new(SessionConfig::default()).await.unwrap());
+    for identity in &identities {
+        let mut session = Session::new(SessionConfig::default()).await.unwrap();
+        if check_peers {
+            session.set_link_identity(identity.clone());
+        }
+        sessions.push(session);
     }
     let heard: Vec<Arc<Mutex<Vec<f32>>>> = (0..3).map(|_| Default::default()).collect();
     for (session, heard) in sessions.iter_mut().zip(&heard) {
@@ -493,6 +522,7 @@ async fn when_a_session_broadcasts_each_peer_gets_audio_it_alone_can_open() {
     };
     let addrs: Vec<SocketAddr> = sessions.iter().map(addr_of).collect();
     let peer_info = |index: usize| jamjam::network::PeerInfo {
+        link_key: check_peers.then(|| identities[index].public_key()),
         id: ids[index],
         name: format!("peer-{index}"),
         candidates: vec![],
@@ -533,7 +563,252 @@ async fn when_a_session_broadcasts_each_peer_gets_audio_it_alone_can_open() {
     sessions[0].broadcast_audio(&signal, 0).await.unwrap();
     settle().await;
 
-    assert!(heard[0].lock().unwrap().is_empty(), "not sent to itself");
-    assert_eq!(*heard[1].lock().unwrap(), signal);
-    assert_eq!(*heard[2].lock().unwrap(), signal);
+    heard
+        .iter()
+        .map(|heard| heard.lock().unwrap().clone())
+        .collect()
+}
+
+/// Two connections whose every packet crosses a relay, connected through it when this returns.
+/// With `keys`, they know each other by the keys a server would have given them (the sender's
+/// and the receiver's); without, as before the exchange was signed, they do not. `rewrite` is
+/// given the sender's address and makes what the relay does to each datagram.
+struct RelayedPair {
+    sender: Connection,
+    receiver: Connection,
+    tap: Tap,
+    received: Received,
+}
+
+async fn relayed_pair(
+    keys: Option<(&LinkIdentity, &LinkIdentity)>,
+    rewrite: impl FnOnce(SocketAddr) -> Rewrite,
+) -> RelayedPair {
+    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender");
+    let mut receiver = Connection::new("127.0.0.1:0").await.expect("receiver");
+    sender.set_audio_encoding(encoding(None)).unwrap();
+    receiver.set_audio_encoding(encoding(None)).unwrap();
+    if let Some((sender_key, receiver_key)) = keys {
+        sender
+            .verify_peer(sender_key, Some(&receiver_key.public_key()))
+            .unwrap();
+        receiver
+            .verify_peer(receiver_key, Some(&sender_key.public_key()))
+            .unwrap();
+    }
+    let received: Received = Arc::new(Mutex::new(Vec::new()));
+    let sink = received.clone();
+    receiver.set_audio_callback(move |sequence, payload, _| {
+        sink.lock().unwrap().push((sequence, payload));
+    });
+
+    let (a, b) = (sender.local_addr(), receiver.local_addr());
+    let tap = Tap::start_rewriting(a, b, rewrite(a)).await;
+    sender.connect(tap.addr()).await.expect("sender connects");
+    receiver
+        .connect(tap.addr())
+        .await
+        .expect("receiver connects");
+    RelayedPair {
+        sender,
+        receiver,
+        tap,
+        received,
+    }
+}
+
+fn pass_on(_: SocketAddr) -> Rewrite {
+    Box::new(|_, datagram| vec![datagram])
+}
+
+/// A relay that sits between the two ends the way someone who can alter packets on the path
+/// would: it makes a key of its own towards each end, agrees keys with each, and passes on
+/// what it opens - listening to the audio on its way. What it overheard is in `heard`.
+struct Interloper {
+    sender_addr: SocketAddr,
+    /// The relay's end of the link to the sender, and to the receiver
+    towards_sender: jamjam::network::SecureLink,
+    towards_receiver: jamjam::network::SecureLink,
+    heard: Mutex<Vec<Vec<u8>>>,
+}
+
+impl Interloper {
+    /// The ephemeral key in a key exchange of either kind, put in the form an unsigned link takes
+    fn as_unsigned(packet: &Packet) -> Packet {
+        let mut payload = vec![0x01, 0x01];
+        payload.extend_from_slice(&packet.payload[2..34]);
+        Packet::control(0, payload)
+    }
+
+    /// What goes on to the other end for `datagram`, which came from `from`
+    fn handle(&self, from: SocketAddr, datagram: Vec<u8>) -> Vec<Vec<u8>> {
+        let Some(packet) = Packet::from_bytes(&datagram) else {
+            return vec![];
+        };
+        let (listening, speaking) = if from == self.sender_addr {
+            (&self.towards_sender, &self.towards_receiver)
+        } else {
+            (&self.towards_receiver, &self.towards_sender)
+        };
+        if packet.packet_type == PacketType::Control {
+            if packet.payload.len() < 34 {
+                return vec![];
+            }
+            // Take the end's key, and give the other end the relay's own in its place
+            let _ = listening.open(Self::as_unsigned(&packet));
+            return vec![speaking.key_exchange_packet().to_bytes()];
+        }
+        match listening.open(packet) {
+            jamjam::network::Opened::Packet(plain) => {
+                if plain.packet_type == PacketType::Audio {
+                    self.heard.lock().unwrap().push(plain.payload.clone());
+                }
+                speaking
+                    .seal(plain)
+                    .map(|sealed| vec![sealed.to_bytes()])
+                    .unwrap_or_default()
+            }
+            _ => vec![],
+        }
+    }
+}
+
+fn interloper(sender_addr: SocketAddr) -> Arc<Interloper> {
+    Arc::new(Interloper {
+        sender_addr,
+        towards_sender: jamjam::network::SecureLink::new(),
+        towards_receiver: jamjam::network::SecureLink::new(),
+        heard: Mutex::new(Vec::new()),
+    })
+}
+
+/// Two ends that know each other by their keys agree keys over a relay that changes nothing,
+/// and the audio arrives
+///
+/// Verifies: REQ-SEC-007
+#[tokio::test]
+async fn when_both_ends_check_the_peer_and_nothing_interferes_audio_arrives_encrypted() {
+    let (sender_key, receiver_key) = (LinkIdentity::generate(), LinkIdentity::generate());
+    let pair = relayed_pair(Some((&sender_key, &receiver_key)), pass_on).await;
+    wait_until_encrypted(&[&pair.sender, &pair.receiver]).await;
+    assert!(pair.sender.checks_peer() && pair.receiver.checks_peer());
+    assert!(pair.sender.stats().peer_checked && pair.receiver.stats().peer_checked);
+
+    for _ in 0..3 {
+        pair.sender.send_audio(&known_signal(), 0).await.unwrap();
+    }
+    settle().await;
+
+    assert_eq!(pair.received.lock().unwrap().len(), 3);
+    let plain = bytes_of(&known_signal());
+    assert!(pair
+        .tap
+        .datagrams()
+        .iter()
+        .all(|d| !contains(d, &plain[..16])));
+}
+
+/// What the relay above is able to do, shown against ends that do not know each other: it
+/// agrees keys with each, the receiver hears the sender's audio as sent, and the relay has
+/// listened to all of it. This is the case the other ends are not in.
+///
+/// Verifies: REQ-SEC-008
+#[tokio::test]
+async fn when_the_ends_do_not_check_the_peer_a_relay_in_the_exchange_hears_the_audio() {
+    let spy = Arc::new(Mutex::new(None));
+    let pair = relayed_pair(None, |sender_addr| {
+        let relay = interloper(sender_addr);
+        *spy.lock().unwrap() = Some(relay.clone());
+        Box::new(move |from, datagram| relay.handle(from, datagram))
+    })
+    .await;
+    wait_until_encrypted(&[&pair.sender, &pair.receiver]).await;
+    assert!(!pair.sender.checks_peer() && !pair.receiver.checks_peer());
+    assert!(!pair.sender.stats().peer_checked && !pair.receiver.stats().peer_checked);
+
+    for _ in 0..3 {
+        pair.sender.send_audio(&known_signal(), 0).await.unwrap();
+    }
+    settle().await;
+
+    let relay = spy.lock().unwrap().clone().unwrap();
+    let heard = relay.heard.lock().unwrap().clone();
+    assert_eq!(heard.len(), 3, "the relay listened to the audio");
+    assert!(heard
+        .iter()
+        .all(|payload| *payload == bytes_of(&known_signal())));
+    assert_eq!(
+        pair.received.lock().unwrap().len(),
+        3,
+        "and the receiver heard it, none the wiser"
+    );
+}
+
+/// The same relay against ends that know each other by their keys does not get between them:
+/// neither takes the relay's key, no audio is sent, and the relay has heard nothing
+///
+/// Verifies: REQ-SEC-007
+#[tokio::test]
+async fn when_a_relay_puts_its_own_key_in_the_exchange_the_ends_do_not_agree_keys() {
+    let (sender_key, receiver_key) = (LinkIdentity::generate(), LinkIdentity::generate());
+    let spy = Arc::new(Mutex::new(None));
+    let pair = relayed_pair(Some((&sender_key, &receiver_key)), |sender_addr| {
+        let relay = interloper(sender_addr);
+        *spy.lock().unwrap() = Some(relay.clone());
+        Box::new(move |from, datagram| relay.handle(from, datagram))
+    })
+    .await;
+
+    for _ in 0..5 {
+        pair.sender.send_audio(&known_signal(), 0).await.unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    assert_eq!(pair.sender.security(), LinkSecurity::Negotiating);
+    assert_eq!(pair.receiver.security(), LinkSecurity::Negotiating);
+    assert!(pair.sender.stats().packets_refused >= 1);
+    assert!(pair.receiver.stats().packets_refused >= 1);
+    assert!(pair.received.lock().unwrap().is_empty());
+    assert_eq!(pair.sender.stats().packets_sent, 0, "no audio was sent");
+    let relay = spy.lock().unwrap().clone().unwrap();
+    assert!(relay.heard.lock().unwrap().is_empty());
+}
+
+/// A relay that signs with a key of its own, not the one the server gave for the other end,
+/// fares no better
+///
+/// Verifies: REQ-SEC-007
+#[tokio::test]
+async fn when_a_relay_signs_the_exchange_with_a_key_the_server_did_not_give_it_is_not_taken() {
+    let (sender_key, receiver_key) = (LinkIdentity::generate(), LinkIdentity::generate());
+    let relay_key = LinkIdentity::generate();
+    let (as_sender, as_receiver) = (
+        jamjam::network::SecureLink::for_peer(Some(&relay_key), Some(&receiver_key.public_key())),
+        jamjam::network::SecureLink::for_peer(Some(&relay_key), Some(&sender_key.public_key())),
+    );
+    let (as_sender, as_receiver) = (Arc::new(as_sender), Arc::new(as_receiver));
+    let pair = relayed_pair(Some((&sender_key, &receiver_key)), |sender_addr| {
+        Box::new(move |from, datagram| match Packet::from_bytes(&datagram) {
+            Some(packet) if packet.packet_type == PacketType::Control => {
+                let forged = if from == sender_addr {
+                    &as_sender
+                } else {
+                    &as_receiver
+                };
+                vec![forged.key_exchange_packet().to_bytes()]
+            }
+            _ => vec![datagram],
+        })
+    })
+    .await;
+
+    for _ in 0..5 {
+        pair.sender.send_audio(&known_signal(), 0).await.unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    assert_eq!(pair.sender.security(), LinkSecurity::Negotiating);
+    assert_eq!(pair.receiver.security(), LinkSecurity::Negotiating);
+    assert!(pair.received.lock().unwrap().is_empty());
+    assert_eq!(pair.sender.stats().packets_sent, 0);
 }

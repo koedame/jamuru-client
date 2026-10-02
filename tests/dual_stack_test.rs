@@ -199,6 +199,7 @@ fn test_peer_info_backward_compat_no_candidates() {
 #[test]
 fn test_peer_info_with_candidates_roundtrip() {
     let original = PeerInfo {
+        link_key: None,
         id: Uuid::new_v4(),
         name: "NewPeer".to_string(),
         candidates: vec![
