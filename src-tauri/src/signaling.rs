@@ -264,10 +264,24 @@ pub async fn signaling_list_rooms(
         .await
         .map_err(|e| e.to_string())?;
 
-    match conn.recv().await.map_err(|e| e.to_string())? {
-        SignalingMessage::RoomList { rooms } => Ok(rooms),
-        SignalingMessage::Error { message } => Err(message),
-        _ => Err("Unexpected response".to_string()),
+    // What the room's other participants sent before they heard this app left
+    // can still be on its way, and comes ahead of the answer. It is for a room
+    // this app is no longer in, so it is let go rather than taken for the
+    // answer (leaving, then listing the rooms, failed with "Unexpected
+    // response" when a helper's message was in flight).
+    loop {
+        match conn.recv().await.map_err(|e| e.to_string())? {
+            SignalingMessage::RoomList { rooms } => return Ok(rooms),
+            SignalingMessage::Error { message } => return Err(message),
+            SignalingMessage::PeerJoined { .. }
+            | SignalingMessage::PeerLeft { .. }
+            | SignalingMessage::PeerUpdated { .. }
+            | SignalingMessage::ChatMessage { .. }
+            | SignalingMessage::PeerMessage { .. } => {
+                tracing::debug!("Letting go of a room message that came before the room list");
+            }
+            _ => return Err("Unexpected response".to_string()),
+        }
     }
 }
 
@@ -1350,6 +1364,36 @@ mod tests {
             .unwrap()
             .insert(1, conn);
         app
+    }
+
+    /// The bug this guards: leaving a room and listing the rooms read the
+    /// next message as the answer, and a message the room's other participants
+    /// sent before they heard of the leave came first, so leaving failed with
+    /// "Unexpected response".
+    #[tokio::test]
+    async fn a_room_message_comes_ahead_of_the_room_list_is_let_go_and_the_list_returned() {
+        let url = spawn_server_sending(vec![
+            r#"{"type":"PeerLeft","data":{"peer_id":"00000000-0000-0000-0000-000000000002"}}"#
+                .to_string(),
+            r#"{"type":"PeerMessage","data":{"from":"00000000-0000-0000-0000-000000000002","body":{"topic":"unknown"}}}"#
+                .to_string(),
+            r#"{"type":"RoomList","data":{"rooms":[{"id":"t","name":"Test Room","peer_count":0,"max_peers":10,"has_password":false,"invite_code":"HJK567MNP","test_room":true}]}}"#
+                .to_string(),
+        ])
+        .await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+
+        let rooms = signaling_list_rooms(1, app.state::<SignalingState>())
+            .await
+            .expect("the room list should be returned");
+
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].name, "Test Room");
     }
 
     /// A connection that drops without a close frame must still surface
