@@ -133,18 +133,13 @@ impl UsageState {
     /// included) is a normal exit, so it does not on its own mean the
     /// confirmation screen has asked yet. While reporting is already on,
     /// this is queued at once like a crash and the pending file is cleared;
-    /// if the current version also [`attaches_log`], `jamjam.log` is sent
-    /// the same way `usage_send_previous_hang` does when the user answers
-    /// "send" (ADR-060) - no confirmation is asked, since turning reporting
-    /// on already was one. While it is off, it is kept (in memory and on
+    /// `jamjam.log` is not attached, because turning reporting on is consent
+    /// to the aggregated items only and the log can carry other people's
+    /// identifiers (ADR-065). While it is off, it is kept (in memory and on
     /// disk, so a further restart before the screen asks still finds it)
     /// until the screen asks and answers (`usage_previous_hang`,
     /// `usage_send_previous_hang`).
-    pub fn apply_previous_incident<R: Runtime>(
-        &self,
-        app: &AppHandle<R>,
-        incident: Option<(Hang, String, String)>,
-    ) {
+    pub fn apply_previous_incident(&self, incident: Option<(Hang, String, String)>) {
         let dir = self.reporter.state_dir();
         let incident = incident.or_else(|| dir.and_then(watchdog::read_pending_hang));
         let Some((hang, launch_id, app_version)) = incident else {
@@ -155,15 +150,6 @@ impl UsageState {
                 .record_previous_hang(hang, &launch_id, &app_version);
             if let Some(dir) = dir {
                 watchdog::clear_pending_hang(dir);
-            }
-            if attaches_log(app) {
-                let app = app.clone();
-                let comment = hang_report_comment(&hang, &launch_id);
-                spawn_settling(async move {
-                    if let Err(err) = crate::report_problem::send_log_report(&app, &comment).await {
-                        tracing::warn!("automatic hang report: could not attach jamjam.log: {err}");
-                    }
-                });
             }
         } else {
             if let Some(dir) = dir {
@@ -199,19 +185,31 @@ impl UsageState {
     /// ([`ClientInfo`]), whether or not usage reporting is on. Read fresh, so
     /// it shows the settings and devices of this moment. A driver that does not
     /// answer in time leaves the devices out; the rest is still sent.
+    ///
+    /// The audio devices (their names and IDs, which can carry a person's
+    /// name) are part of it only while usage reporting is on (ADR-065).
     pub async fn client_info(&self, config: &AppConfig) -> ClientInfo {
-        let audio = audio_env_within(
-            self.read_audio_env.clone(),
-            config.input_device_id.clone(),
-            config.output_device_id.clone(),
-        )
-        .await
-        .unwrap_or(AudioEnv {
-            input: None,
-            output: None,
-            input_id: config.input_device_id.clone(),
-            output_id: config.output_device_id.clone(),
-        });
+        let audio = if self.reporter.is_enabled() {
+            audio_env_within(
+                self.read_audio_env.clone(),
+                config.input_device_id.clone(),
+                config.output_device_id.clone(),
+            )
+            .await
+            .unwrap_or(AudioEnv {
+                input: None,
+                output: None,
+                input_id: config.input_device_id.clone(),
+                output_id: config.output_device_id.clone(),
+            })
+        } else {
+            AudioEnv {
+                input: None,
+                output: None,
+                input_id: None,
+                output_id: None,
+            }
+        };
         ClientInfo::new(self.reporter.app_version(), app_start_of(config), audio)
     }
 
@@ -440,12 +438,10 @@ pub fn usage_previous_hang_attaches_log(app: AppHandle) -> bool {
     attaches_log(&app)
 }
 
-/// Before 1.0.0, only verification users run the app, so both the confirmed
-/// hang report (ADR-059) and the automatic one sent while reporting is
-/// already on (ADR-060) also attach `jamjam.log` through the "Report a
-/// problem" send path. Revisit this at the 1.0.0 release: decide there
-/// whether `jamjam.log` still goes out unasked, and adjust this together
-/// with what the confirmation screen says it will send.
+/// Before 1.0.0, only verification users run the app, so the confirmed hang
+/// report (ADR-059) also attaches `jamjam.log` through the "Report a problem"
+/// send path. The automatic one sent while reporting is already on never
+/// does (ADR-065). From 1.0.0 neither does.
 fn major_attaches_log(major: u64) -> bool {
     major < 1
 }
@@ -454,8 +450,8 @@ fn attaches_log<R: Runtime>(app: &AppHandle<R>) -> bool {
     major_attaches_log(app.package_info().version.major)
 }
 
-/// The comment sent with the `jamjam.log` [`attaches_log`] attaches to a
-/// hang report - confirmed or automatic - naming the stage and launch it is
+/// The comment sent with the `jamjam.log` [`attaches_log`] attaches to the
+/// confirmed hang report, naming the stage and launch it is
 /// about so a report read on the server side does not need to be matched up
 /// with the structured `hang` event by anything but this text (the same
 /// `launch_id` is on both).
@@ -495,7 +491,7 @@ pub async fn usage_send_previous_hang(
         if attaches_log(&app) {
             let comment = hang_report_comment(&pending.hang, &pending.launch_id);
             if let Err(err) = crate::report_problem::send_log_report(&app, &comment).await {
-                tracing::warn!("automatic hang report: could not attach jamjam.log: {err}");
+                tracing::warn!("hang report: could not attach jamjam.log: {err}");
             }
         }
     }
@@ -923,6 +919,60 @@ mod tests {
         }
     }
 
+    fn named_microphone_reader() -> ReadAudioEnv {
+        Arc::new(|input_id, _| AudioEnv {
+            input: Some(jamjam::telemetry::Device {
+                name: "Taro's AirPods".to_string(),
+                kind: jamjam::telemetry::DeviceKind::Bluetooth,
+                channels: 1,
+                sample_rates: vec![48000],
+                min_buffer_frames: None,
+                is_default: false,
+            }),
+            output: None,
+            input_id: input_id.map(str::to_string),
+            output_id: None,
+        })
+    }
+
+    /// Verifies: REQ-CON-032
+    #[tokio::test]
+    async fn when_reporting_is_off_the_room_entry_info_carries_no_device_name_or_id() {
+        let (app, _) = launched(false);
+        let usage = reading_devices_with(&app, named_microphone_reader());
+        let config = AppConfig {
+            input_device_id: Some("coreaudio:Taro's AirPods".to_string()),
+            ..AppConfig::default()
+        };
+
+        let info = usage.client_info(&config).await;
+
+        let text = serde_json::to_string(&info).unwrap();
+        assert!(!text.contains("AirPods"), "{text}");
+        assert!(info.audio.input.is_none() && info.audio.input_id.is_none());
+        assert_eq!(info.app_version, "test");
+    }
+
+    /// Verifies: REQ-CON-032
+    #[tokio::test]
+    async fn when_reporting_is_on_the_room_entry_info_carries_the_device_name_and_id() {
+        let (app, _) = launched(true);
+        let usage = reading_devices_with(&app, named_microphone_reader());
+        let config = AppConfig {
+            input_device_id: Some("coreaudio:Taro's AirPods".to_string()),
+            usage_reporting: true,
+            ..AppConfig::default()
+        };
+
+        let info = usage.client_info(&config).await;
+
+        assert_eq!(info.audio.input.unwrap().name, "Taro's AirPods");
+        assert_eq!(
+            info.audio.input_id.as_deref(),
+            Some("coreaudio:Taro's AirPods")
+        );
+    }
+
     /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_the_settings_change_after_launch_the_new_settings_are_reported() {
@@ -1124,7 +1174,6 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-021
-    /// Verifies: REQ-TEL-023
     #[test]
     fn a_pre_1_0_0_app_version_attaches_the_log_and_a_1_0_0_or_later_one_does_not() {
         assert!(major_attaches_log(0));
@@ -1133,9 +1182,8 @@ mod tests {
     }
 
     /// Verifies: REQ-TEL-021
-    /// Verifies: REQ-TEL-023
     #[test]
-    fn the_automatic_hang_reports_comment_names_the_stage_and_launch() {
+    fn the_confirmed_hang_reports_comment_names_the_stage_and_launch() {
         let comment = hang_report_comment(
             &Hang {
                 stage: HangStage::Restart,
@@ -1264,7 +1312,7 @@ mod tests {
         let found = crate::watchdog::previous_incident(&relaunch);
         assert!(found.is_some(), "the killed launch's marker was found");
         let usage2 = UsageState::with_reporter(relaunch.clone());
-        usage2.apply_previous_incident(app.handle(), found);
+        usage2.apply_previous_incident(found);
         let watchdog2 = crate::watchdog::Watchdog::install(relaunch.clone());
 
         // The auto-updater restarts launch 2 before its own screen ever
@@ -1281,7 +1329,7 @@ mod tests {
         let found_next = crate::watchdog::previous_incident(&next);
         assert!(found_next.is_none(), "nothing new happened in launch 2");
         let usage3 = UsageState::with_reporter(next.clone());
-        usage3.apply_previous_incident(app.handle(), found_next);
+        usage3.apply_previous_incident(found_next);
 
         app.manage(usage3);
         let hang = usage_previous_hang(app.state::<UsageState>())
@@ -1303,13 +1351,11 @@ mod tests {
     /// A device with usage reporting already on never shows the
     /// confirmation screen: the incident is queued into the structured
     /// report at once, like a crash, and nothing is left pending for a
-    /// screen to ask about. This is the branch `report_problem::send_log_report`
-    /// is also attempted from when the current version [`attaches_log`]
-    /// (ADR-060); that part needs the real network/log-file path a mock app
-    /// does not have (same boundary `usage_send_previous_hang`'s own tests
-    /// stop at), so it is checked on a real device instead (see the ticket).
+    /// screen to ask about. `jamjam.log` is not attached on this path
+    /// (ADR-065).
     ///
     /// Verifies: REQ-TEL-019
+    /// Verifies: REQ-TEL-023
     #[tokio::test]
     async fn when_reporting_is_already_on_a_previous_incident_is_recorded_without_asking() {
         let dir = tempfile::tempdir().unwrap();
@@ -1320,19 +1366,15 @@ mod tests {
             true,
         );
         let usage = UsageState::with_reporter(reporter.clone());
-        let app = tauri::test::mock_app();
 
-        usage.apply_previous_incident(
-            app.handle(),
-            Some((
-                Hang {
-                    stage: HangStage::AppExit,
-                    stalled_ms: Some(6000),
-                },
-                "launch-killed-1".to_string(),
-                "0.1.0-36".to_string(),
-            )),
-        );
+        usage.apply_previous_incident(Some((
+            Hang {
+                stage: HangStage::AppExit,
+                stalled_ms: Some(6000),
+            },
+            "launch-killed-1".to_string(),
+            "0.1.0-36".to_string(),
+        )));
 
         let lines = reported_lines(&reporter);
         assert_eq!(lines.len(), 1, "{lines:?}");

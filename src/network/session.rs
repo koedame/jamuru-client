@@ -120,7 +120,7 @@ impl Session {
             return Ok(()); // Already added
         }
 
-        info!("Adding peer {} ({}) at {}", info.name, info.id, addr);
+        info!("Adding peer {} at {}", info.id, addr);
 
         peers.insert(
             info.id,
@@ -140,8 +140,8 @@ impl Session {
     /// Remove a peer from the session
     pub async fn remove_peer(&self, peer_id: Uuid) {
         let mut peers = self.peers.write().await;
-        if let Some(peer) = peers.remove(&peer_id) {
-            info!("Removed peer {} ({})", peer.info.name, peer_id);
+        if peers.remove(&peer_id).is_some() {
+            info!("Removed peer {}", peer_id);
         }
     }
 
