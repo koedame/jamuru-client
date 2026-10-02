@@ -31,6 +31,8 @@ pub enum Audio {
     Start {
         peer: Uuid,
         candidates: Vec<SocketAddr>,
+        /// The key the server gave for `peer`, which its key exchange is checked against
+        link_key: Option<String>,
     },
 }
 
@@ -207,6 +209,7 @@ impl Roster {
         Some(Audio::Start {
             peer: peer.id,
             candidates,
+            link_key: peer.link_key.clone(),
         })
     }
 
@@ -293,6 +296,7 @@ mod tests {
             local_addr: None,
             joined_at: 0,
             features: vec![],
+            link_key: None,
         }
     }
 
@@ -300,6 +304,7 @@ mod tests {
         Audio::Start {
             peer: Uuid::from_u128(id),
             candidates: vec![addr.parse().unwrap()],
+            link_key: None,
         }
     }
 

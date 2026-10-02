@@ -91,6 +91,17 @@ describe('registerInviteLinkHandler', () => {
     expect(onInvalidLink).toHaveBeenCalledTimes(1);
   });
 
+  it('logs a malformed invite link, the link itself stays out of the log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(getCurrent).mockResolvedValueOnce(['jamjam://join/ABC-123']);
+
+    await registerInviteLinkHandler(vi.fn(), vi.fn());
+
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('ABC-123');
+    warn.mockRestore();
+  });
+
   it('joins only the first invite link in a batch', async () => {
     vi.mocked(getCurrent).mockResolvedValueOnce([
       'jamjam://join/ABC234XYZ',
