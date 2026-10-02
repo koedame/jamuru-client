@@ -692,6 +692,7 @@ async fn when_both_ends_check_the_peer_and_nothing_interferes_audio_arrives_encr
     let pair = relayed_pair(Some((&sender_key, &receiver_key)), pass_on).await;
     wait_until_encrypted(&[&pair.sender, &pair.receiver]).await;
     assert!(pair.sender.checks_peer() && pair.receiver.checks_peer());
+    assert!(pair.sender.stats().peer_checked && pair.receiver.stats().peer_checked);
 
     for _ in 0..3 {
         pair.sender.send_audio(&known_signal(), 0).await.unwrap();
@@ -723,6 +724,7 @@ async fn when_the_ends_do_not_check_the_peer_a_relay_in_the_exchange_hears_the_a
     .await;
     wait_until_encrypted(&[&pair.sender, &pair.receiver]).await;
     assert!(!pair.sender.checks_peer() && !pair.receiver.checks_peer());
+    assert!(!pair.sender.stats().peer_checked && !pair.receiver.stats().peer_checked);
 
     for _ in 0..3 {
         pair.sender.send_audio(&known_signal(), 0).await.unwrap();

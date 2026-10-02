@@ -64,6 +64,10 @@ pub struct ConnectionStats {
     pub uptime_seconds: u64,
     /// Whether what this link carries is encrypted
     pub security: LinkSecurity,
+    /// Whether the keys of this link are bound to the peer's key from the signaling server.
+    /// `false` for a peer whose app tells none and for a direct connection: the link is then
+    /// encrypted but not known to be with that peer.
+    pub peer_checked: bool,
     /// Packets turned away because they were forged, repeated or from a peer that is not
     /// encrypting while the link is
     pub packets_refused: u64,
@@ -1257,6 +1261,7 @@ impl Connection {
                 .map(|_| self.fec_recovered.load(Ordering::Relaxed)),
             uptime_seconds: uptime,
             security: self.secure_link.security(),
+            peer_checked: self.secure_link.checks_peer(),
             packets_refused: self.secure_link.refused(),
         }
     }
