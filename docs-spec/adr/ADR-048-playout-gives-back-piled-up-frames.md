@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-048: Play-out Gives Back Piled-up Frames"
-sidebar_position: 48
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-048: 再生バッファが目標より深く溜め込み続けたら、余分を 1 回で捨てる

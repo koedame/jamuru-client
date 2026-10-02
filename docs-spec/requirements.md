@@ -111,7 +111,7 @@ REQ-AUD-030（受信側は再生リングバッファの空き容量に従って
 | REQ-NET-020 | PCM の必要帯域がサンプルレートとビット幅から算出され、1ch あたり約1.5Mbpsを下回らない | must |
 | REQ-NET-021 | FEC の帯域コストがプリセットの冗長度と一致する | must |
 | REQ-NET-022 | フレームが小さいほどヘッダ overhead により必要帯域が増える | must |
-| REQ-NET-023 | 相手が送った音声パケットのうち届かなかった割合が 1% 以上なら marginal、5% 以上なら insufficient、それ未満なら sufficient と判定される（[ADR-046](./adr/ADR-046-bandwidth-verdict-from-loss.md)） | must |
+| REQ-NET-023 | 相手が送った音声パケットのうち届かなかった割合が 1% 以上なら marginal、5% 以上なら insufficient、それ未満なら sufficient と判定される（[ADR-046](./adr/ADR-046-audio-gaps-are-measured-not-guessed.md)） | must |
 | REQ-NET-024 | 帯域測定は区間レートを返し、短すぎる区間では値を返さず、カウンタ巻き戻しで負値を返さない | must |
 | REQ-NET-025 | 測定前は帯域判定を返さない（未観測の回線について警告しない） | must |
 | REQ-NET-026 | `ConnectionStats` の各指標が実際のトラフィックに反応する（定数ではない） | must |
@@ -416,4 +416,4 @@ CLI と GUI をサーバーに繋いだ状態の振る舞い:
 - [ADR-018: 反復V字モデルとトレーサビリティ](./adr/ADR-018-iterative-v-model-traceability.md)
 - [ADR-019: プリセット遅延バジェット](./adr/ADR-019-preset-latency-budget.md)
 - [traceability.md](./traceability.md) - 要求と検証の対応表（自動生成）
-- `docs-spec/behavior/*.feature` - 振る舞い要求（Gherkin。ドキュメントサイトには公開されない）
+- `docs-spec/behavior/*.feature` - 振る舞い要求（Gherkin）

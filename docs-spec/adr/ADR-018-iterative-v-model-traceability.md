@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-018 Iterative V-Model and Traceability
-sidebar_position: 18
----
-
 # ADR-018: 反復V字モデルとトレーサビリティ
 
 ## Status

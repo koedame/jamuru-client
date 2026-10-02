@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-053: Device Round Trip Is Measured In The Callbacks"
-sidebar_position: 53
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-053: デバイスの往復の遅延は、出力と入力のコールバックの中でパルスの時刻を測って求める

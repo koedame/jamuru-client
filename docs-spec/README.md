@@ -1,8 +1,3 @@
----
-sidebar_label: Overview
-sidebar_position: 1
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # jamjam Specification Documents
@@ -118,6 +113,6 @@ sidebar_position: 1
 
 ## 開発者向けドキュメント
 
-開発者向けの解説資料（ガイド、チュートリアル等）は [Docs](/docs/intro) を参照。
+開発者向けの解説資料（ガイド、チュートリアル等）は [docs/](../docs/README.md) を参照。
 
-> docs-site/ の内容は仕様ではない。実装の正は常に本ディレクトリ（docs-spec/）である。
+> docs/ の内容は仕様ではない。実装の正は常に本ディレクトリ（docs-spec/）である。

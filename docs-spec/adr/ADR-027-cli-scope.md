@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-027: CLI Scope"
-sidebar_position: 27
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-027: CLI の位置づけと GUI との機能差

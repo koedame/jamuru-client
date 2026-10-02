@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-023 Drop Phase as an Identifier
-sidebar_position: 23
----
-
 # ADR-023: 「Phase」を識別子として使わない
 
 ## Status

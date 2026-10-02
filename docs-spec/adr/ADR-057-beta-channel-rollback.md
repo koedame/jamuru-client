@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-057: Beta Channel Rollback"
-sidebar_position: 57
----
-
 # ADR-057: 悪いベータ版が出たら、beta-channel を過去の版へ意図的に戻せるようにする
 
 ## Status

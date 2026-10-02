@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-036: Diagnostic Log File"
-sidebar_position: 36
----
-
 # ADR-036: 公開ビルドでも診断ログファイル `jamjam.log` を書く
 
 ## Status
