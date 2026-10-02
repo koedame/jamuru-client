@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-002: UDP Protocol"
-sidebar_position: 2
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-002: カスタムUDPプロトコル採用

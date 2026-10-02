@@ -1,8 +1,3 @@
----
-sidebar_label: Network
-sidebar_position: 2
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # Network API

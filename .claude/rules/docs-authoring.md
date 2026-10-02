@@ -1,7 +1,6 @@
 ---
 paths:
   - "docs-spec/**"
-  - "docs-site/**"
   - "docs/**"
 ---
 

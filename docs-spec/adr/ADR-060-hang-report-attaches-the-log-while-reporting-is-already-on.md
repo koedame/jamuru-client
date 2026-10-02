@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-060: Hang Report Attaches the Log While Reporting Is Already On"
-sidebar_position: 60
----
-
 # ADR-060: 送信オンの端末の自動の固まり報告にも `jamjam.log` を添える
 
 ## Status

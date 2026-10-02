@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-030: Server URL by Build Profile"
-sidebar_position: 30
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-030: サーバーの URL をビルドの種別で決めて 1 か所に置き、シグナリングの接続先はサーバーに問い合わせる

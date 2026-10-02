@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-035: STUN Through the Audio Socket"
-sidebar_position: 35
----
-
 # ADR-035: 公開アドレスは音声ソケット自身から STUN に問い合わせて公開する
 
 ## Status

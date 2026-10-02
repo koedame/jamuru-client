@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-051: The Route Follows The Peer's Answers"
-sidebar_position: 51
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-051: 音声の送り先は、相手の応答が確認できた候補にする

@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-046: Audio Gaps Are Measured"
-sidebar_position: 46
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-046: 受信した音の欠けを数え、時刻と一緒に記録する。自動調整と帯域の警告は、その欠けを見る

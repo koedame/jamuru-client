@@ -1,8 +1,3 @@
----
-sidebar_label: Device Identity
-sidebar_position: 7
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # Device Identity Specification（端末アイデンティティ）

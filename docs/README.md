@@ -1,13 +1,6 @@
----
-sidebar_position: 1
-title: jamjam について
-description: ミュージシャン向け低遅延（< 2ms）P2P音声通信アプリ
----
-
-:::note
-このドキュメントは開発者向けの解説資料です。
-正確な仕様・制約・判断は [docs-spec/](https://github.com/koedame/jamjam-client/tree/main/docs-spec) を参照してください。
-:::
+> [!NOTE]
+> このドキュメントは開発者向けの解説資料です。
+> 正確な仕様・制約・判断は [docs-spec/](../docs-spec) を参照してください。
 
 # jamjam
 
@@ -53,11 +46,11 @@ jamjamは、ミュージシャンがインターネット越しにリアルタ�
 | エフェクト、VST/CLAP プラグインホスト | — | 未着手 |
 
 > 「未着手」の機能はコードベースに存在しません。実装状況の正は
-> [docs-spec/traceability.md](https://github.com/koedame/jamjam-client/blob/main/docs-spec/traceability.md)
+> [docs-spec/traceability.md](../docs-spec/traceability.md)
 > （要求と検証の対応表）です。
 
 ## 次のステップ
 
-- [インストール](/docs/getting-started/installation) - jamjamをインストールする
-- [クイックスタート](/docs/getting-started/quick-start) - 最初のセッションを始める
-- [ジッタバッファ](/docs/concepts/jitter-buffer) - 低遅延を実現する技術を理解する
+- [インストール](getting-started/installation.md) - jamjamをインストールする
+- [クイックスタート](getting-started/quick-start.md) - 最初のセッションを始める
+- [ジッタバッファ](concepts/jitter-buffer.md) - 低遅延を実現する技術を理解する

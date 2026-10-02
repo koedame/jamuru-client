@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-028: Single-stage Play-out"
-sidebar_position: 28
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-028: 受信音声を単段バッファにし、出力コールバックが直接引く

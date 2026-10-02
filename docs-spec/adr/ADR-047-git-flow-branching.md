@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-047: Git-Flow Branching"
-sidebar_position: 47
----
-
 # ADR-047: 開発は develop で進め、main には出した正式版だけを置く（Git-Flow）
 
 ## Status
