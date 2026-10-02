@@ -69,5 +69,9 @@ fn relative_links_in_docs_point_at_existing_files() {
             }
         }
     }
-    assert!(broken.is_empty(), "broken links:\n  {}", broken.join("\n  "));
+    assert!(
+        broken.is_empty(),
+        "broken links:\n  {}",
+        broken.join("\n  ")
+    );
 }
