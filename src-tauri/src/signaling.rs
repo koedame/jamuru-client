@@ -12,8 +12,8 @@ use tokio::sync::Mutex;
 use tokio::time::Duration;
 
 use jamjam::network::{
-    gather_host_candidates, AddressCandidate, ClientInfo, NetworkError, PeerInfo, RoomInfo,
-    SignalingClient, SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
+    gather_host_candidates, AddressCandidate, ClientInfo, LinkIdentity, NetworkError, PeerInfo,
+    RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
 };
 use uuid::Uuid;
 
@@ -111,6 +111,9 @@ pub struct SignalingState {
     /// Events from the UI's own help actions, handed over on its next poll
     /// with those that arrived from the room.
     queued_events: std::sync::Mutex<Vec<SignalingEvent>>,
+    /// The key this app signs its audio key exchanges with in the room it entered last. A new
+    /// one is made each time a room is created or joined.
+    link_identity: std::sync::Mutex<Option<LinkIdentity>>,
 }
 
 impl SignalingState {
@@ -122,7 +125,27 @@ impl SignalingState {
             help: std::sync::Mutex::new(Help::new()),
             help_conn: std::sync::Mutex::new(None),
             queued_events: std::sync::Mutex::new(Vec::new()),
+            link_identity: std::sync::Mutex::new(None),
         }
+    }
+
+    /// The key this app signs its key exchanges with in the room it is in
+    pub fn link_identity(&self) -> Option<LinkIdentity> {
+        self.link_identity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Makes the key for a room being entered, and returns its public half to tell the server
+    fn new_link_identity(&self) -> String {
+        let identity = LinkIdentity::generate();
+        let public_key = identity.public_key();
+        *self
+            .link_identity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(identity);
+        public_key
     }
 }
 
@@ -281,6 +304,7 @@ pub async fn signaling_join_room<R: Runtime>(
         peer_name: peer_name.clone(),
         features: vec![PEER_MESSAGE_FEATURE.to_string()],
         client_info,
+        link_key: Some(state.new_link_identity()),
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -486,6 +510,7 @@ pub async fn signaling_create_room<R: Runtime>(
         peer_name: peer_name.clone(),
         features: vec![PEER_MESSAGE_FEATURE.to_string()],
         client_info,
+        link_key: Some(state.new_link_identity()),
     })
     .await
     .map_err(|e| e.to_string())?;
