@@ -596,6 +596,7 @@ fn enter_room<R: Runtime>(
     peer_name: String,
     fallback_code: &str,
 ) -> Vec<Audio> {
+    let own = Uuid::parse_str(&result.peer_id).unwrap_or_default();
     app.state::<SessionState>().change(app, |session| {
         session.connection_id = Some(conn);
         session.room = Some(Room {
@@ -613,7 +614,7 @@ fn enter_room<R: Runtime>(
         session.joining_code = None;
         session.reconnect = Reconnect::Idle;
         session.reconnect_error = None;
-        session.roster.entered(result.peers)
+        session.roster.entered(own, result.peers)
     })
 }
 
@@ -895,8 +896,40 @@ fn spawn_pump<R: Runtime>(app: AppHandle<R>, conn: u32) {
             if !events.is_empty() && !handle_events(&app, conn, events).await {
                 return;
             }
+            follow_the_audio_link(&app, conn).await;
         }
     });
+}
+
+/// Tells the roster how the audio link is doing, and carries out where it
+/// then sends the audio. The server tells of a peer that left, not of one whose
+/// connection it has not yet found dead, so a link gone silent is the only
+/// sign that the peer the audio is with is no longer there to hear it.
+async fn follow_the_audio_link<R: Runtime>(app: &AppHandle<R>, conn: u32) {
+    let state = app.state::<SessionState>();
+    let link = app.state::<streaming::StreamingState>().link_state();
+    if !matches!(
+        link.as_deref(),
+        Some("reconnecting" | "failed" | "connected")
+    ) {
+        return;
+    }
+    let _flow = state.flow.lock().await;
+    let audio = state.change(app, |session| {
+        if session.connection_id != Some(conn) || session.room.is_none() {
+            return Vec::new();
+        }
+        match link.as_deref() {
+            Some("reconnecting") => session.roster.audio_silent(),
+            Some("failed") => session.roster.audio_failed(),
+            Some("connected") => {
+                session.roster.audio_recovered();
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    });
+    run_audio(app, conn, audio).await;
 }
 
 /// Ends the connection `conn` and gets it back, rejoining the room the app is
@@ -988,6 +1021,7 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
         match step {
             Audio::Stop => stop_audio(app).await,
             Audio::Advertise => advertise(app, conn).await,
+            Audio::KeepAddress => keep_address(app, conn).await,
             Audio::Start {
                 peer,
                 candidates,
@@ -1029,6 +1063,17 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
                 }
             }
         }
+    }
+}
+
+/// Binds the audio socket on the port the last audio session used, so the
+/// address the room already has stays good. Advertises a new one only when
+/// that port could not be had again.
+async fn keep_address<R: Runtime>(app: &AppHandle<R>, conn: u32) {
+    match streaming::streaming_prepare_again(app.state()).await {
+        Ok(true) => {}
+        Ok(false) => advertise(app, conn).await,
+        Err(e) => tracing::error!("Failed to bind the audio socket again: {}", e),
     }
 }
 
@@ -1105,6 +1150,10 @@ mod tests {
         /// time, and it refuses every WebSocket handshake with a 401, as it
         /// does a device whose clock differs from its own.
         clock_behind_secs: Option<i64>,
+        /// When set, an app that rejoins gets a new peer id, and the room still
+        /// lists the entries of the ids it had before, as it does while the
+        /// server has not noticed the old connection is gone.
+        keep_old_entries: bool,
     }
 
     enum Say {
@@ -1182,6 +1231,11 @@ mod tests {
         /// right) and it refuses the connection of any device while it is.
         fn set_clock_behind(&self, secs: Option<i64>) {
             self.log.lock().unwrap().clock_behind_secs = secs;
+        }
+
+        /// From now on, a rejoin is a new peer and its old entries stay listed.
+        fn keep_old_entries_in_the_room(&self) {
+            self.log.lock().unwrap().keep_old_entries = true;
         }
 
         fn reset(&self, connection: usize) {
@@ -1275,11 +1329,26 @@ mod tests {
                         "JoinRoom" if value["data"]["room_id"] == "NOPE22" => Some(
                             r#"{"type":"Error","data":{"message":"room not found"}}"#.to_string(),
                         ),
-                        "JoinRoom" => Some(format!(
-                            r#"{{"type":"RoomJoined","data":{{"room_id":"room-1","peer_id":"{}","invite_code":"ABC234XYZ","peers":[{}]}}}}"#,
-                            Uuid::from_u128(ME),
-                            peer_json(OTHER, "Aki")
-                        )),
+                        "JoinRoom" => {
+                            let (own, mut peers) = {
+                                let log = log.lock().unwrap();
+                                let joins =
+                                    log.received.iter().filter(|(_, k)| k == "JoinRoom").count();
+                                if log.keep_old_entries {
+                                    let id = |join: usize| ME + 100 * join as u128;
+                                    let old = (0..joins - 1).map(|j| peer_json(id(j), "Me"));
+                                    (id(joins - 1), old.collect::<Vec<_>>())
+                                } else {
+                                    (ME, Vec::new())
+                                }
+                            };
+                            peers.push(peer_json(OTHER, "Aki"));
+                            Some(format!(
+                                r#"{{"type":"RoomJoined","data":{{"room_id":"room-1","peer_id":"{}","invite_code":"ABC234XYZ","peers":[{}]}}}}"#,
+                                Uuid::from_u128(own),
+                                peers.join(",")
+                            ))
+                        }
                         _ => None,
                     };
                     if let Some(reply) = reply {
@@ -1708,6 +1777,31 @@ mod tests {
         assert!(announced
             .windows(2)
             .all(|pair| pair[0].revision < pair[1].revision));
+    }
+
+    /// Verifies: REQ-CON-130
+    #[tokio::test]
+    async fn the_connection_drops_and_the_room_still_lists_the_old_entry_of_the_app_does_not_list_it_as_a_participant(
+    ) {
+        let server = FakeServer::start().await;
+        server.keep_old_entries_in_the_room();
+        let dir = tempfile::tempdir().unwrap();
+        let app = in_a_room(&server, &dir).await;
+        let first = app.state::<SessionState>().snapshot().connection_id;
+
+        server.reset(0);
+        let snapshot = until(&app, |s| {
+            s.phase == Phase::Connected
+                && s.connection_id.is_some()
+                && s.connection_id != first
+                && s.signaling_reconnect == Reconnect::Idle
+        })
+        .await;
+
+        let room = snapshot.room.unwrap();
+        let names: Vec<_> = room.participants.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["Aki"]);
+        assert_ne!(room.peer_id, Uuid::from_u128(ME).to_string());
     }
 
     fn server_rejoined(server: &FakeServer) -> bool {
