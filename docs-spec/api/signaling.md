@@ -520,7 +520,7 @@ stateDiagram-v2
 
 ### 5.2 鍵交換の署名の鍵（`link_key`）
 
-相手との UDP の通信を暗号化する鍵交換（[ADR-064](../adr/ADR-064-encrypt-the-audio-link.md)）で、相手が本人であることを確かめるための鍵。判断は [ADR-065](../adr/ADR-065-check-the-peer-in-the-key-exchange.md)。
+相手との UDP の通信を暗号化する鍵交換（[ADR-064](../adr/ADR-064-encrypt-the-audio-link.md)）で、相手が本人であることを確かめるための鍵。判断は [ADR-067](../adr/ADR-067-check-the-peer-in-the-key-exchange.md)。
 
 1. アプリは**ルームを作る・入るたびに**、使い捨ての Ed25519 鍵を作り、公開鍵（32 bytes を base64 にしたもの）を `CreateRoom`/`JoinRoom` の `link_key` で知らせる。
    端末識別子（[ADR-024](../adr/ADR-024-device-identity-instead-of-accounts.md)）とは別の鍵で、端末識別子は今までどおり他の参加者に渡らない（REQ-IDT-007）。
