@@ -1158,13 +1158,25 @@ pub async fn streaming_stop(state: tauri::State<'_, StreamingState>) -> Result<(
         }
     }
 
-    // Wait briefly for thread to finish
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    state.is_active.store(false, Ordering::SeqCst);
+    // The audio thread clears `is_active` as the last thing it does. Waiting
+    // for that, not for a fixed time, is what keeps the end of this session
+    // from clearing the flag of the one that starts right after it.
+    let deadline = std::time::Instant::now() + STOP_WAIT_LIMIT;
+    while state.is_active.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+    if state.is_active.swap(false, Ordering::SeqCst) {
+        tracing::warn!(
+            "The audio thread did not end within {:?} of being told to stop",
+            STOP_WAIT_LIMIT
+        );
+    }
 
     Ok(())
 }
+
+/// How long [`streaming_stop`] waits for the audio thread to end.
+const STOP_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Get streaming status
 #[tauri::command]
@@ -2844,6 +2856,7 @@ async fn run_audio_streaming(
 mod tests {
     use super::*;
     use jamjam::audio::PlayoutConfig;
+    use tauri::Manager;
 
     /// Verifies: REQ-AUD-126
     #[cfg(target_os = "windows")]
@@ -2883,6 +2896,28 @@ mod tests {
         assert_eq!(shared_asio_driver(None, Some(&asio)), None);
         assert_eq!(shared_asio_driver(Some(&asio), None), None);
         assert_eq!(shared_asio_driver(None, None), None);
+    }
+
+    /// The bug this guards: stopping waited a fixed 100 ms, and a thread that
+    /// took longer to end cleared `is_active` after the next session had set
+    /// it, which ended that session as soon as it connected.
+    #[tokio::test]
+    async fn stopping_waits_until_the_audio_thread_has_ended() {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+        let state = app.state::<StreamingState>();
+        state.is_active.store(true, Ordering::SeqCst);
+        let is_active = state.is_active.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            is_active.store(false, Ordering::SeqCst);
+        });
+        let started = std::time::Instant::now();
+
+        streaming_stop(app.state()).await.unwrap();
+
+        assert!(started.elapsed() >= std::time::Duration::from_millis(400));
+        assert!(!state.is_active.load(Ordering::SeqCst));
     }
 
     /// After audio starts the socket belongs to the audio session, so the
