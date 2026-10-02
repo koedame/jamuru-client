@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-045: Beta Self Update"
-sidebar_position: 45
----
-
 # ADR-045: ベータ版も自動更新する。ベータ版は固定タグの Release から更新情報を読み、ベータごとに違う版としてビルドする
 
 ## Status

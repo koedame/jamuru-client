@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-050: Calls Into A Hung Audio Driver Are Bounded"
-sidebar_position: 50
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-050: 固まったオーディオドライバへの呼び出しには上限を付け、待ちが他の操作を止めないようにする

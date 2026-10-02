@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-063: Third-Party License Notices"
-sidebar_position: 63
----
-
 # ADR-063: 第三者ライセンスの表示は、実際の依存から生成して検査する
 
 ## Status

@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-054: The Route Is The Nearest That Answers"
-sidebar_position: 54
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-054: 送り先は、応答した候補のうち近い経路にする

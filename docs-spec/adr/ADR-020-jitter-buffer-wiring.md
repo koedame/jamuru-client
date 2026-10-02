@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-020 Jitter Buffer Wiring
-sidebar_position: 20
----
-
 # ADR-020: ジッタバッファの受信経路への配線
 
 ## Status

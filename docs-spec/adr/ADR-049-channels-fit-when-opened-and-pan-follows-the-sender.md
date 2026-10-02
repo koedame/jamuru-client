@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-049: Channels Fit When Opened, Pan Follows The Sender"
-sidebar_position: 49
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-049: デバイスへのチャンネルの当てはめは開くときだけ。同じ番号の組は 1 チャンネル。受け手のパンは届いた音に合わせる

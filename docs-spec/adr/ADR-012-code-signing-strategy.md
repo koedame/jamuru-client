@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-012 Code Signing Strategy
-sidebar_position: 12
----
-
 # ADR-012: Code Signing Strategy
 
 ## Context

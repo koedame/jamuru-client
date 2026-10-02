@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-059: Hang Report Attaches the Log Before 1.0.0"
-sidebar_position: 59
----
-
 # ADR-059: 1.0.0 より前は、正常終了しなかった前回の起動の確認にも `jamjam.log` を添える
 
 ## Status

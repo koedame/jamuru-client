@@ -1,6 +1,6 @@
 ---
 name: spec-review
-description: Review specification and developer documents for compliance with project guidelines. Use when checking docs-spec/ and docs-site/docs/ for ambiguous expressions or missing required sections.
+description: Review specification and developer documents for compliance with project guidelines. Use when checking docs-spec/ and docs/ for ambiguous expressions or missing required sections.
 allowed-tools: Read, Glob, Grep
 ---
 
@@ -10,7 +10,7 @@ allowed-tools: Read, Glob, Grep
 
 1. Determine the review target:
    - If argument is provided: Review that specific file
-   - If no argument: Find all files in `docs-spec/` and `docs-site/docs/` directories using Glob (exclude node_modules)
+   - If no argument: Find all files in `docs-spec/` and `docs/` directories using Glob
 
 2. Read each target file
 
@@ -111,7 +111,7 @@ Flag if:
 
 ---
 
-### docs-site Files (docs-site/docs/**/*.md)
+### docs Files (docs/**/*.md)
 
 Checks for developer documentation:
 
@@ -156,7 +156,7 @@ If file contains implementation status table:
 ```
 
 ```
-## docs-site/docs/intro.md
+## docs/README.md
 
 ### Issues Found
 - [Line 14] Ambiguous expression detected

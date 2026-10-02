@@ -187,7 +187,7 @@
 | REQ-NET-020 | must | PCM の必要帯域がサンプルレートとビット幅から算出され、1ch あたり約1.5Mbpsを下回らない | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::pcm_requirement_matches_the_documented_figure |
 | REQ-NET-021 | must | FEC の帯域コストがプリセットの冗長度と一致する | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::fec_costs_its_redundancy_in_bandwidth |
 | REQ-NET-022 | must | フレームが小さいほどヘッダ overhead により必要帯域が増える | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::smaller_frames_cost_more_in_overhead |
-| REQ-NET-023 | must | 相手が送った音声パケットのうち届かなかった割合が 1% 以上なら marginal、5% 以上なら insufficient、それ未満なら sufficient と判定される（[ADR-046](./adr/ADR-046-bandwidth-verdict-from-loss.md)） | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::status_classifies_the_share_of_the_peers_packets_that_were_lost |
+| REQ-NET-023 | must | 相手が送った音声パケットのうち届かなかった割合が 1% 以上なら marginal、5% 以上なら insufficient、それ未満なら sufficient と判定される（[ADR-046](./adr/ADR-046-audio-gaps-are-measured-not-guessed.md)） | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::status_classifies_the_share_of_the_peers_packets_that_were_lost |
 | REQ-NET-024 | must | 帯域測定は区間レートを返し、短すぎる区間では値を返さず、カウンタ巻き戻しで負値を返さない | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::estimator_measures_the_interval_rate<br/>`src/network/connection.rs`::wire_bytes_add_the_udp_and_ip_headers_of_every_packet |
 | REQ-NET-025 | must | 測定前は帯域判定を返さない（未観測の回線について警告しない） | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::status_is_absent_until_measured |
 | REQ-NET-026 | must | `ConnectionStats` の各指標が実際のトラフィックに反応する（定数ではない） | `docs-spec/requirements.md` | `tests/metric_liveness_test.rs`::connection_stats_respond_to_traffic |

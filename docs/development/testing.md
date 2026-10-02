@@ -1,13 +1,6 @@
----
-sidebar_position: 2
-title: テスト
-description: jamjamのテスト実行方法
----
-
-:::note
-このドキュメントは開発者向けの解説資料です。
-正確な仕様・制約・判断は [docs-spec/](https://github.com/koedame/jamjam-client/tree/main/docs-spec) を参照してください。
-:::
+> [!NOTE]
+> このドキュメントは開発者向けの解説資料です。
+> 正確な仕様・制約・判断は [docs-spec/](../../docs-spec) を参照してください。
 
 # テスト
 
@@ -40,7 +33,7 @@ cargo test -- --nocapture
 
 ## テスト構成
 
-テストは [docs-spec/behavior/](https://github.com/koedame/jamjam-client/tree/main/docs-spec/behavior) の BDD 仕様に基づいています。
+テストは [docs-spec/behavior/](../../docs-spec/behavior) の BDD 仕様に基づいています。
 
 | テストファイル | 対応仕様 |
 |--------------|---------|
@@ -74,5 +67,5 @@ cargo test --all-targets
 
 ## 関連情報
 
-- [ビルド](/docs/development/building) - ビルド方法
-- [CI/CD](/docs/development/ci) - 継続的インテグレーション
+- [ビルド](building.md) - ビルド方法
+- [CI/CD](ci.md) - 継続的インテグレーション

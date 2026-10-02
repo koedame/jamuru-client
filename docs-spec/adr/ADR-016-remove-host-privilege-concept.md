@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-016: Remove Host Privilege Concept"
-sidebar_position: 16
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-016: ルーム作成者特権（ホスト概念）の廃止

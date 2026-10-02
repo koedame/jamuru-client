@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-014 Claude Code Config Structure
-sidebar_position: 14
----
-
 # ADR-014: Claude Code 設定構成の再編
 
 ## Context

@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-062: Remove Connection History"
-sidebar_position: 62
----
-
 # ADR-062: 「最近の接続」（入ったルームの履歴）を、画面・呼び出し・設定ファイルの項目ごと無くす
 
 ## Status
