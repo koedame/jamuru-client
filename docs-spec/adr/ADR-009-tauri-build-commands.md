@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-009 Tauri Build Commands
-sidebar_position: 9
----
-
 # ADR-009: Tauri Build Commands Cross-Platform Strategy
 
 ## Context

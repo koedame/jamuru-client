@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-043: Remote Operation RPC"
-sidebar_position: 43
----
-
 # ADR-043: アプリの操作はすべて名前付きのコマンド（RPC）にする。E2E は全部を、相手の設定の手伝いはその一部を呼ぶ
 
 ## Status

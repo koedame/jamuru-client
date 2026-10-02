@@ -1,8 +1,3 @@
----
-sidebar_label: Audio Engine
-sidebar_position: 1
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # Audio Engine API

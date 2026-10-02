@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-024: Device Identity Instead of Accounts"
-sidebar_position: 24
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-024: 端末アイデンティティによる識別（メールOTPアカウントを上書き）

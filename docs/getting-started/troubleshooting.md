@@ -1,9 +1,3 @@
----
-sidebar_position: 3
-title: トラブルシューティング
-description: jamjamの問題解決ガイド
----
-
 # トラブルシューティング
 
 jamjamで問題が発生した場合の解決方法をまとめています。

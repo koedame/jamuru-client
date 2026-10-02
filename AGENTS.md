@@ -44,7 +44,7 @@ docs-spec/           # 仕様書（実装の唯一の正）
 ├── behavior/            # 振る舞い定義（BDD/Gherkin・@REQ-ID タグ付き）
 └── ui/                  # UI仕様（画面・コンポーネント・デザイントークン）
 
-docs-site/           # Docusaurus 開発者向けドキュメント（解説資料。仕様ではない）
+docs/                # 利用者・開発者向けの解説資料（インストール・プライバシー・ビルド等。仕様ではない）
 
 .claude/
 ├── settings.json    # 権限設定
@@ -98,7 +98,7 @@ docs-site/           # Docusaurus 開発者向けドキュメント（解説資�
 | `traceability.md` | 要求ID付与・検証宣言・対応表更新 | 仕様・コード・テスト編集時 |
 | `source-available.md` | Source Available ライセンス・秘匿情報ポリシー | 常時 |
 | `spec-sync.md` | 仕様書と実装の同期・実装フェーズ指示 | コード・仕様・依存関係編集時 |
-| `docs-authoring.md` | 仕様書の書き方・図解ルール | docs-spec/, docs-site/, docs/ 編集時 |
+| `docs-authoring.md` | 仕様書の書き方・図解ルール | docs-spec/, docs/ 編集時 |
 | `implementation-quality.md` | 実装品質（形骸化実装禁止等） | コード編集時 |
 | `test-quality.md` | テスト品質（テスト削除禁止等） | コード・テスト編集時 |
 | `ui-component-rules.md` | UIコンポーネント設計（Pure + Adapter） | ui/src/ 編集時 |

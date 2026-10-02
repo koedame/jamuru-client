@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-011 Core Library Architecture
-sidebar_position: 11
----
-
 # ADR-011: Core Library Architecture
 
 ## Status

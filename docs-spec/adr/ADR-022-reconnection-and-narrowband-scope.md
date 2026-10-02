@@ -1,8 +1,3 @@
----
-sidebar_label: ADR-022 Reconnection and Narrow-band Scope
-sidebar_position: 22
----
-
 # ADR-022: 再接続の設計と狭帯域回線の対象外化
 
 ## Status

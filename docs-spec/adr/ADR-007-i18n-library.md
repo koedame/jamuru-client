@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-007: i18n Library"
-sidebar_position: 7
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-007: i18nライブラリ選定

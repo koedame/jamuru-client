@@ -1,8 +1,3 @@
----
-sidebar_label: Usage Reporting
-sidebar_position: 8
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # Usage Reporting Specification（利用状況の送信）

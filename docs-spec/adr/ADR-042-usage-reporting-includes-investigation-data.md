@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-042: Usage Reporting Includes Investigation Data"
-sidebar_position: 42
----
-
 # ADR-042: 利用状況の送信に、不具合の調査に役立つ項目（自分の IP アドレス・デバイス ID・接続先）を含める
 
 ## Status
