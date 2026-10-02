@@ -253,6 +253,9 @@ pub struct StreamingState {
     /// Address `prepared_socket` is bound to, kept so repeated prepares report
     /// the same one.
     prepared_addr: Mutex<Option<SocketAddr>>,
+    /// The port of the socket the last audio session took, so the next one can
+    /// be bound there when the room already knows it.
+    last_port: Mutex<Option<u16>>,
 }
 
 impl StreamingState {
@@ -287,6 +290,7 @@ impl StreamingState {
             peer_latency_info: Arc::new(RwLock::new(None)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
+            last_port: Mutex::new(None),
         }
     }
 
@@ -356,7 +360,39 @@ impl StreamingState {
         }
 
         // Port 0 lets the OS choose; the bound address is what we advertise.
-        let socket = jamjam::network::bind_std("0.0.0.0:0")
+        self.bind_prepared(&mut addr_lock, "0.0.0.0:0").await
+    }
+
+    /// Bind the audio socket on the port the last audio session used, so the
+    /// address the room has stays good for a peer on its way to it. Binds a
+    /// fresh port when that one cannot be had again, or when a socket is
+    /// already bound; true only when the port is the last one.
+    async fn prepare_socket_again(&self) -> Result<bool, String> {
+        let mut addr_lock = self.prepared_addr.lock().await;
+        if addr_lock.is_some() {
+            return Ok(false);
+        }
+        let last = *self.last_port.lock().await;
+        if let Some(port) = last {
+            match self
+                .bind_prepared(&mut addr_lock, &format!("0.0.0.0:{port}"))
+                .await
+            {
+                Ok(_) => return Ok(true),
+                Err(e) => tracing::warn!("Could not bind port {} again: {}", port, e),
+            }
+        }
+        self.bind_prepared(&mut addr_lock, "0.0.0.0:0")
+            .await
+            .map(|_| false)
+    }
+
+    async fn bind_prepared(
+        &self,
+        addr_lock: &mut Option<SocketAddr>,
+        bind: &str,
+    ) -> Result<SocketAddr, String> {
+        let socket = jamjam::network::bind_std(bind)
             .map_err(|e| format!("Failed to bind the audio socket: {}", e))?;
         let addr = socket
             .local_addr()
@@ -378,7 +414,23 @@ impl StreamingState {
         let mut addr_lock = self.prepared_addr.lock().await;
         let socket = self.prepared_socket.lock().await.take();
         *addr_lock = None;
+        if let Some(port) = socket
+            .as_ref()
+            .and_then(|s| s.local_addr().ok())
+            .map(|addr| addr.port())
+        {
+            *self.last_port.lock().await = Some(port);
+        }
         socket
+    }
+
+    /// How the audio connection is doing, as the status reports it
+    /// ("connected", "reconnecting", "failed", ...), if there is one.
+    pub fn link_state(&self) -> Option<String> {
+        self.connection_state
+            .read()
+            .ok()
+            .and_then(|c| c.as_ref().map(|(state, _)| state.clone()))
     }
 
     /// Address candidates for the prepared audio socket, with the public
@@ -813,6 +865,14 @@ pub struct StreamingStatus {
 /// learned it.
 pub async fn streaming_prepare(state: tauri::State<'_, StreamingState>) -> Result<String, String> {
     state.prepare_socket().await.map(|addr| addr.to_string())
+}
+
+/// Binds the audio socket on the port the last audio session used and reports
+/// whether it got that port (see [`StreamingState::prepare_socket_again`]).
+pub async fn streaming_prepare_again(
+    state: tauri::State<'_, StreamingState>,
+) -> Result<bool, String> {
+    state.prepare_socket_again().await
 }
 
 /// Address candidates to race for `addr` (REQ-CON-113): `others`, in the
@@ -2842,6 +2902,31 @@ mod tests {
         let second = state.prepare_socket().await.unwrap();
 
         assert_ne!(second, first, "the taken socket still holds the first port");
+        assert!(state.take_prepared_socket().await.is_some());
+    }
+
+    /// Going from one peer to another keeps the address the room has: the
+    /// peer being moved to is already sending to it.
+    #[tokio::test]
+    async fn prepare_socket_again_after_the_session_ended_binds_the_port_it_used() {
+        let state = StreamingState::new();
+        let first = state.prepare_socket().await.unwrap();
+        drop(state.take_prepared_socket().await);
+
+        let kept = state.prepare_socket_again().await.unwrap();
+
+        assert!(kept);
+        let again = state.take_prepared_socket().await.unwrap();
+        assert_eq!(again.local_addr().unwrap().port(), first.port());
+    }
+
+    #[tokio::test]
+    async fn prepare_socket_again_when_no_session_ever_ran_binds_a_fresh_port_and_says_so() {
+        let state = StreamingState::new();
+
+        let kept = state.prepare_socket_again().await.unwrap();
+
+        assert!(!kept);
         assert!(state.take_prepared_socket().await.is_some());
     }
 
