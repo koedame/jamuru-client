@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-061: Prune Old Beta Packages"
-sidebar_position: 61
----
-
 # ADR-061: ベータ版が新しく出たら、古いベータ版の dmg・msi・deb だけを消す。更新とロールバックが使う成果物は消さない
 
 ## Status
@@ -24,7 +19,7 @@ Accepted
 
 これに対して、**`.dmg`（macOS）・`.msi`（Windows）・`.deb`（Linux）は、どれも自分自身を入れ替えられない配布形態**（REQ-UPD-004）。
 アプリの自動更新はこの 3 つを一度も読みに行かない。手で入れ替えるか、`.msi` は管理者権限で・`.deb` はパッケージ管理で個別に
-更新してもらう前提（`docs-site/docs/getting-started/installation.md`「自動更新」）。つまりこの 3 つは、**新しいベータ版が出た
+更新してもらう前提（`docs/getting-started/installation.md`「自動更新」）。つまりこの 3 つは、**新しいベータ版が出た
 瞬間に「Release ページから人が直接落として入れる」以外の使い道が無くなる**。
 
 ## Decision

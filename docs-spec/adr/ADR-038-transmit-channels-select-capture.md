@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-038: Transmit Channels Select Capture"
-sidebar_position: 38
----
-
 # ADR-038: 送信チャンネル設定は、取り込むチャンネル数を決める。線路は常にステレオ
 
 ## Status

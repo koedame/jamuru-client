@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-031: Live Play-out Delay"
-sidebar_position: 31
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-031: 再生中の段数変更と自動調整を、実際に保持する量へ効かせる

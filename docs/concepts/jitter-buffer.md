@@ -1,13 +1,6 @@
----
-sidebar_position: 1
-title: ジッタバッファ
-description: ネットワークジッターを吸収して安定した音声再生を実現する仕組み
----
-
-:::note
-このドキュメントは開発者向けの解説資料です。
-正確な仕様・制約・判断は [docs-spec/](https://github.com/koedame/jamjam-client/tree/main/docs-spec) を参照してください。
-:::
+> [!NOTE]
+> このドキュメントは開発者向けの解説資料です。
+> 正確な仕様・制約・判断は [docs-spec/](../../docs-spec) を参照してください。
 
 # ジッタバッファ（Jitter Buffer）
 

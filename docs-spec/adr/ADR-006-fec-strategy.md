@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-006: FEC Strategy"
-sidebar_position: 6
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-006: FEC（前方誤り訂正）採用

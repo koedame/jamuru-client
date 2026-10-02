@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-004: GUI Framework"
-sidebar_position: 4
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-004: GUIフレームワーク選択（Tauri / Flutter）

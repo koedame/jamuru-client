@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-052: Capture Is Converted When The Device Cannot Open At The Session Rate"
-sidebar_position: 52
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-052: 入力デバイスがセッションのレートで開けないときは、デバイスのレートで開いて変換し、それでも開けなくてもセッションは続ける

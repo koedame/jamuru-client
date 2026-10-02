@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-013: Sample Rate Strategy"
-sidebar_position: 13
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-013: サンプリングレート戦略

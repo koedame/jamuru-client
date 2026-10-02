@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-037: Usage Reporting Opt-in"
-sidebar_position: 37
----
-
 # ADR-037: 利用状況の送信は、利用者が設定でオンにしたときだけ行う
 
 ## Status

@@ -1,13 +1,6 @@
----
-sidebar_position: 1
-title: インストール
-description: jamjamのインストール方法
----
-
-:::note
-このドキュメントは開発者向けの解説資料です。
-正確な仕様・制約・判断は [docs-spec/](https://github.com/koedame/jamjam-client/tree/main/docs-spec) を参照してください。
-:::
+> [!NOTE]
+> このドキュメントは開発者向けの解説資料です。
+> 正確な仕様・制約・判断は [docs-spec/](../../docs-spec) を参照してください。
 
 # インストール
 
@@ -77,10 +70,10 @@ auto_update = false
    - macOS: `.dmg`
    - Linux: `.AppImage` または `.deb`
 
-:::caution 署名なしアプリの警告について
-現在配布しているビルドはコード署名されていないため、OSのセキュリティ機能により警告が表示されます。
-以下の手順で起動できます。
-:::
+> [!CAUTION]
+> **署名なしアプリの警告について**
+> 現在配布しているビルドはコード署名されていないため、OSのセキュリティ機能により警告が表示されます。
+> 以下の手順で起動できます。
 
 #### Windows での起動方法
 
@@ -113,9 +106,9 @@ chmod +x jamjam_*.AppImage
 
 ## 次のステップ
 
-インストールが完了したら、[クイックスタート](/docs/getting-started/quick-start)に進んでください。
+インストールが完了したら、[クイックスタート](quick-start.md)に進んでください。
 
-:::info プライバシーについて
-jamjamはP2P通信を使用するため、セッション参加者間でIPアドレスが共有されます。
-詳細は[プライバシーとセキュリティ](/docs/getting-started/privacy)をご確認ください。
-:::
+> [!NOTE]
+> **プライバシーについて**
+> jamjamはP2P通信を使用するため、セッション参加者間でIPアドレスが共有されます。
+> 詳細は[プライバシーとセキュリティ](privacy.md)をご確認ください。

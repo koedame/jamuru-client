@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-056: Hang Detection and Reporting"
-sidebar_position: 56
----
-
 # ADR-056: 主スレッドの見張りと、正常終了しなかった前回の起動の報告
 
 ## Status

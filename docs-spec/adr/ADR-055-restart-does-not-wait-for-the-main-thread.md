@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-055: Restart Does Not Wait For The Main Thread"
-sidebar_position: 55
----
-
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
 # ADR-055: 再起動は、主スレッドの終了を待ち続けない

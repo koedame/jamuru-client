@@ -1,8 +1,3 @@
----
-sidebar_label: "ADR-040: Input And Output Channel Selection"
-sidebar_position: 40
----
-
 # ADR-040: 入力・出力チャンネルの設定は、デバイスを開くチャンネル数と、取り出す・置く番号を決める
 
 ## Status

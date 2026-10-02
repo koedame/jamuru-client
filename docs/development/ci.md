@@ -1,13 +1,6 @@
----
-sidebar_position: 3
-title: CI/CD
-description: jamjamの継続的インテグレーション
----
-
-:::note
-このドキュメントは開発者向けの解説資料です。
-正確な仕様・制約・判断は [docs-spec/](https://github.com/koedame/jamjam-client/tree/main/docs-spec) を参照してください。
-:::
+> [!NOTE]
+> このドキュメントは開発者向けの解説資料です。
+> 正確な仕様・制約・判断は [docs-spec/](../../docs-spec) を参照してください。
 
 # CI/CD
 
@@ -96,9 +89,9 @@ main・develop ブランチへの push またはタグ作成時に実行され�
 | `vX.Y.Z` のタグ（main に打つ） | 正式版 | `jamjam` を更新 |
 | 手動起動 | 何も公開しない（ビルドの予行演習） | 更新しない |
 
-リリースのビルドは、更新用の成果物と署名（`.sig`）も作り、更新情報 `latest.json` を Release に添えます（[ADR-041](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-041-self-update.md)）。正式版のタグ `vX.Y.Z` は、`src-tauri/tauri.conf.json` の版と同じでなければ、更新情報を作る段階で失敗します。先に版を上げてからタグを打ってください。
+リリースのビルドは、更新用の成果物と署名（`.sig`）も作り、更新情報 `latest.json` を Release に添えます（[ADR-041](../../docs-spec/adr/ADR-041-self-update.md)）。正式版のタグ `vX.Y.Z` は、`src-tauri/tauri.conf.json` の版と同じでなければ、更新情報を作る段階で失敗します。先に版を上げてからタグを打ってください。
 
-ベータ版のタグは、動作を確かめたいコミットに開発者が打ちます。同じ X.Y.Z のベータ版では、それまでの最大の N に 1 を足します。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ベータ版のアプリは `X.Y.Z-N`（`vX.Y.Z-beta.N` の N）の版としてビルドされ、更新情報は固定タグの Release `beta-channel` の `latest.json` から読みます。ベータ版・正式版のどちらのリリースでも、より新しければその `latest.json` に置き換えます（[ADR-045](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-045-beta-self-update.md)）。ブランチの使い分けとリリースの手順は [ADR-047](https://github.com/koedame/jamjam-client/blob/main/docs-spec/adr/ADR-047-git-flow-branching.md) にあります。
+ベータ版のタグは、動作を確かめたいコミットに開発者が打ちます。同じ X.Y.Z のベータ版では、それまでの最大の N に 1 を足します。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ベータ版のアプリは `X.Y.Z-N`（`vX.Y.Z-beta.N` の N）の版としてビルドされ、更新情報は固定タグの Release `beta-channel` の `latest.json` から読みます。ベータ版・正式版のどちらのリリースでも、より新しければその `latest.json` に置き換えます（[ADR-045](../../docs-spec/adr/ADR-045-beta-self-update.md)）。ブランチの使い分けとリリースの手順は [ADR-047](../../docs-spec/adr/ADR-047-git-flow-branching.md) にあります。
 
 ## ローカルでのCI実行
 
@@ -136,9 +129,8 @@ act push -W .github/workflows/ci.yml -j lint
 act push -W .github/workflows/ci.yml -n
 ```
 
-:::tip
-act は Docker ベースのため、Linux ジョブのみ実行可能です。Windows/macOS ビルドはスキップされます。
-:::
+> [!TIP]
+> act は Docker ベースのため、Linux ジョブのみ実行可能です。Windows/macOS ビルドはスキップされます。
 
 ## キャッシュ戦略
 
@@ -152,5 +144,5 @@ act は Docker ベースのため、Linux ジョブのみ実行可能です。Wi
 
 ## 関連情報
 
-- [ビルド](/docs/development/building) - ローカルビルド方法
-- [テスト](/docs/development/testing) - テスト実行方法
+- [ビルド](building.md) - ローカルビルド方法
+- [テスト](testing.md) - テスト実行方法

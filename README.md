@@ -6,11 +6,11 @@ Low-latency peer-to-peer audio communication application for macOS, Windows, and
 
 ## Documentation
 
-- [Documentation Site](https://koedame.github.io/jamjam-client/) - Getting started, installation guides, and development documentation
-- [Storybook](https://koedame.github.io/jamjam-client/storybook/) - UI component library and design system
+- [Storybook](https://koedame.github.io/jamjam-client/) - UI component library and design system
 
 ### In-Repository Development Docs
 
+- [docs/](./docs/README.md) - Installation, quick start, troubleshooting, privacy, and development guides
 - [docs-spec/](./docs-spec/README.md) - Specifications (single source of truth for the implementation; ADRs are append-only)
 - [AGENTS.md](./AGENTS.md) - Development guide: workflow, commands, and the development rules index (commit conventions, secrets policy, etc.)
 - [Plans.md](./Plans.md) - Task tracking
@@ -26,7 +26,7 @@ Low-latency peer-to-peer audio communication application for macOS, Windows, and
 
 This section is for the copyright holder's development work. The [LICENSE](./LICENSE) does not permit anyone else to build or run the software from source; use the official binaries from GitHub Releases.
 
-See the [documentation site](https://koedame.github.io/jamjam-client/) for detailed development guides.
+See [docs/development/](./docs/development/building.md) for detailed development guides.
 
 ### Quick Start
 
