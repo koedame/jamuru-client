@@ -451,7 +451,7 @@ mod tests {
     /// The bug this guards: the app came back to its room as a new peer while
     /// the server still listed its old entry, and started its audio with that
     /// entry - an address nothing listens on - instead of with the other peer.
-    /// Verifies: REQ-CON-121
+    /// Verifies: REQ-CON-130
     #[test]
     fn the_room_still_lists_our_own_old_entry_when_entering_again_starts_the_audio_with_the_other_peer(
     ) {
@@ -471,9 +471,10 @@ mod tests {
         assert_eq!(roster.peers()[0].id, Uuid::from_u128(2));
     }
 
-    /// Verifies: REQ-CON-121
+    /// Verifies: REQ-CON-130
     #[test]
-    fn the_room_still_lists_every_old_entry_of_ours_when_entering_a_third_time_lists_none_of_them() {
+    fn the_room_still_lists_every_old_entry_of_ours_when_entering_a_third_time_lists_none_of_them()
+    {
         let mut roster = Roster::default();
         roster.entered(me(), vec![]);
         roster.entered(Uuid::from_u128(11), vec![peer(1, Some("192.0.2.1:5000"))]);
@@ -510,14 +511,17 @@ mod tests {
     /// The bug this guards: the other side of a rejoin kept sending audio to
     /// the old entry of the peer that came back, for ever, because the audio
     /// was "already with someone" and the server had not removed the entry.
-    /// Verifies: REQ-CON-122
+    /// Verifies: REQ-CON-131
     #[test]
     fn the_peer_comes_back_under_a_new_id_while_the_audio_is_silent_follows_them_on_the_address_we_advertised(
     ) {
         let mut roster = Roster::default();
         the_audio_is_with(&mut roster, 2, "Ben", "192.0.2.2:5000");
         roster.joined(named(12, "Ben", None));
-        assert_eq!(roster.updated(named(12, "Ben", Some("192.0.2.2:6000"))), vec![]);
+        assert_eq!(
+            roster.updated(named(12, "Ben", Some("192.0.2.2:6000"))),
+            vec![]
+        );
 
         let audio = roster.audio_silent();
 
@@ -528,10 +532,10 @@ mod tests {
         assert_eq!(roster.streaming_with(), Some(Uuid::from_u128(12)));
     }
 
-    /// Verifies: REQ-CON-122
+    /// Verifies: REQ-CON-131
     #[test]
-    fn the_peer_comes_back_under_a_new_id_after_the_audio_went_silent_follows_them_when_they_publish()
-    {
+    fn the_peer_comes_back_under_a_new_id_after_the_audio_went_silent_follows_them_when_they_publish(
+    ) {
         let mut roster = Roster::default();
         the_audio_is_with(&mut roster, 2, "Ben", "192.0.2.2:5000");
         roster.audio_silent();
@@ -545,7 +549,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-122
+    /// Verifies: REQ-CON-131
     #[test]
     fn someone_else_publishes_while_the_audio_is_silent_leaves_the_peer_the_audio_is_with_alone() {
         let mut roster = Roster::default();
@@ -559,7 +563,7 @@ mod tests {
         assert_eq!(roster.streaming_with(), Some(Uuid::from_u128(2)));
     }
 
-    /// Verifies: REQ-CON-122
+    /// Verifies: REQ-CON-131
     #[test]
     fn the_audio_gave_up_on_the_peer_goes_to_someone_else_who_has_an_address() {
         let mut roster = Roster::default();
@@ -575,7 +579,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-122
+    /// Verifies: REQ-CON-131
     #[test]
     fn the_audio_gave_up_on_the_peer_and_nobody_else_is_there_waits_for_the_next_one_to_publish() {
         let mut roster = Roster::default();
@@ -592,7 +596,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-122
+    /// Verifies: REQ-CON-131
     #[test]
     fn the_audio_was_silent_and_came_back_does_not_follow_a_peer_that_publishes_later() {
         let mut roster = Roster::default();
@@ -607,7 +611,7 @@ mod tests {
         assert_eq!(roster.streaming_with(), Some(Uuid::from_u128(2)));
     }
 
-    /// Verifies: REQ-CON-122
+    /// Verifies: REQ-CON-131
     #[test]
     fn the_peer_the_audio_is_with_publishes_other_addresses_while_the_audio_is_silent_follows_them_there(
     ) {
@@ -635,7 +639,7 @@ mod tests {
         assert_eq!(audio, vec![]);
     }
 
-    /// Verifies: REQ-CON-122
+    /// Verifies: REQ-CON-131
     #[test]
     fn the_audio_goes_silent_after_it_was_moved_goes_on_to_a_further_entry_and_never_back_to_one_it_left(
     ) {

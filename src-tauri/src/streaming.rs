@@ -2901,6 +2901,8 @@ mod tests {
     /// The bug this guards: stopping waited a fixed 100 ms, and a thread that
     /// took longer to end cleared `is_active` after the next session had set
     /// it, which ended that session as soon as it connected.
+    ///
+    /// Verifies: REQ-CON-131
     #[tokio::test]
     async fn stopping_waits_until_the_audio_thread_has_ended() {
         let app = tauri::test::mock_app();
