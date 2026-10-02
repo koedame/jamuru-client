@@ -61,11 +61,12 @@ export async function registerInviteLinkHandler(
         return;
       }
       if (url.trim().startsWith(INVITE_URL_PREFIX)) {
-        console.warn(`Ignoring invite link with a malformed code: ${url}`);
+        // Neither does a malformed one: it is most often a real code with a typo.
+        console.warn('Ignoring an invite link with a malformed code');
         onInvalidLink();
         return;
       }
-      console.warn(`Ignoring URL that is not an invite link: ${url}`);
+      console.warn('Ignoring a URL that is not an invite link');
     }
   };
 
