@@ -428,6 +428,10 @@ struct ConnectionStats {
     /// 音声が暗号化されているか。`Negotiating`（鍵を合わせている最中）/ `Encrypted` /
     /// `Unencrypted`（相手のアプリが暗号化に対応していない。ADR-064）
     security: LinkSecurity,
+    /// 鍵が、シグナリングのサーバーが渡した相手の鍵に結び付いているか（ADR-065）。
+    /// `false` は、相手のアプリが鍵を知らせない古い版のとき・サーバーを使わない直接接続のとき:
+    /// 暗号化はされるが、相手が本人かは確かめていない
+    peer_checked: bool,
     /// 偽造・再送・状態に合わないものとして受け付けなかったパケット数
     packets_refused: u64,
 }
