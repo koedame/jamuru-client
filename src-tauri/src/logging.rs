@@ -276,6 +276,7 @@ fn builder(spec: &LogSpec) -> tauri_plugin_log::Builder {
         // file, and precise enough to read connect timings from it.
         .format(move |out, message, record| {
             let message = redact_network_identifiers(&message.to_string(), redact);
+            let message = redact_personal_identifiers(&message, redact);
             out.finish(format_args!(
                 "{} {:<5} [{}] {}",
                 chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -544,6 +545,224 @@ fn run_end(text: &str, start: usize, pred: impl Fn(char) -> bool) -> usize {
         .unwrap_or(text.len())
 }
 
+/// What the app has learned about the people and rooms it is talking to, so
+/// that the file can leave their values out wherever they turn up in a line
+/// (ADR-065). The log sites do not have to know which of their arguments are
+/// somebody's: a value registered here is replaced wherever it appears.
+#[derive(Default)]
+struct Known {
+    /// Room IDs and invite codes, kept as the server wrote them.
+    rooms: Vec<String>,
+    /// Display names of everybody in the room, this app's own included. A
+    /// name is replaced by `peer<n>`, `n` being its place in this list.
+    names: Vec<String>,
+    /// Device IDs and names with what to write instead.
+    devices: Vec<(String, String)>,
+}
+
+static KNOWN: Mutex<Known> = Mutex::new(Known {
+    rooms: Vec::new(),
+    names: Vec::new(),
+    devices: Vec::new(),
+});
+
+fn known() -> std::sync::MutexGuard<'static, Known> {
+    KNOWN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The shortest registered value that is replaced anywhere in a line. A one
+/// character name would rewrite ordinary words.
+const MIN_KNOWN_CHARS: usize = 2;
+
+/// A room ID or an invite code that must not reach the file whole.
+pub fn register_room(room_id: &str, invite_code: Option<&str>) {
+    let mut known = known();
+    for value in std::iter::once(room_id).chain(invite_code) {
+        if value.chars().count() >= MIN_KNOWN_CHARS && !known.rooms.iter().any(|r| r == value) {
+            known.rooms.push(value.to_string());
+        }
+    }
+}
+
+/// A display name (the other participants' and this app's own).
+pub fn register_participant_name(name: &str) {
+    let name = name.trim();
+    let mut known = known();
+    if name.chars().count() >= MIN_KNOWN_CHARS && !known.names.iter().any(|n| n == name) {
+        known.names.push(name.to_string());
+    }
+}
+
+/// A device as the OS lists it. The raw ID and name are replaced by what
+/// [`redact_device_id`] and [`redact_device_owner`] leave of them, wherever a
+/// log site writes them.
+pub fn register_device(id: &str, name: &str) {
+    let mut known = known();
+    let replacements = [
+        (id, redact_device_id(id, true)),
+        (name, redact_device_owner(name)),
+    ];
+    for (raw, masked) in replacements {
+        if raw != masked
+            && raw.chars().count() >= MIN_KNOWN_CHARS
+            && !known.devices.iter().any(|(r, _)| r == raw)
+        {
+            known.devices.push((raw.to_string(), masked));
+        }
+    }
+}
+
+/// Keeps the first two characters of an invite code or a room ID.
+fn shorten_room(value: &str) -> String {
+    let head: String = value.chars().take(2).collect();
+    format!("{}***", head)
+}
+
+/// `text` with every `needle` replaced. A needle made of ASCII letters and
+/// digits only matches as a whole word, so that the name `ann` does not
+/// rewrite `channel`.
+fn replace_known(text: &str, needle: &str, replacement: &str) -> String {
+    let whole_word = needle.chars().all(|c| c.is_ascii_alphanumeric());
+    if !whole_word {
+        return text.replace(needle, replacement);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(needle) {
+        let before = rest[..at].chars().next_back();
+        let after = rest[at + needle.len()..].chars().next();
+        let inside_word =
+            before.is_some_and(char::is_alphanumeric) || after.is_some_and(char::is_alphanumeric);
+        out.push_str(&rest[..at]);
+        out.push_str(if inside_word { needle } else { replacement });
+        rest = &rest[at + needle.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Leaves out what identifies a person from a rendered log line: the display
+/// names, room IDs and invite codes the app has registered, the peer IDs
+/// (UUIDs; the first four characters survive) and the user name in a home
+/// folder path (`/Users/taro/Library` -> `~/Library`). What is diagnosed from
+/// is the kind, the version and the shape of a value, never whose it is.
+///
+/// `enabled` is threaded in as in [`redact_network_identifiers`].
+fn redact_personal_identifiers(text: &str, enabled: bool) -> String {
+    if !enabled {
+        return text.to_string();
+    }
+    let known = known();
+    apply_known(text, &known)
+}
+
+fn apply_known(text: &str, known: &Known) -> String {
+    let mut out = text.to_string();
+    // Longest first: a name that contains another one is replaced whole.
+    let mut names: Vec<(usize, &String)> = known.names.iter().enumerate().collect();
+    names.sort_by_key(|(_, name)| std::cmp::Reverse(name.len()));
+    for (index, name) in names {
+        out = replace_known(&out, name, &format!("peer{}", index + 1));
+    }
+    for room in &known.rooms {
+        out = replace_known(&out, room, &shorten_room(room));
+    }
+    for (raw, masked) in &known.devices {
+        out = out.replace(raw.as_str(), masked);
+    }
+    redact_home_dir(&redact_uuids(&out))
+}
+
+fn redact_uuids(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut i = 0;
+    while i + 36 <= bytes.len() {
+        let standalone = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if standalone
+            && is_uuid(&bytes[i..i + 36])
+            && !bytes.get(i + 36).is_some_and(u8::is_ascii_alphanumeric)
+        {
+            out.push_str(&text[copied..i]);
+            out.push_str(&text[i..i + 4]);
+            out.push('…');
+            i += 36;
+            copied = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+fn is_uuid(bytes: &[u8]) -> bool {
+    bytes.iter().enumerate().all(|(i, b)| match i {
+        8 | 13 | 18 | 23 => *b == b'-',
+        _ => b.is_ascii_hexdigit(),
+    })
+}
+
+/// `/Users/<name>/`, `/home/<name>/` and `C:\Users\<name>\` to `~/`.
+fn redact_home_dir(text: &str) -> String {
+    const MARKERS: [&str; 3] = ["/Users/", "/home/", "\\Users\\"];
+    let mut out = text.to_string();
+    for marker in MARKERS {
+        let mut from = 0;
+        while let Some(found) = out[from..].find(marker) {
+            let at = from + found;
+            let name_start = at + marker.len();
+            // A Windows user name may hold a space; a macOS or Linux one does not.
+            let windows = marker.starts_with('\\');
+            let name_end = out[name_start..]
+                .find(|c: char| {
+                    matches!(c, '/' | '\\' | '"' | '\'' | ')' | '\n') || (!windows && c == ' ')
+                })
+                .map_or(out.len(), |n| name_start + n);
+            if name_end == name_start {
+                from = name_start;
+                continue;
+            }
+            // The drive letter in front belongs to the path that is replaced.
+            let bytes = out.as_bytes();
+            let start = if marker.starts_with('\\')
+                && at >= 2
+                && bytes[at - 1] == b':'
+                && bytes[at - 2].is_ascii_alphabetic()
+            {
+                at - 2
+            } else {
+                at
+            };
+            out.replace_range(start..name_end, "~");
+            from = start + 1;
+        }
+    }
+    out
+}
+
+/// The owner out of a device name: `Taro's AirPods` -> `***'s AirPods`,
+/// `太郎のAirPods` -> `***のAirPods`. The device itself stays readable, since
+/// what is diagnosed from is which product it is. Apple's own names for a
+/// built-in device (`MacBook Proのスピーカー`) are not somebody's and stay.
+pub(crate) fn redact_device_owner(name: &str) -> String {
+    const PRODUCTS: [&str; 7] = [
+        "macbook", "imac", "mac", "studio", "iphone", "ipad", "apple",
+    ];
+    for separator in ["'s ", "\u{2019}s ", "の"] {
+        let Some((owner, rest)) = name.split_once(separator) else {
+            continue;
+        };
+        let first_word = owner.split_whitespace().next().unwrap_or("").to_lowercase();
+        if owner.is_empty() || rest.is_empty() || PRODUCTS.contains(&first_word.as_str()) {
+            return name.to_string();
+        }
+        return format!("***{}{}", separator, rest);
+    }
+    name.to_string()
+}
+
 /// Reduces a cpal device id (`"{host}:{backend-specific value}"`, e.g.
 /// `coreaudio:AppleUSBAudioEngine:Yamaha Corporation:AG06/AG03:20221310:1,2`
 /// on macOS) to the product-looking segment, dropping the serial number and
@@ -558,12 +777,12 @@ pub(crate) fn redact_device_id(raw: &str, enabled: bool) -> String {
     }
     let mut segments: Vec<&str> = raw.split(':').collect();
     if segments.len() < 2 {
-        return raw.to_string();
+        return redact_device_owner(raw);
     }
     while segments.len() > 1 && segments.last().is_some_and(|s| is_numeric_ish(s)) {
         segments.pop();
     }
-    segments.last().copied().unwrap_or(raw).to_string()
+    redact_device_owner(segments.last().copied().unwrap_or(raw))
 }
 
 fn is_numeric_ish(s: &str) -> bool {
@@ -897,6 +1116,162 @@ mod tests {
     fn device_id_redaction_is_disabled_the_raw_id_survives() {
         let raw = "coreaudio:AppleUSBAudioEngine:Yamaha Corporation:AG06/AG03:20221310:1,2";
         assert_eq!(redact_device_id(raw, false), raw);
+    }
+
+    fn known_with(rooms: &[&str], names: &[&str]) -> Known {
+        Known {
+            rooms: rooms.iter().map(|r| r.to_string()).collect(),
+            names: names.iter().map(|n| n.to_string()).collect(),
+            devices: Vec::new(),
+        }
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_room_id_or_invite_code_is_in_a_line_only_its_first_two_characters_survive() {
+        let known = known_with(&["ABC234XYZ"], &[]);
+
+        let line = apply_known("Created room ABC234XYZ as host", &known);
+
+        assert_eq!(line, "Created room AB*** as host");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_display_name_is_in_a_line_it_becomes_a_numbered_peer() {
+        let known = known_with(&[], &["Taro", "花子"]);
+
+        let line = apply_known("Taro joined; 花子さん left; Taro again", &known);
+
+        assert_eq!(line, "peer1 joined; peer2さん left; peer1 again");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_display_name_is_part_of_another_word_the_word_is_left_alone() {
+        let known = known_with(&[], &["ann"]);
+
+        let line = apply_known("channel 2, ann, Joann", &known);
+
+        assert_eq!(line, "channel 2, peer1, Joann");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_name_contains_another_name_the_longer_one_is_replaced_whole() {
+        let known = known_with(&[], &["Taro", "Taro Yamada"]);
+
+        let line = apply_known("Taro Yamada joined", &known);
+
+        assert_eq!(line, "peer2 joined");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_peer_id_is_in_a_line_only_its_first_four_characters_survive() {
+        let known = known_with(&[], &[]);
+
+        let line = apply_known(
+            "Peer 3f2a9c10-7b1e-4d55-9a02-0c6d5e8f1a77 joined the room",
+            &known,
+        );
+
+        assert_eq!(line, "Peer 3f2a… joined the room");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn text_that_only_looks_like_a_peer_id_it_is_left_alone() {
+        let known = known_with(&[], &[]);
+
+        for text in [
+            "3f2a9c10-7b1e-4d55-9a02-0c6d5e8f1a7",
+            "x3f2a9c10-7b1e-4d55-9a02-0c6d5e8f1a77",
+            "3f2a9c10-7b1e-4d55-9a02-0c6d5e8f1a77f",
+            "zzzzzzzz-7b1e-4d55-9a02-0c6d5e8f1a77",
+        ] {
+            assert_eq!(apply_known(text, &known), text);
+        }
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_path_is_in_a_home_folder_the_user_name_becomes_a_tilde() {
+        let known = known_with(&[], &[]);
+
+        for (text, expected) in [
+            (
+                "log file: /Users/taro/Library/Logs/jp.jamjam/jamjam.log",
+                "log file: ~/Library/Logs/jp.jamjam/jamjam.log",
+            ),
+            (
+                "opened /home/taro/.config/jamjam",
+                "opened ~/.config/jamjam",
+            ),
+            (
+                "C:\\Users\\Taro Y\\AppData\\Roaming\\jamjam",
+                "~\\AppData\\Roaming\\jamjam",
+            ),
+            ("/usr/lib/libasound.so", "/usr/lib/libasound.so"),
+        ] {
+            assert_eq!(apply_known(text, &known), expected, "{text}");
+        }
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_device_name_has_an_owner_the_owner_is_hidden_and_the_product_stays() {
+        assert_eq!(
+            redact_device_owner("Taro's AirPods Pro"),
+            "***'s AirPods Pro"
+        );
+        assert_eq!(redact_device_owner("太郎のAirPods"), "***のAirPods");
+        assert_eq!(redact_device_owner("Yamaha AG06/AG03"), "Yamaha AG06/AG03");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_device_name_is_the_names_of_a_built_in_device_it_is_left_alone() {
+        assert_eq!(
+            redact_device_owner("MacBook Proのスピーカー"),
+            "MacBook Proのスピーカー"
+        );
+        assert_eq!(redact_device_owner("iPhoneのマイク"), "iPhoneのマイク");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_device_id_names_its_owner_the_owner_is_hidden_with_the_serial() {
+        assert_eq!(
+            redact_device_id("coreaudio:Taro's AirPods:20221310:1,2", true),
+            "***'s AirPods"
+        );
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn personal_redaction_is_turned_off_the_line_is_unchanged() {
+        let line = "/Users/taro/x 3f2a9c10-7b1e-4d55-9a02-0c6d5e8f1a77";
+
+        assert_eq!(redact_personal_identifiers(line, false), line);
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_registered_value_is_logged_the_line_in_the_file_does_not_hold_it() {
+        register_room("QWE789RTY", None);
+        register_participant_name("Registered Tester");
+        register_device("coreaudio:Registered's Mic:99887766:1", "Registered's Mic");
+
+        let line = redact_personal_identifiers(
+            "room QWE789RTY, Registered Tester, coreaudio:Registered's Mic:99887766:1",
+            true,
+        );
+
+        assert!(!line.contains("QWE789RTY"), "{line}");
+        assert!(!line.contains("Registered Tester"), "{line}");
+        assert!(!line.contains("99887766"), "{line}");
+        assert!(line.contains("QW***"), "{line}");
     }
 
     #[test]
