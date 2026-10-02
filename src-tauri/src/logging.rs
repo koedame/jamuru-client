@@ -670,7 +670,7 @@ fn apply_known(text: &str, known: &Known) -> String {
     for (raw, masked) in &known.devices {
         out = out.replace(raw.as_str(), masked);
     }
-    redact_home_dir(&redact_uuids(&out))
+    redact_home_dir(&redact_device_identifiers(&redact_uuids(&out)))
 }
 
 fn redact_uuids(text: &str) -> String {
@@ -688,6 +688,34 @@ fn redact_uuids(text: &str) -> String {
             out.push_str(&text[i..i + 4]);
             out.push('…');
             i += 36;
+            copied = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+/// This installation's device identifier (26 base32 characters, the one the
+/// app presents to the signaling server): its first four characters stay.
+fn redact_device_identifiers(text: &str) -> String {
+    const LEN: usize = 26;
+    let bytes = text.as_bytes();
+    let is_base32 = |b: &u8| b.is_ascii_uppercase() || (b'2'..=b'7').contains(b);
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut i = 0;
+    while i + LEN <= bytes.len() {
+        let standalone = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if standalone
+            && bytes[i..i + LEN].iter().all(is_base32)
+            && !bytes.get(i + LEN).is_some_and(u8::is_ascii_alphanumeric)
+        {
+            out.push_str(&text[copied..i]);
+            out.push_str(&text[i..i + 4]);
+            out.push('…');
+            i += LEN;
             copied = i;
         } else {
             i += 1;
@@ -1177,6 +1205,31 @@ mod tests {
         );
 
         assert_eq!(line, "Peer 3f2a… joined the room");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_device_identifier_is_in_a_line_only_its_first_four_characters_survive() {
+        let known = known_with(&[], &[]);
+
+        let line = apply_known("this device is ZV552SMKNDGMD56IKZ5CGND4LQ (beta)", &known);
+
+        assert_eq!(line, "this device is ZV55… (beta)");
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn text_that_only_looks_like_a_device_identifier_it_is_left_alone() {
+        let known = known_with(&[], &[]);
+
+        for text in [
+            "ZV552SMKNDGMD56IKZ5CGND4L",
+            "ZV552SMKNDGMD56IKZ5CGND4LQX",
+            "zv552smkndgmd56ikz5cgnd4lq",
+            "ZV552SMKNDGMD56IKZ5CGND4L1",
+        ] {
+            assert_eq!(apply_known(text, &known), text);
+        }
     }
 
     /// Verifies: REQ-GUI-022
