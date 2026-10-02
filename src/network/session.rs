@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use super::encryption::{LinkSecurity, Opened, SecureLink};
+use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::signaling::PeerInfo;
 use super::transport::UdpTransport;
@@ -75,6 +75,9 @@ pub struct Session {
     inner_recv_handle: Option<tokio::task::JoinHandle<()>>,
     /// Sends our key to the peers that have not shown they have it
     key_exchange_handle: Option<tokio::task::JoinHandle<()>>,
+    /// The key our key exchanges are signed with, when the links to the peers added are to
+    /// check who they are
+    link_identity: Option<LinkIdentity>,
 }
 
 impl Session {
@@ -95,7 +98,15 @@ impl Session {
             receive_handle: None,
             inner_recv_handle: None,
             key_exchange_handle: None,
+            link_identity: None,
         })
+    }
+
+    /// Has the links to the peers added from now on check who each peer is, by the key in
+    /// its [`PeerInfo::link_key`] and signing our key exchange with `identity`. A peer that
+    /// told no key gets a link that is encrypted but not checked.
+    pub fn set_link_identity(&mut self, identity: LinkIdentity) {
+        self.link_identity = Some(identity);
     }
 
     /// Get local peer ID
@@ -120,8 +131,12 @@ impl Session {
             return Ok(()); // Already added
         }
 
-        info!("Adding peer {} ({}) at {}", info.name, info.id, addr);
+        info!("Adding peer {} at {}", info.id, addr);
 
+        let link = Arc::new(SecureLink::for_peer(
+            self.link_identity.as_ref(),
+            info.link_key.as_deref(),
+        ));
         peers.insert(
             info.id,
             Peer {
@@ -130,7 +145,7 @@ impl Session {
                 connected: AtomicBool::new(true),
                 packets_received: AtomicU32::new(0),
                 last_audio: None,
-                link: Arc::new(SecureLink::new()),
+                link,
             },
         );
 
@@ -140,8 +155,8 @@ impl Session {
     /// Remove a peer from the session
     pub async fn remove_peer(&self, peer_id: Uuid) {
         let mut peers = self.peers.write().await;
-        if let Some(peer) = peers.remove(&peer_id) {
-            info!("Removed peer {} ({})", peer.info.name, peer_id);
+        if peers.remove(&peer_id).is_some() {
+            info!("Removed peer {}", peer_id);
         }
     }
 

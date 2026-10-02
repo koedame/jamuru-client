@@ -16,7 +16,7 @@ use crate::protocol::{
 };
 
 use super::bandwidth::UDP_IP_OVERHEAD_BYTES;
-use super::encryption::{LinkSecurity, Opened, SecureLink};
+use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
 use super::link_facts::{route_preference, LinkFacts, NEAREST_ROUTE_PREFERENCE};
@@ -64,6 +64,10 @@ pub struct ConnectionStats {
     pub uptime_seconds: u64,
     /// Whether what this link carries is encrypted
     pub security: LinkSecurity,
+    /// Whether the keys of this link are bound to the peer's key from the signaling server.
+    /// `false` for a peer whose app tells none and for a direct connection: the link is then
+    /// encrypted but not known to be with that peer.
+    pub peer_checked: bool,
     /// Packets turned away because they were forged, repeated or from a peer that is not
     /// encrypting while the link is
     pub packets_refused: u64,
@@ -666,6 +670,28 @@ impl Connection {
         })
     }
 
+    /// Has the link to the peer check who the peer is: the key exchange it sends has to be
+    /// signed with `peer_key`, the key the signaling server gave for it, and ours is signed
+    /// with `ours`. Without this, or with no `peer_key` (the peer's app predates it), the
+    /// link is encrypted but anyone who can alter packets on the path while it is set up
+    /// could be the peer. Called before connecting.
+    pub fn verify_peer(
+        &mut self,
+        ours: &LinkIdentity,
+        peer_key: Option<&str>,
+    ) -> Result<(), NetworkError> {
+        if self.is_connected() {
+            return Err(NetworkError::AlreadyConnected);
+        }
+        self.secure_link = Arc::new(SecureLink::for_peer(Some(ours), peer_key));
+        Ok(())
+    }
+
+    /// Whether the keys of the link are bound to the peer's key from the server
+    pub fn checks_peer(&self) -> bool {
+        self.secure_link.checks_peer()
+    }
+
     /// Get the local address
     pub fn local_addr(&self) -> SocketAddr {
         self.transport.local_addr()
@@ -1235,6 +1261,7 @@ impl Connection {
                 .map(|_| self.fec_recovered.load(Ordering::Relaxed)),
             uptime_seconds: uptime,
             security: self.secure_link.security(),
+            peer_checked: self.secure_link.checks_peer(),
             packets_refused: self.secure_link.refused(),
         }
     }

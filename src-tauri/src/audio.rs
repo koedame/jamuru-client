@@ -86,6 +86,9 @@ impl Listing {
                 // Kept by the call itself, so a listing that comes back late
                 // still becomes the last one
                 if let Ok(devices) = &listed {
+                    for device in devices {
+                        crate::logging::register_device(&device.id, &device.name);
+                    }
                     *self.last.lock().unwrap_or_else(|e| e.into_inner()) = Some(devices.clone());
                 }
                 listed

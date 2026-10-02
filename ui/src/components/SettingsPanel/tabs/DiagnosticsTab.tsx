@@ -367,7 +367,7 @@ function PreviousHangSection({
         {previousHangAttachesLog
           ? t(
               "settings.diagnostics.previousHang.descriptionWithLog",
-              "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamjam.log, so this can be found and fixed? The log can include the server address, your audio device names, the room ID, and other participants' identifiers.",
+              "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamjam.log, so this can be found and fixed? The log can include the server address and your audio device names. The room ID and other participants' identifiers are cut down to their first characters, and their names are replaced by numbers.",
               { stage: stageLabel(previousHang.stage, t) }
             )
           : t(

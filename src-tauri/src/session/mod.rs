@@ -24,7 +24,7 @@ use uuid::Uuid;
 use crate::config::ConfigState;
 use crate::mixer::{self, MixerState};
 use crate::settings_help::HelpEvent;
-use crate::signaling::{self, JoinResult, SignalingEvent};
+use crate::signaling::{self, JoinResult, SignalingEvent, SignalingState};
 use crate::streaming;
 use roster::{Audio, Roster};
 
@@ -1022,7 +1022,11 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
             Audio::Stop => stop_audio(app).await,
             Audio::Advertise => advertise(app, conn).await,
             Audio::KeepAddress => keep_address(app, conn).await,
-            Audio::Start { peer, candidates } => {
+            Audio::Start {
+                peer,
+                candidates,
+                link_key,
+            } => {
                 let candidates: Vec<String> = candidates.iter().map(ToString::to_string).collect();
                 let Some(addr) = candidates.first().cloned() else {
                     continue;
@@ -1030,9 +1034,14 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
                 mixer::set_on_audio(app, &peer.to_string()).await;
                 // The devices, buffer size and sample rate are the saved
                 // settings.
+                let link = app
+                    .state::<SignalingState>()
+                    .link_identity()
+                    .map(|ours| (ours, link_key));
                 let started = streaming::streaming_start(
                     addr,
                     Some(candidates.clone()),
+                    link,
                     app.state(),
                     app.state(),
                     app.state(),
