@@ -125,6 +125,12 @@ pub struct PeerInfo {
     /// predates features.
     #[serde(default)]
     pub features: Vec<String>,
+    /// The key the peer signs its half of the audio link's key exchange with, as
+    /// [`crate::network::LinkIdentity::public_key`] gives it. The server relays what the
+    /// peer told it. Absent from a server or an app that predates it, and then the link to
+    /// that peer is encrypted but not checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_key: Option<String>,
 }
 
 impl PeerInfo {
@@ -272,6 +278,11 @@ pub enum SignalingMessage {
         /// that has nothing to tell (the CLI). Never passed on to the others.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         client_info: Option<ClientInfo>,
+        /// The public key this app signs its key exchanges with for as long as it is in the
+        /// room, told to the others in its [`PeerInfo`]. Left out by an app that has none
+        /// (the CLI's direct connections do not use a room).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        link_key: Option<String>,
     },
     JoinRoom {
         room_id: String,
@@ -283,6 +294,9 @@ pub enum SignalingMessage {
         /// As [`SignalingMessage::CreateRoom`]'s.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         client_info: Option<ClientInfo>,
+        /// As [`SignalingMessage::CreateRoom`]'s.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        link_key: Option<String>,
     },
     LeaveRoom,
     /// Update peer connection information with multiple candidates
@@ -962,6 +976,7 @@ mod tests {
     #[test]
     fn an_app_that_announces_no_features_sends_no_features_field() {
         let json = serde_json::to_value(SignalingMessage::JoinRoom {
+            link_key: None,
             room_id: "ABC234XYZ".to_string(),
             password: None,
             peer_name: "Bob".to_string(),
@@ -972,6 +987,7 @@ mod tests {
         assert!(json["data"].get("features").is_none(), "{}", json);
 
         let json = serde_json::to_value(SignalingMessage::CreateRoom {
+            link_key: None,
             room_name: "Jam".to_string(),
             password: None,
             peer_name: "Alice".to_string(),
@@ -1015,6 +1031,7 @@ mod tests {
     #[test]
     fn the_app_information_is_sent_in_the_entering_message_and_left_out_when_there_is_none() {
         let json = serde_json::to_value(SignalingMessage::JoinRoom {
+            link_key: None,
             room_id: "ABC234XYZ".to_string(),
             password: None,
             peer_name: "Bob".to_string(),
@@ -1033,6 +1050,7 @@ mod tests {
         assert!(info.get("output_id").is_none(), "{}", info);
 
         let json = serde_json::to_value(SignalingMessage::CreateRoom {
+            link_key: None,
             room_name: "Jam".to_string(),
             password: None,
             peer_name: "Alice".to_string(),
@@ -1113,6 +1131,7 @@ mod tests {
     #[test]
     fn a_participant_as_the_others_receive_it_has_no_app_information() {
         let peer = PeerInfo {
+            link_key: None,
             id: Uuid::nil(),
             name: "Alice".to_string(),
             candidates: vec![],
@@ -1218,6 +1237,7 @@ mod tests {
     #[test]
     fn test_signaling_message_serialize() {
         let msg = SignalingMessage::CreateRoom {
+            link_key: None,
             room_name: "Test Room".to_string(),
             password: None,
             peer_name: "Alice".to_string(),
@@ -1410,6 +1430,7 @@ mod tests {
     #[test]
     fn when_the_interfaces_are_listed_overlay_first_the_lan_candidate_is_still_probed_first() {
         let mut peer = PeerInfo {
+            link_key: None,
             id: Uuid::nil(),
             name: "peer".into(),
             candidates: vec![
@@ -1470,6 +1491,7 @@ mod tests {
     #[test]
     fn test_peer_info_with_candidates() {
         let peer = PeerInfo {
+            link_key: None,
             id: uuid::Uuid::new_v4(),
             name: "TestPeer".to_string(),
             candidates: vec![AddressCandidate::host(

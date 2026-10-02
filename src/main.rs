@@ -22,7 +22,7 @@ use jamjam::audio::{
 };
 use jamjam::network::{
     candidates_to_addrs, gather_candidates, AudioEncodingConfig, Connection, ConnectionState,
-    ConnectionStats, LatencyBreakdown, LocalLatencyInfo, PeerInfo, PeerLatencyInfo,
+    ConnectionStats, LatencyBreakdown, LinkIdentity, LocalLatencyInfo, PeerInfo, PeerLatencyInfo,
     SignalingClient, SignalingConnection, SignalingMessage,
 };
 use jamjam::protocol::LatencyInfoMessage;
@@ -892,9 +892,13 @@ async fn run_room_session(
     let client = signaling_client(&server);
     let mut conn = client.connect().await?;
 
+    // The key the others in the room check our key exchange against
+    let link_identity = LinkIdentity::generate();
+
     // The CLI takes no peer messages, so it announces no features.
     let request = match &entry {
         RoomEntry::Create { room_name } => SignalingMessage::CreateRoom {
+            link_key: Some(link_identity.public_key()),
             room_name: room_name.clone(),
             password: None,
             peer_name: peer_name.clone(),
@@ -902,6 +906,7 @@ async fn run_room_session(
             client_info: None,
         },
         RoomEntry::Join { room_id } => SignalingMessage::JoinRoom {
+            link_key: Some(link_identity.public_key()),
             room_id: room_id.clone(),
             password: None,
             peer_name: peer_name.clone(),
@@ -1026,7 +1031,7 @@ async fn run_room_session(
     let mut peer_display_name: Option<String> = None;
     for peer in peers.drain(..) {
         if let Some(session) = audio.as_ref() {
-            if maybe_connect(session, &peer).await? {
+            if maybe_connect(session, &peer, &link_identity).await? {
                 peer_display_name = Some(peer.name.clone());
                 break;
             }
@@ -1053,7 +1058,7 @@ async fn run_room_session(
                     _ => None,
                 };
                 if let (Some(peer), Some(session)) = (peer, audio.as_ref()) {
-                    if maybe_connect(session, &peer).await? {
+                    if maybe_connect(session, &peer, &link_identity).await? {
                         peer_display_name = Some(peer.name.clone());
                     }
                 }
@@ -1300,6 +1305,13 @@ impl AudioSession {
         let peer = self.connection.lock().await.accept().await?;
         self.announce().await;
         Ok(peer)
+    }
+
+    /// Has the link to the peer check that its key exchange is signed with `peer_key`, which
+    /// the server gave for it. Done before connecting.
+    async fn verify_peer(&self, ours: &LinkIdentity, peer_key: Option<&str>) -> Result<()> {
+        self.connection.lock().await.verify_peer(ours, peer_key)?;
+        Ok(())
     }
 
     /// Connects to the first of `addrs` that answers.
@@ -1633,7 +1645,11 @@ fn run_at_frame_rate(
 
 /// Connects to `peer` if it has an address and we are not connected yet.
 /// Returns whether this call established the connection.
-async fn maybe_connect(session: &AudioSession, peer: &PeerInfo) -> Result<bool> {
+async fn maybe_connect(
+    session: &AudioSession,
+    peer: &PeerInfo,
+    link_identity: &LinkIdentity,
+) -> Result<bool> {
     let addrs = peer_addrs(peer);
     if addrs.is_empty() || session.is_connected().await {
         return Ok(false);
@@ -1644,6 +1660,9 @@ async fn maybe_connect(session: &AudioSession, peer: &PeerInfo) -> Result<bool> 
         peer.name,
         addrs.len()
     );
+    session
+        .verify_peer(link_identity, peer.link_key.as_deref())
+        .await?;
     session.connect(&addrs).await?;
     println!("Connected. Audio is flowing.\n");
     print!("chat> ");

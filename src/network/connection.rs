@@ -16,7 +16,7 @@ use crate::protocol::{
 };
 
 use super::bandwidth::UDP_IP_OVERHEAD_BYTES;
-use super::encryption::{LinkSecurity, Opened, SecureLink};
+use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
 use super::link_facts::{route_preference, LinkFacts, NEAREST_ROUTE_PREFERENCE};
@@ -664,6 +664,28 @@ impl Connection {
             pending_latency_info: Arc::new(Mutex::new(None)),
             secure_link_handle: None,
         })
+    }
+
+    /// Has the link to the peer check who the peer is: the key exchange it sends has to be
+    /// signed with `peer_key`, the key the signaling server gave for it, and ours is signed
+    /// with `ours`. Without this, or with no `peer_key` (the peer's app predates it), the
+    /// link is encrypted but anyone who can alter packets on the path while it is set up
+    /// could be the peer. Called before connecting.
+    pub fn verify_peer(
+        &mut self,
+        ours: &LinkIdentity,
+        peer_key: Option<&str>,
+    ) -> Result<(), NetworkError> {
+        if self.is_connected() {
+            return Err(NetworkError::AlreadyConnected);
+        }
+        self.secure_link = Arc::new(SecureLink::for_peer(Some(ours), peer_key));
+        Ok(())
+    }
+
+    /// Whether the keys of the link are bound to the peer's key from the server
+    pub fn checks_peer(&self) -> bool {
+        self.secure_link.checks_peer()
     }
 
     /// Get the local address

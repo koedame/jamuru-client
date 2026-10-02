@@ -117,6 +117,24 @@ async fn connect_direct(
 ) -> Result<Connection, ConnectionError>;
 ```
 
+ルームで繋ぐ相手とは、`connect` の前に相手を確かめる（ADR-065）:
+
+```rust
+/// 相手との鍵交換を、サーバーが渡した相手の鍵で署名されたものだけにする
+///
+/// - ours: 入室のときに作った鍵（`LinkIdentity::generate()`。公開鍵は `link_key` としてサーバーに知らせてある）
+/// - peer_key: そのピアの `PeerInfo::link_key`。無い（古い版）・鍵として読めないときは確かめず、
+///   署名の無い鍵交換で暗号化する（`checks_peer()` が `false`）
+///
+/// 接続したあとは呼べない（`AlreadyConnected`）。呼ばなければ、確かめない接続になる（サーバーを使わない直接接続）
+fn verify_peer(&mut self, ours: &LinkIdentity, peer_key: Option<&str>) -> Result<(), NetworkError>;
+
+/// 鍵が相手の鍵に結び付いているか
+fn checks_peer(&self) -> bool;
+```
+
+複数の相手へ送る `Session` は `set_link_identity(LinkIdentity)` で自分の鍵を渡すと、そのあとに `add_peer` した相手ごとに、`PeerInfo::link_key` で同じことをする。
+
 ### 3.3 接続設定
 
 ```rust
