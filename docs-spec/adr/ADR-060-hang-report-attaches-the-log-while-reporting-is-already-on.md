@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-065](./ADR-065-personal-information-before-1-0-0.md)
 
 ## Context
 
