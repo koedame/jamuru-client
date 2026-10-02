@@ -1770,7 +1770,7 @@ mod tests {
             .all(|pair| pair[0].revision < pair[1].revision));
     }
 
-    /// Verifies: REQ-CON-121
+    /// Verifies: REQ-CON-130
     #[tokio::test]
     async fn the_connection_drops_and_the_room_still_lists_the_old_entry_of_the_app_does_not_list_it_as_a_participant(
     ) {
