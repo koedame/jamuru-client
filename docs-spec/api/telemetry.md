@@ -100,7 +100,7 @@ sequenceDiagram
 
 **この記録は `usage_reporting` の設定を見ずに、常にローカルへ書く。** クラッシュと違い、固まりに気づくこと自体は同意を要らないものとし、送るかどうかだけを同意にかける。
 
-- `usage_reporting` がオンなら、次の起動でクラッシュと同じように自動で `hang` として送る（`UsageReporter::record_previous_hang`）。**アプリの版が 1.0.0 未満の間は、この自動送信にも現在の `jamjam.log` を追加で送る**（確認は挟まない。REQ-TEL-023・[ADR-060](../adr/ADR-060-hang-report-attaches-the-log-while-reporting-is-already-on.md)）
+- `usage_reporting` がオンなら、次の起動でクラッシュと同じように自動で `hang` として送る（`UsageReporter::record_previous_hang`）。**この自動送信に `jamjam.log` は添えない**（オンにしたことは集計した項目への同意で、他の参加者の識別子を含みうるログまでは含まないため。REQ-TEL-023・[ADR-065](../adr/ADR-065-personal-information-before-1-0-0.md)）
 - `usage_reporting` がオフのときは記録を保持し（`UsageReporter::previous_hang`）、Diagnostics タブの案内から「送る」を選んだときだけ、送信のためだけに作って送信後に必ず捨てるインストール ID でこの 1 件を送る（`UsageReporter::send_one_off_hang`。`usage_reporting` 自体はオンにならない。REQ-TEL-020）。「送らない」を選べば記録はそのまま捨てる
 - **アプリの版が 1.0.0 未満のときは、「送る」を選ぶと現在の `jamjam.log` も追加で送る**（`src-tauri/src/usage.rs` の `attaches_log`。ADR-058「問題を報告」と同じ送り先・同じ本文の作り方を再利用する。REQ-TEL-021・[ADR-059](../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）。1.0.0 以上ではこの追加送信をしない
 - どちらの経路も送るコメントに区間名と起動 ID を機械的に埋めるので、利用ログ側の `hang` 行の `launch_id` と突き合わせられる

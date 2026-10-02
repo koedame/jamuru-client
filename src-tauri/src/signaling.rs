@@ -294,6 +294,11 @@ pub async fn signaling_join_room<R: Runtime>(
         } => {
             // Store room state for chat
             let peer_id_str = peer_id.to_string();
+            crate::logging::register_room(&room_id, invite_code.as_ref().map(|c| c.as_str()));
+            crate::logging::register_participant_name(&peer_name);
+            for peer in &peers {
+                crate::logging::register_participant_name(&peer.name);
+            }
             let mut room_state = state.room_state.lock().await;
             *room_state = Some(RoomState {
                 _room_id: room_id.clone(),
@@ -493,6 +498,8 @@ pub async fn signaling_create_room<R: Runtime>(
         } => {
             // Store room state for chat
             let peer_id_str = peer_id.to_string();
+            crate::logging::register_room(&room_id, Some(invite_code.as_str()));
+            crate::logging::register_participant_name(&peer_name);
             let mut room_state = state.room_state.lock().await;
             *room_state = Some(RoomState {
                 _room_id: room_id.clone(),
@@ -785,6 +792,7 @@ pub async fn signaling_poll_events(
             Ok(Ok(msg)) => {
                 match msg {
                     SignalingMessage::PeerJoined { peer } => {
+                        crate::logging::register_participant_name(&peer.name);
                         // Add system message for join
                         let mut room_state = state.room_state.lock().await;
                         if let Some(ref mut rs) = *room_state {
@@ -840,6 +848,7 @@ pub async fn signaling_poll_events(
                         events.extend(carry_out(conn, &state, outs).await);
                     }
                     SignalingMessage::PeerUpdated { peer } => {
+                        crate::logging::register_participant_name(&peer.name);
                         events.push(SignalingEvent::PeerUpdated { peer });
                     }
                     SignalingMessage::ChatMessage {
