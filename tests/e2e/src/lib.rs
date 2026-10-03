@@ -17,6 +17,8 @@
 //! - `full`: Enable all test features
 
 pub mod audio_injection;
+#[path = "../../common/fake_signaling.rs"]
+pub mod fake_signaling;
 pub mod node;
 pub mod orchestrator;
 pub mod pipeline;
