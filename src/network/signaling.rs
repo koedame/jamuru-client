@@ -72,7 +72,8 @@ impl AddressCandidate {
     /// Create a new host candidate
     pub fn host(address: SocketAddr) -> Self {
         // Host candidates have high priority. Among them the nearer route
-        // wins (LAN, then an overlay such as Tailscale, then the rest): every
+        // wins (LAN, then the rest, then an overlay such as Tailscale, which may be
+        // a relay when it is not a direct path): every
         // interface address used to tie, so the order a peer probed them in
         // was whatever order the OS listed the interfaces in.
         // IPv6 gets slightly higher priority than IPv4 (Happy Eyeballs)
@@ -1454,8 +1455,8 @@ mod tests {
             order,
             [
                 "192.168.1.20",
-                "100.98.128.5",
                 "203.0.113.9",
+                "100.98.128.5",
                 "203.0.113.50"
             ]
         );

@@ -735,6 +735,7 @@ impl Connection {
         if let Ok(mut start) = self.connection_start.lock() {
             *start = Some(Instant::now());
         }
+        self.start_silence_count();
 
         self.link_facts.link_up(remote_addr, false, started);
         self.set_state(ConnectionState::Connected);
@@ -766,7 +767,7 @@ impl Connection {
     /// Connect to a remote peer using multiple address candidates (Happy Eyeballs style)
     ///
     /// This function tries multiple candidates in parallel and uses the nearest route that
-    /// responds (a LAN address, then an overlay such as Tailscale, then any other), waiting a
+    /// responds (a LAN address, then any other, then an overlay such as Tailscale), waiting a
     /// moment for a nearer one when the first response is not on the LAN.
     /// Candidates are tried in order of priority, with a small delay between starting each attempt.
     pub async fn connect_with_candidates(
@@ -872,6 +873,7 @@ impl Connection {
                 if let Ok(mut start) = self.connection_start.lock() {
                     *start = Some(Instant::now());
                 }
+                self.start_silence_count();
 
                 self.link_facts.link_up(selected_addr, true, started);
                 self.set_state(ConnectionState::Connected);
@@ -904,6 +906,7 @@ impl Connection {
                 if let Ok(mut start) = self.connection_start.lock() {
                     *start = Some(Instant::now());
                 }
+                self.start_silence_count();
 
                 self.link_facts.link_up(fallback, false, started);
                 self.set_state(ConnectionState::Connected);
@@ -1084,6 +1087,15 @@ impl Connection {
                 self.start_keepalive_loop();
                 Ok(())
             }
+        }
+    }
+
+    /// Count the silence from now: until the link is up the only packets are
+    /// probe answers, which the liveness monitor never sees, so the time since
+    /// this connection was created says nothing about the link.
+    fn start_silence_count(&self) {
+        if let Ok(mut last) = self.last_received.lock() {
+            *last = Instant::now();
         }
     }
 
@@ -2067,6 +2079,47 @@ mod tests {
             .unwrap();
 
         assert_eq!(conn.remote_addr(), silent);
+    }
+
+    /// The silence is counted from the moment the link is up, not from the moment the
+    /// connection was created: setup before the probes can take seconds, and probe answers
+    /// never reach the monitor.
+    ///
+    /// Verifies: REQ-CON-110
+    #[tokio::test]
+    async fn when_the_link_comes_up_long_after_the_connection_was_created_it_is_not_reported_silent(
+    ) {
+        let quick = ReconnectConfig {
+            keep_alive_interval: Duration::from_millis(100),
+            detect_after: Duration::from_millis(400),
+            give_up_after: Duration::from_secs(30),
+            check_interval: Duration::from_millis(25),
+        };
+        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        conn.set_reconnect_config(quick);
+        let states = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = states.clone();
+        conn.set_state_change_callback(move |state| seen.lock().unwrap().push(state));
+        // The peer answers once, as a keep-alive that is the answer to the probe, then is quiet.
+        let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        peer.send_to(&Packet::keep_alive(0).to_bytes(), conn.local_addr())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(600)).await;
+
+        conn.connect_with_candidates(&[addr("127.0.0.1:59999"), peer.local_addr().unwrap()])
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+
+        assert!(
+            !states
+                .lock()
+                .unwrap()
+                .contains(&ConnectionState::Reconnecting),
+            "{:?}",
+            states.lock().unwrap()
+        );
     }
 
     /// Verifies: REQ-CON-114
