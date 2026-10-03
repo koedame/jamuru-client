@@ -96,20 +96,6 @@ async fn connect(
     config: ConnectionConfig,
 ) -> Result<Connection, ConnectionError>;
 
-/// 相手のアドレスを知らずに待ち受ける（`jamjam host`）
-///
-/// 最初に届いたパケットの送信元を相手とみなし、そこへ接続し返す。
-/// 接続する側は keep-alive から送り始めるので、ここで読み捨てても音声は欠けない。
-async fn accept(&mut self) -> Result<SocketAddr, NetworkError>;
-
-/// 直接接続（ICEなし、アドバンスオプション）
-///
-/// スレッド: 非リアルタイムスレッドから呼び出すこと
-/// ブロッキング: No
-async fn connect_direct(
-    remote_addr: SocketAddr,
-    config: ConnectionConfig,
-) -> Result<Connection, ConnectionError>;
 ```
 
 ルームで繋ぐ相手とは、`connect` の前に相手を確かめる（ADR-067）:
@@ -121,7 +107,7 @@ async fn connect_direct(
 /// - peer_key: そのピアの `PeerInfo::link_key`。無い（古い版）・鍵として読めないときは確かめず、
 ///   署名の無い鍵交換で暗号化する（`checks_peer()` が `false`）
 ///
-/// 接続したあとは呼べない（`AlreadyConnected`）。呼ばなければ、確かめない接続になる（サーバーを使わない直接接続）
+/// 接続したあとは呼べない（`AlreadyConnected`）。呼ばなければ、確かめない接続になる
 fn verify_peer(&mut self, ours: &LinkIdentity, peer_key: Option<&str>) -> Result<(), NetworkError>;
 
 /// 鍵が相手の鍵に結び付いているか
@@ -431,7 +417,7 @@ struct ConnectionStats {
     /// `Unencrypted`（相手のアプリが暗号化に対応していない。ADR-064）
     security: LinkSecurity,
     /// 鍵が、シグナリングのサーバーが渡した相手の鍵に結び付いているか（ADR-067）。
-    /// `false` は、相手のアプリが鍵を知らせない古い版のとき・サーバーを使わない直接接続のとき:
+    /// `false` は、相手のアプリが鍵を知らせない古い版のとき:
     /// 暗号化はされるが、相手が本人かは確かめていない（echo と音質チェックのボットは鍵を知らせ、
     /// 確かめる。ADR-069）
     peer_checked: bool,

@@ -168,7 +168,7 @@ async fn test_session_repeated_recreate() {
 }
 
 // ---------------------------------------------------------------------------
-// Invite links and direct connection
+// Invite links
 // ---------------------------------------------------------------------------
 
 /// Given the creator has created a room
@@ -230,47 +230,6 @@ fn test_invite_url_round_trips() {
             rejected
         );
     }
-}
-
-/// Given the peer is listening on a port
-/// When the user connects by IP address and port
-/// Then the connection is established without a signaling server
-///
-/// Verifies: REQ-CON-107
-#[tokio::test]
-async fn test_direct_connection_without_signaling() {
-    // Two sockets on loopback, connected by address alone.
-    let mut listener = Connection::new("127.0.0.1:0")
-        .await
-        .expect("Failed to create listener");
-    let listener_addr = listener.local_addr();
-    assert!(listener_addr.port() > 0, "listener needs a real port");
-
-    let mut caller = Connection::new("127.0.0.1:0")
-        .await
-        .expect("Failed to create caller");
-    assert!(!caller.is_connected(), "must start disconnected");
-
-    // The listener learns who is calling from the first packet that reaches it.
-    let (accepted, called) = tokio::join!(listener.accept(), caller.connect(listener_addr));
-    accepted.expect("the listener takes the call");
-    called.expect("direct connection by address should succeed");
-
-    assert!(
-        caller.is_connected(),
-        "connection state must reflect the direct connect"
-    );
-
-    // Audio goes as soon as the two agree keys: no signaling exchange is involved.
-    common::wait_until_encrypted(&[&caller, &listener]).await;
-    caller
-        .send_audio(&[0.25f32; 64], 0)
-        .await
-        .expect("send over a directly established connection");
-    assert!(
-        caller.stats().packets_sent > 0,
-        "the packet must be counted"
-    );
 }
 
 // ---------------------------------------------------------------------------
