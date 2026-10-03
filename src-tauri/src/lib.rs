@@ -133,7 +133,7 @@ pub fn run() {
     // Local and unconditional: whether it is sent depends on
     // `usage_reporting`, decided inside (usage.rs, ADR-056).
     let previous_incident = watchdog::previous_incident(usage.reporter());
-    usage.apply_previous_incident(app.handle(), previous_incident);
+    usage.apply_previous_incident(previous_incident);
     let watchdog = watchdog::Watchdog::install(usage.reporter().clone());
     if usage.reporter().is_enabled() {
         usage.report_launch(startup_config);

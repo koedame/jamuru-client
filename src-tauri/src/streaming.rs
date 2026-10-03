@@ -30,7 +30,7 @@ use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
 use jamjam::network::{
     required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
     BandwidthVerdict, Connection, ConnectionState, ConnectionStats, LatencyBreakdown, LinkFacts,
-    LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
+    LinkIdentity, LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
@@ -253,6 +253,9 @@ pub struct StreamingState {
     /// Address `prepared_socket` is bound to, kept so repeated prepares report
     /// the same one.
     prepared_addr: Mutex<Option<SocketAddr>>,
+    /// The port of the socket the last audio session took, so the next one can
+    /// be bound there when the room already knows it.
+    last_port: Mutex<Option<u16>>,
 }
 
 impl StreamingState {
@@ -287,6 +290,7 @@ impl StreamingState {
             peer_latency_info: Arc::new(RwLock::new(None)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
+            last_port: Mutex::new(None),
         }
     }
 
@@ -356,7 +360,39 @@ impl StreamingState {
         }
 
         // Port 0 lets the OS choose; the bound address is what we advertise.
-        let socket = jamjam::network::bind_std("0.0.0.0:0")
+        self.bind_prepared(&mut addr_lock, "0.0.0.0:0").await
+    }
+
+    /// Bind the audio socket on the port the last audio session used, so the
+    /// address the room has stays good for a peer on its way to it. Binds a
+    /// fresh port when that one cannot be had again, or when a socket is
+    /// already bound; true only when the port is the last one.
+    async fn prepare_socket_again(&self) -> Result<bool, String> {
+        let mut addr_lock = self.prepared_addr.lock().await;
+        if addr_lock.is_some() {
+            return Ok(false);
+        }
+        let last = *self.last_port.lock().await;
+        if let Some(port) = last {
+            match self
+                .bind_prepared(&mut addr_lock, &format!("0.0.0.0:{port}"))
+                .await
+            {
+                Ok(_) => return Ok(true),
+                Err(e) => tracing::warn!("Could not bind port {} again: {}", port, e),
+            }
+        }
+        self.bind_prepared(&mut addr_lock, "0.0.0.0:0")
+            .await
+            .map(|_| false)
+    }
+
+    async fn bind_prepared(
+        &self,
+        addr_lock: &mut Option<SocketAddr>,
+        bind: &str,
+    ) -> Result<SocketAddr, String> {
+        let socket = jamjam::network::bind_std(bind)
             .map_err(|e| format!("Failed to bind the audio socket: {}", e))?;
         let addr = socket
             .local_addr()
@@ -378,7 +414,23 @@ impl StreamingState {
         let mut addr_lock = self.prepared_addr.lock().await;
         let socket = self.prepared_socket.lock().await.take();
         *addr_lock = None;
+        if let Some(port) = socket
+            .as_ref()
+            .and_then(|s| s.local_addr().ok())
+            .map(|addr| addr.port())
+        {
+            *self.last_port.lock().await = Some(port);
+        }
         socket
+    }
+
+    /// How the audio connection is doing, as the status reports it
+    /// ("connected", "reconnecting", "failed", ...), if there is one.
+    pub fn link_state(&self) -> Option<String> {
+        self.connection_state
+            .read()
+            .ok()
+            .and_then(|c| c.as_ref().map(|(state, _)| state.clone()))
     }
 
     /// Address candidates for the prepared audio socket, with the public
@@ -632,6 +684,9 @@ pub struct NetworkStats {
     /// Whether the audio to this peer is encrypted: "encrypted", "negotiating" while the
     /// keys are being agreed, or "unencrypted" when the peer's app cannot encrypt
     pub encryption: String,
+    /// Whether the keys of the link are bound to the peer's key from the server, so the peer is
+    /// known to be who the server said. False for a peer whose app predates the check.
+    pub peer_checked: bool,
     /// Total bytes sent
     pub bytes_sent: u64,
     /// Total bytes received
@@ -815,6 +870,14 @@ pub async fn streaming_prepare(state: tauri::State<'_, StreamingState>) -> Resul
     state.prepare_socket().await.map(|addr| addr.to_string())
 }
 
+/// Binds the audio socket on the port the last audio session used and reports
+/// whether it got that port (see [`StreamingState::prepare_socket_again`]).
+pub async fn streaming_prepare_again(
+    state: tauri::State<'_, StreamingState>,
+) -> Result<bool, String> {
+    state.prepare_socket_again().await
+}
+
 /// Address candidates to race for `addr` (REQ-CON-113): `others`, in the
 /// order the caller ranked them (LAN before public), deduplicated, with
 /// `addr` appended if it was not already among them. `addr` is always kept
@@ -841,6 +904,10 @@ pub async fn streaming_start(
     // `remote_addr` so a peer on the same network is reached directly
     // instead of only through its public address (REQ-CON-113).
     remote_candidates: Option<Vec<String>>,
+    // Our key in the room and the key the server gave for the peer: with them the link to
+    // the peer is checked to be that peer's (`Connection::verify_peer`). `None` for a peer
+    // reached without a room.
+    link: Option<(LinkIdentity, Option<String>)>,
     state: tauri::State<'_, StreamingState>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
     settings_state: tauri::State<'_, crate::settings::SettingsState>,
@@ -1008,6 +1075,7 @@ pub async fn streaming_start(
         rt.block_on(async move {
             if let Err(e) = run_audio_streaming(
                 candidate_addrs,
+                link,
                 prepared_socket,
                 input_device_id,
                 output_device_id,
@@ -1098,13 +1166,25 @@ pub async fn streaming_stop(state: tauri::State<'_, StreamingState>) -> Result<(
         }
     }
 
-    // Wait briefly for thread to finish
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    state.is_active.store(false, Ordering::SeqCst);
+    // The audio thread clears `is_active` as the last thing it does. Waiting
+    // for that, not for a fixed time, is what keeps the end of this session
+    // from clearing the flag of the one that starts right after it.
+    let deadline = std::time::Instant::now() + STOP_WAIT_LIMIT;
+    while state.is_active.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+    if state.is_active.swap(false, Ordering::SeqCst) {
+        tracing::warn!(
+            "The audio thread did not end within {:?} of being told to stop",
+            STOP_WAIT_LIMIT
+        );
+    }
 
     Ok(())
 }
+
+/// How long [`streaming_stop`] waits for the audio thread to end.
+const STOP_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Get streaming status
 #[tauri::command]
@@ -1139,6 +1219,7 @@ pub async fn streaming_status(
             packets_sent: s.packets_sent,
             packets_received: s.packets_received,
             encryption: s.security.as_str().to_string(),
+            peer_checked: s.peer_checked,
             bytes_sent: s.bytes_sent,
             bytes_received: s.bytes_received,
         };
@@ -1785,6 +1866,7 @@ fn open_asio(
 #[allow(clippy::too_many_arguments)]
 async fn run_audio_streaming(
     remote_candidates: Vec<SocketAddr>,
+    link: Option<(LinkIdentity, Option<String>)>,
     prepared_socket: Option<std::net::UdpSocket>,
     input_device_id: Option<String>,
     output_device_id: Option<String>,
@@ -1844,6 +1926,12 @@ async fn run_audio_streaming(
             .await
             .map_err(|e| format!("Failed to create connection: {}", e))?,
     };
+
+    if let Some((ours, peer_key)) = &link {
+        connection
+            .verify_peer(ours, peer_key.as_deref())
+            .map_err(|e| format!("Failed to set up the link to the peer: {}", e))?;
+    }
 
     // Create separate audio engines for capture (mono) and playback (stereo)
     let mut capture_engine = AudioEngine::new(capture_config.clone());
@@ -2784,6 +2872,7 @@ async fn run_audio_streaming(
 mod tests {
     use super::*;
     use jamjam::audio::PlayoutConfig;
+    use tauri::Manager;
 
     /// Verifies: REQ-AUD-126
     #[cfg(target_os = "windows")]
@@ -2825,6 +2914,30 @@ mod tests {
         assert_eq!(shared_asio_driver(None, None), None);
     }
 
+    /// The bug this guards: stopping waited a fixed 100 ms, and a thread that
+    /// took longer to end cleared `is_active` after the next session had set
+    /// it, which ended that session as soon as it connected.
+    ///
+    /// Verifies: REQ-CON-131
+    #[tokio::test]
+    async fn stopping_waits_until_the_audio_thread_has_ended() {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+        let state = app.state::<StreamingState>();
+        state.is_active.store(true, Ordering::SeqCst);
+        let is_active = state.is_active.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            is_active.store(false, Ordering::SeqCst);
+        });
+        let started = std::time::Instant::now();
+
+        streaming_stop(app.state()).await.unwrap();
+
+        assert!(started.elapsed() >= std::time::Duration::from_millis(400));
+        assert!(!state.is_active.load(Ordering::SeqCst));
+    }
+
     /// After audio starts the socket belongs to the audio session, so the
     /// next prepare must bind a new one. Reporting the old address would
     /// advertise a port nothing listens on: the audio session that follows a
@@ -2842,6 +2955,31 @@ mod tests {
         let second = state.prepare_socket().await.unwrap();
 
         assert_ne!(second, first, "the taken socket still holds the first port");
+        assert!(state.take_prepared_socket().await.is_some());
+    }
+
+    /// Going from one peer to another keeps the address the room has: the
+    /// peer being moved to is already sending to it.
+    #[tokio::test]
+    async fn prepare_socket_again_after_the_session_ended_binds_the_port_it_used() {
+        let state = StreamingState::new();
+        let first = state.prepare_socket().await.unwrap();
+        drop(state.take_prepared_socket().await);
+
+        let kept = state.prepare_socket_again().await.unwrap();
+
+        assert!(kept);
+        let again = state.take_prepared_socket().await.unwrap();
+        assert_eq!(again.local_addr().unwrap().port(), first.port());
+    }
+
+    #[tokio::test]
+    async fn prepare_socket_again_when_no_session_ever_ran_binds_a_fresh_port_and_says_so() {
+        let state = StreamingState::new();
+
+        let kept = state.prepare_socket_again().await.unwrap();
+
+        assert!(!kept);
         assert!(state.take_prepared_socket().await.is_some());
     }
 

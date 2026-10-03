@@ -6,14 +6,16 @@
 //! cargo test --release --test wire_latency_measure -- --ignored --nocapture
 //! ```
 //!
-//! It uses only what every version of the connection offers, so the same file runs on both sides
-//! of a comparison. The figures are the time spent in the app (encoding, sealing, the socket,
-//! opening); the network between two machines comes on top of them.
+//! The figures are the time spent in the app (encoding, sealing, the socket, opening); the
+//! network between two machines comes on top of them. The first test leaves the peer unchecked,
+//! as the version before the key exchange was signed did; the second checks it, as an app in a
+//! room does. Both print how long the first audio took to arrive, which is where the signing
+//! of the key exchange would show.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use jamjam::network::{AudioEncodingConfig, Connection};
+use jamjam::network::{AudioEncodingConfig, Connection, LinkIdentity};
 
 /// 128 frames of stereo 32-bit float: the Balanced preset's packet
 const FRAME: usize = 128;
@@ -28,6 +30,16 @@ fn percentile(sorted: &[u128], p: f64) -> u128 {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "a measurement, run by hand"]
 async fn how_long_audio_takes_from_send_to_callback_over_loopback() {
+    measure(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "a measurement, run by hand"]
+async fn how_long_audio_takes_from_send_to_callback_over_loopback_with_the_peer_checked() {
+    measure(true).await;
+}
+
+async fn measure(check_peer: bool) {
     let encoding = || AudioEncodingConfig {
         channels: 2,
         frame_size: FRAME as u32,
@@ -44,6 +56,16 @@ async fn how_long_audio_takes_from_send_to_callback_over_loopback() {
     receiver.set_audio_callback(move |sequence, _, _| {
         sink.lock().unwrap().push((sequence, Instant::now()));
     });
+    if check_peer {
+        let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
+        sender
+            .verify_peer(&ours, Some(&theirs.public_key()))
+            .unwrap();
+        receiver
+            .verify_peer(&theirs, Some(&ours.public_key()))
+            .unwrap();
+    }
+    let connecting = Instant::now();
     sender.connect(receiver.local_addr()).await.unwrap();
     receiver.connect(sender.local_addr()).await.unwrap();
 
@@ -60,6 +82,10 @@ async fn how_long_audio_takes_from_send_to_callback_over_loopback() {
             "no audio arrived"
         );
     }
+    println!(
+        "connect -> first audio at the callback, peer checked: {check_peer}: {} ms",
+        connecting.elapsed().as_millis()
+    );
     tokio::time::sleep(Duration::from_millis(100)).await;
     arrivals.lock().unwrap().clear();
 
@@ -88,8 +114,8 @@ async fn how_long_audio_takes_from_send_to_callback_over_loopback() {
     micros.sort_unstable();
     let lost = PACKETS - micros.len().min(PACKETS);
     println!(
-        "send -> callback over loopback, {} packets of {} bytes, {} lost: \
-         p50 {} us, p95 {} us, p99 {} us, max {} us",
+        "send -> callback over loopback, peer checked: {check_peer}, {} packets of {} bytes, \
+         {} lost: p50 {} us, p95 {} us, p99 {} us, max {} us",
         micros.len(),
         FRAME * 2 * 4,
         lost,

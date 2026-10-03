@@ -19,6 +19,8 @@ jamjamをインストールする方法を説明します。
 - オーディオインターフェース（ASIO/CoreAudio/ALSA対応）
 - 安定したインターネット接続
 
+> ASIO は Steinberg Media Technologies GmbH の商標です。jamjam は Steinberg と提携・承認の関係にありません。
+
 ## インストール方法
 
 ### Homebrew（macOS）
