@@ -165,7 +165,7 @@ IP アドレスとオーディオデバイスの ID は既定でマスクされ�
 
 `jamjam.log` が 5 MB を超えると `jamjam_<日時>.log` に改名され、新しい `jamjam.log` に書き始めます。残るのは現在のファイルと古い 2 世代までです。詳しく見たいときは、環境変数 `JAMJAM_LOG` で出力レベルを変えて起動できます（例: `JAMJAM_LOG=trace`。`jamjam=trace,info` のように対象ごとの指定も可）。
 
-接続のとき、アプリは相手の全アドレス（同じ LAN・公開・Tailscale など）に確認を送り、往復時間が最も短いものを選びます。どれを選んだかはログの `Selected candidate` に出ます。経路を指定して試したいときは、環境変数 `JAMJAM_ROUTE` に `lan`・`public`・`tailscale`・IP アドレスのいずれかを入れて起動します（例: `JAMJAM_ROUTE=public`）。その種類のアドレスだけで接続し、該当するアドレスが相手に無ければ接続できません。
+接続のとき、アプリは相手の全アドレス（同じ LAN・公開・Tailscale など）に確認を 5 回ずつ送り、往復時間の中央値が最も短いものを選びます。どれを選んだかはログの `Selected candidate` に出ます。経路を指定して試したいときは、環境変数 `JAMJAM_ROUTE` に `lan`・`public`・`tailscale`・IP アドレスのいずれかを入れて起動します（例: `JAMJAM_ROUTE=public`）。その種類のアドレスだけで接続し、該当するアドレスが相手に無ければ接続できません。
 
 ### 問題報告
 

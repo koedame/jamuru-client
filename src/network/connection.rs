@@ -19,7 +19,7 @@ use super::bandwidth::{samples_per_audio_packet, UDP_IP_OVERHEAD_BYTES};
 use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
-use super::link_facts::{route_preference, LinkFacts, RouteOverride, NEAREST_ROUTE_PREFERENCE};
+use super::link_facts::{route_preference, LinkFacts, RouteOverride};
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
 use super::transport::UdpTransport;
@@ -30,9 +30,13 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(1000);
 /// How long the connectivity check waits between probing one candidate and the next
 const CANDIDATE_DELAY: Duration = Duration::from_millis(50);
 
-/// How long, once a keep-alive has come from a peer that answers no probe, the check waits
-/// for a nearer route to be heard
-const ANSWER_GRACE: Duration = Duration::from_millis(500);
+/// How many times the connectivity check probes each candidate. One round trip is a single
+/// sample of a path that jitters (a relayed Tailscale path swings between 43 and 187 ms),
+/// so a route is judged by the median of several.
+const PROBE_ROUNDS: usize = 5;
+
+/// How long the connectivity check waits between one round of probes and the next
+const ROUND_INTERVAL: Duration = Duration::from_millis(80);
 
 /// Number of RTT samples to keep for averaging
 const RTT_SAMPLE_COUNT: usize = 10;
@@ -183,33 +187,37 @@ fn is_probe_answer(
 }
 
 /// How much faster a route must be to beat one that is nearer by kind: round trips
-/// closer than this are noise in a single sample.
+/// closer than this are noise.
 const NEAR_ENOUGH: Duration = Duration::from_millis(2);
+
+/// The number a probe carries, so that its reply names the candidate and the round it
+/// answers
+fn probe_token(round: usize, index: usize) -> u32 {
+    ((round as u32) << 16) | index as u32
+}
 
 /// What the connectivity check has heard so far, candidate by candidate
 ///
-/// Each probe is a keep-alive that asks for one back ([`Packet::route_probe`]), so a peer
-/// that can answer lets the check time the round trip on every address. A peer that cannot
-/// still sends its own keep-alives, and then the check falls back to the kind of route.
+/// Each probe is a keep-alive that asks for one back ([`Packet::route_probe`]), so the check
+/// can time the round trip on every address, [`PROBE_ROUNDS`] times each.
 struct Probing<'a> {
     candidates: &'a [SocketAddr],
-    /// Whether the probe to the candidate went out: one that did not is not a route,
-    /// however its packets reach us (REQ-CON-114)
-    sendable: Vec<bool>,
-    sent_at: Vec<Option<Instant>>,
-    /// When the first keep-alive of any kind came from the candidate
-    answered_at: Vec<Option<Instant>>,
-    /// The round trip of the probe sent to the candidate, once its reply came
-    rtt: Vec<Option<Duration>>,
+    /// When the probe of each round went out to the candidate. A probe that did not go out
+    /// is not a route, however its packets reach us (REQ-CON-114)
+    sent_at: Vec<Vec<Option<Instant>>>,
+    /// The round trip of each probe, once its reply came
+    rtt: Vec<Vec<Option<Duration>>>,
 }
 
 /// What the check has settled on, or how long it has to wait
 enum Verdict {
-    /// The candidate with the shortest round trip (within [`NEAR_ENOUGH`], the nearer kind)
-    Fastest { index: usize, rtt: Duration },
-    /// The peer answered no probe with a reply: the nearest kind of route that sent a
-    /// keep-alive, and the candidate whose keep-alive came first
-    NearestKind { index: usize, first: usize },
+    /// The candidate with the shortest median round trip (within [`NEAR_ENOUGH`], the
+    /// nearer kind)
+    Fastest {
+        index: usize,
+        rtt: Duration,
+        replies: usize,
+    },
     /// Nothing is settled before this time
     WaitUntil(Instant),
     /// Nothing has answered
@@ -221,90 +229,110 @@ impl<'a> Probing<'a> {
         let n = candidates.len();
         Self {
             candidates,
-            sendable: vec![false; n],
-            sent_at: vec![None; n],
-            answered_at: vec![None; n],
-            rtt: vec![None; n],
+            sent_at: vec![vec![None; PROBE_ROUNDS]; n],
+            rtt: vec![vec![None; PROBE_ROUNDS]; n],
         }
     }
 
-    fn sent(&mut self, index: usize, at: Instant) {
-        self.sendable[index] = true;
-        self.sent_at[index] = Some(at);
+    fn sent(&mut self, index: usize, round: usize, at: Instant) {
+        self.sent_at[index][round] = Some(at);
+    }
+
+    /// Whether any probe went out to the candidate
+    fn sendable(&self, index: usize) -> bool {
+        self.sent_at[index].iter().any(Option::is_some)
+    }
+
+    fn sent_count(&self, index: usize) -> usize {
+        self.sent_at[index].iter().flatten().count()
+    }
+
+    fn reply_count(&self, index: usize) -> usize {
+        self.rtt[index].iter().flatten().count()
+    }
+
+    /// The median round trip of the replies that came: one lucky or unlucky probe does not
+    /// move it
+    fn median(&self, index: usize) -> Option<Duration> {
+        let mut replies: Vec<Duration> = self.rtt[index].iter().flatten().copied().collect();
+        replies.sort();
+        replies.get(replies.len().checked_sub(1)? / 2).copied()
     }
 
     /// Take in a datagram that reached the socket. Returns the token to send back to
     /// `from` when the peer asked for one.
     fn hear(&mut self, from: SocketAddr, bytes: &[u8], now: Instant) -> Option<u32> {
-        if !is_probe_answer(self.candidates, &self.sendable, from, bytes) {
+        let sendable: Vec<bool> = (0..self.candidates.len())
+            .map(|i| self.sendable(i))
+            .collect();
+        if !is_probe_answer(self.candidates, &sendable, from, bytes) {
             return None;
         }
         let index = self.candidates.iter().position(|&addr| addr == from)?;
-        self.answered_at[index].get_or_insert(now);
         let (reply, token) = Packet::from_bytes(bytes)?.route_probe_token()?;
         if !reply {
             return Some(token);
         }
-        // A reply counts only for the address its probe went to
-        if token as usize == index && self.rtt[index].is_none() {
-            self.rtt[index] = self.sent_at[index].map(|sent| now.saturating_duration_since(sent));
+        // A reply counts only for the address and the round its probe went to
+        let (round, named) = ((token >> 16) as usize, (token & 0xFFFF) as usize);
+        if named == index && round < PROBE_ROUNDS && self.rtt[index][round].is_none() {
+            self.rtt[index][round] =
+                self.sent_at[index][round].map(|sent| now.saturating_duration_since(sent));
         }
         None
     }
 
+    /// Settle on the candidate whose median round trip is shortest, once no probe still
+    /// out could change that. A candidate that answered fewer than half of its probes is a
+    /// lossy path and is passed over, unless nothing else answered.
     fn assess(&self, now: Instant) -> Verdict {
-        let fastest = self.rtt.iter().flatten().min().copied();
-        if let Some(fastest) = fastest {
-            // A candidate that has not replied cannot beat `fastest` once that long has
-            // passed since its probe went out
-            let settled = (0..self.candidates.len())
-                .filter(|&i| self.rtt[i].is_none())
-                .filter_map(|i| self.sent_at[i])
-                .map(|sent| sent + fastest + NEAR_ENOUGH)
-                .max();
-            if let Some(settled) = settled.filter(|&settled| now < settled) {
-                return Verdict::WaitUntil(settled);
-            }
-            let index = (0..self.candidates.len())
-                .filter(|&i| self.rtt[i].is_some_and(|rtt| rtt <= fastest + NEAR_ENOUGH))
-                .max_by_key(|&i| {
-                    (
-                        route_preference(self.candidates[i]),
-                        std::cmp::Reverse(self.rtt[i]),
-                    )
-                })
-                .expect("the fastest candidate is among them");
-            return Verdict::Fastest {
-                index,
-                rtt: self.rtt[index].expect("it has a round trip"),
-            };
-        }
-
-        let first = (0..self.candidates.len())
-            .filter(|&i| self.answered_at[i].is_some())
-            .min_by_key(|&i| self.answered_at[i]);
-        let Some(first) = first else {
+        let answered: Vec<usize> = (0..self.candidates.len())
+            .filter(|&i| self.reply_count(i) > 0)
+            .collect();
+        let reliable: Vec<usize> = answered
+            .iter()
+            .copied()
+            .filter(|&i| self.reply_count(i) * 2 >= self.sent_count(i))
+            .collect();
+        let pool = if reliable.is_empty() {
+            answered
+        } else {
+            reliable
+        };
+        let Some(fastest) = pool.iter().filter_map(|&i| self.median(i)).min() else {
             return Verdict::NoAnswer;
         };
-        // Which keep-alive came first depends on the order the peer probed us in, not on how
-        // near the route is. Unless one is already the nearest kind, give the peer time to
-        // probe its other addresses (a peer probes our candidates CANDIDATE_DELAY apart, so
-        // an answer from the tenth can come nine delays after the first).
-        let index = (0..self.candidates.len())
-            .filter(|&i| self.answered_at[i].is_some())
+
+        // A probe still out cannot come back faster than `fastest` once that long has
+        // passed since it went out
+        let settled = (0..self.candidates.len())
+            .flat_map(|i| {
+                (0..PROBE_ROUNDS)
+                    .filter(move |&round| self.rtt[i][round].is_none())
+                    .filter_map(move |round| self.sent_at[i][round])
+            })
+            .map(|sent| sent + fastest + NEAR_ENOUGH)
+            .max();
+        if let Some(settled) = settled.filter(|&settled| now < settled) {
+            return Verdict::WaitUntil(settled);
+        }
+
+        let index = pool
+            .iter()
+            .copied()
+            .filter(|&i| self.median(i).is_some_and(|m| m <= fastest + NEAR_ENOUGH))
             .max_by_key(|&i| {
                 (
                     route_preference(self.candidates[i]),
-                    std::cmp::Reverse(self.answered_at[i]),
+                    std::cmp::Reverse(self.median(i)),
                 )
             })
-            .expect("the first to answer is among them");
-        let waits_until = self.answered_at[first].expect("it answered") + ANSWER_GRACE;
-        if route_preference(self.candidates[index]) < NEAREST_ROUTE_PREFERENCE && now < waits_until
-        {
-            return Verdict::WaitUntil(waits_until);
+            .expect("the fastest candidate is among them");
+        Verdict::Fastest {
+            index,
+            rtt: self.median(index).expect("it has a round trip"),
+            replies: self.reply_count(index),
         }
-        Verdict::NearestKind { index, first }
     }
 }
 
@@ -884,11 +912,9 @@ impl Connection {
 
     /// Connect to a remote peer using multiple address candidates (Happy Eyeballs style)
     ///
-    /// Every candidate is probed with a keep-alive that asks for one back, and the one whose
-    /// round trip is shortest is used. A peer that cannot answer the request is still heard:
-    /// then the nearest kind of route that sent a keep-alive is used (a LAN address, then any
-    /// other, then an overlay such as Tailscale), waiting a moment for a nearer one when the
-    /// first is not on the LAN. `JAMJAM_ROUTE` pins the kind of route for debugging.
+    /// Every candidate is probed several times with a keep-alive that asks for one back, and
+    /// the one whose median round trip is shortest is used. A peer that answers no probe is
+    /// not connected to. `JAMJAM_ROUTE` pins the kind of route for debugging.
     /// Candidates are probed in order of priority, with a small delay between each.
     pub async fn connect_with_candidates(
         &mut self,
@@ -932,27 +958,38 @@ impl Connection {
         self.set_state(ConnectionState::CheckingConnectivity);
         info!("Checking connectivity with {} candidates", candidates.len());
 
-        // Probe every candidate a little apart, hearing the peer's probes in between so
-        // that its requests are answered at once: a request left in the socket until the
-        // loop ends would be timed by the peer as a long round trip.
+        // Probe every candidate PROBE_ROUNDS times, a little apart, hearing the peer's probes
+        // in between so that its requests are answered at once: a request left in the socket
+        // until the loop ends would be timed by the peer as a long round trip.
         let mut probing = Probing::new(candidates);
-        for (i, &addr) in candidates.iter().enumerate() {
-            let packet = Packet::route_probe(self.next_sequence(), i as u32);
+        let mut due: Vec<(Duration, usize, usize)> = (0..PROBE_ROUNDS)
+            .flat_map(|round| {
+                (0..candidates.len()).map(move |i| {
+                    (
+                        ROUND_INTERVAL * round as u32 + CANDIDATE_DELAY * i as u32,
+                        round,
+                        i,
+                    )
+                })
+            })
+            .collect();
+        due.sort();
+        for (after, round, i) in due {
+            let at = started + after;
+            while Instant::now() < at {
+                self.hear_probe(&mut probing, at - Instant::now()).await?;
+            }
+            let addr = candidates[i];
+            let packet = Packet::route_probe(self.next_sequence(), probe_token(round, i));
             if let Err(e) = send_sealed(&self.transport, &self.secure_link, packet, addr).await {
                 debug!("Failed to send probe to candidate {}: {}", addr, e);
                 continue;
             }
-            probing.sent(i, Instant::now());
-            debug!("Sent connectivity probe to candidate {} ({})", i, addr);
-
-            // Small delay before next candidate (Happy Eyeballs style)
-            if i < candidates.len() - 1 {
-                let until = Instant::now() + CANDIDATE_DELAY;
-                while Instant::now() < until {
-                    self.hear_probe(&mut probing, until - Instant::now())
-                        .await?;
-                }
-            }
+            probing.sent(i, round, Instant::now());
+            debug!(
+                "Sent connectivity probe {} to candidate {} ({})",
+                round, i, addr
+            );
         }
 
         let give_up_at = Instant::now() + PROBE_TIMEOUT;
@@ -973,33 +1010,26 @@ impl Connection {
         let other_candidates = |selected: SocketAddr| -> Vec<(SocketAddr, bool)> {
             candidates
                 .iter()
-                .zip(&probing.sendable)
-                .filter(|(&addr, _)| addr != selected)
-                .map(|(&addr, &sendable)| (addr, sendable))
+                .enumerate()
+                .filter(|&(_, &addr)| addr != selected)
+                .map(|(i, &addr)| (addr, probing.sendable(i)))
                 .collect()
         };
 
         let selected = match verdict {
-            Verdict::Fastest { index, rtt } => {
+            Verdict::Fastest {
+                index,
+                rtt,
+                replies,
+            } => {
                 info!(
-                    "Selected candidate: {} (round trip {:.1} ms, the shortest of {})",
+                    "Selected candidate: {} (median round trip {:.1} ms of {} replies, the shortest of {} candidates)",
                     candidates[index],
                     rtt.as_secs_f32() * 1000.0,
-                    probing.rtt.iter().flatten().count()
-                );
-                Some(candidates[index])
-            }
-            Verdict::NearestKind { index, first } if index == first => {
-                info!(
-                    "Selected candidate: {} (first to respond)",
-                    candidates[index]
-                );
-                Some(candidates[index])
-            }
-            Verdict::NearestKind { index, first } => {
-                info!(
-                    "Selected candidate: {} (nearer than {}, which responded first)",
-                    candidates[index], candidates[first]
+                    replies,
+                    (0..candidates.len())
+                        .filter(|&i| probing.reply_count(i) > 0)
+                        .count()
                 );
                 Some(candidates[index])
             }
@@ -1032,8 +1062,8 @@ impl Connection {
                 self.set_state(ConnectionState::Connecting);
                 let fallback = candidates
                     .iter()
-                    .zip(&probing.sendable)
-                    .find_map(|(&addr, &sendable)| sendable.then_some(addr))
+                    .enumerate()
+                    .find_map(|(i, &addr)| probing.sendable(i).then_some(addr))
                     .unwrap_or(candidates[0]);
                 *self.route.lock() = Route::new(fallback, other_candidates(fallback));
 
@@ -2134,8 +2164,7 @@ mod tests {
 
     /// Verifies: REQ-CON-115
     #[tokio::test]
-    async fn when_the_first_answer_is_on_the_nearest_kind_of_route_the_connection_does_not_wait_for_others(
-    ) {
+    async fn when_every_probe_is_answered_the_connection_is_up_as_soon_as_the_probes_are_out() {
         let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
         let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
         conn2.connect(conn1.local_addr()).await.unwrap();
@@ -2145,8 +2174,8 @@ mod tests {
 
         let snapshot = conn1.link_facts().snapshot();
         assert!(
-            snapshot.connect_ms.is_some_and(|ms| ms < 400),
-            "a loopback answer needs no grace: {snapshot:?}"
+            snapshot.connect_ms.is_some_and(|ms| ms < 800),
+            "the rounds of probes take under a second and then nothing is waited for: {snapshot:?}"
         );
     }
 
@@ -2292,24 +2321,49 @@ mod tests {
         assert_eq!(conn.remote_addr(), silent);
     }
 
-    fn reply_from(probing: &mut Probing<'_>, index: usize, token: u32, now: Instant) {
-        let bytes = Packet::route_probe_reply(0, token).to_bytes();
-        probing.hear(probing.candidates[index], &bytes, now);
+    /// The reply to the probe of `round` that went to candidate `index`, heard from the
+    /// address `from`
+    fn reply_from(
+        probing: &mut Probing<'_>,
+        from: usize,
+        index: usize,
+        round: usize,
+        now: Instant,
+    ) {
+        let bytes = Packet::route_probe_reply(0, probe_token(round, index)).to_bytes();
+        probing.hear(probing.candidates[from], &bytes, now);
+    }
+
+    /// When the probe of `round` goes out to candidate `index`, after the check starts
+    fn probe_time(round: usize, index: usize) -> Duration {
+        ROUND_INTERVAL * round as u32 + CANDIDATE_DELAY * index as u32
     }
 
     fn probed(candidates: &[SocketAddr], at: Instant) -> Probing<'_> {
         let mut probing = Probing::new(candidates);
-        for i in 0..candidates.len() {
-            probing.sent(i, at + CANDIDATE_DELAY * i as u32);
+        for round in 0..PROBE_ROUNDS {
+            for i in 0..candidates.len() {
+                probing.sent(i, round, at + probe_time(round, i));
+            }
         }
         probing
     }
 
+    /// Every probe to candidate `index` answered, the one of round `r` after `rtts[r]`
+    fn answer_probes(probing: &mut Probing<'_>, t0: Instant, index: usize, rtts: [u64; 5]) {
+        for (round, rtt) in rtts.into_iter().enumerate() {
+            let at = t0 + probe_time(round, index) + Duration::from_micros(rtt);
+            reply_from(probing, index, index, round, at);
+        }
+    }
+
+    fn settled(probing: &Probing<'_>, t0: Instant) -> Verdict {
+        probing.assess(t0 + Duration::from_secs(2))
+    }
+
     fn chosen(verdict: Verdict, candidates: &[SocketAddr]) -> SocketAddr {
         match verdict {
-            Verdict::Fastest { index, .. } | Verdict::NearestKind { index, .. } => {
-                candidates[index]
-            }
+            Verdict::Fastest { index, .. } => candidates[index],
             Verdict::WaitUntil(_) => panic!("still waiting"),
             Verdict::NoAnswer => panic!("nothing answered"),
         }
@@ -2322,12 +2376,17 @@ mod tests {
         let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
         let t0 = Instant::now();
         let mut probing = probed(&candidates, t0);
-        // Tailscale is listed first and answers with a relay's round trip; the public
-        // address was probed 50 ms later and answers in 6 ms.
-        reply_from(&mut probing, 0, 0, t0 + Duration::from_millis(120));
-        reply_from(&mut probing, 1, 1, t0 + Duration::from_millis(56));
+        // Tailscale is listed first and answers with a relay's round trips; the public
+        // address answers in 6 ms.
+        answer_probes(
+            &mut probing,
+            t0,
+            0,
+            [120_000, 90_000, 150_000, 43_000, 187_000],
+        );
+        answer_probes(&mut probing, t0, 1, [6_000; 5]);
 
-        let verdict = probing.assess(t0 + Duration::from_millis(700));
+        let verdict = settled(&probing, t0);
 
         assert_eq!(chosen(verdict, &candidates), candidates[1]);
     }
@@ -2338,11 +2397,11 @@ mod tests {
         let candidates = [addr("192.168.1.20:5000"), addr("203.0.113.7:5000")];
         let t0 = Instant::now();
         let mut probing = probed(&candidates, t0);
-        // A LAN address that is a bridge to nowhere useful: it replies, but slowly.
-        reply_from(&mut probing, 0, 0, t0 + Duration::from_millis(40));
-        reply_from(&mut probing, 1, 1, t0 + Duration::from_millis(58));
+        // A LAN address that replies, but slowly.
+        answer_probes(&mut probing, t0, 0, [40_000; 5]);
+        answer_probes(&mut probing, t0, 1, [8_000; 5]);
 
-        let verdict = probing.assess(t0 + Duration::from_millis(700));
+        let verdict = settled(&probing, t0);
 
         assert_eq!(chosen(verdict, &candidates), candidates[1]);
     }
@@ -2353,17 +2412,73 @@ mod tests {
         let candidates = [addr("203.0.113.7:5000"), addr("192.168.1.20:5000")];
         let t0 = Instant::now();
         let mut probing = probed(&candidates, t0);
-        reply_from(&mut probing, 0, 0, t0 + Duration::from_micros(800));
-        reply_from(
-            &mut probing,
-            1,
-            1,
-            t0 + Duration::from_millis(50) + Duration::from_micros(1700),
-        );
+        answer_probes(&mut probing, t0, 0, [800; 5]);
+        answer_probes(&mut probing, t0, 1, [1_700; 5]);
 
-        let verdict = probing.assess(t0 + Duration::from_millis(700));
+        let verdict = settled(&probing, t0);
 
         assert_eq!(chosen(verdict, &candidates), candidates[1]);
+    }
+
+    /// One lucky probe on a path that swings must not decide the route: the median does.
+    ///
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_one_probe_of_a_slow_route_is_lucky_the_route_that_is_steady_is_used() {
+        let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        answer_probes(
+            &mut probing,
+            t0,
+            0,
+            [4_000, 120_000, 150_000, 90_000, 187_000],
+        );
+        answer_probes(&mut probing, t0, 1, [30_000; 5]);
+
+        let verdict = settled(&probing, t0);
+
+        assert_eq!(chosen(verdict, &candidates), candidates[1]);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_route_answers_fewer_than_half_its_probes_a_slower_one_that_answers_all_is_used() {
+        let candidates = [addr("203.0.113.7:5000"), addr("203.0.113.8:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        // Only the first of five probes to the first candidate comes back.
+        reply_from(
+            &mut probing,
+            0,
+            0,
+            0,
+            t0 + probe_time(0, 0) + Duration::from_millis(5),
+        );
+        answer_probes(&mut probing, t0, 1, [40_000; 5]);
+
+        let verdict = settled(&probing, t0);
+
+        assert_eq!(chosen(verdict, &candidates), candidates[1]);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_route_answers_less_than_half_its_probes_but_nothing_else_answers_it_is_used() {
+        let candidates = [addr("203.0.113.7:5000"), addr("203.0.113.8:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        reply_from(
+            &mut probing,
+            0,
+            0,
+            2,
+            t0 + probe_time(2, 0) + Duration::from_millis(5),
+        );
+
+        let verdict = settled(&probing, t0);
+
+        assert_eq!(chosen(verdict, &candidates), candidates[0]);
     }
 
     /// Verifies: REQ-CON-115
@@ -2372,11 +2487,14 @@ mod tests {
         let candidates = [addr("203.0.113.7:5000"), addr("192.168.1.20:5000")];
         let t0 = Instant::now();
         let mut probing = probed(&candidates, t0);
-        reply_from(&mut probing, 0, 0, t0 + Duration::from_millis(30));
+        // The first candidate answers in 30 ms every time; the second has not answered yet.
+        answer_probes(&mut probing, t0, 0, [30_000; 5]);
 
-        // The second was probed at 50 ms, so it has until 50 + 30 ms (plus the noise) to beat 30 ms
-        let early = probing.assess(t0 + Duration::from_millis(60));
-        let late = probing.assess(t0 + Duration::from_millis(100));
+        // The last probe to the second went out at 4 * 80 + 50 ms, so it has until 30 ms
+        // (plus the noise) after that to beat 30 ms
+        let last = t0 + probe_time(PROBE_ROUNDS - 1, 1);
+        let early = probing.assess(last + Duration::from_millis(10));
+        let late = probing.assess(last + Duration::from_millis(40));
 
         assert!(matches!(early, Verdict::WaitUntil(_)));
         assert_eq!(chosen(late, &candidates), candidates[0]);
@@ -2389,9 +2507,28 @@ mod tests {
         let t0 = Instant::now();
         let mut probing = probed(&candidates, t0);
 
-        reply_from(&mut probing, 0, 1, t0 + Duration::from_millis(5));
+        reply_from(&mut probing, 0, 1, 0, t0 + Duration::from_millis(5));
 
-        assert!(probing.rtt.iter().all(Option::is_none));
+        assert!(probing.rtt.iter().flatten().all(Option::is_none));
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_reply_names_another_round_it_is_timed_from_the_probe_of_that_round() {
+        let candidates = [addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+
+        reply_from(
+            &mut probing,
+            0,
+            0,
+            3,
+            t0 + probe_time(3, 0) + Duration::from_millis(7),
+        );
+
+        assert_eq!(probing.rtt[0][3], Some(Duration::from_millis(7)));
+        assert_eq!(probing.rtt[0][0], None);
     }
 
     /// Verifies: REQ-CON-115
@@ -2409,38 +2546,39 @@ mod tests {
         assert_eq!(plain, None);
     }
 
-    /// A peer that answers no probe (an older app) is still heard through its own keep-alives.
+    /// A peer that answers no probe is not chosen from its own keep-alives: only a measured
+    /// round trip makes a route.
     ///
     /// Verifies: REQ-CON-115
     #[test]
-    fn when_the_peer_answers_no_probe_the_nearest_kind_of_route_that_was_heard_is_used() {
+    fn when_the_peer_answers_no_probe_its_keep_alives_do_not_make_a_route() {
         let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
         let t0 = Instant::now();
         let mut probing = probed(&candidates, t0);
         let keep_alive = Packet::keep_alive(0).to_bytes();
         probing.hear(candidates[0], &keep_alive, t0 + Duration::from_millis(10));
-
-        let waiting = probing.assess(t0 + Duration::from_millis(100));
         probing.hear(candidates[1], &keep_alive, t0 + Duration::from_millis(200));
-        let settled = probing.assess(t0 + Duration::from_millis(600));
 
-        assert!(matches!(waiting, Verdict::WaitUntil(_)));
-        assert_eq!(chosen(settled, &candidates), candidates[1]);
+        assert!(matches!(settled(&probing, t0), Verdict::NoAnswer));
     }
 
-    /// A stand-in for a peer's address: answers every route probe after `delay`.
-    async fn peer_answering_probes_after(delay: Duration) -> SocketAddr {
+    /// A stand-in for a peer's address: answers the route probes after `delays`, the first
+    /// probe after the first delay, the next after the next, and round again.
+    async fn peer_answering_probes_after(delays: &[u64]) -> SocketAddr {
+        let delays: Vec<Duration> = delays.iter().map(|&ms| Duration::from_millis(ms)).collect();
         let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let at = socket.local_addr().unwrap();
         tokio::spawn(async move {
             let mut buf = [0u8; 256];
+            let mut asked = 0;
             while let Ok((len, from)) = socket.recv_from(&mut buf).await {
                 let token = Packet::from_bytes(&buf[..len])
                     .and_then(|packet| packet.route_probe_token())
                     .filter(|(reply, _)| !reply)
                     .map(|(_, token)| token);
                 if let Some(token) = token {
-                    tokio::time::sleep(delay).await;
+                    tokio::time::sleep(delays[asked % delays.len()]).await;
+                    asked += 1;
                     let _ = socket
                         .send_to(&Packet::route_probe_reply(0, token).to_bytes(), from)
                         .await;
@@ -2455,14 +2593,32 @@ mod tests {
     async fn when_two_addresses_of_the_same_kind_reply_at_different_speeds_the_faster_is_used() {
         // The slow one is probed first and its reply arrives first (at 60 ms against
         // 50 + 20 ms), so only the round trips tell the two apart.
-        let slow = peer_answering_probes_after(Duration::from_millis(60)).await;
-        let fast = peer_answering_probes_after(Duration::from_millis(20)).await;
+        let slow = peer_answering_probes_after(&[60]).await;
+        let fast = peer_answering_probes_after(&[20]).await;
         let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
 
         conn.connect_with_candidates(&[slow, fast]).await.unwrap();
 
         assert_eq!(conn.remote_addr(), fast);
         assert_eq!(conn.link_facts().snapshot().route_confirmed, Some(true));
+    }
+
+    /// The first probe of the nearest-looking candidate is answered at once and every other
+    /// is slow; the other candidate is steady. Judged on one probe the first would win.
+    ///
+    /// Verifies: REQ-CON-115
+    #[tokio::test]
+    async fn when_one_probe_of_a_route_is_answered_at_once_and_the_rest_slowly_the_steady_route_is_used(
+    ) {
+        let lucky = peer_answering_probes_after(&[0, 70, 70, 70, 70]).await;
+        let steady = peer_answering_probes_after(&[25]).await;
+        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+
+        conn.connect_with_candidates(&[lucky, steady])
+            .await
+            .unwrap();
+
+        assert_eq!(conn.remote_addr(), steady);
     }
 
     /// Verifies: REQ-CON-115
@@ -2488,8 +2644,8 @@ mod tests {
             let snapshot = conn.link_facts().snapshot();
             assert_eq!(snapshot.route_confirmed, Some(true));
             assert!(
-                snapshot.connect_ms.is_some_and(|ms| ms < 400),
-                "a measured route needs no grace: {snapshot:?}"
+                snapshot.connect_ms.is_some_and(|ms| ms < 800),
+                "the probes take their rounds and then no grace: {snapshot:?}"
             );
         }
     }
@@ -2539,14 +2695,10 @@ mod tests {
         let states = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = states.clone();
         conn.set_state_change_callback(move |state| seen.lock().unwrap().push(state));
-        // The peer answers once, as a keep-alive that is the answer to the probe, then is quiet.
-        let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        peer.send_to(&Packet::keep_alive(0).to_bytes(), conn.local_addr())
-            .await
-            .unwrap();
+        let peer = peer_answering_probes_after(&[0]).await;
         tokio::time::sleep(Duration::from_millis(600)).await;
 
-        conn.connect_with_candidates(&[addr("127.0.0.1:59999"), peer.local_addr().unwrap()])
+        conn.connect_with_candidates(&[addr("127.0.0.1:59999"), peer])
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_millis(250)).await;
