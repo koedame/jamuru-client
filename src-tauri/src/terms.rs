@@ -278,6 +278,6 @@ mod tests {
         for page in [Page::Privacy, Page::Announcements] {
             assert!(page.url().contains("/jamjam-client/blob/main/docs/"));
         }
-        assert!(serde_json::from_str::<Page>("\"https://example.com\"").is_err());
+        assert!(serde_json::from_str::<Page>("\"somewhere_else\"").is_err());
     }
 }
