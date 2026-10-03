@@ -17,7 +17,6 @@ pub const HEADER_SIZE: usize = 12;
 
 /// Maximum payload size (MTU - IP header - UDP header - our header)
 /// 1500 - 20 - 8 - 12 = 1460 bytes
-#[allow(dead_code)]
 pub const MAX_PAYLOAD_SIZE: usize = 1460;
 
 /// Packet types

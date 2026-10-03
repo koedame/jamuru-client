@@ -73,6 +73,7 @@
 | [ADR-054](./adr/ADR-054-route-is-the-nearest-that-answers.md) | 送り先は、応答した候補のうち近い経路（LAN、その他、Tailscale などの重ね合わせ網の順。Tailscale は中継かもしれず、応答した公開アドレスより良くならない）にする。候補の優先度もこの順に並べ、最初の応答が LAN でなければ 500 ms まで近い経路の応答を待つ |
 | [ADR-068](./adr/ADR-068-follow-the-peer-after-rejoin.md) | 入り直しのあと、音声は名簿の旧エントリではなく、いま聞こえる相手へ張り直す。移すとき自分のアドレスは変えない |
 | [ADR-069](./adr/ADR-069-sign-the-answer-of-echo-and-the-quality-bot.md) | echo と音質チェックのボットは、受け取ったアプリの一時鍵あてに署名して答える。アプリは相手の `link_key` の署名なら、宛先が自分の鍵でも一時鍵でも受け付ける |
+| [ADR-070](./adr/ADR-070-split-audio-frames-that-do-not-fit-a-packet.md) | 暗号化後に 1460 バイトを超える音声フレーム（256 フレームのステレオ PCM）は、フレーム境界で等分した複数のパケットで送る。IP の断片化に載せない |
 
 ---
 
