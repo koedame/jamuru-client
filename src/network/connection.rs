@@ -19,10 +19,20 @@ use super::bandwidth::{samples_per_audio_packet, UDP_IP_OVERHEAD_BYTES};
 use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
-use super::link_facts::{route_preference, LinkFacts, NEAREST_ROUTE_PREFERENCE};
+use super::link_facts::{route_preference, LinkFacts, RouteOverride, NEAREST_ROUTE_PREFERENCE};
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
 use super::transport::UdpTransport;
+
+/// How long the connectivity check waits for the first answer after the last probe went out
+const PROBE_TIMEOUT: Duration = Duration::from_millis(1000);
+
+/// How long the connectivity check waits between probing one candidate and the next
+const CANDIDATE_DELAY: Duration = Duration::from_millis(50);
+
+/// How long, once a keep-alive has come from a peer that answers no probe, the check waits
+/// for a nearer route to be heard
+const ANSWER_GRACE: Duration = Duration::from_millis(500);
 
 /// Number of RTT samples to keep for averaging
 const RTT_SAMPLE_COUNT: usize = 10;
@@ -172,24 +182,129 @@ fn is_probe_answer(
             .is_some_and(|packet| matches!(packet.packet_type, PacketType::KeepAlive))
 }
 
-/// Wait for the next probe answer on `transport`, `None` if it cannot be read.
-async fn next_probe_answer(
-    transport: &UdpTransport,
-    candidates: &[SocketAddr],
-    sendable: &[bool],
-) -> Option<SocketAddr> {
-    loop {
-        match transport.recv_raw().await {
-            Ok((buf, from_addr)) => {
-                if is_probe_answer(candidates, sendable, from_addr, &buf) {
-                    return Some(from_addr);
-                }
-            }
-            Err(e) => {
-                warn!("Error receiving probe response: {}", e);
-                return None;
-            }
+/// How much faster a route must be to beat one that is nearer by kind: round trips
+/// closer than this are noise in a single sample.
+const NEAR_ENOUGH: Duration = Duration::from_millis(2);
+
+/// What the connectivity check has heard so far, candidate by candidate
+///
+/// Each probe is a keep-alive that asks for one back ([`Packet::route_probe`]), so a peer
+/// that can answer lets the check time the round trip on every address. A peer that cannot
+/// still sends its own keep-alives, and then the check falls back to the kind of route.
+struct Probing<'a> {
+    candidates: &'a [SocketAddr],
+    /// Whether the probe to the candidate went out: one that did not is not a route,
+    /// however its packets reach us (REQ-CON-114)
+    sendable: Vec<bool>,
+    sent_at: Vec<Option<Instant>>,
+    /// When the first keep-alive of any kind came from the candidate
+    answered_at: Vec<Option<Instant>>,
+    /// The round trip of the probe sent to the candidate, once its reply came
+    rtt: Vec<Option<Duration>>,
+}
+
+/// What the check has settled on, or how long it has to wait
+enum Verdict {
+    /// The candidate with the shortest round trip (within [`NEAR_ENOUGH`], the nearer kind)
+    Fastest { index: usize, rtt: Duration },
+    /// The peer answered no probe with a reply: the nearest kind of route that sent a
+    /// keep-alive, and the candidate whose keep-alive came first
+    NearestKind { index: usize, first: usize },
+    /// Nothing is settled before this time
+    WaitUntil(Instant),
+    /// Nothing has answered
+    NoAnswer,
+}
+
+impl<'a> Probing<'a> {
+    fn new(candidates: &'a [SocketAddr]) -> Self {
+        let n = candidates.len();
+        Self {
+            candidates,
+            sendable: vec![false; n],
+            sent_at: vec![None; n],
+            answered_at: vec![None; n],
+            rtt: vec![None; n],
         }
+    }
+
+    fn sent(&mut self, index: usize, at: Instant) {
+        self.sendable[index] = true;
+        self.sent_at[index] = Some(at);
+    }
+
+    /// Take in a datagram that reached the socket. Returns the token to send back to
+    /// `from` when the peer asked for one.
+    fn hear(&mut self, from: SocketAddr, bytes: &[u8], now: Instant) -> Option<u32> {
+        if !is_probe_answer(self.candidates, &self.sendable, from, bytes) {
+            return None;
+        }
+        let index = self.candidates.iter().position(|&addr| addr == from)?;
+        self.answered_at[index].get_or_insert(now);
+        let (reply, token) = Packet::from_bytes(bytes)?.route_probe_token()?;
+        if !reply {
+            return Some(token);
+        }
+        // A reply counts only for the address its probe went to
+        if token as usize == index && self.rtt[index].is_none() {
+            self.rtt[index] = self.sent_at[index].map(|sent| now.saturating_duration_since(sent));
+        }
+        None
+    }
+
+    fn assess(&self, now: Instant) -> Verdict {
+        let fastest = self.rtt.iter().flatten().min().copied();
+        if let Some(fastest) = fastest {
+            // A candidate that has not replied cannot beat `fastest` once that long has
+            // passed since its probe went out
+            let settled = (0..self.candidates.len())
+                .filter(|&i| self.rtt[i].is_none())
+                .filter_map(|i| self.sent_at[i])
+                .map(|sent| sent + fastest + NEAR_ENOUGH)
+                .max();
+            if let Some(settled) = settled.filter(|&settled| now < settled) {
+                return Verdict::WaitUntil(settled);
+            }
+            let index = (0..self.candidates.len())
+                .filter(|&i| self.rtt[i].is_some_and(|rtt| rtt <= fastest + NEAR_ENOUGH))
+                .max_by_key(|&i| {
+                    (
+                        route_preference(self.candidates[i]),
+                        std::cmp::Reverse(self.rtt[i]),
+                    )
+                })
+                .expect("the fastest candidate is among them");
+            return Verdict::Fastest {
+                index,
+                rtt: self.rtt[index].expect("it has a round trip"),
+            };
+        }
+
+        let first = (0..self.candidates.len())
+            .filter(|&i| self.answered_at[i].is_some())
+            .min_by_key(|&i| self.answered_at[i]);
+        let Some(first) = first else {
+            return Verdict::NoAnswer;
+        };
+        // Which keep-alive came first depends on the order the peer probed us in, not on how
+        // near the route is. Unless one is already the nearest kind, give the peer time to
+        // probe its other addresses (a peer probes our candidates CANDIDATE_DELAY apart, so
+        // an answer from the tenth can come nine delays after the first).
+        let index = (0..self.candidates.len())
+            .filter(|&i| self.answered_at[i].is_some())
+            .max_by_key(|&i| {
+                (
+                    route_preference(self.candidates[i]),
+                    std::cmp::Reverse(self.answered_at[i]),
+                )
+            })
+            .expect("the first to answer is among them");
+        let waits_until = self.answered_at[first].expect("it answered") + ANSWER_GRACE;
+        if route_preference(self.candidates[index]) < NEAREST_ROUTE_PREFERENCE && now < waits_until
+        {
+            return Verdict::WaitUntil(waits_until);
+        }
+        Verdict::NearestKind { index, first }
     }
 }
 
@@ -769,10 +884,12 @@ impl Connection {
 
     /// Connect to a remote peer using multiple address candidates (Happy Eyeballs style)
     ///
-    /// This function tries multiple candidates in parallel and uses the nearest route that
-    /// responds (a LAN address, then any other, then an overlay such as Tailscale), waiting a
-    /// moment for a nearer one when the first response is not on the LAN.
-    /// Candidates are tried in order of priority, with a small delay between starting each attempt.
+    /// Every candidate is probed with a keep-alive that asks for one back, and the one whose
+    /// round trip is shortest is used. A peer that cannot answer the request is still heard:
+    /// then the nearest kind of route that sent a keep-alive is used (a LAN address, then any
+    /// other, then an overlay such as Tailscale), waiting a moment for a nearer one when the
+    /// first is not on the LAN. `JAMJAM_ROUTE` pins the kind of route for debugging.
+    /// Candidates are probed in order of priority, with a small delay between each.
     pub async fn connect_with_candidates(
         &mut self,
         candidates: &[SocketAddr],
@@ -785,6 +902,27 @@ impl Connection {
             return Err(NetworkError::NoCandidates);
         }
 
+        let pinned: Vec<SocketAddr>;
+        let candidates = match RouteOverride::from_env().map_err(NetworkError::ConnectionFailed)? {
+            Some(route) => {
+                pinned = candidates
+                    .iter()
+                    .copied()
+                    .filter(|&addr| route.allows(addr))
+                    .collect();
+                warn!(
+                    "JAMJAM_ROUTE pins the route: {} of {} candidates allowed",
+                    pinned.len(),
+                    candidates.len()
+                );
+                if pinned.is_empty() {
+                    return Err(NetworkError::NoCandidates);
+                }
+                &pinned[..]
+            }
+            None => candidates,
+        };
+
         // If only one candidate, use simple connect
         if candidates.len() == 1 {
             return self.connect(candidates[0]).await;
@@ -794,82 +932,82 @@ impl Connection {
         self.set_state(ConnectionState::CheckingConnectivity);
         info!("Checking connectivity with {} candidates", candidates.len());
 
-        // Try candidates with Happy Eyeballs approach:
-        // - Send probes to all candidates
-        // - Use the first one that responds
-        const PROBE_TIMEOUT: Duration = Duration::from_millis(1000);
-        const CANDIDATE_DELAY: Duration = Duration::from_millis(50);
-        // A peer probes our candidates CANDIDATE_DELAY apart, so an answer from
-        // the tenth can come nine delays after the first.
-        const ANSWER_GRACE: Duration = Duration::from_millis(500);
-
-        // Send probes to all candidates with small delays between each. Which
-        // ones went out is kept: a candidate we cannot send to is not a route,
-        // however its packets reach us (REQ-CON-114).
-        let mut sendable = vec![false; candidates.len()];
+        // Probe every candidate a little apart, hearing the peer's probes in between so
+        // that its requests are answered at once: a request left in the socket until the
+        // loop ends would be timed by the peer as a long round trip.
+        let mut probing = Probing::new(candidates);
         for (i, &addr) in candidates.iter().enumerate() {
-            let packet = Packet::keep_alive(self.next_sequence());
+            let packet = Packet::route_probe(self.next_sequence(), i as u32);
             if let Err(e) = send_sealed(&self.transport, &self.secure_link, packet, addr).await {
                 debug!("Failed to send probe to candidate {}: {}", addr, e);
                 continue;
             }
-            sendable[i] = true;
+            probing.sent(i, Instant::now());
             debug!("Sent connectivity probe to candidate {} ({})", i, addr);
 
             // Small delay before next candidate (Happy Eyeballs style)
             if i < candidates.len() - 1 {
-                tokio::time::sleep(CANDIDATE_DELAY).await;
+                let until = Instant::now() + CANDIDATE_DELAY;
+                while Instant::now() < until {
+                    self.hear_probe(&mut probing, until - Instant::now())
+                        .await?;
+                }
             }
         }
+
+        let give_up_at = Instant::now() + PROBE_TIMEOUT;
+        let verdict = loop {
+            let now = Instant::now();
+            match probing.assess(now) {
+                Verdict::WaitUntil(until) => {
+                    self.hear_probe(&mut probing, until.saturating_duration_since(now))
+                        .await?
+                }
+                Verdict::NoAnswer if now < give_up_at => {
+                    self.hear_probe(&mut probing, give_up_at - now).await?
+                }
+                verdict => break verdict,
+            }
+        };
 
         let other_candidates = |selected: SocketAddr| -> Vec<(SocketAddr, bool)> {
             candidates
                 .iter()
-                .zip(&sendable)
+                .zip(&probing.sendable)
                 .filter(|(&addr, _)| addr != selected)
                 .map(|(&addr, &sendable)| (addr, sendable))
                 .collect()
         };
 
-        // Wait for first response
-        let transport = self.transport.clone();
-        let timeout = tokio::time::timeout(
-            PROBE_TIMEOUT,
-            next_probe_answer(&transport, candidates, &sendable),
-        )
-        .await;
+        let selected = match verdict {
+            Verdict::Fastest { index, rtt } => {
+                info!(
+                    "Selected candidate: {} (round trip {:.1} ms, the shortest of {})",
+                    candidates[index],
+                    rtt.as_secs_f32() * 1000.0,
+                    probing.rtt.iter().flatten().count()
+                );
+                Some(candidates[index])
+            }
+            Verdict::NearestKind { index, first } if index == first => {
+                info!(
+                    "Selected candidate: {} (first to respond)",
+                    candidates[index]
+                );
+                Some(candidates[index])
+            }
+            Verdict::NearestKind { index, first } => {
+                info!(
+                    "Selected candidate: {} (nearer than {}, which responded first)",
+                    candidates[index], candidates[first]
+                );
+                Some(candidates[index])
+            }
+            Verdict::WaitUntil(_) | Verdict::NoAnswer => None,
+        };
 
-        match timeout {
-            Ok(Some(first_answer)) => {
-                // The first answer is the one that arrived first, and which
-                // route that is depends on the order the peer probed us in,
-                // not on how near the route is. Unless it is already the
-                // nearest kind, give the peer time to probe its other
-                // addresses, and take the nearest route that answers.
-                let mut selected_addr = first_answer;
-                if route_preference(first_answer) < NEAREST_ROUTE_PREFERENCE {
-                    let _ = tokio::time::timeout(ANSWER_GRACE, async {
-                        while let Some(answer) =
-                            next_probe_answer(&transport, candidates, &sendable).await
-                        {
-                            if route_preference(answer) > route_preference(selected_addr) {
-                                selected_addr = answer;
-                                if route_preference(answer) == NEAREST_ROUTE_PREFERENCE {
-                                    break;
-                                }
-                            }
-                        }
-                    })
-                    .await;
-                }
-                if selected_addr == first_answer {
-                    info!("Selected candidate: {} (first to respond)", selected_addr);
-                } else {
-                    info!(
-                        "Selected candidate: {} (nearer than {}, which responded first)",
-                        selected_addr, first_answer
-                    );
-                }
+        match selected {
+            Some(selected_addr) => {
                 *self.route.lock() = Route::new(selected_addr, other_candidates(selected_addr));
 
                 // Record connection start time
@@ -888,19 +1026,13 @@ impl Connection {
 
                 Ok(())
             }
-            Ok(None) => {
-                self.set_state(ConnectionState::Failed);
-                Err(NetworkError::ConnectionFailed(
-                    "No candidate responded".to_string(),
-                ))
-            }
-            Err(_) => {
+            None => {
                 // Timeout - fall back to the first candidate we could send to
                 warn!("No candidate responded in time, falling back to first candidate");
                 self.set_state(ConnectionState::Connecting);
                 let fallback = candidates
                     .iter()
-                    .zip(&sendable)
+                    .zip(&probing.sendable)
                     .find_map(|(&addr, &sendable)| sendable.then_some(addr))
                     .unwrap_or(candidates[0]);
                 *self.route.lock() = Route::new(fallback, other_candidates(fallback));
@@ -1323,26 +1455,60 @@ impl Connection {
         self.audio_sequence.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Wait up to `wait` for one datagram while probing and take it in, answering a peer's
+    /// request for a reply to its probe. A socket that cannot be read ends the check.
+    async fn hear_probe(
+        &self,
+        probing: &mut Probing<'_>,
+        wait: Duration,
+    ) -> Result<(), NetworkError> {
+        let heard = match tokio::time::timeout(wait, self.transport.recv_raw()).await {
+            Err(_) => return Ok(()),
+            Ok(Ok(heard)) => heard,
+            Ok(Err(e)) => {
+                warn!("Error receiving probe response: {}", e);
+                self.set_state(ConnectionState::Failed);
+                return Err(NetworkError::ConnectionFailed(
+                    "No candidate responded".to_string(),
+                ));
+            }
+        };
+        let (bytes, from) = heard;
+        if let Some(token) = probing.hear(from, &bytes, Instant::now()) {
+            let reply = Packet::route_probe_reply(self.next_sequence(), token);
+            if let Err(e) = send_sealed(&self.transport, &self.secure_link, reply, from).await {
+                debug!("Failed to answer the probe from {}: {}", from, e);
+            }
+        }
+        self.note_latency_info_heard_while_probing(&bytes);
+        Ok(())
+    }
+
     /// Drops the audio that reached the socket while connectivity was being
     /// probed.
     ///
-    /// The probes go out one candidate at a time and nothing is read until the
-    /// last is sent. A peer that is already connected sends audio all that time,
-    /// so it piles up in the socket and, read at once when the receive loop
-    /// starts, overflows the play-out buffer (REQ-CON-116). Audio that old is
+    /// A peer that is already connected sends audio all that time. What arrives
+    /// between the last read of the check and the receive loop starting would,
+    /// read at once, overflow the play-out buffer (REQ-CON-116). Audio that old is
     /// not worth playing. The peer's latency info is kept.
     fn discard_audio_queued_while_probing(&self) {
         while let Some((bytes, _)) = self.transport.try_recv_raw() {
-            if let Some(packet) = Packet::from_bytes(&bytes) {
-                // An encrypted one cannot be read before the keys are agreed, and a peer that
-                // encrypts sends none until it knows we have them
-                if packet.packet_type == PacketType::LatencyInfo && !packet.flags.encrypted {
-                    note_peer_latency_info(
-                        &packet.payload,
-                        &self.latency_info_callback,
-                        &self.peer_latency_info,
-                    );
-                }
+            self.note_latency_info_heard_while_probing(&bytes);
+        }
+    }
+
+    /// Keeps the peer's latency info if `bytes` is one, whichever way it reached the
+    /// socket while probing
+    fn note_latency_info_heard_while_probing(&self, bytes: &[u8]) {
+        if let Some(packet) = Packet::from_bytes(bytes) {
+            // An encrypted one cannot be read before the keys are agreed, and a peer that
+            // encrypts sends none until it knows we have them
+            if packet.packet_type == PacketType::LatencyInfo && !packet.flags.encrypted {
+                note_peer_latency_info(
+                    &packet.payload,
+                    &self.latency_info_callback,
+                    &self.peer_latency_info,
+                );
             }
         }
     }
@@ -1516,6 +1682,19 @@ impl Connection {
                     }
                     PacketType::KeepAlive => {
                         debug!("Received keep-alive");
+                        // A peer that is still probing times the route to us
+                        if let (true, Some((false, token))) =
+                            (from_a_peer_address, packet.route_probe_token())
+                        {
+                            let reply = Packet::route_probe_reply(
+                                sequence.fetch_add(1, Ordering::Relaxed),
+                                token,
+                            );
+                            if let Err(e) = send_sealed(&transport, &secure_link, reply, addr).await
+                            {
+                                warn!("Failed to answer a route probe: {}", e);
+                            }
+                        }
                     }
                     PacketType::LatencyPing => {
                         // Respond with pong
@@ -2111,6 +2290,234 @@ mod tests {
             .unwrap();
 
         assert_eq!(conn.remote_addr(), silent);
+    }
+
+    fn reply_from(probing: &mut Probing<'_>, index: usize, token: u32, now: Instant) {
+        let bytes = Packet::route_probe_reply(0, token).to_bytes();
+        probing.hear(probing.candidates[index], &bytes, now);
+    }
+
+    fn probed(candidates: &[SocketAddr], at: Instant) -> Probing<'_> {
+        let mut probing = Probing::new(candidates);
+        for i in 0..candidates.len() {
+            probing.sent(i, at + CANDIDATE_DELAY * i as u32);
+        }
+        probing
+    }
+
+    fn chosen(verdict: Verdict, candidates: &[SocketAddr]) -> SocketAddr {
+        match verdict {
+            Verdict::Fastest { index, .. } | Verdict::NearestKind { index, .. } => {
+                candidates[index]
+            }
+            Verdict::WaitUntil(_) => panic!("still waiting"),
+            Verdict::NoAnswer => panic!("nothing answered"),
+        }
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_relayed_tailscale_address_and_a_public_one_both_reply_the_shorter_round_trip_is_used()
+    {
+        let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        // Tailscale is listed first and answers with a relay's round trip; the public
+        // address was probed 50 ms later and answers in 6 ms.
+        reply_from(&mut probing, 0, 0, t0 + Duration::from_millis(120));
+        reply_from(&mut probing, 1, 1, t0 + Duration::from_millis(56));
+
+        let verdict = probing.assess(t0 + Duration::from_millis(700));
+
+        assert_eq!(chosen(verdict, &candidates), candidates[1]);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_nearer_kind_of_route_is_much_slower_the_faster_route_is_used() {
+        let candidates = [addr("192.168.1.20:5000"), addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        // A LAN address that is a bridge to nowhere useful: it replies, but slowly.
+        reply_from(&mut probing, 0, 0, t0 + Duration::from_millis(40));
+        reply_from(&mut probing, 1, 1, t0 + Duration::from_millis(58));
+
+        let verdict = probing.assess(t0 + Duration::from_millis(700));
+
+        assert_eq!(chosen(verdict, &candidates), candidates[1]);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_round_trips_differ_by_less_than_the_noise_the_nearer_kind_of_route_is_used() {
+        let candidates = [addr("203.0.113.7:5000"), addr("192.168.1.20:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        reply_from(&mut probing, 0, 0, t0 + Duration::from_micros(800));
+        reply_from(
+            &mut probing,
+            1,
+            1,
+            t0 + Duration::from_millis(50) + Duration::from_micros(1700),
+        );
+
+        let verdict = probing.assess(t0 + Duration::from_millis(700));
+
+        assert_eq!(chosen(verdict, &candidates), candidates[1]);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_candidate_probed_later_may_still_be_faster_the_check_waits_for_it() {
+        let candidates = [addr("203.0.113.7:5000"), addr("192.168.1.20:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        reply_from(&mut probing, 0, 0, t0 + Duration::from_millis(30));
+
+        // The second was probed at 50 ms, so it has until 50 + 30 ms (plus the noise) to beat 30 ms
+        let early = probing.assess(t0 + Duration::from_millis(60));
+        let late = probing.assess(t0 + Duration::from_millis(100));
+
+        assert!(matches!(early, Verdict::WaitUntil(_)));
+        assert_eq!(chosen(late, &candidates), candidates[0]);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_reply_names_another_candidates_token_it_is_not_counted() {
+        let candidates = [addr("203.0.113.7:5000"), addr("203.0.113.8:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+
+        reply_from(&mut probing, 0, 1, t0 + Duration::from_millis(5));
+
+        assert!(probing.rtt.iter().all(Option::is_none));
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_the_peer_asks_for_a_reply_the_token_is_handed_back_and_a_plain_keep_alive_asks_for_none(
+    ) {
+        let candidates = [addr("203.0.113.7:5000")];
+        let mut probing = probed(&candidates, Instant::now());
+        let now = Instant::now();
+
+        let asked = probing.hear(candidates[0], &Packet::route_probe(0, 42).to_bytes(), now);
+        let plain = probing.hear(candidates[0], &Packet::keep_alive(1).to_bytes(), now);
+
+        assert_eq!(asked, Some(42));
+        assert_eq!(plain, None);
+    }
+
+    /// A peer that answers no probe (an older app) is still heard through its own keep-alives.
+    ///
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_the_peer_answers_no_probe_the_nearest_kind_of_route_that_was_heard_is_used() {
+        let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        let keep_alive = Packet::keep_alive(0).to_bytes();
+        probing.hear(candidates[0], &keep_alive, t0 + Duration::from_millis(10));
+
+        let waiting = probing.assess(t0 + Duration::from_millis(100));
+        probing.hear(candidates[1], &keep_alive, t0 + Duration::from_millis(200));
+        let settled = probing.assess(t0 + Duration::from_millis(600));
+
+        assert!(matches!(waiting, Verdict::WaitUntil(_)));
+        assert_eq!(chosen(settled, &candidates), candidates[1]);
+    }
+
+    /// A stand-in for a peer's address: answers every route probe after `delay`.
+    async fn peer_answering_probes_after(delay: Duration) -> SocketAddr {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let at = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 256];
+            while let Ok((len, from)) = socket.recv_from(&mut buf).await {
+                let token = Packet::from_bytes(&buf[..len])
+                    .and_then(|packet| packet.route_probe_token())
+                    .filter(|(reply, _)| !reply)
+                    .map(|(_, token)| token);
+                if let Some(token) = token {
+                    tokio::time::sleep(delay).await;
+                    let _ = socket
+                        .send_to(&Packet::route_probe_reply(0, token).to_bytes(), from)
+                        .await;
+                }
+            }
+        });
+        at
+    }
+
+    /// Verifies: REQ-CON-115
+    #[tokio::test]
+    async fn when_two_addresses_of_the_same_kind_reply_at_different_speeds_the_faster_is_used() {
+        // The slow one is probed first and its reply arrives first (at 60 ms against
+        // 50 + 20 ms), so only the round trips tell the two apart.
+        let slow = peer_answering_probes_after(Duration::from_millis(60)).await;
+        let fast = peer_answering_probes_after(Duration::from_millis(20)).await;
+        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+
+        conn.connect_with_candidates(&[slow, fast]).await.unwrap();
+
+        assert_eq!(conn.remote_addr(), fast);
+        assert_eq!(conn.link_facts().snapshot().route_confirmed, Some(true));
+    }
+
+    /// Verifies: REQ-CON-115
+    #[tokio::test]
+    async fn when_both_peers_probe_each_other_each_answers_the_others_probes_and_both_connect() {
+        let mut a = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut b = Connection::new("127.0.0.1:0").await.unwrap();
+        let (a_addr, b_addr) = (a.local_addr(), b.local_addr());
+        let nowhere = addr("127.0.0.1:59999");
+
+        let (for_a, for_b) = ([nowhere, b_addr], [nowhere, a_addr]);
+
+        let (from_a, from_b) = tokio::join!(
+            a.connect_with_candidates(&for_a),
+            b.connect_with_candidates(&for_b)
+        );
+
+        from_a.unwrap();
+        from_b.unwrap();
+        assert_eq!(a.remote_addr(), b_addr);
+        assert_eq!(b.remote_addr(), a_addr);
+        for conn in [&a, &b] {
+            let snapshot = conn.link_facts().snapshot();
+            assert_eq!(snapshot.route_confirmed, Some(true));
+            assert!(
+                snapshot.connect_ms.is_some_and(|ms| ms < 400),
+                "a measured route needs no grace: {snapshot:?}"
+            );
+        }
+    }
+
+    /// Verifies: REQ-CON-115
+    #[tokio::test]
+    async fn when_a_peer_that_is_already_connected_gets_a_route_probe_it_replies_with_the_token() {
+        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        conn.connect(peer.local_addr().unwrap()).await.unwrap();
+
+        peer.send_to(&Packet::route_probe(0, 9).to_bytes(), conn.local_addr())
+            .await
+            .unwrap();
+
+        let reply = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut buf = [0u8; 256];
+            loop {
+                let (len, _) = peer.recv_from(&mut buf).await.unwrap();
+                let packet = Packet::from_bytes(&buf[..len]).unwrap();
+                if let Some((true, token)) = packet.route_probe_token() {
+                    return token;
+                }
+            }
+        })
+        .await
+        .expect("the reply should come");
+        assert_eq!(reply, 9);
     }
 
     /// The silence is counted from the moment the link is up, not from the moment the
