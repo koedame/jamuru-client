@@ -85,7 +85,7 @@ TERMS AND CONDITIONS
 3. NO WARRANTY
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 
-For full license terms, see: https://github.com/koedame/jamjam-client/blob/main/LICENSE
+For full license terms, see: https://github.com/koedame/jamjam-client/blob/HEAD/LICENSE
 """
 
 
