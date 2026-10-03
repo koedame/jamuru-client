@@ -55,6 +55,22 @@ pub fn samples_per_audio_packet(total_samples: usize, channels: usize) -> usize 
     total_samples.div_ceil(packets).next_multiple_of(channels)
 }
 
+/// How long the audio in one packet lasts, in ms, when frames of `frame_size`
+/// samples per channel are sent over `channels` at `sample_rate`
+///
+/// The play-out buffer counts its depth in packets, so this is what turns that
+/// depth into the delay the display and the peer are told about. It is shorter
+/// than the frame for 256 frames, which go as two packets of 128.
+pub fn audio_packet_duration_ms(frame_size: u32, channels: usize, sample_rate: u32) -> f32 {
+    if sample_rate == 0 {
+        return 0.0;
+    }
+    let channels = channels.max(1);
+    let packet_frames =
+        samples_per_audio_packet(frame_size as usize * channels, channels) / channels;
+    packet_frames as f32 / sample_rate as f32 * 1000.0
+}
+
 /// Share of the peer's audio packets lost, from which a link is called marginal
 ///
 /// The same line `quality` draws between a good link and a fair one: a link
@@ -426,6 +442,19 @@ mod tests {
         assert_eq!(samples_per_audio_packet(2 * 128, 2), 2 * 128);
         assert_eq!(samples_per_audio_packet(2 * 256, 2), 2 * 128);
         assert_eq!(samples_per_audio_packet(256, 1), 256);
+    }
+
+    /// Verifies: REQ-NET-029
+    #[test]
+    fn a_packet_lasts_the_frame_unless_the_frame_was_cut_in_two() {
+        assert!((audio_packet_duration_ms(128, 2, 48_000) - 2.667).abs() < 0.001);
+        assert!((audio_packet_duration_ms(256, 2, 48_000) - 2.667).abs() < 0.001);
+        assert!((audio_packet_duration_ms(32, 2, 48_000) - 0.667).abs() < 0.001);
+        assert_eq!(audio_packet_duration_ms(256, 2, 0), 0.0);
+        // high-quality's depth of 8 packets holds 21.3 ms, not 42.7 ms.
+        let depth = AudioPreset::HighQuality.jitter_buffer_frames() as f32;
+        let held = depth * audio_packet_duration_ms(256, 2, 48_000);
+        assert!((held - 21.333).abs() < 0.01, "{held} ms");
     }
 
     /// Cutting a frame in two doubles the headers it pays for, and the requirement
