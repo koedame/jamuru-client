@@ -27,8 +27,8 @@
 //! connection is `wss`, so the identities reach the ends unaltered; the server that hands
 //! them out is trusted.
 //!
-//! A link with no peer key to check (a peer whose app predates this, or a direct
-//! connection that has no server) exchanges unsigned and does not say who the peer is:
+//! A link with no peer key to check (a peer whose app predates this) exchanges unsigned and
+//! does not say who the peer is:
 //! [`SecureLink::checks_peer`] tells the two apart. A link that does check the peer never
 //! falls back to plain or to an unsigned exchange, whatever arrives.
 //!
@@ -315,9 +315,9 @@ impl SecureLink {
 
     /// A link to the participant whose [`LinkIdentity::public_key`] the server gave as
     /// `peer_key`, that signs our half of the exchange with `ours` and takes only a half the
-    /// peer signed. When either is missing - the app has no identity (a direct connection),
-    /// or the peer told none because its app predates this - or `peer_key` is not a key, it
-    /// is a link as [`SecureLink::new`] makes and [`SecureLink::checks_peer`] is `false`.
+    /// peer signed. When either is missing - the app has no identity, or the peer told none
+    /// because its app predates this - or `peer_key` is not a key, it is a link as
+    /// [`SecureLink::new`] makes and [`SecureLink::checks_peer`] is `false`.
     pub fn for_peer(ours: Option<&LinkIdentity>, peer_key: Option<&str>) -> Self {
         let secret = StaticSecret::random_from_rng(&mut UnwrapErr(SysRng));
         let check = ours.zip(peer_key).and_then(|(ours, peer_key)| {

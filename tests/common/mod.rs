@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+pub mod fake_signaling;
+
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
