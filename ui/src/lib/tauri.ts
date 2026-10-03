@@ -411,6 +411,8 @@ export interface NetworkStats {
   packets_received: number;
   /** Whether the audio to the peer is encrypted */
   encryption: AudioEncryption;
+  /** Whether the peer is known to be who the server said: false for an app that predates the check */
+  peer_checked: boolean;
   /** Total bytes sent */
   bytes_sent: number;
   /** Total bytes received */

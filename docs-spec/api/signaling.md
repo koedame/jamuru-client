@@ -120,6 +120,7 @@ CLI 引数・環境変数を持たない。
 /// - password: パスワード（オプション）
 /// - peer_name: 参加者名
 /// - features: 受け付ける追加の機能（空なら送らない。5 章）
+/// - link_key: 入室中の鍵交換の署名に使う公開鍵（Ed25519、base64。5.2 章）。持たなければ送らない
 ///
 /// 戻り値: SignalingMessage::RoomCreated { room_id, peer_id, invite_code }
 
@@ -162,6 +163,7 @@ struct CreateRoomResult {
 /// - password: パスワード（オプション）
 /// - peer_name: 参加者名
 /// - features: 受け付ける追加の機能（空なら送らない。5 章）
+/// - link_key: `CreateRoom` と同じ
 ///
 /// 戻り値: SignalingMessage::RoomJoined { room_id, peer_id, invite_code, peers: Vec<PeerInfo> }
 
@@ -353,6 +355,10 @@ enum SignalingMessage {
         /// このアプリが受け付ける追加の機能（`"peer_message"` = 相手あてのメッセージを受け取れる）。
         /// 空なら送らない（機能を知らない頃のアプリと同じ形）。他の参加者には `PeerInfo::features` で伝わる
         features: Vec<String>,
+        /// 入室中、このアプリが相手との音声の鍵交換に署名する鍵の公開鍵（Ed25519 の 32 bytes を base64 にしたもの）。
+        /// 入室のたびにアプリが作る。端末識別子とは別のもので、サーバーは他の参加者に `PeerInfo::link_key` としてそのまま渡す。
+        /// 持たないアプリ（この項目を知らない頃のアプリ）は送らない
+        link_key: Option<String>,
     },
     /// ルームに参加
     JoinRoom {
@@ -361,6 +367,8 @@ enum SignalingMessage {
         peer_name: String,
         /// `CreateRoom` と同じ
         features: Vec<String>,
+        /// `CreateRoom` と同じ
+        link_key: Option<String>,
     },
     /// ルームから退出
     LeaveRoom,
@@ -444,6 +452,10 @@ struct PeerInfo {
     /// `#[serde(default)]` のため、無い（機能を知らない頃のサーバー・アプリ）ときは空で、
     /// 相手あてのメッセージは受け取れないものとして扱う（`PeerInfo::takes_peer_messages`）
     features: Vec<String>,
+    /// このピアが入室のときに知らせた、鍵交換の署名の公開鍵（`CreateRoom`/`JoinRoom` の `link_key` をそのまま渡したもの）。
+    /// `#[serde(default)]` のため、無い（この項目を知らない頃のサーバー・アプリ）ときは `None` で、
+    /// そのピアとの音声は暗号化されるが、相手が本人かは確かめない（5.2 章）
+    link_key: Option<String>,
 }
 
 /// アドレス候補
@@ -506,6 +518,21 @@ stateDiagram-v2
     Connected --> Disconnected: Disconnected event
 ```
 
+### 5.2 鍵交換の署名の鍵（`link_key`）
+
+相手との UDP の通信を暗号化する鍵交換（[ADR-064](../adr/ADR-064-encrypt-the-audio-link.md)）で、相手が本人であることを確かめるための鍵。判断は [ADR-067](../adr/ADR-067-check-the-peer-in-the-key-exchange.md)。
+
+1. アプリは**ルームを作る・入るたびに**、使い捨ての Ed25519 鍵を作り、公開鍵（32 bytes を base64 にしたもの）を `CreateRoom`/`JoinRoom` の `link_key` で知らせる。
+   端末識別子（[ADR-024](../adr/ADR-024-device-identity-instead-of-accounts.md)）とは別の鍵で、端末識別子は今までどおり他の参加者に渡らない（REQ-IDT-007）。
+2. サーバーは `link_key` を座席と一緒に持ち、他の参加者へ届く `PeerInfo::link_key` に**そのまま**載せる。中身は読まない。
+3. 鍵交換は、相手の `link_key` で署名されたものだけを受け付ける（`SecureLink::for_peer`）。署名の対象は「送り手の鍵・宛先の鍵・一時鍵」。
+4. 相手が `link_key` を持たない（この項目を知らない頃のアプリ・サーバー）ときは、署名の無い鍵交換のままで繋ぎ、そのリンクは暗号化されるが相手が本人かは確かめない（`SecureLink::checks_peer` が `false`）。
+5. echo と音質チェックのボットも、入室のときに `link_key` を知らせる。この 2 つは多数のアプリと 1 つのソケットで話し、送信元の住所から参加者を引けないので、鍵交換の宛先にアプリの `link_key` を使えない。
+   代わりに、受け取った鍵交換のアプリの一時鍵あてに署名して答える（`SecureLink::answering`。判断は [ADR-069](../adr/ADR-069-sign-the-answer-of-echo-and-the-quality-bot.md)）。
+   アプリは、署名の対象が自分の `link_key` でも自分の一時鍵でも、相手の `link_key` で署名されたものを受け付ける。
+
+シグナリングは `wss` なので、経路上の第三者は `link_key` を書き換えられない。鍵を配るサーバーは信じる前提になる。
+
 ---
 
 ## 6. エラー
@@ -546,6 +573,7 @@ conn.send(SignalingMessage::CreateRoom {
     password: None,
     peer_name: "Host".into(),
     features: vec![], // 受け付ける追加の機能が無ければ空（送られない）
+    link_key: Some(link_identity.public_key()), // 持たなければ None（送られない）
 }).await?;
 
 match conn.recv().await? {
@@ -564,6 +592,7 @@ conn.send(SignalingMessage::JoinRoom {
     password: None,
     peer_name: "Player1".into(),
     features: vec![],
+    link_key: Some(link_identity.public_key()),
 }).await?;
 
 match conn.recv().await? {

@@ -85,3 +85,7 @@ This software is released under a custom Source Available license. The source co
 - **Not Permitted**: Modification, redistribution, commercial use, building from source, creating competing products
 
 See [LICENSE](./LICENSE) for full terms and [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) for third-party component licenses.
+
+## Trademarks
+
+ASIO is a trademark of Steinberg Media Technologies GmbH. jamjam is not affiliated with or endorsed by Steinberg. All other product names are the property of their respective owners.
