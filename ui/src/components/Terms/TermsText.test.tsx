@@ -30,6 +30,13 @@ describe('the terms text', () => {
     expect(screen.getByText('大事').tagName).toBe('STRONG');
   });
 
+  it('the title is skipped, the first heading is not drawn and the rest is', () => {
+    render(<TermsText text={'# 利用規約\n\n## 第 1 条'} skipTitle />);
+
+    expect(screen.queryByText('利用規約')).not.toBeInTheDocument();
+    expect(screen.getByText('第 1 条')).toBeInTheDocument();
+  });
+
   it('the license is shown as plain text, its line breaks are kept', () => {
     const { container } = render(<TermsText text={'1. DEFINITIONS\n\n"Software" means'} format="plain" />);
 

@@ -5,6 +5,8 @@ export interface TermsTextProps {
   /** The text. Markdown for the terms of use, plain text for the license */
   text: string;
   format?: "markdown" | "plain";
+  /** Leave out the first heading, for a container that already shows it as its title */
+  skipTitle?: boolean;
 }
 
 type Block =
@@ -49,13 +51,14 @@ function inline(text: string): ReactNode[] {
 }
 
 /** Terms of use or license text, scrolled by its container. */
-export function TermsText({ text, format = "markdown" }: TermsTextProps) {
+export function TermsText({ text, format = "markdown", skipTitle = false }: TermsTextProps) {
   if (format === "plain") {
     return <pre className="terms-text terms-text--plain">{text}</pre>;
   }
   return (
     <div className="terms-text">
       {parseTerms(text).map((block, index) => {
+        if (skipTitle && index === 0 && block.kind === "h1") return null;
         switch (block.kind) {
           case "h1":
             return (
