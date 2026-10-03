@@ -136,8 +136,10 @@ pub fn report_problem_preview(app: AppHandle) -> Result<String, String> {
 /// the confirmed hang report (`usage.rs`, ADR-059) and the automatic one
 /// sent while reporting is already on (`usage.rs`, ADR-060), so all three go
 /// through the one send path and there is only one place that builds the
-/// body.
+/// body. Refuses until the user has agreed to the terms, like every command
+/// that reaches the network (REQ-TRM-003).
 pub async fn send_log_report<R: Runtime>(app: &AppHandle<R>, comment: &str) -> Result<(), String> {
+    crate::terms::require_accepted(app)?;
     let log = read_log(app)?;
     let Some(transport) = HttpReportTransport::for_build() else {
         return Err("送信先が分かりません".to_string());
@@ -279,5 +281,19 @@ mod tests {
         };
 
         assert!(!transport.send(b"{}".to_vec()).await);
+    }
+
+    /// Verifies: REQ-TRM-003
+    #[tokio::test]
+    async fn the_terms_are_not_agreed_to_and_a_report_is_sent_refuses_before_reading_the_log() {
+        let app = tauri::test::mock_app();
+        app.manage(crate::terms::TermsState::new(false));
+
+        let sent = send_log_report(app.handle(), "it stops").await;
+
+        assert_eq!(
+            sent,
+            Err("The terms of use have not been agreed to".to_string())
+        );
     }
 }
