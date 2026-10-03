@@ -16,6 +16,7 @@ jamjamで最初のセッションを始める手順を説明します。
 
 > [!TIP]
 > レイテンシを最小化するため、ASIOドライバ（Windows）またはオーディオインターフェースの専用ドライバを使用することを推奨します。
+> ASIO は Steinberg Media Technologies GmbH の商標です。
 
 ## 2. ルームを作成する（ホスト）
 
