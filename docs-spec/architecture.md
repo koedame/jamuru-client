@@ -272,7 +272,7 @@ CGNATによるP2P接続の困難さに対応するため、以下の設計を採
 | 古い相手 | 暗号化できない相手は平文で繋ぎ、接続の状態に `unencrypted` と出す。`link_key` を知らせない相手（古い版）とは、署名の無い鍵交換で暗号化して繋ぎ、相手が本人かは確かめない |
 | ユーザー設定 | なし（OFF にできない） |
 
-相手が本人かどうかの確認は、ルームで繋ぐ相手に対して [ADR-067](./adr/ADR-067-check-the-peer-in-the-key-exchange.md) の署名でしている。サーバーを使わない直接接続と、`link_key` を知らせない古い版の相手とは確かめない。echo と音質チェックのボットは `link_key` を知らせ、アプリの一時鍵あてに署名して答えるので、アプリはこの 2 つも確かめる（[ADR-069](./adr/ADR-069-sign-the-answer-of-echo-and-the-quality-bot.md)）。判断と理由は [ADR-064](./adr/ADR-064-encrypt-the-audio-link.md)・ADR-067。暗号化の増加分はパケットあたり 24 bytes と、暗号化・復号の計算（ADR-064 の測定）である。
+相手が本人かどうかの確認は、ルームで繋ぐ相手に対して [ADR-067](./adr/ADR-067-check-the-peer-in-the-key-exchange.md) の署名でしている。`link_key` を知らせない古い版の相手とは確かめない。echo と音質チェックのボットは `link_key` を知らせ、アプリの一時鍵あてに署名して答えるので、アプリはこの 2 つも確かめる（[ADR-069](./adr/ADR-069-sign-the-answer-of-echo-and-the-quality-bot.md)）。判断と理由は [ADR-064](./adr/ADR-064-encrypt-the-audio-link.md)・ADR-067。暗号化の増加分はパケットあたり 24 bytes と、暗号化・復号の計算（ADR-064 の測定）である。
 
 暗号化は ADR-002 の当初の決定（DTLS）とは別の方式にした。
 
@@ -429,10 +429,6 @@ P2P接続確立のためのシグナリングサーバーを提供する。
 
 10人のフルメッシュでは各クライアントが9本の接続を維持する。
 
-### 7.3 直接接続（アドバンスオプション）
-
-シグナリングサーバーを介さず、IPアドレスとポートを直接指定して接続する機能を提供する。
-
 ---
 
 ## 8. ユーザーインターフェース
@@ -513,7 +509,7 @@ Tauri 2.0を使用したデスクトップGUIを提供する。
 
 CLI は**デバッグ効率のために存在する**。GUI を立ち上げずにセッションを再現・観察するための手段であり、E2E テストの自動化は GUI E2E（[ADR-025](./adr/ADR-025-gui-e2e-control-channel.md)）が担う。範囲の根拠は [ADR-027](./adr/ADR-027-cli-scope.md)。
 
-GUI で操作できるコア機能は CLI からも操作できる。逆方向は求めない（`host` / `join` の IP 直指定は CLI にのみある）。
+GUI で操作できるコア機能は CLI からも操作できる。逆方向は求めない。シグナリングサーバーを介さずアドレスを指定して繋ぐ機能は無く、CLI もルームで繋ぐ（[ADR-071](./adr/ADR-071-remove-direct-connection.md)）。
 
 **コマンド:**
 
@@ -524,13 +520,11 @@ jamjam preset list                      # プリセットと遅延バジェッ�
 jamjam preset use <NAME>                # 設定に保存
 jamjam create-room --server <URL>       # ルーム作成、招待コードを表示
 jamjam join-room --server <URL> --room <CODE>       # ルーム参加
-jamjam host [--port PORT]               # シグナリング無しで待ち受け（最初に届いた相手に接続し返す）
-jamjam join <IP:PORT>                   # シグナリング無しで接続
 ```
 
-`host` / `join` は `--duration <秒>`（接続してからその秒数で終了）、`--report-json <PATH>`（終了時に統計を JSON で書く）、`--echo-delay-ms <ms>`（相手が音を保持して返す時間。往復から引く）を取る。
+`create-room` / `join-room` は `--duration <秒>`（相手につながってからその秒数で終了）、`--report-json <PATH>`（終了時に統計を JSON で書く）、`--echo-delay-ms <ms>`（相手が音を保持して返す時間。往復から引く）を取る。
 
-セッションを開くコマンド（`host` / `join` / `create-room` / `join-room`）は、デバイスの代わりに次を使える。サウンドカードの無い環境で動かすため、また送った音と聞こえた音を再現可能にするためである。
+セッションを開くコマンド（`create-room` / `join-room`）は、デバイスの代わりに次を使える。サウンドカードの無い環境で動かすため、また送った音と聞こえた音を再現可能にするためである。
 
 | フラグ | 代わりにするもの |
 |--------|-----------------|

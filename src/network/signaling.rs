@@ -280,8 +280,7 @@ pub enum SignalingMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         client_info: Option<ClientInfo>,
         /// The public key this app signs its key exchanges with for as long as it is in the
-        /// room, told to the others in its [`PeerInfo`]. Left out by an app that has none
-        /// (the CLI's direct connections do not use a room).
+        /// room, told to the others in its [`PeerInfo`]. Left out by an app that predates it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         link_key: Option<String>,
     },

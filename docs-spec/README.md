@@ -74,6 +74,7 @@
 | [ADR-068](./adr/ADR-068-follow-the-peer-after-rejoin.md) | 入り直しのあと、音声は名簿の旧エントリではなく、いま聞こえる相手へ張り直す。移すとき自分のアドレスは変えない |
 | [ADR-069](./adr/ADR-069-sign-the-answer-of-echo-and-the-quality-bot.md) | echo と音質チェックのボットは、受け取ったアプリの一時鍵あてに署名して答える。アプリは相手の `link_key` の署名なら、宛先が自分の鍵でも一時鍵でも受け付ける |
 | [ADR-070](./adr/ADR-070-split-audio-frames-that-do-not-fit-a-packet.md) | 暗号化後に 1460 バイトを超える音声フレーム（256 フレームのステレオ PCM）は、フレーム境界で等分した複数のパケットで送る。IP の断片化に載せない |
+| [ADR-071](./adr/ADR-071-remove-direct-connection.md) | サーバーを使わない直接接続（CLI の `host` / `join`）を無くし、往復の測定は `create-room` / `join-room` で行う。相手を確かめない経路が無くなる |
 
 ---
 
