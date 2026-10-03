@@ -88,7 +88,7 @@ struct AudioArgs {
     monitor: bool,
 }
 
-/// How a `host` or `join` session ends and what it leaves behind.
+/// How a room session ends and what it leaves behind.
 #[derive(clap::Args, Clone, Debug)]
 struct RunArgs {
     /// Stop after this many seconds connected (default: run until Ctrl+C)
@@ -119,31 +119,6 @@ enum Commands {
         action: PresetAction,
     },
 
-    /// Host a session on a port, without a signaling server
-    Host {
-        /// Port to listen on
-        #[arg(short, long, default_value = "5000")]
-        port: u16,
-
-        #[command(flatten)]
-        audio: AudioArgs,
-
-        #[command(flatten)]
-        run: RunArgs,
-    },
-
-    /// Join a session by address, without a signaling server
-    Join {
-        /// Remote address (IP:PORT)
-        address: String,
-
-        #[command(flatten)]
-        audio: AudioArgs,
-
-        #[command(flatten)]
-        run: RunArgs,
-    },
-
     /// Create a room on a signaling server and print its invite code
     CreateRoom {
         /// jamjam server URL (e.g., https://example.com). The CLI asks it
@@ -161,6 +136,9 @@ enum Commands {
 
         #[command(flatten)]
         audio: AudioArgs,
+
+        #[command(flatten)]
+        run: RunArgs,
 
         /// Skip audio (chat only mode)
         #[arg(long)]
@@ -192,6 +170,9 @@ enum Commands {
         /// Timeout in seconds for non-interactive mode (default: 5)
         #[arg(long, default_value = "5")]
         timeout: u64,
+
+        #[command(flatten)]
+        run: RunArgs,
 
         /// Skip audio (chat only mode)
         #[arg(long)]
@@ -580,91 +561,13 @@ fn print_session_stats(
     println!("\n═══════════════════════════════════════════════════════════════\n");
 }
 
-/// Where a session without a signaling server finds its peer.
-enum Direct {
-    /// Listen on a port until a peer reaches it.
-    Host { port: u16 },
-    /// Reach a peer at a known address.
-    Join { address: SocketAddr },
-}
-
-/// Runs `host` or `join`: one peer, no signaling server, until Ctrl+C or the
-/// end of `--duration`.
-async fn run_direct(target: Direct, settings: AudioSettings, run: RunArgs) -> Result<()> {
-    let bind = match &target {
-        Direct::Host { port } => format!("0.0.0.0:{}", port),
-        Direct::Join { .. } => "0.0.0.0:0".to_string(),
-    };
-    let connection = Connection::new(&bind).await?;
-    info!("Audio socket: {}", connection.local_addr());
-
-    print_audio_settings(&settings);
-    let probe = settings.input_bursts.then(|| Arc::new(BurstProbe::new()));
-    let session = AudioSession::start(
-        connection,
-        &settings,
-        Arc::new(AtomicBool::new(false)),
-        probe.clone(),
-    )?;
-
-    let peer = match target {
-        Direct::Host { port } => {
-            println!("\nHost started. Listening on port {}.", port);
-            println!("Press Ctrl+C to stop.\n");
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => None,
-                peer = session.accept() => {
-                    let peer = peer?;
-                    println!("Connected to {}. Session active.", peer);
-                    Some(peer)
-                }
-            }
-        }
-        Direct::Join { address } => {
-            session.connect(&[address]).await?;
-            println!("\nConnected to {}. Session active.", address);
-            println!("Press Ctrl+C to stop.\n");
-            Some(address)
-        }
-    };
-
-    let connected_at = Instant::now();
-    if peer.is_some() {
-        match run.duration {
-            Some(seconds) => tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = tokio::time::sleep(Duration::from_secs(seconds)) => {}
-            },
-            None => tokio::signal::ctrl_c().await?,
-        }
-    }
-    info!("Shutting down...");
-    let outcome = session.finish(None).await;
-
-    if let Some(path) = &run.report_json {
-        let round_trip = probe.map(|probe| probe.report(Duration::from_millis(run.echo_delay_ms)));
-        let report = session_report(
-            &settings,
-            peer,
-            &outcome,
-            connected_at.elapsed(),
-            round_trip
-                .as_ref()
-                .map(|report| (run.echo_delay_ms, report)),
-        );
-        std::fs::write(path, format!("{}\n", report))
-            .with_context(|| format!("cannot write {}", path.display()))?;
-    }
-    Ok(())
-}
-
 /// Rounds to six decimals, so a report reads `0.495` and not `0.4950000047683716`
 /// (an `f32` widened), and a loss rate of 0.04 % is not rounded away.
 fn rounded(value: f64) -> f64 {
     (value * 1_000_000.0).round() / 1_000_000.0
 }
 
-/// What a `host` / `join` session measured, as one JSON object.
+/// What a room session measured, as one JSON object.
 ///
 /// `round_trip` is present only when the session sent `--input-bursts`.
 fn session_report(
@@ -883,11 +786,16 @@ async fn run_room_session(
     server: String,
     entry: RoomEntry,
     peer_name: String,
-    audio: AudioSettings,
+    settings: AudioSettings,
+    run: RunArgs,
     message: Option<String>,
     timeout_secs: u64,
     chat_only: bool,
 ) -> Result<()> {
+    if chat_only && run.report_json.is_some() {
+        anyhow::bail!("--report-json reports the audio, which --chat-only does not open");
+    }
+
     info!("Connecting through the jamjam server: {}", server);
     let client = signaling_client(&server);
     let mut conn = client.connect().await?;
@@ -962,18 +870,19 @@ async fn run_room_session(
     // Audio setup happens before any peer is known: the socket has to be bound
     // and published for the *other* side to have somewhere to send to.
     let is_muted = Arc::new(AtomicBool::new(false));
+    let probe = settings.input_bursts.then(|| Arc::new(BurstProbe::new()));
     let audio: Option<AudioSession> = if chat_only {
         println!("\n📝 Chat-only mode (no audio)");
         None
     } else {
-        print_audio_settings(&audio);
+        print_audio_settings(&settings);
         let connection = Connection::new("0.0.0.0:0").await?;
         publish_address(&mut conn, &connection).await?;
         Some(AudioSession::start(
             connection,
-            &audio,
+            &settings,
             is_muted.clone(),
-            None,
+            probe.clone(),
         )?)
     };
 
@@ -1029,18 +938,28 @@ async fn run_room_session(
     // Connect to the first peer that has an address, whether it was already in
     // the room or turns up later.
     let mut peer_display_name: Option<String> = None;
+    let mut connected_at: Option<Instant> = None;
     for peer in peers.drain(..) {
         if let Some(session) = audio.as_ref() {
             if maybe_connect(session, &peer, &link_identity).await? {
                 peer_display_name = Some(peer.name.clone());
+                connected_at = Some(Instant::now());
                 break;
             }
         }
     }
 
+    let mut stdin_open = true;
     loop {
+        let session_ends = connected_at
+            .zip(run.duration)
+            .map(|(at, seconds)| at + Duration::from_secs(seconds));
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
+                info!("Shutting down...");
+                break;
+            }
+            _ = tokio::time::sleep_until(session_ends.unwrap_or_else(Instant::now).into()), if session_ends.is_some() => {
                 info!("Shutting down...");
                 break;
             }
@@ -1060,10 +979,11 @@ async fn run_room_session(
                 if let (Some(peer), Some(session)) = (peer, audio.as_ref()) {
                     if maybe_connect(session, &peer, &link_identity).await? {
                         peer_display_name = Some(peer.name.clone());
+                        connected_at = Some(Instant::now());
                     }
                 }
             }
-            line_result = stdin_reader.next_line() => {
+            line_result = stdin_reader.next_line(), if stdin_open => {
                 match line_result {
                     Ok(Some(line)) => {
                         let line = line.trim();
@@ -1095,9 +1015,11 @@ async fn run_room_session(
                     }
                     Ok(None) => {
                         info!("stdin closed");
+                        stdin_open = false;
                     }
                     Err(e) => {
                         warn!("stdin error: {}", e);
+                        stdin_open = false;
                     }
                 }
             }
@@ -1107,7 +1029,27 @@ async fn run_room_session(
     signaling_recv_task.abort();
 
     if let Some(session) = audio {
-        session.finish(peer_display_name.as_deref()).await;
+        let peer = match connected_at {
+            Some(_) => Some(session.remote_addr().await),
+            None => None,
+        };
+        let outcome = session.finish(peer_display_name.as_deref()).await;
+
+        if let Some(path) = &run.report_json {
+            let round_trip =
+                probe.map(|probe| probe.report(Duration::from_millis(run.echo_delay_ms)));
+            let report = session_report(
+                &settings,
+                peer,
+                &outcome,
+                connected_at.map_or(Duration::ZERO, |at| at.elapsed()),
+                round_trip
+                    .as_ref()
+                    .map(|report| (run.echo_delay_ms, report)),
+            );
+            std::fs::write(path, format!("{}\n", report))
+                .with_context(|| format!("cannot write {}", path.display()))?;
+        }
     }
 
     leave_room(&signaling_conn_arc).await;
@@ -1300,11 +1242,9 @@ impl AudioSession {
         &self.monitor
     }
 
-    /// Waits for a peer to reach the socket, and connects back to it.
-    async fn accept(&self) -> Result<SocketAddr> {
-        let peer = self.connection.lock().await.accept().await?;
-        self.announce().await;
-        Ok(peer)
+    /// The address of the peer this session is connected to.
+    async fn remote_addr(&self) -> SocketAddr {
+        self.connection.lock().await.remote_addr()
     }
 
     /// Has the link to the peer check that its key exchange is signed with `peer_key`, which
@@ -1734,24 +1674,12 @@ async fn main() -> Result<()> {
             PresetAction::List => list_presets(),
             PresetAction::Use { name } => use_preset(&name)?,
         },
-        Commands::Host { port, audio, run } => {
-            run_direct(Direct::Host { port }, audio.resolve()?, run).await?;
-        }
-        Commands::Join {
-            address,
-            audio,
-            run,
-        } => {
-            let address = address
-                .parse()
-                .with_context(|| format!("{:?} is not an IP:PORT address", address))?;
-            run_direct(Direct::Join { address }, audio.resolve()?, run).await?;
-        }
         Commands::CreateRoom {
             server,
             room_name,
             name,
             audio,
+            run,
             chat_only,
         } => {
             run_room_session(
@@ -1759,6 +1687,7 @@ async fn main() -> Result<()> {
                 RoomEntry::Create { room_name },
                 name,
                 audio.resolve()?,
+                run,
                 None,
                 0,
                 chat_only,
@@ -1772,6 +1701,7 @@ async fn main() -> Result<()> {
             audio,
             message,
             timeout,
+            run,
             chat_only,
         } => {
             run_room_session(
@@ -1779,6 +1709,7 @@ async fn main() -> Result<()> {
                 RoomEntry::Join { room_id: room },
                 name,
                 audio.resolve()?,
+                run,
                 message,
                 timeout,
                 chat_only,

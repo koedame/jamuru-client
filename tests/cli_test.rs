@@ -10,6 +10,7 @@
 
 mod common;
 
+use common::fake_signaling::FakeSignaling;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -196,14 +197,6 @@ fn devices_set_refuses_a_device_this_machine_does_not_have() {
     );
 }
 
-fn find_available_udp_port() -> u16 {
-    std::net::UdpSocket::bind("127.0.0.1:0")
-        .expect("bind an ephemeral UDP port")
-        .local_addr()
-        .expect("read the bound address")
-        .port()
-}
-
 /// What a CLI wrote with `--output-file`: 32-bit float, little-endian,
 /// stereo interleaved. Returned as (left, right).
 fn read_played(path: &Path) -> (Vec<f32>, Vec<f32>) {
@@ -235,7 +228,7 @@ fn tone_frequency(samples: &[f32], sample_rate: u32) -> f32 {
     sample_rate as f32 / periods[periods.len() / 2] as f32
 }
 
-/// Two CLIs connected directly each hear the other's tone - at the pitch and
+/// Two CLIs in one room each hear the other's tone - at the pitch and
 /// level it was sent, in both channels - after it has gone through the
 /// play-out path the app uses (a buffered preset, so FEC and the play-out
 /// delay are both in play).
@@ -245,14 +238,13 @@ fn tone_frequency(samples: &[f32], sample_rate: u32) -> f32 {
 ///
 /// Verifies: REQ-CLI-005
 #[test]
-fn two_clis_connected_directly_hear_each_other() {
+fn two_clis_in_a_room_hear_each_other() {
     const SAMPLE_RATE: u32 = 48000;
-    let port = find_available_udp_port().to_string();
-    let address = format!("127.0.0.1:{}", port);
-    let host_home = tempfile::tempdir().expect("temp HOME");
-    let join_home = tempfile::tempdir().expect("temp HOME");
-    let host_out = host_home.path().join("played.f32");
-    let join_out = join_home.path().join("played.f32");
+    let server = FakeSignaling::start();
+    let creator_home = tempfile::tempdir().expect("temp HOME");
+    let joiner_home = tempfile::tempdir().expect("temp HOME");
+    let creator_out = creator_home.path().join("played.f32");
+    let joiner_out = joiner_home.path().join("played.f32");
     let audio = |tone: &'static str, out: &Path| -> Vec<String> {
         [
             "--preset",
@@ -269,35 +261,53 @@ fn two_clis_connected_directly_hear_each_other() {
         .collect()
     };
 
-    let host_args: Vec<String> = ["host".to_string(), "--port".to_string(), port.clone()]
-        .into_iter()
-        .chain(audio("440", &host_out))
+    let creator_args: Vec<String> = ["create-room", "--server", server.url()]
+        .iter()
+        .map(|arg| arg.to_string())
+        .chain(audio("440", &creator_out))
         .collect();
-    let host = Running::start(
-        host_home.path(),
-        &host_args.iter().map(String::as_str).collect::<Vec<_>>(),
+    let creator = Running::start(
+        creator_home.path(),
+        &creator_args.iter().map(String::as_str).collect::<Vec<_>>(),
     );
-    host.wait_for("Listening on port")
-        .expect("host should start listening");
+    let invite_code = creator
+        .wait_for("Invite code:")
+        .expect("the room should be created")
+        .split_whitespace()
+        .last()
+        .expect("the invite code follows its label")
+        .to_string();
 
-    let join_args: Vec<String> = ["join".to_string(), address]
-        .into_iter()
-        .chain(audio("660", &join_out))
-        .collect();
-    let join = Running::start(
-        join_home.path(),
-        &join_args.iter().map(String::as_str).collect::<Vec<_>>(),
+    let joiner_args: Vec<String> = [
+        "join-room",
+        "--server",
+        server.url(),
+        "--room",
+        &invite_code,
+    ]
+    .iter()
+    .map(|arg| arg.to_string())
+    .chain(audio("660", &joiner_out))
+    .collect();
+    let joiner = Running::start(
+        joiner_home.path(),
+        &joiner_args.iter().map(String::as_str).collect::<Vec<_>>(),
     );
-    join.wait_for("Session active")
-        .expect("join should connect");
-    host.wait_for("Session active")
-        .expect("host should accept the joining peer");
+    joiner
+        .wait_for("Audio is flowing")
+        .expect("the joining CLI should connect");
+    creator
+        .wait_for("Audio is flowing")
+        .expect("the creating CLI should connect to the joining peer");
 
     std::thread::sleep(Duration::from_millis(1500));
-    drop(join);
-    drop(host);
+    drop(joiner);
+    drop(creator);
 
-    for (who, path, sent_hz) in [("host", &host_out, 660.0), ("join", &join_out, 440.0)] {
+    for (who, path, sent_hz) in [
+        ("creator", &creator_out, 660.0),
+        ("joiner", &joiner_out, 440.0),
+    ] {
         let (left, right) = read_played(path);
 
         // Priming and the moments before the peer connected are silence;
@@ -341,20 +351,20 @@ fn two_clis_connected_directly_hear_each_other() {
     }
 }
 
-/// Runs a host with nobody connected, capturing a 440 Hz tone and writing what
-/// it plays to a file, and returns the left channel.
+/// Runs a CLI alone in a room, capturing a 440 Hz tone and writing what it
+/// plays to a file, and returns the left channel.
 ///
 /// With no peer the only thing the output can carry is the monitored input, so
 /// what comes out is what monitoring does.
-fn host_alone_playing(extra_args: &[&str]) -> Vec<f32> {
+fn cli_alone_playing(extra_args: &[&str]) -> Vec<f32> {
+    let server = FakeSignaling::start();
     let home = tempfile::tempdir().expect("temp HOME");
     let out = home.path().join("played.f32");
-    let port = find_available_udp_port().to_string();
     let out_arg = out.display().to_string();
     let mut args = vec![
-        "host",
-        "--port",
-        &port,
+        "create-room",
+        "--server",
+        server.url(),
         "--preset",
         "ultra-low-latency",
         "--sample-rate",
@@ -366,16 +376,16 @@ fn host_alone_playing(extra_args: &[&str]) -> Vec<f32> {
     ];
     args.extend_from_slice(extra_args);
 
-    let host = Running::start(home.path(), &args);
-    host.wait_for("Listening on port")
-        .expect("host should start listening");
+    let cli = Running::start(home.path(), &args);
+    cli.wait_for("Chat enabled")
+        .expect("the CLI should be in its room");
     std::thread::sleep(Duration::from_millis(1500));
-    drop(host);
+    drop(cli);
 
     read_played(&out).0
 }
 
-/// With `--monitor` the host hears its own tone at the pitch and level it was
+/// With `--monitor` the CLI hears its own tone at the pitch and level it was
 /// captured, before any peer exists to send it anywhere - which is what makes
 /// it local, not a round trip.
 ///
@@ -384,7 +394,7 @@ fn host_alone_playing(extra_args: &[&str]) -> Vec<f32> {
 #[test]
 fn a_monitoring_cli_hears_its_own_input_without_a_peer() {
     const SAMPLE_RATE: u32 = 48000;
-    let left = host_alone_playing(&["--monitor"]);
+    let left = cli_alone_playing(&["--monitor"]);
 
     let start = left
         .iter()
@@ -416,7 +426,7 @@ fn a_monitoring_cli_hears_its_own_input_without_a_peer() {
 /// Verifies: REQ-AUD-112
 #[test]
 fn a_cli_without_monitoring_does_not_play_its_own_input() {
-    let left = host_alone_playing(&[]);
+    let left = cli_alone_playing(&[]);
 
     assert!(!left.is_empty(), "the output file should have been written");
     assert!(
@@ -481,11 +491,12 @@ impl Drop for EchoPeer {
     }
 }
 
-/// `join` against a peer that echoes audio after a hold ends by itself after
-/// `--duration`, leaves a JSON report, and that report holds the round trip of
-/// the bursts sent - the hold taken off - so a change that slows the audio path
-/// shows up as a number. The sound card is replaced by `--input-bursts` and
-/// `--output-file`, so this runs wherever `cargo test` runs.
+/// `join-room` into a room with a peer that echoes audio after a hold ends by
+/// itself after `--duration`, leaves a JSON report, and that report holds the
+/// round trip of the bursts sent - the hold taken off - so a change that slows
+/// the audio path shows up as a number. The sound card is replaced by
+/// `--input-bursts` and `--output-file`, so this runs wherever `cargo test`
+/// runs.
 ///
 /// Verifies: REQ-CLI-007
 #[test]
@@ -493,6 +504,7 @@ fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
     const HOLD_MS: u64 = 200;
     let echo_peer = common::Peer::bind();
     let address = echo_peer.local_addr().to_string();
+    let server = FakeSignaling::start_with_resident_at("echo", echo_peer.local_addr());
     let _echo = EchoPeer::start(echo_peer, Duration::from_millis(HOLD_MS));
 
     let home = tempfile::tempdir().expect("temp HOME");
@@ -503,8 +515,11 @@ fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
     let output = run(
         home.path(),
         &[
-            "join",
-            &address,
+            "join-room",
+            "--server",
+            server.url(),
+            "--room",
+            "echo",
             "--preset",
             "balanced",
             "--sample-rate",
