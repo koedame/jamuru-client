@@ -24,6 +24,7 @@ mod session;
 mod settings;
 mod settings_help;
 mod signaling;
+mod software_render;
 mod streaming;
 mod updater;
 mod usage;
@@ -69,6 +70,8 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First: the web process inherits this, and it must be set before any other thread exists.
+    let software_render_limits = software_render::limit_software_rendering();
     let log_spec = logging::LogSpec::from_env();
     #[cfg(feature = "debug-tools")]
     jamjam::perf::enable();
@@ -90,7 +93,13 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
     let app = builder
-        .setup(|_app| {
+        .setup(move |_app| {
+            if !software_render_limits.is_empty() {
+                tracing::info!(
+                    "No GPU render node; limiting software rendering: {:?}",
+                    software_render_limits
+                );
+            }
             // GUI E2E control channel (ADR-025). Compiled out entirely
             // without the `e2e-control` feature, and inert unless the
             // harness sets JAMJAM_E2E_CONTROL_PORT.
