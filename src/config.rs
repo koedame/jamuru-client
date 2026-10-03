@@ -21,6 +21,11 @@ const APP_NAME: &str = "jamjam";
 /// Default buffer size in samples (64 samples @ 48kHz = 1.33ms)
 const DEFAULT_BUFFER_SIZE: u32 = 64;
 
+/// The version of the terms of use bundled with this build (`docs/terms.md`
+/// ends with `版 N`; the app's tests check the two agree). Raise it when the
+/// terms change in a way users must agree to again.
+pub const TERMS_VERSION: u32 = 1;
+
 /// Default sample rate in Hz (48kHz is the recommended value per ADR-013)
 pub const DEFAULT_SAMPLE_RATE: u32 = 48000;
 
@@ -176,6 +181,16 @@ pub struct AppConfig {
     /// the user turns it off in `config.toml`.
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
+
+    /// The version of the terms of use the user agreed to on this device
+    /// (`None` = not yet). Kept only here, never sent to the server. The app
+    /// asks again when [`TERMS_VERSION`] is newer than this.
+    #[serde(default)]
+    pub terms_version: Option<u32>,
+
+    /// When the user agreed to those terms, in seconds since the Unix epoch.
+    #[serde(default)]
+    pub terms_accepted_at: Option<u64>,
 }
 
 fn default_peer_name() -> String {
@@ -208,11 +223,19 @@ impl Default for AppConfig {
             language: None,
             usage_reporting: false,
             auto_update: true,
+            terms_version: None,
+            terms_accepted_at: None,
         }
     }
 }
 
 impl AppConfig {
+    /// Whether the user has agreed to the terms of use in force
+    /// ([`TERMS_VERSION`]).
+    pub fn terms_accepted(&self) -> bool {
+        self.terms_version == Some(TERMS_VERSION)
+    }
+
     /// The jamjam server to use: the configured one, or
     /// [`DEFAULT_SERVER_URL`]
     pub fn effective_server_url(&self) -> &str {
@@ -376,6 +399,30 @@ mod tests {
 
         assert_eq!(config.buffer_size, 128);
         assert!(!toml::to_string(&config).unwrap().contains("ABC234"));
+    }
+
+    /// Verifies: REQ-TRM-002
+    #[test]
+    fn when_no_terms_version_is_saved_the_terms_are_not_accepted() {
+        assert!(!AppConfig::default().terms_accepted());
+        let config: AppConfig = toml::from_str("buffer_size = 64").unwrap();
+        assert!(!config.terms_accepted());
+    }
+
+    /// Verifies: REQ-TRM-002
+    #[test]
+    fn when_the_saved_terms_version_is_older_than_the_current_one_the_terms_are_not_accepted() {
+        let config: AppConfig =
+            toml::from_str(&format!("terms_version = {}", TERMS_VERSION - 1)).unwrap();
+        assert!(!config.terms_accepted());
+    }
+
+    /// Verifies: REQ-TRM-002
+    #[test]
+    fn when_the_saved_terms_version_is_the_current_one_the_terms_are_accepted() {
+        let config: AppConfig =
+            toml::from_str(&format!("terms_version = {}", TERMS_VERSION)).unwrap();
+        assert!(config.terms_accepted());
     }
 
     /// Verifies: REQ-UPD-001

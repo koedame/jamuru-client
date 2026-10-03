@@ -161,6 +161,7 @@ pub(crate) fn spawn(app: AppHandle) {
         return;
     }
     tauri::async_runtime::spawn(async move {
+        crate::terms::wait_accepted(&app).await;
         tokio::time::sleep(FIRST_CHECK_DELAY).await;
         loop {
             let auto_update = config::load_config().unwrap_or_default().auto_update;

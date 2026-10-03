@@ -346,6 +346,11 @@ fn the_default_follows_the_build_profile() {
     assert_eq!(DEFAULT_SERVER_URL, expected);
 }
 
+/// The pages of this repository's documents that the app opens in the browser
+/// (the privacy page and the announcements, from the settings screen). They
+/// are published documents, not a server the app connects to.
+const PUBLISHED_DOCS_PREFIX: &str = "https://github.com/koedame/jamjam-client/blob/main/docs/";
+
 /// The server is decided in one place (`jamjam::config`), and the signaling
 /// server by the server itself. A URL written into the UI or the Tauri
 /// commands would be a second default that release builds could carry
@@ -378,7 +383,9 @@ fn no_other_source_names_a_server() {
         for url in urls_in(&source, &["http://", "https://"]) {
             let host = host_of(&url);
             assert!(
-                is_example_host(host) || host == "www.w3.org",
+                is_example_host(host)
+                    || host == "www.w3.org"
+                    || url.starts_with(PUBLISHED_DOCS_PREFIX),
                 "{} names the server {:?}; take the server from jamjam::config instead",
                 file.display(),
                 url

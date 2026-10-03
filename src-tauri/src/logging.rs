@@ -858,10 +858,12 @@ pub fn log_open_dir(app: AppHandle) -> Result<String, String> {
         .path()
         .app_log_dir()
         .map_err(|e| format!("The log folder is unknown: {}", e))?;
-    open_dir_with(file_manager_command(), &dir)
+    open_dir_with(desktop_opener(), &dir)
 }
 
-fn file_manager_command() -> &'static str {
+/// The OS command that opens a folder in the file manager or an address in
+/// the browser.
+pub(crate) fn desktop_opener() -> &'static str {
     if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(target_os = "windows") {

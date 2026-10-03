@@ -170,6 +170,13 @@ app_commands! {
     [Access::ALL] "表示の言語を読む" crate::config::config_get_language;
     [Access::ALL] "表示の言語を変える" crate::config::config_set_language;
 
+    // Agreeing to the terms is the person's own, from the app's own screen
+    // only: neither a helper nor a testing portal agrees for them.
+    [Access::NO_HELP] "利用規約の本文と、同意済みかを読む" crate::terms::terms_get;
+    [Access::NO_HELP] "ライセンスの本文を読む" crate::terms::terms_get_license;
+    [Access::SCREEN_ONLY] "利用規約に同意する" crate::terms::terms_accept;
+    [Access::NO_HELP] "プライバシーの説明・お知らせのページをブラウザで開く" crate::terms::terms_open_page;
+
     [Access::ALL] "診断を全部走らせる" crate::diagnostics::diagnostics_run_complete;
     [Access::ALL] "ネットワークの診断を走らせる" crate::diagnostics::diagnostics_run_network;
     [Access::ALL] "音声の診断を走らせる" crate::diagnostics::diagnostics_run_audio;
