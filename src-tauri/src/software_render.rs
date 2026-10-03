@@ -31,20 +31,13 @@ fn plan(gpu_available: bool, is_set: impl Fn(&str) -> bool) -> Vec<(&'static str
 /// it set, so that the caller can log it once the logger exists. Call it
 /// before any thread is started and any window is created.
 pub(crate) fn limit_software_rendering() -> Vec<(&'static str, &'static str)> {
-    #[cfg(target_os = "linux")]
-    {
-        let limits = plan(gpu_render_node_usable(), |name| {
-            std::env::var_os(name).is_some()
-        });
-        for (name, value) in &limits {
-            std::env::set_var(name, value);
-        }
-        limits
+    let limits = plan(gpu_render_node_usable(), |name| {
+        std::env::var_os(name).is_some()
+    });
+    for (name, value) in &limits {
+        std::env::set_var(name, value);
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        Vec::new()
-    }
+    limits
 }
 
 /// Whether a GPU render node can be opened. Mesa falls back to llvmpipe when
@@ -65,6 +58,12 @@ fn gpu_render_node_usable() -> bool {
                 .open(entry.path())
                 .is_ok()
         })
+}
+
+/// Other platforms draw through their own compositor, so there is nothing to limit.
+#[cfg(not(target_os = "linux"))]
+fn gpu_render_node_usable() -> bool {
+    true
 }
 
 #[cfg(test)]
