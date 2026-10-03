@@ -72,6 +72,7 @@
 | [ADR-051](./adr/ADR-051-route-follows-the-peers-answers.md) | 音声の送り先は、こちらから送れた候補の中から選ぶ。相手が ping に応答しないまま別の候補から声が届いたら、送り先をそちらに移す |
 | [ADR-054](./adr/ADR-054-route-is-the-nearest-that-answers.md) | 送り先は、応答した候補のうち近い経路（LAN、Tailscale などの重ね合わせ網、その他の順）にする。候補の優先度もこの順に並べ、最初の応答が LAN でなければ 500 ms まで近い経路の応答を待つ |
 | [ADR-068](./adr/ADR-068-follow-the-peer-after-rejoin.md) | 入り直しのあと、音声は名簿の旧エントリではなく、いま聞こえる相手へ張り直す。移すとき自分のアドレスは変えない |
+| [ADR-069](./adr/ADR-069-sign-the-answer-of-echo-and-the-quality-bot.md) | echo と音質チェックのボットは、受け取ったアプリの一時鍵あてに署名して答える。アプリは相手の `link_key` の署名なら、宛先が自分の鍵でも一時鍵でも受け付ける |
 
 ---
 
