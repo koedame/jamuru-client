@@ -272,7 +272,7 @@ CGNATによるP2P接続の困難さに対応するため、以下の設計を採
 | 古い相手 | 暗号化できない相手は平文で繋ぎ、接続の状態に `unencrypted` と出す。`link_key` を知らせない相手（古い版）とは、署名の無い鍵交換で暗号化して繋ぎ、相手が本人かは確かめない |
 | ユーザー設定 | なし（OFF にできない） |
 
-相手が本人かどうかの確認は、ルームで繋ぐ相手に対して [ADR-067](./adr/ADR-067-check-the-peer-in-the-key-exchange.md) の署名でしている。サーバーを使わない直接接続と、`link_key` を知らせない古い版の相手とは確かめない。判断と理由は [ADR-064](./adr/ADR-064-encrypt-the-audio-link.md)・ADR-067。暗号化の増加分はパケットあたり 24 bytes と、暗号化・復号の計算（ADR-064 の測定）である。
+相手が本人かどうかの確認は、ルームで繋ぐ相手に対して [ADR-067](./adr/ADR-067-check-the-peer-in-the-key-exchange.md) の署名でしている。サーバーを使わない直接接続と、`link_key` を知らせない古い版の相手とは確かめない。echo と音質チェックのボットは `link_key` を知らせ、アプリの一時鍵あてに署名して答えるので、アプリはこの 2 つも確かめる（[ADR-069](./adr/ADR-069-sign-the-answer-of-echo-and-the-quality-bot.md)）。判断と理由は [ADR-064](./adr/ADR-064-encrypt-the-audio-link.md)・ADR-067。暗号化の増加分はパケットあたり 24 bytes と、暗号化・復号の計算（ADR-064 の測定）である。
 
 暗号化は ADR-002 の当初の決定（DTLS）とは別の方式にした。
 
