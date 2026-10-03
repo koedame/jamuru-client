@@ -15,7 +15,7 @@ use crate::protocol::{
     LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, HEADER_SIZE,
 };
 
-use super::bandwidth::UDP_IP_OVERHEAD_BYTES;
+use super::bandwidth::{samples_per_audio_packet, UDP_IP_OVERHEAD_BYTES};
 use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
@@ -568,6 +568,8 @@ pub struct Connection {
     fec_decoder: Option<Arc<std::sync::Mutex<FecDecoder>>>,
     /// FEC group size in use, needed to map sequence numbers to groups
     fec_group_size: Option<usize>,
+    /// Channels interleaved in the audio handed to `send_audio`
+    audio_channels: usize,
     /// Reconnection thresholds
     reconnect_config: ReconnectConfig,
     /// Notified when the connection state changes
@@ -653,6 +655,7 @@ impl Connection {
             fec_encoder: None,
             fec_decoder: None,
             fec_group_size: None,
+            audio_channels: 1,
             reconnect_config: ReconnectConfig::default().validated(),
             state_change_callback: None,
             liveness_handle: None,
@@ -1006,6 +1009,7 @@ impl Connection {
             .map_err(|e| NetworkError::Configuration(format!("Audio codec: {}", e)))?;
 
         self.encoder = Some(Arc::new(std::sync::Mutex::new(codec)));
+        self.audio_channels = config.channels.max(1) as usize;
 
         match config.fec_group_size {
             Some(group) if group >= 2 => {
@@ -1151,7 +1155,35 @@ impl Connection {
     }
 
     /// Send audio data to the remote peer
+    ///
+    /// PCM that would not fit one packet within [`crate::protocol::MAX_PAYLOAD_SIZE`] once sealed (256
+    /// stereo frames) goes as several packets of equal length, each numbered and
+    /// timestamped as the frame it is a part of. The receiver plays them as frames of
+    /// their own; nothing on the wire says they were one.
     pub async fn send_audio(&self, data: &[f32], timestamp: u32) -> Result<(), NetworkError> {
+        let splittable = match self.encoder {
+            Some(ref encoder) => {
+                encoder
+                    .lock()
+                    .map_err(|_| NetworkError::Configuration("Codec lock poisoned".into()))?
+                    .codec_type()
+                    == CodecType::Pcm
+            }
+            None => true,
+        };
+        if !splittable || data.is_empty() {
+            return self.send_audio_packet(data, timestamp).await;
+        }
+        let per_packet = samples_per_audio_packet(data.len(), self.audio_channels);
+        let mut timestamp = timestamp;
+        for part in data.chunks(per_packet) {
+            self.send_audio_packet(part, timestamp).await?;
+            timestamp = timestamp.wrapping_add((part.len() / self.audio_channels) as u32);
+        }
+        Ok(())
+    }
+
+    async fn send_audio_packet(&self, data: &[f32], timestamp: u32) -> Result<(), NetworkError> {
         if !self.state().can_transmit() {
             return Err(NetworkError::NotConnected);
         }
@@ -2102,6 +2134,70 @@ mod tests {
         .await
         .expect("sends should move to the address the peer is heard from, and be answered");
         assert_eq!(conn1.state(), ConnectionState::Connected);
+    }
+
+    /// Verifies: REQ-NET-029
+    #[tokio::test]
+    async fn when_a_frame_is_too_big_for_one_packet_it_is_sent_as_packets_that_fit() {
+        use crate::network::SEAL_OVERHEAD;
+        use crate::protocol::MAX_PAYLOAD_SIZE;
+
+        let mut sender = Connection::new("127.0.0.1:0").await.unwrap();
+        sender
+            .set_audio_encoding(AudioEncodingConfig {
+                codec_type: CodecType::Pcm,
+                sample_rate: 48_000,
+                channels: 2,
+                frame_size: 256,
+                bitrate: 0,
+                fec_group_size: None,
+            })
+            .unwrap();
+        let mut receiver = Connection::new("127.0.0.1:0").await.unwrap();
+        let heard = Arc::new(std::sync::Mutex::new(Vec::<(u32, usize, u32)>::new()));
+        let record = heard.clone();
+        receiver.set_audio_callback(move |sequence, payload, timestamp| {
+            record
+                .lock()
+                .unwrap()
+                .push((sequence, payload.len(), timestamp));
+        });
+        sender.connect(receiver.local_addr()).await.unwrap();
+        receiver.connect(sender.local_addr()).await.unwrap();
+
+        // Audio waits for the keys to be agreed; a frame of 64 samples (256 bytes) shows
+        // when it is let through.
+        for _ in 0..50 {
+            sender.send_audio(&[0.0f32; 64], 0).await.unwrap();
+            if receiver.link_facts().snapshot().first_audio_ms.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        heard.lock().unwrap().clear();
+
+        // 256 stereo frames: 2048 bytes, more than a packet carries.
+        sender.send_audio(&[0.25f32; 512], 1000).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while heard.lock().unwrap().len() < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the frame should arrive as packets");
+
+        let heard = heard.lock().unwrap().clone();
+        assert_eq!(heard.len(), 2, "256 frames go as two packets: {:?}", heard);
+        let (first, second) = (heard[0], heard[1]);
+        assert_eq!(second.0, first.0 + 1, "numbered one after the other");
+        assert_eq!((first.1, second.1), (1024, 1024), "128 stereo frames each");
+        assert_eq!(
+            (first.2, second.2),
+            (1000, 1128),
+            "each timestamped where its audio starts"
+        );
+        assert!(first.1 + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE);
     }
 
     /// Verifies: REQ-TEL-015
