@@ -65,16 +65,19 @@ impl LinkRoute {
 pub(super) const NEAREST_ROUTE_PREFERENCE: u32 = 3;
 
 /// How good a route to `addr` is expected to be, the higher the better: inside
-/// a local network (3), through an overlay network such as Tailscale (2), any
-/// other address (1). A peer on the same LAN is a hop away; an overlay adds an
-/// encrypted tunnel on top of the same wire; a public address crosses the NAT.
+/// a local network (3), any other address (2), through an overlay network such
+/// as Tailscale (1). A peer on the same LAN is a hop away. A public address
+/// that answers a probe is a direct path across the NAT. An overlay that
+/// answers may be a direct path too, but it may as well be a relay (Tailscale's
+/// DERP), and a probe cannot tell the two apart: it is never better than a
+/// public address that answers, and often much worse.
 pub(super) fn route_preference(addr: SocketAddr) -> u32 {
     if is_overlay(addr.ip()) {
-        return 2;
+        return 1;
     }
     match LinkRoute::of(addr) {
         LinkRoute::Lan | LinkRoute::Loopback => NEAREST_ROUTE_PREFERENCE,
-        LinkRoute::Public => 1,
+        LinkRoute::Public => 2,
     }
 }
 
@@ -228,8 +231,19 @@ mod tests {
         let overlay = route_preference(addr("100.68.50.7:5000"));
         let public = route_preference(addr("203.0.113.7:5000"));
 
+        assert!(lan > public, "{lan} > {public}");
         assert!(lan > overlay, "{lan} > {overlay}");
-        assert!(overlay > public, "{overlay} > {public}");
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_public_address_and_a_tailscale_address_both_answer_the_public_one_is_preferred() {
+        let overlay = route_preference(addr("100.68.50.7:5000"));
+        let public = route_preference(addr("203.0.113.7:5000"));
+        let public_v6 = route_preference(addr("[2001:db8::7]:5000"));
+
+        assert!(public > overlay, "{public} > {overlay}");
+        assert!(public_v6 > overlay, "{public_v6} > {overlay}");
     }
 
     /// Verifies: REQ-CON-115
@@ -240,10 +254,10 @@ mod tests {
             "100.127.255.254:5000",
             "[fd7a:115c:a1e0::1]:5000",
         ] {
-            assert_eq!(route_preference(addr(text)), 2, "{text}");
+            assert_eq!(route_preference(addr(text)), 1, "{text}");
         }
         for text in ["100.63.255.255:5000", "100.128.0.1:5000", "[fd00::1]:5000"] {
-            assert_ne!(route_preference(addr(text)), 2, "{text}");
+            assert_ne!(route_preference(addr(text)), 1, "{text}");
         }
     }
 
