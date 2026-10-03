@@ -275,12 +275,9 @@ mod tests {
     /// Verifies: REQ-TRM-004
     #[test]
     fn when_a_page_is_named_it_is_one_of_the_two_pages_the_app_opens() {
-        assert!(Page::Privacy
-            .url()
-            .starts_with("https://github.com/koedame/jamjam-client/"));
-        assert!(Page::Announcements
-            .url()
-            .starts_with("https://github.com/koedame/jamjam-client/"));
+        for page in [Page::Privacy, Page::Announcements] {
+            assert!(page.url().contains("/jamjam-client/blob/main/docs/"));
+        }
         assert!(serde_json::from_str::<Page>("\"https://example.com\"").is_err());
     }
 }
