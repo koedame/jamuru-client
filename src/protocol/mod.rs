@@ -5,5 +5,6 @@
 mod packet;
 
 pub use packet::{
-    LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, HEADER_SIZE, PROTOCOL_VERSION,
+    LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, HEADER_SIZE,
+    MAX_PAYLOAD_SIZE, PROTOCOL_VERSION,
 };
