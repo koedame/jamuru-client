@@ -32,7 +32,7 @@
 //! [`SecureLink::checks_peer`] tells the two apart. A link that does check the peer never
 //! falls back to plain or to an unsigned exchange, whatever arrives.
 //!
-//! The echo server and the quality-check bot talk to many apps from one socket and cannot
+//! The echo and quality-check bots talk to many apps from one socket and cannot
 //! tell which participant an address is, so they cannot name the app in what they sign. A
 //! link made [`SecureLink::answering`] signs its half for the ephemeral key of the half it
 //! answers instead, which an app that checks takes as it takes one signed for its identity:
@@ -332,7 +332,7 @@ impl SecureLink {
     }
 
     /// A link for a server that talks to many apps from one socket and cannot tell which
-    /// participant an address is (the echo server, the quality-check bot). `ours` is the key it
+    /// participant an address is (the echo and quality-check bots). `ours` is the key it
     /// tells the room as its [`LinkIdentity::public_key`]. It does not check who the app is.
     /// An app whose half is signed gets a half signed by `ours` for the app's ephemeral key, so
     /// an app that checks it by the key the server gave can tell it from someone on the path;
