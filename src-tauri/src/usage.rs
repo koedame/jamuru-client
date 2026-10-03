@@ -474,11 +474,18 @@ fn hang_report_comment(hang: &Hang, launch_id: &str) -> String {
 /// change the `Ok(())` this returns, matching `send_one_off_hang` itself
 /// not surfacing a delivery failure either.
 #[tauri::command]
-pub async fn usage_send_previous_hang(
-    app: AppHandle,
-    state: tauri::State<'_, UsageState>,
-    send: bool,
-) -> Result<(), String> {
+pub async fn usage_send_previous_hang(app: AppHandle, send: bool) -> Result<(), String> {
+    send_previous_hang(&app, send).await
+}
+
+/// Sending refuses until the user has agreed to the terms, and leaves the
+/// pending report where it is, so it can still be answered after agreeing
+/// (REQ-TRM-003). Discarding reaches nothing, so it needs no agreement.
+async fn send_previous_hang<R: Runtime>(app: &AppHandle<R>, send: bool) -> Result<(), String> {
+    if send {
+        crate::terms::require_accepted(app)?;
+    }
+    let state = app.state::<UsageState>();
     let Some(pending) = state.take_pending_hang() else {
         return Ok(());
     };
@@ -488,9 +495,9 @@ pub async fn usage_send_previous_hang(
             .clone()
             .send_one_off_hang(pending.hang, &pending.launch_id, &pending.app_version)
             .await;
-        if attaches_log(&app) {
+        if attaches_log(app) {
             let comment = hang_report_comment(&pending.hang, &pending.launch_id);
-            if let Err(err) = crate::report_problem::send_log_report(&app, &comment).await {
+            if let Err(err) = crate::report_problem::send_log_report(app, &comment).await {
                 tracing::warn!("hang report: could not attach jamjam.log: {err}");
             }
         }
@@ -1384,5 +1391,34 @@ mod tests {
             usage.pending_hang.lock().unwrap().is_none(),
             "an already-on device has nothing left for a confirmation screen to ask about"
         );
+    }
+
+    /// Verifies: REQ-TRM-003
+    #[tokio::test]
+    async fn the_terms_are_not_agreed_to_and_the_previous_hang_is_sent_refuses_and_keeps_it_pending(
+    ) {
+        let reporter = UsageReporter::new(None, "test", Arc::new(NoTransport), false);
+        let usage = UsageState::with_reporter(reporter);
+        usage.apply_previous_incident(Some((
+            Hang {
+                stage: HangStage::AppExit,
+                stalled_ms: Some(6000),
+            },
+            "launch-killed-1".to_string(),
+            "0.1.0-36".to_string(),
+        )));
+        let app = tauri::test::mock_app();
+        app.manage(usage);
+        app.manage(crate::terms::TermsState::new(false));
+
+        let sent = send_previous_hang(app.handle(), true).await;
+
+        assert!(sent.is_err());
+        assert!(app
+            .state::<UsageState>()
+            .pending_hang
+            .lock()
+            .unwrap()
+            .is_some());
     }
 }
