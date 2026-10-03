@@ -4,11 +4,13 @@
 //! can be observed in. Selectors live here and nowhere else.
 
 mod connection;
+mod consent;
 mod helper;
 mod session;
 mod settings;
 
 pub use connection::{ConnectionScreen, ConnectionState};
+pub use consent::ConsentScreen;
 pub use helper::HelperScreen;
 pub use session::SessionScreen;
 pub use settings::{DevicesTab, DiagnosticsTab, SettingsScreen, SettingsTab};

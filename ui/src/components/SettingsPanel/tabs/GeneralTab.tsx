@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { FormField } from "../FormField";
 import { Select } from "../Select";
 import { Input } from "../Input";
+import { LegalSection, type LegalSectionProps } from "../../Terms/LegalSection";
 import "./TabContent.css";
 
 export type Language = "ja" | "en";
@@ -24,6 +25,8 @@ export interface GeneralTabProps {
   effectiveServerUrl: string;
   /** Server URL change handler. Called with an empty string to clear the override. */
   onServerUrlChange: (url: string) => void;
+  /** Opens the terms of use, the license and the published pages. The section is left out when absent */
+  legal?: LegalSectionProps;
 }
 
 export function GeneralTab({
@@ -32,6 +35,7 @@ export function GeneralTab({
   serverUrl,
   effectiveServerUrl,
   onServerUrlChange,
+  legal,
 }: GeneralTabProps) {
   const { t } = useTranslation();
 
@@ -76,6 +80,8 @@ export function GeneralTab({
           autoComplete="off"
         />
       </FormField>
+
+      {legal && <LegalSection {...legal} />}
     </div>
   );
 }

@@ -244,6 +244,7 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 - 見出し「一般設定」
 - 言語（`stacked` + `block` Select: 日本語 / English）
+- 規約など（`LegalSection`。`legal` を渡したときだけ出る）: 「利用規約」「ライセンス」はアプリに同梱した本文をダイアログ（`TermsViewer`）で読む。「プライバシーとセキュリティ」「お知らせ」はブラウザで開く（開けるのはこの 2 ページだけ。[ADR-072](../../adr/ADR-072-terms-of-use-and-first-launch-consent.md)）
 
 ### プロフィールタブ（ProfileTab）
 

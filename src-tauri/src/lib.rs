@@ -26,6 +26,7 @@ mod settings_help;
 mod signaling;
 mod software_render;
 mod streaming;
+mod terms;
 mod updater;
 mod usage;
 mod watchdog;
@@ -61,6 +62,13 @@ fn load_startup_config() -> config::AppConfig {
             config::AppConfig::default()
         }
     }
+}
+
+/// `config` as the usage reporter should read it: reporting is on only for a
+/// user who has agreed to the terms of use, whatever the saved setting says.
+fn with_usage_reporting_only_after_the_terms(mut config: config::AppConfig) -> config::AppConfig {
+    config.usage_reporting &= config.terms_accepted();
+    config
 }
 
 #[tauri::command]
@@ -117,6 +125,9 @@ pub fn run() {
     // identity) would go nowhere.
     app.manage(SignalingState::new());
     let startup_config = load_startup_config();
+    // Until the user agrees to the terms of use, nothing below that talks to
+    // the network on its own starts (`terms::wait_accepted`).
+    app.manage(terms::TermsState::new(startup_config.terms_accepted()));
     app.manage(StreamingState::new());
     app.manage(SettingsState::new());
     let config_state = ConfigState::new();
@@ -126,7 +137,10 @@ pub fn run() {
 
     // Usage reporting is off unless the user turned it on (`usage_reporting`).
     // The panic hook goes in after the logger's, so both run on a panic.
-    let usage = UsageState::new(&startup_config, &app.package_info().version.to_string());
+    let usage = UsageState::new(
+        &with_usage_reporting_only_after_the_terms(startup_config.clone()),
+        &app.package_info().version.to_string(),
+    );
     usage.reporter().install_panic_hook();
     // Read before the watchdog below writes this launch's own running
     // marker, which would otherwise overwrite what the previous one left.
@@ -139,7 +153,9 @@ pub fn run() {
         usage.report_launch(startup_config);
     }
     let saved_usage = usage.clone();
-    config_state.on_saved(move |config| saved_usage.settings_saved(config));
+    config_state.on_saved(move |config| {
+        saved_usage.settings_saved(&with_usage_reporting_only_after_the_terms(config.clone()))
+    });
     app.manage(config_state);
     app.manage(usage);
     app.manage(mixer::MixerState::new());

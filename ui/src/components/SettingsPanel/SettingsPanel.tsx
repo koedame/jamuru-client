@@ -13,6 +13,7 @@ import { ProfileTab } from "./tabs/ProfileTab";
 import { DevicesTab, DeviceInfo } from "./tabs/DevicesTab";
 import { DiagnosticsTab, DiagnosticsState, ReportProblemState } from "./tabs/DiagnosticsTab";
 import { SelectOption } from "./Select";
+import type { LegalSectionProps } from "../Terms/LegalSection";
 import { MicIcon, SlidersIcon, UserIcon, ActivityIcon } from "./icons";
 import { CompleteDiagnosticsResult, Hang, RecommendedPreset } from "../../lib/tauri";
 import "./SettingsPanel.css";
@@ -80,6 +81,8 @@ export interface SettingsPanelProps {
   onLanguageChange: (language: Language) => void;
   /** Server URL change handler. Called with an empty string to clear the override. */
   onServerUrlChange?: (url: string) => void;
+  /** Opens the terms of use, the license and the published pages (General tab) */
+  legal?: LegalSectionProps;
   /** Display name change handler */
   onDisplayNameChange: (name: string) => void;
   /** Input device change handler */
@@ -191,6 +194,7 @@ export function SettingsPanel({
   diagnosticsResult,
   onLanguageChange,
   onServerUrlChange = () => {},
+  legal,
   onDisplayNameChange,
   onInputDeviceChange,
   onOutputDeviceChange,
@@ -249,6 +253,7 @@ export function SettingsPanel({
             serverUrl={serverUrl}
             effectiveServerUrl={effectiveServerUrl}
             onServerUrlChange={onServerUrlChange}
+            legal={legal}
           />
         );
       case "profile":

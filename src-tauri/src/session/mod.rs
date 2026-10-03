@@ -343,6 +343,7 @@ pub fn session_get(state: tauri::State<'_, SessionState>) -> Snapshot {
 /// connection is made or has failed.
 #[tauri::command]
 pub async fn session_connect(app: AppHandle) -> Result<Snapshot, String> {
+    crate::terms::require_accepted(&app)?;
     let epoch = app.state::<SessionState>().next_epoch();
     connect(&app, epoch).await
 }
@@ -350,12 +351,14 @@ pub async fn session_connect(app: AppHandle) -> Result<Snapshot, String> {
 /// Creates a room and enters it.
 #[tauri::command]
 pub async fn session_create(app: AppHandle) -> Result<Snapshot, String> {
+    crate::terms::require_accepted(&app)?;
     create(&app).await
 }
 
 /// Joins the room `code` names (an invite code, or a room id from a link).
 #[tauri::command]
 pub async fn session_join(code: String, app: AppHandle) -> Result<Snapshot, String> {
+    crate::terms::require_accepted(&app)?;
     join(&app, code).await
 }
 
@@ -371,6 +374,7 @@ pub async fn session_leave(app: AppHandle) -> Result<Snapshot, String> {
 /// every attempt failed.
 #[tauri::command]
 pub async fn session_reconnect(app: AppHandle) -> Result<Snapshot, String> {
+    crate::terms::require_accepted(&app)?;
     let state = app.state::<SessionState>();
     if state.rejoin_code().is_none() {
         return Err("Not in a room".to_string());
@@ -379,9 +383,11 @@ pub async fn session_reconnect(app: AppHandle) -> Result<Snapshot, String> {
     reconnect(&app, epoch).await
 }
 
-/// Connects to the server as the app starts.
+/// Connects to the server as the app starts, once the user has agreed to the
+/// terms of use.
 pub fn spawn<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
+        crate::terms::wait_accepted(&app).await;
         let epoch = app.state::<SessionState>().next_epoch();
         let _ = connect(&app, epoch).await;
     });
@@ -1362,6 +1368,15 @@ mod tests {
     }
 
     fn app_for(server: &FakeServer, dir: &tempfile::TempDir) -> tauri::App<MockRuntime> {
+        app_for_terms(server, dir, true)
+    }
+
+    /// [`app_for`] with the terms of use agreed to or not.
+    fn app_for_terms(
+        server: &FakeServer,
+        dir: &tempfile::TempDir,
+        terms_accepted: bool,
+    ) -> tauri::App<MockRuntime> {
         let app = tauri::test::mock_app();
         let config = crate::config::AppConfig {
             server_url: Some(server.url.clone()),
@@ -1381,6 +1396,7 @@ mod tests {
             ),
         ));
         app.manage(SessionState::new());
+        app.manage(crate::terms::TermsState::new(terms_accepted));
         app
     }
 
@@ -1435,6 +1451,43 @@ mod tests {
         assert!(snapshot.connection_id.is_some());
         assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("HJK567MNP"));
         assert_eq!(snapshot.room, None);
+    }
+
+    /// Verifies: REQ-TRM-003
+    #[tokio::test]
+    async fn the_app_starts_before_the_terms_are_agreed_to_does_not_reach_the_server_until_they_are(
+    ) {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_for_terms(&server, &dir, false);
+
+        spawn(app.handle().clone());
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(
+            server.connections(),
+            0,
+            "the app connected before the terms were agreed to"
+        );
+        assert_eq!(
+            app.state::<SessionState>().snapshot().phase,
+            Phase::ConnectingServer
+        );
+
+        app.state::<crate::terms::TermsState>().accept();
+        until(&app, |s| s.phase == Phase::ServerConnected).await;
+        assert_eq!(server.connections(), 1);
+    }
+
+    /// Verifies: REQ-TRM-003
+    #[tokio::test]
+    async fn the_terms_are_not_agreed_to_and_a_command_that_connects_is_called_refuses_and_stays_off_the_network(
+    ) {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_for_terms(&server, &dir, false);
+
+        assert!(crate::terms::require_accepted(app.handle()).is_err());
+        assert_eq!(server.connections(), 0);
     }
 
     /// Verifies: REQ-RMT-028
