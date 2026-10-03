@@ -22,8 +22,8 @@ Low-latency P2P audio communication for musicians.
 
 This software is provided under a custom Source Available license.
 
-- **Permitted**: Using these official binaries
-- **Not Permitted**: Modification, redistribution, commercial use, building from source
+- **Permitted**: Using these official binaries, for any purpose
+- **Not Permitted**: Modification, redistribution, selling or providing the software (or a service built on it) to others, building from source
 
 By downloading and using this software, you agree to the [LICENSE](https://github.com/koedame/jamjam-client/blob/HEAD/LICENSE) terms.
 
