@@ -21,13 +21,16 @@ const TERMS: &str = include_str!("../../docs/terms.md");
 const LICENSE: &str = include_str!("../../LICENSE");
 
 /// Where the privacy and security page lives, opened in the browser.
+///
+/// The links say `HEAD`, the repository's default branch, not `main`: `main`
+/// only moves at a stable release, so the pages are not there until then.
 const PRIVACY_URL: &str =
-    "https://github.com/koedame/jamjam-client/blob/main/docs/getting-started/privacy.md";
+    "https://github.com/koedame/jamjam-client/blob/HEAD/docs/getting-started/privacy.md";
 
 /// Where notices about ending or interrupting the service are posted, opened
 /// in the browser.
 const ANNOUNCEMENTS_URL: &str =
-    "https://github.com/koedame/jamjam-client/blob/main/docs/announcements.md";
+    "https://github.com/koedame/jamjam-client/blob/HEAD/docs/announcements.md";
 
 /// Tauri-managed state: whether the user has agreed to the terms in force.
 pub struct TermsState {
@@ -276,7 +279,7 @@ mod tests {
     #[test]
     fn when_a_page_is_named_it_is_one_of_the_two_pages_the_app_opens() {
         for page in [Page::Privacy, Page::Announcements] {
-            assert!(page.url().contains("/jamjam-client/blob/main/docs/"));
+            assert!(page.url().contains("/jamjam-client/blob/HEAD/docs/"));
         }
         assert!(serde_json::from_str::<Page>("\"somewhere_else\"").is_err());
     }

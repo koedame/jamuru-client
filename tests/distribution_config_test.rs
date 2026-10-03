@@ -349,7 +349,7 @@ fn the_default_follows_the_build_profile() {
 /// The pages of this repository's documents that the app opens in the browser
 /// (the privacy page and the announcements, from the settings screen). They
 /// are published documents, not a server the app connects to.
-const PUBLISHED_DOCS_PREFIX: &str = "https://github.com/koedame/jamjam-client/blob/main/docs/";
+const PUBLISHED_DOCS_PREFIX: &str = "https://github.com/koedame/jamjam-client/blob/HEAD/docs/";
 
 /// The server is decided in one place (`jamjam::config`), and the signaling
 /// server by the server itself. A URL written into the UI or the Tauri
