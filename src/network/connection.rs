@@ -65,8 +65,8 @@ pub struct ConnectionStats {
     /// Whether what this link carries is encrypted
     pub security: LinkSecurity,
     /// Whether the keys of this link are bound to the peer's key from the signaling server.
-    /// `false` for a peer whose app tells none and for a direct connection: the link is then
-    /// encrypted but not known to be with that peer.
+    /// `false` for a peer whose app tells none: the link is then encrypted but not known to be
+    /// with that peer.
     pub peer_checked: bool,
     /// Packets turned away because they were forged, repeated or from a peer that is not
     /// encrypting while the link is
@@ -748,22 +748,6 @@ impl Connection {
 
         info!("Connected to {}", remote_addr);
         Ok(())
-    }
-
-    /// Wait for a peer to reach this socket, then connect back to it
-    ///
-    /// For a listener that does not know its peer's address in advance
-    /// (`jamjam host`). Whatever arrives first names the peer: a joining side
-    /// opens with a keep-alive, so nothing it cares about is consumed here.
-    pub async fn accept(&mut self) -> Result<SocketAddr, NetworkError> {
-        if self.is_connected() {
-            return Err(NetworkError::AlreadyConnected);
-        }
-
-        let (_, peer) = self.transport.recv_raw().await?;
-        info!("Peer {} reached us", peer);
-        self.connect(peer).await?;
-        Ok(peer)
     }
 
     /// Connect to a remote peer using multiple address candidates (Happy Eyeballs style)

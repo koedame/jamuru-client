@@ -3,6 +3,7 @@
 //! Manages test nodes (local or remote machines) for E2E testing.
 
 use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tracing::{debug, info};
 
@@ -71,8 +72,6 @@ pub struct TestNode {
     pub ssh_address: Option<String>,
     /// Path to jamjam binary on this node
     pub binary_path: String,
-    /// Port for jamjam session
-    pub session_port: u16,
 }
 
 impl TestNode {
@@ -83,22 +82,16 @@ impl TestNode {
             platform: Platform::current(),
             ssh_address: None,
             binary_path: "target/release/jamjam".to_string(),
-            session_port: 0, // Will be assigned
         }
     }
 
     /// Create a local test node with specific settings
-    pub fn local_with_config(
-        id: impl Into<String>,
-        binary_path: impl Into<String>,
-        port: u16,
-    ) -> Self {
+    pub fn local_with_config(id: impl Into<String>, binary_path: impl Into<String>) -> Self {
         Self {
             id: id.into(),
             platform: Platform::current(),
             ssh_address: None,
             binary_path: binary_path.into(),
-            session_port: port,
         }
     }
 
@@ -113,35 +106,18 @@ impl TestNode {
         platform: Platform,
         ssh_address: impl Into<String>,
         binary_path: impl Into<String>,
-        port: u16,
     ) -> Self {
         Self {
             id: id.into(),
             platform,
             ssh_address: Some(ssh_address.into()),
             binary_path: binary_path.into(),
-            session_port: port,
         }
     }
 
     /// Check if this is a local node
     pub fn is_local(&self) -> bool {
         self.ssh_address.is_none()
-    }
-
-    /// Get the session address for this node
-    pub fn session_addr(&self) -> String {
-        if self.is_local() {
-            format!("127.0.0.1:{}", self.session_port)
-        } else {
-            // Extract host from SSH address
-            let host = self
-                .ssh_address
-                .as_ref()
-                .map(|s| s.split('@').next_back().unwrap_or(s))
-                .unwrap_or("127.0.0.1");
-            format!("{}:{}", host, self.session_port)
-        }
     }
 }
 
@@ -153,62 +129,109 @@ pub struct NodeProcess {
     child: Option<Child>,
     /// Whether the process is running
     running: bool,
+    /// The process's `$HOME` and the file its played audio goes to, removed with it
+    _scratch: Option<tempfile::TempDir>,
+}
+
+/// `jamjam <args>` with no sound card and no settings of the machine's: a tone stands in
+/// for the input, a file in `scratch` for the output, and `$HOME` is `scratch`.
+fn session_command(node: &TestNode, scratch: &std::path::Path, args: &[&str]) -> Command {
+    let mut command = Command::new(&node.binary_path);
+    command
+        .args(args)
+        .args(["--input-tone", "440", "--output-file"])
+        .arg(scratch.join("played.f32"))
+        .env("HOME", scratch)
+        .env("XDG_CONFIG_HOME", scratch.join(".config"));
+    command
 }
 
 impl NodeProcess {
-    /// Start jamjam on a local node as host
-    pub async fn start_host(node: TestNode) -> Result<Self, NodeError> {
+    /// Start jamjam on a local node, creating a room on the signaling `server`.
+    /// Returns the process and the invite code the others join with.
+    pub async fn start_create_room(
+        node: TestNode,
+        server: &str,
+    ) -> Result<(Self, String), NodeError> {
+        if !node.is_local() {
+            return Err(NodeError::RemoteNotSupported);
+        }
+
+        info!("Starting jamjam on node {} to create a room", node.id);
+
+        let scratch = tempfile::tempdir().map_err(|e| NodeError::SpawnFailed(e.to_string()))?;
+        let mut child =
+            session_command(&node, scratch.path(), &["create-room", "--server", server])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| NodeError::SpawnFailed(e.to_string()))?;
+
+        // The invite code is on the first lines it prints. The rest is read
+        // and dropped for as long as the process runs: a closed pipe would
+        // make its next print fail.
+        let stdout = child.stdout.take().expect("stdout is piped");
+        let (code_tx, code_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut code_tx = Some(code_tx);
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(code) = line.strip_prefix("Invite code:") {
+                    if let Some(code_tx) = code_tx.take() {
+                        let _ = code_tx.send(code.trim().to_string());
+                    }
+                }
+            }
+        });
+        let invite_code = tokio::time::timeout(std::time::Duration::from_secs(20), code_rx)
+            .await
+            .map_err(|_| NodeError::ConnectionFailed("no invite code within 20 s".to_string()))?
+            .map_err(|_| {
+                NodeError::ConnectionFailed("the process ended without one".to_string())
+            })?;
+
+        Ok((
+            Self {
+                node,
+                child: Some(child),
+                running: true,
+                _scratch: Some(scratch),
+            },
+            invite_code,
+        ))
+    }
+
+    /// Start jamjam on a local node and join the room `invite_code` on the signaling `server`
+    pub async fn start_join_room(
+        node: TestNode,
+        server: &str,
+        invite_code: &str,
+    ) -> Result<Self, NodeError> {
         if !node.is_local() {
             return Err(NodeError::RemoteNotSupported);
         }
 
         info!(
-            "Starting jamjam host on node {} port {}",
-            node.id, node.session_port
+            "Starting jamjam on node {} to join {}",
+            node.id, invite_code
         );
 
-        let child = Command::new(&node.binary_path)
-            .arg("host")
-            .arg("--port")
-            .arg(node.session_port.to_string())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| NodeError::SpawnFailed(e.to_string()))?;
-
-        // Wait a bit for the process to start
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        Ok(Self {
-            node,
-            child: Some(child),
-            running: true,
-        })
-    }
-
-    /// Start jamjam on a local node and join a session
-    pub async fn start_join(node: TestNode, host_addr: &str) -> Result<Self, NodeError> {
-        if !node.is_local() {
-            return Err(NodeError::RemoteNotSupported);
-        }
-
-        info!("Starting jamjam join on node {} to {}", node.id, host_addr);
-
-        let child = Command::new(&node.binary_path)
-            .arg("join")
-            .arg(host_addr)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| NodeError::SpawnFailed(e.to_string()))?;
-
-        // Wait a bit for the process to start
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let scratch = tempfile::tempdir().map_err(|e| NodeError::SpawnFailed(e.to_string()))?;
+        let child = session_command(
+            &node,
+            scratch.path(),
+            &["join-room", "--server", server, "--room", invite_code],
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| NodeError::SpawnFailed(e.to_string()))?;
 
         Ok(Self {
             node,
             child: Some(child),
             running: true,
+            _scratch: Some(scratch),
         })
     }
 
@@ -312,9 +335,9 @@ mod tests {
 
     #[test]
     fn test_local_node_creation() {
-        let node = TestNode::local_with_config("test-node", "/usr/bin/jamjam", 5000);
+        let node = TestNode::local_with_config("test-node", "/usr/bin/jamjam");
         assert!(node.is_local());
-        assert_eq!(node.session_addr(), "127.0.0.1:5000");
+        assert_eq!(node.binary_path, "/usr/bin/jamjam");
     }
 
     #[test]
@@ -331,9 +354,8 @@ mod tests {
             Platform::Linux,
             "user@192.168.1.100",
             "/home/user/jamjam",
-            5001,
         );
         assert!(!node.is_local());
-        assert_eq!(node.session_addr(), "192.168.1.100:5001");
+        assert_eq!(node.ssh_address.as_deref(), Some("user@192.168.1.100"));
     }
 }

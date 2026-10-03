@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
+use crate::fake_signaling::FakeSignaling;
 use crate::node::{NodeProcess, TestNode};
 use crate::{TestConfig, TestResult};
 
@@ -44,36 +45,42 @@ impl TestOrchestrator {
 
         info!("Starting two-node test: {}", scenario);
 
-        // Step 1: Start host node
-        let host_process = match NodeProcess::start_host(host_node.clone()).await {
-            Ok(p) => p,
-            Err(e) => {
-                error!("Failed to start host: {}", e);
-                return TestResult::failed(&scenario, format!("Host start failed: {}", e));
-            }
-        };
+        // Step 1: Start the signaling server both nodes meet through
+        let server = FakeSignaling::start();
+
+        // Step 2: Start host node, which creates the room
+        let (host_process, invite_code) =
+            match NodeProcess::start_create_room(host_node.clone(), server.url()).await {
+                Ok(started) => started,
+                Err(e) => {
+                    error!("Failed to start host: {}", e);
+                    return TestResult::failed(&scenario, format!("Host start failed: {}", e));
+                }
+            };
         self.processes.insert(host_node.id.clone(), host_process);
 
-        // Step 2: Start client node and connect
-        let host_addr = host_node.session_addr();
-        let client_process = match NodeProcess::start_join(client_node.clone(), &host_addr).await {
-            Ok(p) => p,
-            Err(e) => {
-                error!("Failed to start client: {}", e);
-                self.cleanup().await;
-                return TestResult::failed(&scenario, format!("Client start failed: {}", e));
-            }
-        };
+        // Step 3: Start client node, which joins it
+        let client_process =
+            match NodeProcess::start_join_room(client_node.clone(), server.url(), &invite_code)
+                .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("Failed to start client: {}", e);
+                    self.cleanup().await;
+                    return TestResult::failed(&scenario, format!("Client start failed: {}", e));
+                }
+            };
         self.processes
             .insert(client_node.id.clone(), client_process);
 
         let startup_time = start.elapsed();
         info!("Both nodes spawned in {}ms", startup_time.as_millis());
 
-        // Step 3: Wait for test duration
+        // Step 4: Wait for test duration
         tokio::time::sleep(Duration::from_secs(self.config.duration_sec as u64)).await;
 
-        // Step 4: Confirm neither node died while we waited. Without this the
+        // Step 5: Confirm neither node died while we waited. Without this the
         // test would pass for two processes that exited immediately.
         let died: Vec<String> = self
             .processes
@@ -85,7 +92,7 @@ impl TestOrchestrator {
             })
             .collect();
 
-        // Step 5: Cleanup
+        // Step 6: Cleanup
         self.cleanup().await;
 
         let duration = start.elapsed();
