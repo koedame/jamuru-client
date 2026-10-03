@@ -91,6 +91,8 @@ main・develop ブランチへの push またはタグ作成時に実行され�
 
 リリースのビルドは、更新用の成果物と署名（`.sig`）も作り、更新情報 `latest.json` を Release に添えます（[ADR-041](../../docs-spec/adr/ADR-041-self-update.md)）。正式版のタグ `vX.Y.Z` は、`src-tauri/tauri.conf.json` の版と同じでなければ、更新情報を作る段階で失敗します。先に版を上げてからタグを打ってください。
 
+正式版のタグでは、ビルドの前に `scripts/check-terms-for-release.sh` が、規約（`docs/terms.md`）に制定日の「○月○日」が残っていないことと、アプリが開くページ（プライバシーとお知らせ）・規約が指す LICENSE が公開された先で開けること（200）を確かめます。ベータ版のタグでは確かめません。手元でも同じコマンドで確かめられます。
+
 ベータ版のタグは、動作を確かめたいコミットに開発者が打ちます。同じ X.Y.Z のベータ版では、それまでの最大の N に 1 を足します。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ベータ版のアプリは `X.Y.Z-N`（`vX.Y.Z-beta.N` の N）の版としてビルドされ、更新情報は固定タグの Release `beta-channel` の `latest.json` から読みます。ベータ版・正式版のどちらのリリースでも、より新しければその `latest.json` に置き換えます（[ADR-045](../../docs-spec/adr/ADR-045-beta-self-update.md)）。ブランチの使い分けとリリースの手順は [ADR-047](../../docs-spec/adr/ADR-047-git-flow-branching.md) にあります。
 
 ## ローカルでのCI実行
