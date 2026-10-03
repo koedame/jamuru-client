@@ -655,6 +655,10 @@ export interface AppConfig {
   usage_reporting: boolean;
   /** Whether the app installs a new release by itself (on unless the user turns it off in config.toml) */
   auto_update: boolean;
+  /** The terms version the user agreed to on this device (null = not yet) */
+  terms_version: number | null;
+  /** When they agreed, in seconds since the Unix epoch (null = not yet) */
+  terms_accepted_at: number | null;
 }
 
 /**
@@ -804,6 +808,44 @@ export async function configGetLanguage(): Promise<string | null> {
  */
 export async function configSetLanguage(language: string): Promise<void> {
   return invoke("config_set_language", { language });
+}
+
+// ============================================================================
+// Terms of use
+// ============================================================================
+
+/** The terms of use in force, and whether the user agreed to them on this device */
+export interface TermsInfo {
+  version: number;
+  accepted: boolean;
+  /** The text, in Markdown */
+  text: string;
+}
+
+/** A page the app opens in the browser */
+export type TermsPage = "privacy" | "announcements";
+
+/** The terms in force and whether they were agreed to */
+export async function termsGet(): Promise<TermsInfo> {
+  return invoke("terms_get");
+}
+
+/** The text of the LICENSE */
+export async function termsGetLicense(): Promise<string> {
+  return invoke("terms_get_license");
+}
+
+/**
+ * Record that the user agreed to terms `version` (the one the screen showed)
+ * and let what waited for it start: connecting, checking for updates.
+ */
+export async function termsAccept(version: number): Promise<void> {
+  return invoke("terms_accept", { version });
+}
+
+/** Open the privacy page or the announcements page in the browser */
+export async function termsOpenPage(page: TermsPage): Promise<void> {
+  return invoke("terms_open_page", { page });
 }
 
 // ============================================================================

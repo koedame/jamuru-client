@@ -14,6 +14,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { windowOpenSettings, configGetLanguage } from "./lib/tauri";
 import { useWindowEvent } from "./hooks/useWindowEvents";
 import { HELP_HASH } from "./lib/helperBackend";
+import { ConsentGate } from "./components/Terms";
 
 type Screen = "main" | "settings" | "help";
 
@@ -78,7 +79,11 @@ function App() {
     return <HelperScreen />;
   }
 
-  return <MainScreen onSettingsClick={handleOpenSettings} />;
+  return (
+    <ConsentGate>
+      <MainScreen onSettingsClick={handleOpenSettings} />
+    </ConsentGate>
+  );
 }
 
 export default App;

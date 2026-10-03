@@ -28,9 +28,10 @@ use jamjam::audio::{
 #[cfg(target_os = "windows")]
 use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
 use jamjam::network::{
-    audio_packet_duration_ms, required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
-    BandwidthVerdict, Connection, ConnectionState, ConnectionStats, LatencyBreakdown, LinkFacts,
-    LinkIdentity, LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
+    audio_packet_duration_ms, required_bps, status_label, AudioEncodingConfig, BandwidthEstimator,
+    BandwidthStatus, BandwidthVerdict, Connection, ConnectionState, ConnectionStats,
+    LatencyBreakdown, LinkFacts, LinkIdentity, LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo,
+    QualityMonitor,
 };
 use jamjam::protocol::LatencyInfoMessage;
 

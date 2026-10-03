@@ -46,6 +46,7 @@ pub fn spawn(app: AppHandle) {
         app.state::<DeviceIdentityState>().identity().device_id()
     );
     tauri::async_runtime::spawn(async move {
+        crate::terms::wait_accepted(&app).await;
         let mut wait = RETRY_MIN;
         loop {
             let pause = match round(&app).await {
