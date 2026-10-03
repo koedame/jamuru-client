@@ -21,6 +21,8 @@ use super::driver::DriverResult;
 
 #[derive(Default)]
 struct Shared {
+    /// Every TCP connection the app has opened to the relay's address, of any kind.
+    requests: AtomicUsize,
     enrollment_requests: AtomicUsize,
     connections: AtomicUsize,
     /// The `X-Device-Id` of each WebSocket handshake, in order.
@@ -77,6 +79,12 @@ impl FakeRelay {
     /// The jamjam server URL to give the app.
     pub fn server_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// How many connections the app has opened to this server in all, of any
+    /// kind (enrollment, signaling, relay).
+    pub fn requests(&self) -> usize {
+        self.shared.requests.load(Ordering::SeqCst)
     }
 
     /// How many times the app has asked whether it is enrolled.
@@ -164,6 +172,7 @@ impl Target {
 /// One accepted TCP connection: the enrollment question or the relay's
 /// WebSocket, told apart by the first line of the request.
 async fn serve(stream: TcpStream, port: u16, enrolled: bool, shared: Arc<Shared>) {
+    shared.requests.fetch_add(1, Ordering::SeqCst);
     let mut head = [0u8; 2048];
     let Ok(read) = stream.peek(&mut head).await else {
         return;

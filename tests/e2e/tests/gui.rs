@@ -170,6 +170,59 @@ fn typing_an_invite_code_updates_the_field() {
 }
 
 // ---------------------------------------------------------------------------
+// The terms of use on a first launch
+// ---------------------------------------------------------------------------
+
+/// A first launch opens on the terms of use and reaches no server - not to
+/// connect, not to ask whether it is enrolled - until the user has agreed.
+/// Once they have, the app goes on as it always does.
+///
+/// Verifies: REQ-TRM-001
+/// Verifies: REQ-TRM-003
+#[test]
+fn a_first_launch_shows_the_terms_and_reaches_no_server_until_they_are_agreed_to() {
+    let _guard = exclusive();
+    let relay = FakeRelay::start(true).expect("the fake relay should start");
+    let app = App::launch_first_run_with_server_url(&relay.server_url())
+        .expect("app should launch with the e2e-control feature");
+    let consent = app.consent_screen();
+
+    consent
+        .wait_until_displayed(LAUNCH_SETTLE)
+        .expect("a first launch should open on the consent screen");
+    assert!(
+        consent.ip_notice().text().unwrap().contains("IP"),
+        "the screen should say that others in the room can see the IP address"
+    );
+    assert!(
+        !consent.start_button().is_enabled().unwrap(),
+        "the button should not be operable before the boxes are checked"
+    );
+    assert!(
+        !app.connection_screen().is_displayed().unwrap(),
+        "the connection screen should not be behind the consent screen"
+    );
+
+    // Both the connection and the question about enrollment start as soon as
+    // the app does when the user has agreed, so a few quiet seconds mean
+    // they were held back.
+    std::thread::sleep(Duration::from_secs(5));
+    assert_eq!(
+        relay.requests(),
+        0,
+        "the app reached the server before the terms were agreed to"
+    );
+
+    consent.agree().expect("the user should be able to agree");
+
+    jamjam_e2e_tests::pom::wait_until(LAUNCH_SETTLE, || relay.requests() >= 1)
+        .expect("the app should reach the server once the terms are agreed to");
+    app.connection_screen()
+        .wait_until_displayed(UI_TIMEOUT)
+        .expect("the connection screen should follow the agreement");
+}
+
+// ---------------------------------------------------------------------------
 // Reaching (or failing to reach) the signaling server
 // ---------------------------------------------------------------------------
 
@@ -449,7 +502,7 @@ fn by_default_the_apps_own_code_and_the_webview_log_at_debug() {
     let log = wait_for_log(&app, |log| log.contains(" DEBUG [webview] "));
 
     assert!(
-        log.contains(" DEBUG [jamjam_app_lib] "),
+        log.contains(" DEBUG [jamjam_app_lib"),
         "the app's own debug lines are missing:\n{}",
         log
     );

@@ -14,6 +14,8 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // The tests read `../docs/terms.md`, the text the app bundles.
+    fs: { allow: [".."] },
     watch: {
       // Workaround for WSL/Docker
       usePolling: true,
