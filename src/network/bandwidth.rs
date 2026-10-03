@@ -23,7 +23,7 @@
 use std::time::{Duration, Instant};
 
 use crate::audio::AudioPreset;
-use crate::protocol::HEADER_SIZE;
+use crate::protocol::{HEADER_SIZE, MAX_PAYLOAD_SIZE};
 
 use super::encryption::SEAL_OVERHEAD;
 
@@ -40,6 +40,20 @@ pub const UDP_IP_OVERHEAD_BYTES: u64 = 20 + 8;
 /// [`UDP_IP_OVERHEAD_BYTES`] + [`crate::protocol::HEADER_SIZE`] + [`SEAL_OVERHEAD`].
 const PACKET_OVERHEAD_BYTES: f64 =
     UDP_IP_OVERHEAD_BYTES as f64 + HEADER_SIZE as f64 + SEAL_OVERHEAD as f64;
+
+/// Samples of PCM that go in one audio packet when `total_samples` (interleaved
+/// across `channels`) make up one frame
+///
+/// A frame whose sealed payload would pass [`MAX_PAYLOAD_SIZE`] is cut into equal
+/// packets on frame boundaries, so no packet is carried as IP fragments: one lost
+/// fragment loses the whole packet, and some paths drop fragments outright.
+/// 256 stereo frames (2048 bytes) go as two packets of 128.
+pub fn samples_per_audio_packet(total_samples: usize, channels: usize) -> usize {
+    let channels = channels.max(1);
+    let max_samples = (MAX_PAYLOAD_SIZE - SEAL_OVERHEAD) / std::mem::size_of::<f32>();
+    let packets = total_samples.div_ceil(max_samples).max(1);
+    total_samples.div_ceil(packets).next_multiple_of(channels)
+}
 
 /// Share of the peer's audio packets lost, from which a link is called marginal
 ///
@@ -113,8 +127,12 @@ pub fn required_bps(preset: &AudioPreset, sample_rate: u32, channels: u16) -> f6
     }
 
     let frame_size = preset.frame_size() as f64;
-    let packets_per_second = sample_rate as f64 / frame_size;
-    let payload_bytes_per_packet = frame_size * channels as f64 * BYTES_PER_SAMPLE;
+    let frame_samples = preset.frame_size() as usize * channels as usize;
+    let packets_per_frame =
+        frame_samples.div_ceil(samples_per_audio_packet(frame_samples, channels as usize)) as f64;
+    let packets_per_second = sample_rate as f64 / frame_size * packets_per_frame;
+    let payload_bytes_per_packet =
+        frame_size * channels as f64 * BYTES_PER_SAMPLE / packets_per_frame;
 
     let bytes_per_second = packets_per_second * (payload_bytes_per_packet + PACKET_OVERHEAD_BYTES);
 
@@ -384,6 +402,47 @@ mod tests {
             tiny,
             small
         );
+    }
+
+    /// Verifies: REQ-NET-029
+    #[test]
+    fn a_frame_is_cut_into_equal_packets_that_each_fit_the_payload_limit() {
+        for preset in AudioPreset::all() {
+            let samples = preset.frame_size() as usize * 2;
+            let per_packet = samples_per_audio_packet(samples, 2);
+            assert_eq!(
+                per_packet % 2,
+                0,
+                "cut between frames, not between channels"
+            );
+            assert!(
+                per_packet * 4 + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE,
+                "{} frames: {} bytes a packet is too many",
+                preset.frame_size(),
+                per_packet * 4
+            );
+        }
+        // What fits goes whole; 256 stereo frames, the one preset that does not, go as two.
+        assert_eq!(samples_per_audio_packet(2 * 128, 2), 2 * 128);
+        assert_eq!(samples_per_audio_packet(2 * 256, 2), 2 * 128);
+        assert_eq!(samples_per_audio_packet(256, 1), 256);
+    }
+
+    /// Cutting a frame in two doubles the headers it pays for, and the requirement
+    /// counts them.
+    ///
+    /// Verifies: REQ-NET-029
+    #[test]
+    fn the_requirement_counts_the_headers_of_every_packet_a_frame_is_cut_into() {
+        let preset = AudioPreset::HighQuality;
+        let frame_size = preset.frame_size() as f64;
+        let packets_per_second = 48_000.0 / frame_size * 2.0;
+        let payload = frame_size * 2.0 * BYTES_PER_SAMPLE / 2.0;
+        let expected = packets_per_second
+            * (payload + PACKET_OVERHEAD_BYTES)
+            * (1.0 + preset.fec_redundancy() as f64)
+            * BITS_PER_BYTE;
+        assert!((required_bps(&preset, 48_000, 2) - expected).abs() < 1.0);
     }
 
     /// Verifies: REQ-NET-023
