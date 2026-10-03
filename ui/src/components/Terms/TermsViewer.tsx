@@ -36,7 +36,7 @@ export function TermsViewer({ title, text, format, onClose }: TermsViewerProps) 
       >
         <h2 className="terms-viewer__title">{title}</h2>
         <div className="terms-viewer__body">
-          <TermsText text={text} format={format} />
+          <TermsText text={text} format={format} skipTitle />
         </div>
         <button ref={closeRef} type="button" className="terms-viewer__close" onClick={onClose}>
           {t("common.button.close")}
