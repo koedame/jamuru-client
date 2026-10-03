@@ -18,6 +18,8 @@ Accepted
 | `jamjam host --password PASS` | `--password` が無い |
 | `jamjam join <ROOM_URL｜IP:PORT>` | `IP:PORT` のみ |
 
+（`host` / `join` は [ADR-071](./ADR-071-remove-direct-connection.md) で無くした。ルームには `create-room` / `join-room` で入る）
+
 さらに GUI にあって CLI に無い操作が広範にあった: ルーム作成（招待コードの発行）、ミュート、
 音量・パン、プリセット選択、チャンネル数、診断、セッション中のデバイス切替、設定の永続化、
 チャットのリアクション、接続履歴、手動再接続。
@@ -41,7 +43,8 @@ CLI の役割は**GUI を立ち上げずにセッションを再現・観察す�
 
 GUI で操作できるコア機能は CLI からも操作できるようにする。逆は求めない。
 `host` / `join` によるシグナリングサーバー抜きの IP 直指定は CLI にのみ存在し、
-GUI に足す予定はない（利用者はルームで繋ぐ）。
+GUI に足す予定はない（利用者はルームで繋ぐ）、としていた。その後、CLI からも無くした
+（[ADR-071](./ADR-071-remove-direct-connection.md)）。
 
 ### 3. 追加するコア操作
 

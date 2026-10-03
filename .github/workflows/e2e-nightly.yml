@@ -134,10 +134,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: jamjam-linux-x64
-          path: target/release/
+          path: tests/e2e/target/release/
 
       - name: Make binary executable
-        run: chmod +x target/release/jamjam
+        run: chmod +x tests/e2e/target/release/jamjam
 
       - name: Run two-node tests
         working-directory: tests/e2e
