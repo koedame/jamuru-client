@@ -16,7 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Mutex;
 
 use jamjam::config::{
-    AppConfig, AudioPreset, MAX_DEVICE_CHANNELS, VALID_BUFFER_SIZES, VALID_SAMPLE_RATES,
+    offered_buffer_sizes, AppConfig, AudioPreset, MAX_DEVICE_CHANNELS, VALID_SAMPLE_RATES,
 };
 
 use crate::audio::{self, AudioDeviceInfo};
@@ -182,7 +182,8 @@ impl std::fmt::Display for SettingsError {
             SettingsError::InvalidBufferSize(samples) => write!(
                 f,
                 "Invalid buffer size: {}. Valid values are {:?}",
-                samples, VALID_BUFFER_SIZES
+                samples,
+                offered_buffer_sizes()
             ),
             SettingsError::InvalidSampleRate(hz) => write!(
                 f,
@@ -317,7 +318,7 @@ pub fn plan(
             session.push(SessionSetting::TransmitChannels(*count));
         }
         SettingChange::BufferSize { samples } => {
-            if !VALID_BUFFER_SIZES.contains(samples) {
+            if !offered_buffer_sizes().contains(samples) {
                 return Err(SettingsError::InvalidBufferSize(*samples));
             }
             next.buffer_size = *samples;
@@ -329,6 +330,9 @@ pub fn plan(
             next.sample_rate = *hz;
         }
         SettingChange::Preset { preset } => {
+            if !offered_buffer_sizes().contains(&preset.frame_size()) {
+                return Err(SettingsError::InvalidBufferSize(preset.frame_size()));
+            }
             next.preset = preset.clone();
             next.buffer_size = preset.frame_size();
             session.push(SessionSetting::JitterBufferFrames(
@@ -456,7 +460,7 @@ pub fn snapshot(config: &AppConfig, devices: Devices, revision: u64) -> AudioSet
         },
         transmit_channels: config.transmit_channels,
         buffer_size: config.buffer_size,
-        buffer_sizes: VALID_BUFFER_SIZES.to_vec(),
+        buffer_sizes: offered_buffer_sizes(),
         sample_rate: config.sample_rate,
         sample_rates: config::sample_rates(),
     }
@@ -1064,11 +1068,11 @@ mod tests {
         let plan = plan(
             &config,
             &devices,
-            &SettingChange::BufferSize { samples: 32 },
+            &SettingChange::BufferSize { samples: 64 },
         )
         .unwrap();
 
-        assert_eq!(plan.config.buffer_size, 32);
+        assert_eq!(plan.config.buffer_size, 64);
         assert!(plan.session.is_empty());
     }
 
@@ -1088,28 +1092,83 @@ mod tests {
         }
     }
 
-    /// Applying a preset writes its frame size as the buffer size, so every
-    /// preset's frame size has to be one the app offers and can save.
+    /// Applying a preset writes its frame size as the buffer size, so a preset
+    /// whose frame size the app offers has to plan and save, and one it does
+    /// not offer (32 on Linux) is refused.
     ///
-    /// Verifies: REQ-LAT-106
+    /// Verifies: REQ-LAT-106, REQ-AUD-037
     #[test]
-    fn every_presets_frame_size_is_a_buffer_size_on_offer() {
+    fn a_preset_is_applied_exactly_when_its_frame_size_is_a_buffer_size_on_offer() {
         let (config, devices) = setup();
         let offered = snapshot(&config, devices.clone(), 0).buffer_sizes;
         for preset in AudioPreset::all() {
-            assert!(
-                offered.contains(&preset.frame_size()),
-                "{:?}'s frame size {} is not offered ({:?})",
-                preset,
-                preset.frame_size(),
-                offered
+            let planned = plan(
+                &config,
+                &devices,
+                &SettingChange::Preset {
+                    preset: preset.clone(),
+                },
             );
-            plan(&config, &devices, &SettingChange::Preset { preset })
-                .unwrap()
-                .config
-                .validate()
-                .unwrap();
+            if offered.contains(&preset.frame_size()) {
+                planned.unwrap().config.validate().unwrap();
+            } else {
+                assert_eq!(
+                    planned,
+                    Err(SettingsError::InvalidBufferSize(preset.frame_size())),
+                    "{:?}'s frame size {} is not offered ({:?})",
+                    preset,
+                    preset.frame_size(),
+                    offered
+                );
+            }
         }
+    }
+
+    /// PipeWire's period is at least 64 frames, so a buffer of 32 reaches the
+    /// receiver in lumps of 64 and breaks it up. The settings do not offer it
+    /// and refuse it from any caller, as a buffer size or as the zero-latency
+    /// preset.
+    ///
+    /// Verifies: REQ-AUD-037
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn on_linux_a_buffer_size_under_64_is_not_offered_and_is_refused() {
+        let (config, devices) = setup();
+
+        assert_eq!(
+            snapshot(&config, devices.clone(), 0).buffer_sizes,
+            vec![64, 128, 256]
+        );
+        assert_eq!(
+            plan(
+                &config,
+                &devices,
+                &SettingChange::BufferSize { samples: 32 }
+            ),
+            Err(SettingsError::InvalidBufferSize(32))
+        );
+        assert_eq!(
+            plan(
+                &config,
+                &devices,
+                &SettingChange::Preset {
+                    preset: AudioPreset::ZeroLatency
+                }
+            ),
+            Err(SettingsError::InvalidBufferSize(32))
+        );
+    }
+
+    /// Verifies: REQ-AUD-037
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn off_linux_every_buffer_size_the_app_can_save_is_offered() {
+        let (config, devices) = setup();
+
+        assert_eq!(
+            snapshot(&config, devices, 0).buffer_sizes,
+            vec![32, 64, 128, 256]
+        );
     }
 
     /// Verifies: REQ-GUI-024
@@ -1364,7 +1423,7 @@ mod tests {
             app.manage(SettingsState::new());
             app.manage(StreamingState::new());
 
-            let result = apply(app.handle(), &SettingChange::BufferSize { samples: 32 }).await;
+            let result = apply(app.handle(), &SettingChange::BufferSize { samples: 64 }).await;
 
             assert!(matches!(result, Err(SettingsError::Unavailable(_))));
             assert_eq!(
@@ -1378,7 +1437,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let app = app(&dir, AppConfig::default());
 
-            let first = apply(app.handle(), &SettingChange::BufferSize { samples: 32 })
+            let first = apply(app.handle(), &SettingChange::BufferSize { samples: 64 })
                 .await
                 .unwrap();
             let second = apply(app.handle(), &SettingChange::SampleRate { hz: 96000 })

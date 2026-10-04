@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::audio::LINUX_MIN_OUTPUT_PERIOD;
+
 /// Application name used for configuration directory
 const APP_NAME: &str = "jamuru";
 
@@ -40,6 +42,23 @@ pub const MAX_DEVICE_CHANNELS: u32 = 64;
 /// Audio buffer sizes (frame sizes, in samples) the app offers and accepts.
 /// The same set as the presets' frame sizes (`AudioPreset::frame_size`).
 pub const VALID_BUFFER_SIZES: [u32; 4] = [32, 64, 128, 256];
+
+/// The buffer sizes the settings offer on this platform: [`VALID_BUFFER_SIZES`]
+/// without the ones the device cannot run at. On Linux PipeWire's period is at
+/// least [`LINUX_MIN_OUTPUT_PERIOD`] frames, so a smaller buffer size only
+/// arrives in lumps of that many frames (REQ-AUD-037). The config file and the
+/// CLI still take any of [`VALID_BUFFER_SIZES`].
+pub fn offered_buffer_sizes() -> Vec<u32> {
+    let floor = if cfg!(target_os = "linux") {
+        LINUX_MIN_OUTPUT_PERIOD
+    } else {
+        0
+    };
+    VALID_BUFFER_SIZES
+        .into_iter()
+        .filter(|&samples| samples >= floor)
+        .collect()
+}
 
 /// jamuru server a development build uses: one running on this machine on the
 /// development port 17890 (ADR-030).
@@ -474,6 +493,24 @@ mod tests {
             ..Default::default()
         };
         assert!(config.validate().is_err());
+    }
+
+    /// The settings stop offering 32 on Linux, but the file and the CLI still
+    /// take it (a PipeWire set to a period of 32, the measuring tools).
+    ///
+    /// Verifies: REQ-AUD-037
+    #[test]
+    fn a_buffer_size_the_settings_do_not_offer_is_still_valid_in_the_config() {
+        for samples in VALID_BUFFER_SIZES {
+            let config = AppConfig {
+                buffer_size: samples,
+                ..Default::default()
+            };
+            assert!(config.validate().is_ok(), "{samples} was refused");
+        }
+        assert!(offered_buffer_sizes()
+            .iter()
+            .all(|samples| VALID_BUFFER_SIZES.contains(samples)));
     }
 
     #[test]

@@ -210,8 +210,10 @@ pub fn config_get_preset(state: tauri::State<'_, ConfigState>) -> Result<String,
 /// List all available presets
 #[tauri::command]
 pub fn config_list_presets() -> Vec<PresetInfo> {
+    let offered = jamjam::config::offered_buffer_sizes();
     AudioPreset::all()
         .into_iter()
+        .filter(|p| offered.contains(&p.frame_size()))
         .map(|p| PresetInfo {
             id: p.name().to_string(),
             buffer_size: p.frame_size(),
