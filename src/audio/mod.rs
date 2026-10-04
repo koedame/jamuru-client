@@ -36,6 +36,7 @@ pub use device::{
 pub use driver::{bounded, LIST_TIMEOUT, OPEN_TIMEOUT};
 pub use engine::{
     AudioBuffer, AudioConfig, AudioEngine, AudioEvent, BitDepth, CaptureConfig, PlaybackConfig,
+    LINUX_MIN_OUTPUT_PERIOD,
 };
 pub use error::AudioError;
 pub use flight::{

@@ -568,7 +568,7 @@ fn open_channel_count(device: &cpal::Device, input: bool, sample_rate: u32, need
 /// It raises a smaller period to this internally and raises no POLLOUT until
 /// that much is free, so a stream opened at two periods of less (cpal's start
 /// threshold) never gets past its first write and plays nothing.
-const LINUX_MIN_OUTPUT_PERIOD: u32 = 64;
+pub const LINUX_MIN_OUTPUT_PERIOD: u32 = 64;
 
 /// How many frames the output device is asked for at a time. The frame source
 /// carries the remainder of a request over to the next (`FramePuller`), so a

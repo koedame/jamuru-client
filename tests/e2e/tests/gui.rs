@@ -1092,6 +1092,27 @@ fn a_refused_setting_change_comes_back_as_the_apps_answer_and_changes_nothing() 
     assert_eq!(app.audio_settings().unwrap()["buffer_size"], before);
 }
 
+/// PipeWire's period is at least 64 frames, so a buffer of 32 only reaches the
+/// receiver in lumps of 64. The running app does not offer it on Linux, and
+/// refuses it from a command too.
+///
+/// Verifies: REQ-AUD-037
+#[cfg(target_os = "linux")]
+#[test]
+fn on_linux_the_running_app_offers_no_buffer_size_under_64() {
+    let (_guard, app) = launch();
+
+    assert_eq!(
+        app.audio_settings().unwrap()["buffer_sizes"],
+        serde_json::json!([64, 128, 256])
+    );
+    let error = app
+        .change_audio_setting(serde_json::json!({ "setting": "buffer_size", "samples": 32 }))
+        .unwrap()
+        .expect_err("32 samples is not offered on Linux");
+    assert!(error.contains("Invalid buffer size"), "{}", error);
+}
+
 /// Any command the app registers is callable, not only those a page object
 /// wraps; a name the app does not have is an error, not a silent nothing. The
 /// permission table that decides this is the one every other portal uses
