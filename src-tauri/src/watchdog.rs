@@ -205,6 +205,8 @@ impl Drop for StageGuard {
 pub struct Watchdog {
     shared: Arc<Shared>,
     dir: Option<PathBuf>,
+    launch_id: String,
+    app_version: String,
 }
 
 impl Watchdog {
@@ -214,15 +216,22 @@ impl Watchdog {
     /// first: this overwrites the marker the previous launch may have left.
     pub fn install(reporter: UsageReporter) -> Self {
         let dir = reporter.state_dir().map(Path::to_path_buf);
+        let launch_id = reporter.launch_id().to_string();
+        let app_version = reporter.app_version().to_string();
         if let Some(dir) = &dir {
-            write_running_marker(dir, reporter.launch_id(), reporter.app_version());
+            write_running_marker(dir, &launch_id, &app_version);
         }
         let shared = Arc::new(Shared {
             stage: Mutex::new(None),
             stopped: AtomicBool::new(false),
         });
         spawn_loop(shared.clone(), reporter);
-        Watchdog { shared, dir }
+        Watchdog {
+            shared,
+            dir,
+            launch_id,
+            app_version,
+        }
     }
 
     /// Marks a critical operation as running until the returned guard is
@@ -235,6 +244,25 @@ impl Watchdog {
         });
         StageGuard {
             shared: self.shared.clone(),
+        }
+    }
+
+    /// The process is about to be ended on purpose without `RunEvent::Exit`
+    /// (the Windows updater runs the installer and calls `process::exit`):
+    /// removes the marker so the next launch does not take this for a kill.
+    /// The check keeps running, since the handover can still fail -
+    /// [`Self::handover_failed`] puts the marker back then.
+    pub fn handing_over_to_installer(&self) {
+        if let Some(dir) = &self.dir {
+            clear_running_marker(dir);
+        }
+    }
+
+    /// The handover announced by [`Self::handing_over_to_installer`] did not
+    /// happen and this launch carries on: it is running again.
+    pub fn handover_failed(&self) {
+        if let Some(dir) = &self.dir {
+            write_running_marker(dir, &self.launch_id, &self.app_version);
         }
     }
 
@@ -385,6 +413,29 @@ mod tests {
         assert_eq!(app_version, "0.1.2");
         // Found once: a third launch sees nothing left over.
         assert!(previous_incident(&reporter(dir.path())).is_none());
+    }
+
+    /// Verifies: REQ-TEL-024
+    #[test]
+    fn a_launch_handed_over_to_an_installer_leaves_no_record_but_one_that_stays_running_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = reporter(dir.path());
+        let watchdog = Watchdog::install(r.clone());
+
+        // The updater ends the process here, without `RunEvent::Exit`.
+        watchdog.handing_over_to_installer();
+        assert!(previous_incident(&reporter(dir.path())).is_none());
+
+        // The installer could not be started: the launch is still running,
+        // so being killed later must still be noticed.
+        let r = reporter(dir.path());
+        let watchdog = Watchdog::install(r.clone());
+        watchdog.handing_over_to_installer();
+        watchdog.handover_failed();
+
+        let (hang, launch_id, _) = previous_incident(&reporter(dir.path())).unwrap();
+        assert_eq!(hang.stage, HangStage::Unknown);
+        assert_eq!(launch_id, r.launch_id());
     }
 
     /// A stage the watchdog itself caught stuck is the richer record, and is
