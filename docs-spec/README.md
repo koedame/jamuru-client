@@ -3,6 +3,7 @@
 # jamuru Specification Documents
 
 本ディレクトリは仕様書を格納する。
+アプリの旧名は jamjam。`adr/` の決定記録は当時の名前（jamjam）のまま残している。
 すべてのドキュメントは実装の唯一の正とする。
 
 ---
