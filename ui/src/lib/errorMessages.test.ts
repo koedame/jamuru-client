@@ -164,7 +164,7 @@ describe("clock skew", () => {
       await i18n.changeLanguage("en");
 
       expect(formatErrorForDisplay(ahead, i18n.t.bind(i18n), i18n.language).message).toBe(
-        "The clock is about 6 minutes off from the server's. Set the time correctly and jamjam connects again by itself."
+        "The clock is about 6 minutes off from the server's. Set the time correctly and jamuru connects again by itself."
       );
     });
 

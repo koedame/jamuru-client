@@ -42,7 +42,7 @@ impl TwoNodeTest {
 
         TestResult::not_implemented(
             "two_node_audio_quality",
-            "needs two jamjam processes bound to virtual audio devices; \
+            "needs two jamuru processes bound to virtual audio devices; \
              the single-process audio path is covered by the loopback layer",
         )
     }
@@ -70,7 +70,7 @@ impl TwoNodeTest {
             .map(|preset| {
                 TestResult::not_implemented(
                     format!("two_node_preset_{}", preset.name()),
-                    "needs two jamjam processes bound to virtual audio devices",
+                    "needs two jamuru processes bound to virtual audio devices",
                 )
             })
             .collect()
@@ -100,7 +100,7 @@ mod tests {
     use super::*;
     use crate::TestStatus;
 
-    /// Without a release binary at `target/release/jamjam` the orchestrator
+    /// Without a release binary at `target/release/jamuru` the orchestrator
     /// cannot spawn nodes, and the result must say so rather than pass silently.
     /// On a machine where the binary exists the nodes must survive the run.
     #[tokio::test]

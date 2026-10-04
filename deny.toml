@@ -41,5 +41,5 @@ allow = [
 ]
 
 [licenses.private]
-# jamjam / jamjam-app are this project's own crates (publish = false).
+# jamjam / jamuru-app are this project's own crates (publish = false).
 ignore = true

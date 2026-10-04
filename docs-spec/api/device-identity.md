@@ -4,7 +4,7 @@
 
 ## Overview
 
-jamjam は会員登録を持たない。インストールごとに Ed25519 鍵ペアをローカル生成し、その公開鍵から
+jamuru は会員登録を持たない。インストールごとに Ed25519 鍵ペアをローカル生成し、その公開鍵から
 導出したグローバル一意な識別子で端末を識別する。識別子はシグナリングの WebSocket ハンドシェイクで
 提示され、サーバーが所有証明を検証する。
 
@@ -15,7 +15,7 @@ jamjam は会員登録を持たない。インストールごとに Ed25519 鍵�
 
 ```mermaid
 sequenceDiagram
-    participant App as jamjam (src-tauri)
+    participant App as jamuru (src-tauri)
     participant Disk as device_identity.json
     participant Sig as シグナリングサーバー
 
@@ -101,7 +101,7 @@ WebSocket ハンドシェイク（`Upgrade` リクエスト）の HTTP ヘッダ
 
 | 項目 | 値 |
 |------|-----|
-| 場所 | アプリデータディレクトリ（`config.toml` と同じ。macOS: `~/Library/Application Support/jamjam/`） |
+| 場所 | アプリデータディレクトリ（`config.toml` と同じ。macOS: `~/Library/Application Support/jamuru/`） |
 | ファイル名 | `device_identity.json` |
 | パーミッション | Unix: `0600`。Windows: 設定しない（NTFS ACL に委ねる） |
 
@@ -133,7 +133,7 @@ WebSocket ハンドシェイク（`Upgrade` リクエスト）の HTTP ヘッダ
 | 経路 | `device_id` が出るか |
 |------|---------------------|
 | 他の参加者（`PeerJoined` / `RoomJoined` の `PeerInfo`） | **出ない** |
-| jamjam 本体の UI | **出ない**（Tauri コマンドを持たない） |
+| jamuru 本体の UI | **出ない**（Tauri コマンドを持たない） |
 
 ## Configuration
 

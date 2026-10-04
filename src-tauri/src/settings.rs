@@ -94,7 +94,7 @@ fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u
 
 impl SettingChange {
     /// The change as a log line. Device ids are masked like everywhere else
-    /// in `jamjam.log` (REQ-GUI-022).
+    /// in `jamuru.log` (REQ-GUI-022).
     fn describe(&self, redact: bool) -> String {
         match self {
             SettingChange::InputDevice { device_id } => {
@@ -161,7 +161,7 @@ pub enum SettingsError {
 impl std::fmt::Display for SettingsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // Masked: the message reaches jamjam.log through the webview's
+            // Masked: the message reaches jamuru.log through the webview's
             // record of failed commands (REQ-GUI-022).
             SettingsError::DeviceNotOffered(id) => write!(
                 f,

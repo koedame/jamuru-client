@@ -299,7 +299,7 @@ mod tests {
         let value = serde_json::json!({
             "count": 2,
             "exists": true,
-            "text": "jamjam へようこそ",
+            "text": "jamuru へようこそ",
             "value": null,
             "visible": true,
         });
@@ -307,7 +307,7 @@ mod tests {
 
         assert_eq!(parsed.count, 2);
         assert!(parsed.exists);
-        assert_eq!(parsed.text.as_deref(), Some("jamjam へようこそ"));
+        assert_eq!(parsed.text.as_deref(), Some("jamuru へようこそ"));
         assert_eq!(parsed.value, None);
         assert!(parsed.visible);
     }

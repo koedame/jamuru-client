@@ -3,7 +3,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/koedame/jamjam-client/releases/download/beta-channel/latest.json"
+        "https://github.com/koedame/jamuru-client/releases/download/beta-channel/latest.json"
       ]
     }
   }

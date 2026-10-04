@@ -5,11 +5,11 @@ Claude Code は `CLAUDE.md` からのインポート（`@AGENTS.md`）で本フ�
 
 ## プロジェクト概要
 
-**jamjam** — P2P音声通信アプリ（macOS / Windows / Linux ネイティブ動作）
+**jamuru** — P2P音声通信アプリ（macOS / Windows / Linux ネイティブ動作）
 
 - コア: Rust（音声 I/O、ネットワーク、プロトコル）
 - GUI: Tauri + React/TypeScript（`src-tauri/` + `ui/`）
-- バイナリ: `jamjam`（CLI）
+- バイナリ: `jamuru`（CLI）
 - シグナリングサーバーはこのリポジトリに含まれない（別に運用している）
 
 ## 最優先要件

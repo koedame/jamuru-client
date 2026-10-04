@@ -1,6 +1,6 @@
 # ユーザーストーリー
 
-jamjam の機能要件を Epic / User Story 形式で整理。
+jamuru の機能要件を Epic / User Story 形式で整理。
 BDD 仕様（`behavior/*.feature`）と連携する。
 
 > **参照ペルソナ**: [personas.md](./personas.md)
@@ -22,7 +22,7 @@ BDD 仕様（`behavior/*.feature`）と連携する。
 - [ ] メイン画面に「ルーム作成」ボタンがある
 - [ ] ボタンクリック後、10秒以内にルームが作成される
 - [ ] 9文字の招待コード（大文字英数字）が表示される
-- [ ] 招待URL（`jamjam://join/{code}`）が表示される
+- [ ] 招待URL（`jamuru://join/{code}`）が表示される
 - [ ] 「コピー」ボタンで招待コード/URLをクリップボードにコピー
 - [ ] ルーム作成後、自動的に参加者として参加する（作成者に特権はなく、他の参加者とフラットな関係。[ADR-016](../adr/ADR-016-remove-host-privilege-concept.md)）
 
@@ -87,7 +87,7 @@ sequenceDiagram
 
 #### 受入条件
 
-- [ ] `jamjam://join/{code}` 形式のURLを処理
+- [ ] `jamuru://join/{code}` 形式のURLを処理
 - [ ] アプリ起動時にURL引数を確認
 - [ ] 自動的に接続を開始
 - [ ] パスワード付きの場合はパスワード入力画面を表示

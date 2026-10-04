@@ -5,7 +5,7 @@ edition = "2021"
 license-file = "LICENSE"
 publish = false
 description = "Low-latency P2P audio communication for musicians"
-repository = "https://github.com/koedame/jamjam-client"
+repository = "https://github.com/koedame/jamuru-client"
 
 [features]
 default = []
@@ -140,5 +140,5 @@ warnings = "deny"
 all = "deny"
 
 [[bin]]
-name = "jamjam"
+name = "jamuru"
 path = "src/main.rs"

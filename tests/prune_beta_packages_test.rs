@@ -103,7 +103,7 @@ esac
             .arg(tag)
             .current_dir(repo_root())
             .env("GH", self.dir.path().join("gh"))
-            .env("GITHUB_REPOSITORY", "koedame/jamjam-client")
+            .env("GITHUB_REPOSITORY", "koedame/jamuru-client")
             .output()
             .expect("bash is needed to run scripts/prune-beta-packages.sh")
     }
@@ -112,31 +112,31 @@ esac
 /// The full set of assets a beta release carries: the install-only packages
 /// this script deletes, and the updater/rollback chain it must never touch.
 const ALL_BETA_ASSETS: &[&str] = &[
-    "jamjam_x64.dmg",
-    "jamjam_aarch64.dmg",
-    "jamjam_x64.app.tar.gz",
-    "jamjam_x64.app.tar.gz.sig",
-    "jamjam_aarch64.app.tar.gz",
-    "jamjam_aarch64.app.tar.gz.sig",
-    "jamjam.AppImage",
-    "jamjam.AppImage.sig",
-    "jamjam.deb",
-    "jamjam-setup.exe",
-    "jamjam-setup.exe.sig",
-    "jamjam.msi",
-    "jamjam.msi.sig",
+    "jamuru_x64.dmg",
+    "jamuru_aarch64.dmg",
+    "jamuru_x64.app.tar.gz",
+    "jamuru_x64.app.tar.gz.sig",
+    "jamuru_aarch64.app.tar.gz",
+    "jamuru_aarch64.app.tar.gz.sig",
+    "jamuru.AppImage",
+    "jamuru.AppImage.sig",
+    "jamuru.deb",
+    "jamuru-setup.exe",
+    "jamuru-setup.exe.sig",
+    "jamuru.msi",
+    "jamuru.msi.sig",
     "latest.json",
 ];
 
 const UPDATER_AND_ROLLBACK_ASSETS: &[&str] = &[
-    "jamjam_x64.app.tar.gz",
-    "jamjam_x64.app.tar.gz.sig",
-    "jamjam_aarch64.app.tar.gz",
-    "jamjam_aarch64.app.tar.gz.sig",
-    "jamjam.AppImage",
-    "jamjam.AppImage.sig",
-    "jamjam-setup.exe",
-    "jamjam-setup.exe.sig",
+    "jamuru_x64.app.tar.gz",
+    "jamuru_x64.app.tar.gz.sig",
+    "jamuru_aarch64.app.tar.gz",
+    "jamuru_aarch64.app.tar.gz.sig",
+    "jamuru.AppImage",
+    "jamuru.AppImage.sig",
+    "jamuru-setup.exe",
+    "jamuru-setup.exe.sig",
     "latest.json",
 ];
 

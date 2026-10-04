@@ -1,5 +1,5 @@
 //! "Report a problem": the user's own action, from the Diagnostics tab, to
-//! send the current `jamjam.log` (masked, tail-capped) and a comment to a
+//! send the current `jamuru.log` (masked, tail-capped) and a comment to a
 //! receiver kept apart from usage reporting (ADR-058, REQ-RPT-001..004).
 //! Pressing send is the only consent asked; there is no setting that gates
 //! this, and it does not touch `usage_reporting`.
@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::logging::redact_secrets;
 
-/// `jamjam.log` itself is capped at 5 MiB (ADR-036 §6); this feature sends
+/// `jamuru.log` itself is capped at 5 MiB (ADR-036 §6); this feature sends
 /// far less of it, tail-first, so the upload stays quick on a bad connection
 /// and because the most recent activity is what an ongoing problem needs.
 pub const MAX_LOG_BYTES: usize = 512 * 1024;
@@ -34,8 +34,8 @@ trait ReportTransport: Send + Sync {
     fn send(&self, body: Vec<u8>) -> Delivery<'_>;
 }
 
-/// Sends to the jamjam server the build was made for. This is a separate
-/// channel from usage reporting's (ADR-037 decision 7 keeps `jamjam.log`
+/// Sends to the jamuru server the build was made for. This is a separate
+/// channel from usage reporting's (ADR-037 decision 7 keeps `jamuru.log`
 /// itself apart from that channel; this feature is a third one, gated by
 /// the user's own action rather than a setting).
 struct HttpReportTransport {
@@ -106,7 +106,7 @@ fn capped_comment(comment: &str) -> String {
     comment.chars().take(MAX_COMMENT_CHARS).collect()
 }
 
-/// Reads `jamjam.log`, masked the same way `log_frontend` masks a webview
+/// Reads `jamuru.log`, masked the same way `log_frontend` masks a webview
 /// line (ADR-036 §7) and capped to [`MAX_LOG_BYTES`]. The preview command
 /// and the send command both call this, so what is shown is exactly what is
 /// sent (REQ-RPT-002).
@@ -119,19 +119,19 @@ fn read_log<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
         .path()
         .app_log_dir()
         .map_err(|e| format!("ログのフォルダが分かりません: {}", e))?;
-    let raw = std::fs::read_to_string(dir.join("jamjam.log"))
-        .map_err(|e| format!("jamjam.log を読めません: {}", e))?;
+    let raw = std::fs::read_to_string(dir.join("jamuru.log"))
+        .map_err(|e| format!("jamuru.log を読めません: {}", e))?;
     Ok(tail(&redact_secrets(&raw), MAX_LOG_BYTES))
 }
 
-/// The text `report_problem_send` will submit for `jamjam.log`, so the
+/// The text `report_problem_send` will submit for `jamuru.log`, so the
 /// screen can show it before the user decides to send (REQ-RPT-002).
 #[tauri::command]
 pub fn report_problem_preview(app: AppHandle) -> Result<String, String> {
     read_log(&app)
 }
 
-/// Sends `jamjam.log` (masked, capped) and `comment` (capped) to the problem
+/// Sends `jamuru.log` (masked, capped) and `comment` (capped) to the problem
 /// report intake. Shared by the manual "Report a problem" command below,
 /// the confirmed hang report (`usage.rs`, ADR-059) and the automatic one
 /// sent while reporting is already on (`usage.rs`, ADR-060), so all three go
@@ -162,7 +162,7 @@ pub async fn send_log_report<R: Runtime>(app: &AppHandle<R>, comment: &str) -> R
     }
 }
 
-/// Sends the current `jamjam.log` (masked, capped) and `comment` (capped) to
+/// Sends the current `jamuru.log` (masked, capped) and `comment` (capped) to
 /// the problem report intake. This is the only consent asked for this
 /// report: there is no setting to turn on first, and it does not read or
 /// change `usage_reporting` (REQ-RPT-001).

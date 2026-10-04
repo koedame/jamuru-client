@@ -564,7 +564,7 @@ enum SignalingError {
 
 ```rust
 // シグナリングサーバーに接続
-let client = SignalingClient::new("https://jamjam.example.com", identity);
+let client = SignalingClient::new("https://jamuru.example.com", identity);
 let mut conn = client.connect().await?;
 
 // ルーム作成

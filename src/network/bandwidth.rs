@@ -32,10 +32,10 @@ const BITS_PER_BYTE: f64 = 8.0;
 /// Bytes per 32-bit float sample (ADR-003: PCM f32 is the default codec)
 const BYTES_PER_SAMPLE: f64 = 4.0;
 /// UDP + IP header bytes per packet on IPv4: 20 + 8. What the socket counts
-/// is the jamjam packet; the link carries these on top.
+/// is the jamuru packet; the link carries these on top.
 pub const UDP_IP_OVERHEAD_BYTES: u64 = 20 + 8;
 
-/// UDP + IP + jamjam header bytes per packet, and what encrypting it adds
+/// UDP + IP + jamuru header bytes per packet, and what encrypting it adds
 ///
 /// [`UDP_IP_OVERHEAD_BYTES`] + [`crate::protocol::HEADER_SIZE`] + [`SEAL_OVERHEAD`].
 const PACKET_OVERHEAD_BYTES: f64 =

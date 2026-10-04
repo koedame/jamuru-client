@@ -4,7 +4,7 @@
 
 ## Overview
 
-`tests/e2e/` が実行中の jamjam アプリを操作・観測するためのループバック HTTP API。
+`tests/e2e/` が実行中の jamuru アプリを操作・観測するためのループバック HTTP API。
 レンダリング済み DOM の取得、要素のクエリ、クリック、入力と、アプリの任意のコマンドの呼び出し（`/e2e/invoke`）を提供する。
 導入判断は [ADR-025](../adr/ADR-025-gui-e2e-control-channel.md)、コマンドの呼び出しは [ADR-043](../adr/ADR-043-remote-operation-rpc.md)。実装は
 `src-tauri/src/e2e_control.rs`、利用側は `tests/e2e/src/pom/`。
@@ -19,7 +19,7 @@
 ```mermaid
 sequenceDiagram
     participant T as テスト（POM）
-    participant A as jamjam アプリ
+    participant A as jamuru アプリ
     participant W as webview（React）
 
     T->>T: 空きポートを確保、$HOME に一時ディレクトリ
@@ -54,7 +54,7 @@ sequenceDiagram
 
 ```bash
 cargo build --manifest-path src-tauri/Cargo.toml --features e2e-control
-JAMJAM_E2E_CONTROL_PORT=39420 ./src-tauri/target/debug/jamjam-app
+JAMJAM_E2E_CONTROL_PORT=39420 ./src-tauri/target/debug/jamuru-app
 ```
 
 ### 公開ビルドに対して走らせる
@@ -65,7 +65,7 @@ JAMJAM_E2E_CONTROL_PORT=39420 ./src-tauri/target/debug/jamjam-app
 `--ignored` で明示的に走らせる（REQ-GUI-021）。
 
 ```bash
-JAMJAM_SERVER_URL=https://jamjam.example.com cargo build --release --manifest-path src-tauri/Cargo.toml --features e2e-control
+JAMJAM_SERVER_URL=https://jamuru.example.com cargo build --release --manifest-path src-tauri/Cargo.toml --features e2e-control
 cd tests/e2e
 cargo test --features gui --test gui -- --ignored --test-threads=1 the_release_build
 ```

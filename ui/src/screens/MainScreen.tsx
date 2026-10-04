@@ -693,7 +693,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
           onCancel={handleCancelConnection}
           onRetry={handleCancelConnection}
           onOpenSettings={handleSettingsClick}
-          title="jamjam"
+          title="jamuru"
           welcomeTitle={t("session.welcome.title")}
           welcomeSubtitle={t("session.welcome.subtitle")}
           createRoomText={t("session.create.button")}
@@ -735,7 +735,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     return (
       <>
         <header className="main-header">
-          <span className="main-header__logo">jamjam</span>
+          <span className="main-header__logo">jamuru</span>
           <div className="main-header__actions">
             <button
               type="button"

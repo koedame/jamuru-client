@@ -1,6 +1,6 @@
 /**
  * "Report a problem" in the settings panel (ADR-058): a manual, one-off
- * send of jamjam.log and a comment, independent of usage reporting.
+ * send of jamuru.log and a comment, independent of usage reporting.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -14,7 +14,7 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 
-const LOG_TEXT = '[2026-09-27T12:00:00Z INFO jamjam] starting';
+const LOG_TEXT = '[2026-09-27T12:00:00Z INFO jamuru] starting';
 
 function fakeBackend(overrides: Record<string, (args?: unknown) => unknown> = {}) {
   const calls: { command: string; args: unknown }[] = [];
@@ -45,7 +45,7 @@ describe('report a problem in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  it('starting the flow reads jamjam.log and shows exactly what would be sent, without touching usage reporting', async () => {
+  it('starting the flow reads jamuru.log and shows exactly what would be sent, without touching usage reporting', async () => {
     const calls = fakeBackend();
     render(<SettingsPanelAdapter initialTab="diagnostics" />);
 

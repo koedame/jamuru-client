@@ -172,7 +172,7 @@ export const LogFolderOpened: Story = {
     state: "idle",
     onRunDiagnostics: () => {},
     onOpenLogFolder: () => {},
-    logFolder: "/home/user/.local/share/me.koeda.jamjam/logs",
+    logFolder: "/home/user/.local/share/me.koeda.jamuru/logs",
   },
 };
 
@@ -182,7 +182,7 @@ export const LogFolderError: Story = {
     onRunDiagnostics: () => {},
     onOpenLogFolder: () => {},
     logFolderError:
-      "Could not open the log folder /home/user/.local/share/me.koeda.jamjam/logs: No such file or directory",
+      "Could not open the log folder /home/user/.local/share/me.koeda.jamuru/logs: No such file or directory",
   },
 };
 
@@ -249,7 +249,7 @@ export const ReportProblemReady: Story = {
     state: "idle",
     onRunDiagnostics: () => {},
     reportProblemState: "ready",
-    reportProblemPreview: "[2026-09-27T12:00:00Z INFO jamjam] starting\n[2026-09-27T12:00:03Z WARN jamjam] no_packets from peer",
+    reportProblemPreview: "[2026-09-27T12:00:00Z INFO jamuru] starting\n[2026-09-27T12:00:03Z WARN jamuru] no_packets from peer",
     reportProblemComment: "音が届かなくなりました",
     onOpenReportProblem: () => {},
     onReportProblemCommentChange: () => {},
@@ -273,7 +273,7 @@ export const ReportProblemError: Story = {
     state: "idle",
     onRunDiagnostics: () => {},
     reportProblemState: "error",
-    reportProblemPreview: "[2026-09-27T12:00:00Z INFO jamjam] starting",
+    reportProblemPreview: "[2026-09-27T12:00:00Z INFO jamuru] starting",
     reportProblemError: "送信できませんでした。しばらくしてからもう一度試してください",
     onOpenReportProblem: () => {},
     onReportProblemCommentChange: () => {},

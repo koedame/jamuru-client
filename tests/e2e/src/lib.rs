@@ -1,6 +1,6 @@
-//! E2E Test Infrastructure for jamjam
+//! E2E Test Infrastructure for jamuru
 //!
-//! This crate provides end-to-end testing capabilities for the jamjam
+//! This crate provides end-to-end testing capabilities for the jamuru
 //! P2P audio communication application.
 //!
 //! ## Test Layers
