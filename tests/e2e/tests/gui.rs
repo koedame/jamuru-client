@@ -444,7 +444,7 @@ fn changing_the_language_in_settings_updates_the_main_window_immediately() {
 // The diagnostic log file (ADR-036)
 // ---------------------------------------------------------------------------
 //
-// A release build has no console and no developer tools, so `jamjam.log` is
+// A release build has no console and no developer tools, so `jamuru.log` is
 // the only record of what a session did. These scenarios read that file from
 // the throwaway `$HOME` the app was started with.
 
@@ -480,7 +480,7 @@ fn launching_the_app_writes_a_log_file_that_names_the_build_and_the_settings() {
         log
     );
     assert!(
-        log.contains("log file: ") && log.contains("jamjam.log"),
+        log.contains("log file: ") && log.contains("jamuru.log"),
         "the log does not say where it is:\n{}",
         log
     );
@@ -508,15 +508,15 @@ fn by_default_the_apps_own_code_and_the_webview_log_at_debug() {
     );
 }
 
-/// `JAMJAM_LOG` overrides the levels: with `error`, the lines the app writes
+/// `JAMURU_LOG` overrides the levels: with `error`, the lines the app writes
 /// at info and debug on every start-up are gone and the failed connection's
 /// error remains.
 ///
 /// Verifies: REQ-GUI-019
 #[test]
-fn jamjam_log_overrides_the_levels_the_file_is_written_at() {
+fn jamuru_log_overrides_the_levels_the_file_is_written_at() {
     let _guard = exclusive();
-    let app = App::launch_with_env(&[("JAMJAM_LOG", "error")])
+    let app = App::launch_with_env(&[("JAMURU_LOG", "error")])
         .expect("app should launch with the e2e-control feature");
     app.connection_screen()
         .wait_until_interactive(LAUNCH_SETTLE)
@@ -529,7 +529,7 @@ fn jamjam_log_overrides_the_levels_the_file_is_written_at() {
     for level in [" INFO ", " DEBUG ", " WARN "] {
         assert!(
             !log.contains(level),
-            "JAMJAM_LOG=error still wrote{}lines:\n{}",
+            "JAMURU_LOG=error still wrote{}lines:\n{}",
             level,
             log
         );
@@ -1285,7 +1285,7 @@ fn the_operator_reads_what_the_app_is() {
     assert!(info["audio"]["buffer_size"].is_number(), "{}", info);
     assert!(info["log_file"]
         .as_str()
-        .is_some_and(|p| p.ends_with("jamjam.log")));
+        .is_some_and(|p| p.ends_with("jamuru.log")));
     assert_eq!(info["device_id"].as_str().map(str::len), Some(26));
 }
 

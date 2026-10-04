@@ -6,7 +6,7 @@ fn main() {
     tauri_build::build()
 }
 
-/// A release build asks the jamjam server given in `JAMJAM_SERVER_URL`
+/// A release build asks the jamuru server given in `JAMJAM_SERVER_URL`
 /// (`jamjam::config::RELEASE_SERVER_URL`) where its signaling server is.
 /// Without it, or with one users could not reach, the build fails here rather
 /// than shipping an app that cannot connect. The URL itself is not printed:

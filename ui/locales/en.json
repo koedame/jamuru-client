@@ -46,7 +46,7 @@
   },
   "session": {
     "welcome": {
-      "title": "Welcome to jamjam",
+      "title": "Welcome to jamuru",
       "subtitle": "Start a low-latency, high-quality audio session"
     },
     "create": {
@@ -229,12 +229,12 @@
     "diagnostics": {
       "title": "System Diagnostics",
       "logTitle": "Log file",
-      "logDescription": "If something does not work, attach jamjam.log from this folder when you report it.",
+      "logDescription": "If something does not work, attach jamuru.log from this folder when you report it.",
       "openLogFolder": "Open log folder",
       "previousHang": {
         "title": "Last time",
-        "description": "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
-        "descriptionWithLog": "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamjam.log, so this can be found and fixed? The log can include the server address, your audio device names, the room ID, and other participants' identifiers.",
+        "description": "jamuru did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
+        "descriptionWithLog": "jamuru did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamuru.log, so this can be found and fixed? The log can include the server address, your audio device names, the room ID, and other participants' identifiers.",
         "stageAppExit": "closing",
         "stageRestart": "restarting",
         "stageUpdateApply": "installing an update",
@@ -246,7 +246,7 @@
       },
       "usageTitle": "Usage data",
       "usageToggle": "Send usage data",
-      "usageDescription": "Off by default. When you turn it on, jamjam sends how it runs on your machine to the jamjam server, so that problems on particular machines and connections can be found and fixed.",
+      "usageDescription": "Off by default. When you turn it on, jamuru sends how it runs on your machine to the jamuru server, so that problems on particular machines and connections can be found and fixed.",
       "usageSent": "Sent: app version, OS, CPU and memory, audio device names, IDs and what they support, your settings (a custom server URL only as far as its host and port), totals for each session (length, latency, packet loss, what kind of route the audio took and how long it took to connect), your own IP addresses (on your networks and the public one), the kind of each error, and where a crash happened.",
       "usageNotSent": "Never sent: display name, room history, machine identifier, anything about the other people in the room (their IP addresses included), audio, chat.",
       "usageDeviceNames": "Device names are sent as your system reports them. If a name contains your own name, such as \"Taro's AirPods\", it is sent too. Check the exact text with \"Show what is sent\".",
@@ -256,7 +256,7 @@
       "usagePreviewOff": "Off: nothing is collected or sent, and there is no install ID.",
       "reportProblem": {
         "title": "Report a problem",
-        "description": "Send the current jamjam.log and a short comment about what is going wrong right now.",
+        "description": "Send the current jamuru.log and a short comment about what is going wrong right now.",
         "start": "Report a problem",
         "loading": "Loading...",
         "commentPlaceholder": "What happened? (optional)",
@@ -493,7 +493,7 @@
     "connection": {
       "clockSkew": {
         "title": "This Computer's Clock Is Off",
-        "message": "The clock is about {{amount}} off from the server's. Set the time correctly and jamjam connects again by itself."
+        "message": "The clock is about {{amount}} off from the server's. Set the time correctly and jamuru connects again by itself."
       },
       "timeout": {
         "title": "Connection Failed",

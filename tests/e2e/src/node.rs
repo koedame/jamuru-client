@@ -70,7 +70,7 @@ pub struct TestNode {
     pub platform: Platform,
     /// Address for SSH connection (None for local)
     pub ssh_address: Option<String>,
-    /// Path to jamjam binary on this node
+    /// Path to jamuru binary on this node
     pub binary_path: String,
 }
 
@@ -81,7 +81,7 @@ impl TestNode {
             id: id.into(),
             platform: Platform::current(),
             ssh_address: None,
-            binary_path: "target/release/jamjam".to_string(),
+            binary_path: "target/release/jamuru".to_string(),
         }
     }
 
@@ -121,7 +121,7 @@ impl TestNode {
     }
 }
 
-/// Handle to a running jamjam process
+/// Handle to a running jamuru process
 pub struct NodeProcess {
     /// The node this process belongs to
     pub node: TestNode,
@@ -133,7 +133,7 @@ pub struct NodeProcess {
     _scratch: Option<tempfile::TempDir>,
 }
 
-/// `jamjam <args>` with no sound card and no settings of the machine's: a tone stands in
+/// `jamuru <args>` with no sound card and no settings of the machine's: a tone stands in
 /// for the input, a file in `scratch` for the output, and `$HOME` is `scratch`.
 fn session_command(node: &TestNode, scratch: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(&node.binary_path);
@@ -147,7 +147,7 @@ fn session_command(node: &TestNode, scratch: &std::path::Path, args: &[&str]) ->
 }
 
 impl NodeProcess {
-    /// Start jamjam on a local node, creating a room on the signaling `server`.
+    /// Start jamuru on a local node, creating a room on the signaling `server`.
     /// Returns the process and the invite code the others join with.
     pub async fn start_create_room(
         node: TestNode,
@@ -157,7 +157,7 @@ impl NodeProcess {
             return Err(NodeError::RemoteNotSupported);
         }
 
-        info!("Starting jamjam on node {} to create a room", node.id);
+        info!("Starting jamuru on node {} to create a room", node.id);
 
         let scratch = tempfile::tempdir().map_err(|e| NodeError::SpawnFailed(e.to_string()))?;
         let mut child =
@@ -201,7 +201,7 @@ impl NodeProcess {
         ))
     }
 
-    /// Start jamjam on a local node and join the room `invite_code` on the signaling `server`
+    /// Start jamuru on a local node and join the room `invite_code` on the signaling `server`
     pub async fn start_join_room(
         node: TestNode,
         server: &str,
@@ -212,7 +212,7 @@ impl NodeProcess {
         }
 
         info!(
-            "Starting jamjam on node {} to join {}",
+            "Starting jamuru on node {} to join {}",
             node.id, invite_code
         );
 
@@ -335,16 +335,16 @@ mod tests {
 
     #[test]
     fn test_local_node_creation() {
-        let node = TestNode::local_with_config("test-node", "/usr/bin/jamjam");
+        let node = TestNode::local_with_config("test-node", "/usr/bin/jamuru");
         assert!(node.is_local());
-        assert_eq!(node.binary_path, "/usr/bin/jamjam");
+        assert_eq!(node.binary_path, "/usr/bin/jamuru");
     }
 
     #[test]
     fn test_local_node_simple() {
         let node = TestNode::local("simple-node");
         assert!(node.is_local());
-        assert_eq!(node.binary_path, "target/release/jamjam");
+        assert_eq!(node.binary_path, "target/release/jamuru");
     }
 
     #[test]
@@ -353,7 +353,7 @@ mod tests {
             "remote-node",
             Platform::Linux,
             "user@192.168.1.100",
-            "/home/user/jamjam",
+            "/home/user/jamuru",
         );
         assert!(!node.is_local());
         assert_eq!(node.ssh_address.as_deref(), Some("user@192.168.1.100"));

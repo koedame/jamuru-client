@@ -102,7 +102,7 @@ fn without_addresses(reading: &mut Value) {
 }
 
 /// Stands in for device ids while someone helps: an id can carry a serial
-/// number (it is masked in `jamjam.log` for that reason), so the helper sees a
+/// number (it is masked in `jamuru.log` for that reason), so the helper sees a
 /// handle instead and the helped side turns it back. Inputs and outputs are
 /// numbered apart, so a handle from one list cannot pick a device in the other.
 #[derive(Debug, Default, Clone, PartialEq)]

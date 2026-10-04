@@ -114,7 +114,7 @@ export function SettingsPanelAdapter({
   // short confirmation instead of the section just disappearing.
   const [previousHang, setPreviousHang] = useState<Hang | null | undefined>(undefined);
   const [previousHangAnswered, setPreviousHangAnswered] = useState(false);
-  // Whether sending it also attaches jamjam.log (ADR-059: true before 1.0.0).
+  // Whether sending it also attaches jamuru.log (ADR-059: true before 1.0.0).
   const [previousHangAttachesLog, setPreviousHangAttachesLog] = useState(false);
 
   // Report a problem (ADR-058): a manual, one-off send, independent of
@@ -379,7 +379,7 @@ export function SettingsPanelAdapter({
       setReportProblemPreview(await readReportProblemPreview());
       setReportProblemState("ready");
     } catch (err) {
-      console.error("Could not read jamjam.log for the problem report:", err);
+      console.error("Could not read jamuru.log for the problem report:", err);
       setReportProblemError(String(err));
       setReportProblemState("error");
     }

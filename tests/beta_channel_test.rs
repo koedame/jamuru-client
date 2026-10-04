@@ -148,7 +148,7 @@ fn publish(manifest: &Path, state: &Path, force_rollback: bool) -> Output {
         .arg(manifest)
         .current_dir(repo_root())
         .env("GH", state.join("gh"))
-        .env("GITHUB_REPOSITORY", "koedame/jamjam-client")
+        .env("GITHUB_REPOSITORY", "koedame/jamuru-client")
         .env("GITHUB_SHA", "0000000");
     if force_rollback {
         command.env("FORCE_ROLLBACK", "1");

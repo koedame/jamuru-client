@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Checks a built release against REQ-DIST-005 (ADR-030): the app must use the
-# jamjam server it was built with, and nothing in what ships may point at a
+# jamuru server it was built with, and nothing in what ships may point at a
 # server on the user's own machine.
 #
 # Usage (from the repository root, after `cargo tauri build`, with the same
 # JAMJAM_SERVER_URL the build was given):
 #   scripts/check-release-server-url.sh <app binary> [ui dist directory]
 #
-#   scripts/check-release-server-url.sh src-tauri/target/release/jamjam-app
-#   scripts/check-release-server-url.sh src-tauri/target/x86_64-pc-windows-msvc/release/jamjam-app.exe
+#   scripts/check-release-server-url.sh src-tauri/target/release/jamuru-app
+#   scripts/check-release-server-url.sh src-tauri/target/x86_64-pc-windows-msvc/release/jamuru-app.exe
 #
 # The binary carries the Rust side (connection screen and diagnostics); the UI
 # bundle is embedded in it compressed, so ui/dist is scanned separately.

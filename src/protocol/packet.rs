@@ -1,4 +1,4 @@
-//! Packet definitions for the jamjam protocol
+//! Packet definitions for the jamuru protocol
 //!
 //! Packet format (12-byte header):
 //! - version: 1 byte

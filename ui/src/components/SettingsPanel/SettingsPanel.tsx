@@ -1,7 +1,7 @@
 /**
  * SettingsPanel - Settings panel with header and vertical tabs
  *
- * Design: jamjam brand (ui.pen Screens/Settings). Header bar + left sidebar of
+ * Design: jamuru brand (ui.pen Screens/Settings). Header bar + left sidebar of
  * icon tabs (Devices / General / Profile / Diagnostics) + content area.
  */
 
@@ -121,7 +121,7 @@ export interface SettingsPanelProps {
   onSendPreviousHang?: (send: boolean) => void;
   /** Set once the pending hang report has been answered */
   previousHangAnswered?: boolean;
-  /** Whether "send" also attaches jamjam.log (ADR-059: true before 1.0.0) */
+  /** Whether "send" also attaches jamuru.log (ADR-059: true before 1.0.0) */
   previousHangAttachesLog?: boolean;
   /** Whether usage reporting is on */
   usageReporting?: boolean;

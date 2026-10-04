@@ -488,7 +488,7 @@ describe('MainScreen の招待リンク', () => {
   it('招待リンクが届いたとき、そのコードで session_join を呼ぶこと', async () => {
     await withConnection();
 
-    act(() => openUrl.handler!(['jamjam://join/abc234xyz']));
+    act(() => openUrl.handler!(['jamuru://join/abc234xyz']));
 
     expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ' }]);
   });
@@ -496,7 +496,7 @@ describe('MainScreen の招待リンク', () => {
   it('コードが壊れた招待リンクが届いたとき、エラーを出して参加しないこと', async () => {
     await withConnection();
 
-    act(() => openUrl.handler!(['jamjam://join/nope']));
+    act(() => openUrl.handler!(['jamuru://join/nope']));
 
     expect(await screen.findByTestId('connection-panel-error')).toBeInTheDocument();
     expect(callsTo('session_join')).toHaveLength(0);

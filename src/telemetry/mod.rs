@@ -1,4 +1,4 @@
-//! Usage reporting: what the app tells the jamjam server about how it runs,
+//! Usage reporting: what the app tells the jamuru server about how it runs,
 //! when the user has turned "usage reporting" on.
 //!
 //! - **Off by default.** While it is off nothing is collected or sent, and
@@ -22,7 +22,7 @@
 //! - **What would be sent** can be read at any time with
 //!   [`UsageReporter::preview_ndjson`].
 //!
-//! This is a separate path from the diagnostic log file `jamjam.log`
+//! This is a separate path from the diagnostic log file `jamuru.log`
 //! (ADR-036), which stays on the machine. Nothing here reuses its redaction:
 //! what may leave the machine is decided by the schema and by
 //! [`settings::LEFT_OUT`].

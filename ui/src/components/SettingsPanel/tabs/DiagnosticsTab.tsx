@@ -1,7 +1,7 @@
 /**
  * DiagnosticsTab - System diagnostics with results view
  *
- * Design: jamjam brand (ui.pen Screens/Settings/Diagnostics + Running + Result).
+ * Design: jamuru brand (ui.pen Screens/Settings/Diagnostics + Running + Result).
  * Idle: description + primary run button. Running: loader, progress bar, steps,
  * optional cancel. Complete: score, result cards with grade badges, problems.
  */
@@ -61,7 +61,7 @@ export interface DiagnosticsTabProps {
   onSendPreviousHang?: (send: boolean) => void;
   /** Set once the pending hang report has been answered, to show a short confirmation instead */
   previousHangAnswered?: boolean;
-  /** Whether "send" also attaches the current jamjam.log (ADR-059: true before the app's 1.0.0 release) */
+  /** Whether "send" also attaches the current jamuru.log (ADR-059: true before the app's 1.0.0 release) */
   previousHangAttachesLog?: boolean;
   /** Whether usage reporting is on (off by default) */
   usageReporting?: boolean;
@@ -73,9 +73,9 @@ export interface DiagnosticsTabProps {
   onShowUsagePreview?: () => void;
   /** Why what would be sent could not be read */
   usagePreviewError?: string | null;
-  /** "Report a problem" (ADR-058): a manual, one-off send of jamjam.log and a comment */
+  /** "Report a problem" (ADR-058): a manual, one-off send of jamuru.log and a comment */
   reportProblemState?: ReportProblemState;
-  /** The jamjam.log content that would be sent; null while not loaded yet */
+  /** The jamuru.log content that would be sent; null while not loaded yet */
   reportProblemPreview?: string | null;
   reportProblemComment?: string;
   reportProblemError?: string | null;
@@ -297,7 +297,7 @@ function LogFileSection({
       <p className="diagnostics-tab__description">
         {t(
           "settings.diagnostics.logDescription",
-          "If something does not work, attach jamjam.log from this folder when you report it."
+          "If something does not work, attach jamuru.log from this folder when you report it."
         )}
       </p>
       <div>
@@ -367,12 +367,12 @@ function PreviousHangSection({
         {previousHangAttachesLog
           ? t(
               "settings.diagnostics.previousHang.descriptionWithLog",
-              "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamjam.log, so this can be found and fixed? The log can include the server address and your audio device names. The room ID and other participants' identifiers are cut down to their first characters, and their names are replaced by numbers.",
+              "jamuru did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamuru.log, so this can be found and fixed? The log can include the server address and your audio device names. The room ID and other participants' identifiers are cut down to their first characters, and their names are replaced by numbers.",
               { stage: stageLabel(previousHang.stage, t) }
             )
           : t(
               "settings.diagnostics.previousHang.description",
-              "jamjam did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
+              "jamuru did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
               { stage: stageLabel(previousHang.stage, t) }
             )}
       </p>
@@ -437,7 +437,7 @@ function UsageReportingSection({
       <p className="diagnostics-tab__description">
         {t(
           "settings.diagnostics.usageDescription",
-          "Off by default. When you turn it on, jamjam sends how it runs on your machine to the jamjam server, so that problems on particular machines and connections can be found and fixed."
+          "Off by default. When you turn it on, jamuru sends how it runs on your machine to the jamuru server, so that problems on particular machines and connections can be found and fixed."
         )}
       </p>
       <p className="diagnostics-tab__description">
@@ -536,7 +536,7 @@ function ReportProblemSection({
         <p className="diagnostics-tab__description">
           {t(
             "settings.diagnostics.reportProblem.description",
-            "Send the current jamjam.log and a short comment about what is going wrong right now."
+            "Send the current jamuru.log and a short comment about what is going wrong right now."
           )}
         </p>
         <div>

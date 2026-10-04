@@ -32,10 +32,10 @@
 **状況**: `src-tauri/Cargo.lock` の `glib 0.18.5`（GHSA-wrw7-89jp-8q8g, medium）が Dependabot で検出された。`glib::VariantStrIter` の NULL ポインタ参照によるクラッシュで、fixed version は `0.20.0`
 **決定**: Cargo 依存関係の更新では修正しない。alert はオープンのまま放置し、次回 `/sync-spec` 等での定期チェック時に再確認する
 **理由**:
-- `glib` は jamjam のコードから直接使用しておらず、Tauri 2.11.5（最新）→ wry 0.55.1 → tao/muda → `gtk 0.18.2`（gtk3-rs）が固定した推移的依存
+- `glib` は jamuru のコードから直接使用しておらず、Tauri 2.11.5（最新）→ wry 0.55.1 → tao/muda → `gtk 0.18.2`（gtk3-rs）が固定した推移的依存
 - `gtk` クレート自体が upstream で UNMAINTAINED（gtk3-rs、0.18.2 が最終リリース）であり、`glib >= 0.20` を要求する新バージョンが存在しないため `cargo update` では一切バージョンを上げられない（dry-run で確認済み）
 - Tauri が Linux バックエンドを gtk3-rs/webkit2gtk スタックから移行しない限り修正不可能な upstream 側の課題
-- 該当コード（`VariantStrIter`、GVariant 文字列配列のイテレータ）は jamjam のコードパスから到達しないため、実害は低いと判断
+- 該当コード（`VariantStrIter`、GVariant 文字列配列のイテレータ）は jamuru のコードパスから到達しないため、実害は低いと判断
 
 ---
 

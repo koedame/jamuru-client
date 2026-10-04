@@ -30,20 +30,20 @@ describe('DiagnosticsTab log file section', () => {
       <DiagnosticsTab
         state="idle"
         onOpenLogFolder={() => {}}
-        logFolderError="Could not open the log folder /logs/me.koeda.jamjam: No such file"
+        logFolderError="Could not open the log folder /logs/me.koeda.jamuru: No such file"
       />
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('/logs/me.koeda.jamjam');
+    expect(screen.getByRole('alert')).toHaveTextContent('/logs/me.koeda.jamuru');
   });
 
   // Verifies: REQ-GUI-020
   it('the folder was opened, its path is shown under the button', () => {
     render(
-      <DiagnosticsTab state="idle" onOpenLogFolder={() => {}} logFolder="/logs/me.koeda.jamjam" />
+      <DiagnosticsTab state="idle" onOpenLogFolder={() => {}} logFolder="/logs/me.koeda.jamuru" />
     );
 
-    expect(screen.getByText('/logs/me.koeda.jamjam')).toBeInTheDocument();
+    expect(screen.getByText('/logs/me.koeda.jamuru')).toBeInTheDocument();
   });
 
   it('no handler is given, the section is not shown', () => {
@@ -329,7 +329,7 @@ describe('DiagnosticsTab previous hang section (ADR-056, ADR-059)', () => {
     );
 
     const section = screen.getByTestId('diagnostics-previous-hang');
-    expect(section).toHaveTextContent('jamjam.log');
+    expect(section).toHaveTextContent('jamuru.log');
     expect(section).toHaveTextContent('room ID');
     expect(section).not.toHaveTextContent('nothing about your audio, chat or rooms');
   });

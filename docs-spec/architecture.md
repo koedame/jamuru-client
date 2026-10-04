@@ -2,7 +2,7 @@
 
 # architecture.md
 
-jamjamの技術構成を定義する。本ドキュメントは実装の正とする。
+jamuruの技術構成を定義する。本ドキュメントは実装の正とする。
 
 ---
 
@@ -195,7 +195,7 @@ LAN内は非圧縮PCM、インターネット越しはOpusという使い分け�
 +------------------+
 |   Audio Codec    |
 +------------------+
-|  jamjam Protocol |  <- カスタムUDPプロトコル
+|  jamuru Protocol |  <- カスタムUDPプロトコル
 +------------------+
 |   SecureLink     |  <- 暗号化レイヤー（ADR-064）
 +------------------+
@@ -205,7 +205,7 @@ LAN内は非圧縮PCM、インターネット越しはOpusという使い分け�
 +------------------+
 ```
 
-### 5.2 jamjam Protocol
+### 5.2 jamuru Protocol
 
 カスタムUDPプロトコルを使用する。
 
@@ -514,12 +514,12 @@ GUI で操作できるコア機能は CLI からも操作できる。逆方向�
 **コマンド:**
 
 ```
-jamjam devices list                     # デバイス一覧
-jamjam devices set --input <NAME> --output <NAME>   # 設定に保存（'default' で解除）
-jamjam preset list                      # プリセットと遅延バジェット
-jamjam preset use <NAME>                # 設定に保存
-jamjam create-room --server <URL>       # ルーム作成、招待コードを表示
-jamjam join-room --server <URL> --room <CODE>       # ルーム参加
+jamuru devices list                     # デバイス一覧
+jamuru devices set --input <NAME> --output <NAME>   # 設定に保存（'default' で解除）
+jamuru preset list                      # プリセットと遅延バジェット
+jamuru preset use <NAME>                # 設定に保存
+jamuru create-room --server <URL>       # ルーム作成、招待コードを表示
+jamuru join-room --server <URL> --room <CODE>       # ルーム参加
 ```
 
 `create-room` / `join-room` は `--duration <秒>`（相手につながってからその秒数で終了）、`--report-json <PATH>`（終了時に統計を JSON で書く）、`--echo-delay-ms <ms>`（相手が音を保持して返す時間。往復から引く）を取る。
@@ -559,7 +559,7 @@ jamjam join-room --server <URL> --room <CODE>       # ルーム参加
 
 ### 9.1 仮想アウトプットチャンネル（録音・配信用）
 
-自分の音（A）・参加者ごとの音（B）・ミックス後の音（C）を、それぞれ 2ch（計 6ch）で、DAW や配信ソフトが選べる仮想デバイスとして提供する。ユーザーが別途仮想デバイスをインストールする前提にはせず、jamjam 自身が OBS / DAW から選べるデバイスとして見える状態を作る（詳細な判断経緯は `Plans.md`「録音・配信用の仮想アウトプットチャンネル」）。
+自分の音（A）・参加者ごとの音（B）・ミックス後の音（C）を、それぞれ 2ch（計 6ch）で、DAW や配信ソフトが選べる仮想デバイスとして提供する。ユーザーが別途仮想デバイスをインストールする前提にはせず、jamuru 自身が OBS / DAW から選べるデバイスとして見える状態を作る（詳細な判断経緯は `Plans.md`「録音・配信用の仮想アウトプットチャンネル」）。
 
 | プラットフォーム | 実装方式 | 状態 |
 |-----------------|---------|------|
@@ -669,15 +669,15 @@ Audio Capture/Playbackスレッドでは以下を禁止する:
 
 | プラットフォーム | パス |
 |-----------------|------|
-| Windows | `%APPDATA%\jamjam\config.toml` |
-| macOS | `~/Library/Application Support/jamjam/config.toml` |
-| Linux | `~/.config/jamjam/config.toml` |
+| Windows | `%APPDATA%\jamuru\config.toml` |
+| macOS | `~/Library/Application Support/jamuru/config.toml` |
+| Linux | `~/.config/jamuru/config.toml` |
 
-`config.toml` と端末識別子（`device_identity.json`）の場所はアプリ名 `jamjam` から決まり、アプリ識別子（`tauri.conf.json` の `identifier`）には依存しない。
+`config.toml` と端末識別子（`device_identity.json`）の場所はアプリ名 `jamuru` から決まり、アプリ識別子（`tauri.conf.json` の `identifier`）には依存しない。
 
 ### 13.2 webview の保存データ
 
-webview の `localStorage`（表示言語の選択 `i18nextLng`、チャットの最近使った絵文字）は、アプリ識別子 `me.koeda.jamjam` ごとの領域に保存される（[ADR-029](./adr/ADR-029-distribution-app-settings.md)）。識別子を変えると、この 2 つは初期状態に戻る。
+webview の `localStorage`（表示言語の選択 `i18nextLng`、チャットの最近使った絵文字）は、アプリ識別子 `me.koeda.jamuru` ごとの領域に保存される（[ADR-029](./adr/ADR-029-distribution-app-settings.md)）。識別子を変えると、この 2 つは初期状態に戻る。
 
 ### 13.3 フォーマット
 

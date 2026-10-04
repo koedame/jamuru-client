@@ -1,4 +1,4 @@
-//! Audio diagnostics for jamjam
+//! Audio diagnostics for jamuru
 //!
 //! Provides audio device checks including:
 //! - Input/output device detection and capabilities
@@ -31,7 +31,7 @@ pub struct DeviceDiagnostics {
     pub is_asio: bool,
     /// Supported sample rates
     pub supported_sample_rates: Vec<u32>,
-    /// Whether 48kHz is supported (required for jamjam)
+    /// Whether 48kHz is supported (required for jamuru)
     pub supports_48khz: bool,
     /// Supported channel counts
     pub supported_channels: Vec<u16>,

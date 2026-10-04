@@ -9,7 +9,7 @@
 set -euo pipefail
 
 SINK_NAME="jamjam-test-sink"
-SOURCE_NAME="jamjam-test-source"
+SOURCE_NAME="jamuru-test-source"
 SINK_8CH_NAME="jamjam-test-8ch"
 
 create_devices() {
@@ -26,7 +26,7 @@ create_devices() {
     pw-cli create-node adapter '{
         factory.name = support.null-audio-sink
         node.name = "'"$SINK_NAME"'"
-        node.description = "jamjam Test Sink"
+        node.description = "jamuru Test Sink"
         media.class = Audio/Sink
         audio.position = [ FL FR ]
         audio.rate = 48000
@@ -36,7 +36,7 @@ create_devices() {
     pw-cli create-node adapter '{
         factory.name = support.null-audio-sink
         node.name = "'"$SOURCE_NAME"'"
-        node.description = "jamjam Test Source"
+        node.description = "jamuru Test Source"
         media.class = Audio/Source
         audio.position = [ FL FR ]
         audio.rate = 48000
@@ -47,7 +47,7 @@ create_devices() {
     pw-cli create-node adapter '{
         factory.name = support.null-audio-sink
         node.name = "'"$SINK_8CH_NAME"'"
-        node.description = "jamjam Test 8ch"
+        node.description = "jamuru Test 8ch"
         media.class = Audio/Sink
         object.linger = true
         audio.channels = 8
@@ -80,7 +80,7 @@ create_devices() {
     # List created devices
     echo ""
     echo "Available devices:"
-    pw-cli list-objects Node | grep -E "(jamjam|null-audio)" || true
+    pw-cli list-objects Node | grep -E "(jamuru|null-audio)" || true
 }
 
 destroy_devices() {
@@ -124,10 +124,10 @@ status() {
     echo "Virtual audio device status:"
     echo ""
     echo "PipeWire nodes:"
-    pw-cli list-objects Node | grep -E "(jamjam|null-audio)" || echo "No jamjam devices found"
+    pw-cli list-objects Node | grep -E "(jamuru|null-audio)" || echo "No jamuru devices found"
     echo ""
     echo "PipeWire links:"
-    pw-link -l 2>/dev/null | grep -E "(jamjam|test)" || echo "No jamjam links found"
+    pw-link -l 2>/dev/null | grep -E "(jamuru|test)" || echo "No jamuru links found"
 }
 
 usage() {

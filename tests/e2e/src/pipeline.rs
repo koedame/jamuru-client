@@ -1,6 +1,6 @@
 //! Software audio pipeline
 //!
-//! Runs audio through the real jamjam send and receive path - codec, packet
+//! Runs audio through the real jamuru send and receive path - codec, packet
 //! serialisation and the play-out buffer with its PLC - without a network
 //! socket or an audio device. This is what the loopback layer measures.
 //!

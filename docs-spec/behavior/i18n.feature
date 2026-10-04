@@ -1,16 +1,16 @@
 # This specification is the source of truth. Sync implementation when changed.
 
 Feature: 国際化
-  jamjamはユーザーインターフェースの多言語表示に対応する
+  jamuruはユーザーインターフェースの多言語表示に対応する
 
   Background:
-    Given jamjamアプリケーションがインストールされている
+    Given jamuruアプリケーションがインストールされている
 
   @REQ-I18N-101 @must
   Scenario: 初回起動時のシステム言語検出
     Given システムロケールが日本語（ja）に設定されている
     And config.tomlにlanguage設定が存在しない
-    When ユーザーがjamjamを初めて起動する
+    When ユーザーがjamuruを初めて起動する
     Then UIが日本語で表示される
 
   @REQ-I18N-102 @must
@@ -31,7 +31,7 @@ Feature: 国際化
   @REQ-I18N-104 @should
   Scenario: 言語設定の永続化
     Given ユーザーが言語設定を日本語に変更している
-    When ユーザーがjamjamを終了して再起動する
+    When ユーザーがjamuruを終了して再起動する
     Then UIが日本語で表示される
 
   @REQ-I18N-105 @must

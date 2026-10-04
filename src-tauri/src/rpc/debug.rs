@@ -19,7 +19,7 @@ use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
 
 /// The log file's name, as `logging` writes it.
-const LOG_FILE: &str = "jamjam.log";
+const LOG_FILE: &str = "jamuru.log";
 
 /// The crash record's name in the usage state directory.
 const CRASH_FILE: &str = "crash.json";

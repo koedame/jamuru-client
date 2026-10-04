@@ -184,13 +184,13 @@ REQ-IDT-006 を `should` とするのは、Windows に 0600 相当のモード�
 
 REQ-SEC-006 を `should` とするのは、画面の確認が単体テストと手元の確認に留まるため。
 
-REQ-SEC-009 の確かめ方は、`src/network/encryption.rs` の単体テストで鍵交換の受け付け方を、`jamjam-server` の `tests/echo_encryption_test.rs` で実際の echo・ボットとの間に割り込む中継を置いて確かめる。
+REQ-SEC-009 の確かめ方は、`src/network/encryption.rs` の単体テストで鍵交換の受け付け方を、`jamuru-server` の `tests/echo_encryption_test.rs` で実際の echo・ボットとの間に割り込む中継を置いて確かめる。
 
 REQ-SEC-007 の確かめ方は、割り込む中継（鍵交換を自分の鍵に差し替え、両端と別々に鍵を作り、開いた音声を渡し直す）を `tests/wire_encryption_test.rs` に置き、同じ中継が、相手を確かめない接続では音声を聞け（REQ-SEC-008 の側）、確かめる接続では聞けないことを並べて見る。
 
 ## REQ-TEL: 利用状況の送信設計要求
 
-アプリが動いた様子（環境・設定・エラー・セッションの集計）を、利用者が設定でオンにしたときだけ jamjam サーバーへ送る仕組みに対する要求。何を・いつ・どう止めるかの仕様は [api/telemetry.md](./api/telemetry.md)、送る項目の定義は `src/telemetry/schema.json`。実装は `src/telemetry/`（収集・送信）と `src-tauri/src/usage.rs`（アプリへの接続）。`jamjam.log`（ADR-036）は端末の中に留まる別経路で、ここでは使わない。
+アプリが動いた様子（環境・設定・エラー・セッションの集計）を、利用者が設定でオンにしたときだけ jamuru サーバーへ送る仕組みに対する要求。何を・いつ・どう止めるかの仕様は [api/telemetry.md](./api/telemetry.md)、送る項目の定義は `src/telemetry/schema.json`。実装は `src/telemetry/`（収集・送信）と `src-tauri/src/usage.rs`（アプリへの接続）。`jamuru.log`（ADR-036）は端末の中に留まる別経路で、ここでは使わない。
 
 | ID | 要求 | criticality |
 |----|------|------------|
@@ -214,19 +214,19 @@ REQ-SEC-007 の確かめ方は、割り込む中継（鍵交換を自分の鍵�
 | REQ-TEL-018 | `app_start` に、接続先がアプリの持つ既定のサーバーかどうか（`server_is_default`）を付ける | must |
 | REQ-TEL-019 | 主スレッドの終了・再起動・更新の適用・音声デバイスを開く処理のうち、見張っているものが自分の上限時間を過ぎても終わらないとき、`usage_reporting` の設定に関わらず、どの処理で・どれだけの時間止まっていたかをローカルに記録する。上限を過ぎる前に終われば何も残さない。見張っている処理が無いまま前回の起動が正常終了しなかったとき（強制終了・電源断など）も、次の起動時に「処理は不明」として同じ形で記録する。`usage_reporting` がオンならこの記録は次の起動でクラッシュの記録と同じように送信の対象になる | must |
 | REQ-TEL-020 | `usage_reporting` がオフのまま REQ-TEL-019 の記録が残っているとき、アプリはこの記録だけを 1 件、送信のためだけに作って捨てるインストール ID で送れる。送っても `usage_reporting` の設定はオンにならず、送らずに捨てることもできる | must |
-| REQ-TEL-021 | REQ-TEL-020 の確認で「送る」を選んだとき、アプリの版が 1.0.0 未満なら、現在の `jamjam.log` を「問題を報告」（REQ-RPT）と同じ送り先・同じ本文の作り方で追加で送る。確認の説明文は、ログを添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く。1.0.0 以上になったらこの追加送信をしない（[ADR-059](./adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)） | must |
+| REQ-TEL-021 | REQ-TEL-020 の確認で「送る」を選んだとき、アプリの版が 1.0.0 未満なら、現在の `jamuru.log` を「問題を報告」（REQ-RPT）と同じ送り先・同じ本文の作り方で追加で送る。確認の説明文は、ログを添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く。1.0.0 以上になったらこの追加送信をしない（[ADR-059](./adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)） | must |
 | REQ-TEL-022 | `usage_reporting` がオフで REQ-TEL-019 の記録がまだ利用者に確認されていないとき、その後アプリが再起動しても（自動更新による再起動を含む）記録は失われない。再起動も通常の正常終了であり、次の起動が見るのはその再起動自身の痕跡だけなので、確認するか送信して捨てるまで記録を別に保持する | must |
-| REQ-TEL-023 | REQ-TEL-019 の記録が見つかったとき、`usage_reporting` が既にオンなら（確認は挟まず自動で送る）、`hang` の構造化イベントだけを送り、`jamjam.log` は添えない。オンにしたことは集計した項目への同意で、他の参加者の識別子を含みうるログまでは含まないため（[ADR-065](./adr/ADR-065-personal-information-before-1-0-0.md)。[ADR-060](./adr/ADR-060-hang-report-attaches-the-log-while-reporting-is-already-on.md) を置き換える） | must |
+| REQ-TEL-023 | REQ-TEL-019 の記録が見つかったとき、`usage_reporting` が既にオンなら（確認は挟まず自動で送る）、`hang` の構造化イベントだけを送り、`jamuru.log` は添えない。オンにしたことは集計した項目への同意で、他の参加者の識別子を含みうるログまでは含まないため（[ADR-065](./adr/ADR-065-personal-information-before-1-0-0.md)。[ADR-060](./adr/ADR-060-hang-report-attaches-the-log-while-reporting-is-already-on.md) を置き換える） | must |
 
 ## REQ-RPT: 問題の報告設計要求
 
-利用者が設定の診断タブから、任意のタイミングで `jamjam.log` と一言のコメントを添えて jamjam サーバーへ送る機能に対する要求（[ADR-058](./adr/ADR-058-report-a-problem.md)）。`usage_reporting`（REQ-TEL）とは別の経路で、その設定を読まず・変えない。実装は `src-tauri/src/report_problem.rs`。
+利用者が設定の診断タブから、任意のタイミングで `jamuru.log` と一言のコメントを添えて jamuru サーバーへ送る機能に対する要求（[ADR-058](./adr/ADR-058-report-a-problem.md)）。`usage_reporting`（REQ-TEL）とは別の経路で、その設定を読まず・変えない。実装は `src-tauri/src/report_problem.rs`。
 
 | ID | 要求 | criticality |
 |----|------|------------|
 | REQ-RPT-001 | この機能に事前の同意設定は無く、利用者が「送信する」を押す操作そのものが、その 1 件の同意である。`usage_reporting` の値に関わらず動き、送っても `usage_reporting` は変わらない | must |
-| REQ-RPT-002 | 送信前に、送る `jamjam.log` の内容をそのまま画面に表示できる。表示される文字列と、実際に送信される `log` の内容は常に一致する | must |
-| REQ-RPT-003 | 送る `jamjam.log` は、`log_frontend` が画面のメッセージに適用するのと同じ秘匿情報のマスク（ADR-036 §7、`password` / `secret` / `token` 等の値を `***` にする）を通したうえで、末尾から 512 KiB までに切り詰める。切り詰めたときは、省略したことを示す一行を先頭に付ける | must |
+| REQ-RPT-002 | 送信前に、送る `jamuru.log` の内容をそのまま画面に表示できる。表示される文字列と、実際に送信される `log` の内容は常に一致する | must |
+| REQ-RPT-003 | 送る `jamuru.log` は、`log_frontend` が画面のメッセージに適用するのと同じ秘匿情報のマスク（ADR-036 §7、`password` / `secret` / `token` 等の値を `***` にする）を通したうえで、末尾から 512 KiB までに切り詰める。切り詰めたときは、省略したことを示す一行を先頭に付ける | must |
 | REQ-RPT-004 | コメントは 2000 Unicode スカラー値までに切り詰めて送る | must |
 
 利用者が実際に操作できる機能と、観測できる状態に対する要求。検証は実アプリを起動して DOM を読む GUI E2E（`tests/e2e/tests/gui.rs`、[ADR-025](./adr/ADR-025-gui-e2e-control-channel.md)）が行う。Storybook と UI 単体テストは Pure コンポーネントまでしか到達できないため、この層でしか検証できない。
@@ -248,13 +248,13 @@ REQ-SEC-007 の確かめ方は、割り込む中継（鍵交換を自分の鍵�
 | REQ-GUI-013 | レベルメーターが実入力信号に追従し、ミュートで無音（0）を示す | must |
 | REQ-GUI-014 | GUI 2 台の間で音声が流れ、受信側のピアチャンネルのメーターが反応する | must |
 | REQ-GUI-015 | 同室の参加者全員が同一のルームコードを表示する | must |
-| REQ-GUI-016 | 起動すると、公開ビルドでも OS のログ置き場に `jamjam.log` が作られ、バージョン・OS・設定の要約が書かれる | must |
-| REQ-GUI-017 | 画面側の `console` 出力と、失敗した Tauri コマンドの名前とエラーが、同じ `jamjam.log` に書かれる。接続・入室の段階の遷移（`[session] connecting_server -> error: …`）は、バックエンドと画面の両方が書く | must |
-| REQ-GUI-018 | 部屋のパスワードは `jamjam.log` に書かれない（画面側の出力にも、設定の要約にも） | must |
-| REQ-GUI-019 | 環境変数 `JAMJAM_LOG` で出力レベルを上書きできる。既定は自分のクレートが debug、依存クレートが info | must |
+| REQ-GUI-016 | 起動すると、公開ビルドでも OS のログ置き場に `jamuru.log` が作られ、バージョン・OS・設定の要約が書かれる | must |
+| REQ-GUI-017 | 画面側の `console` 出力と、失敗した Tauri コマンドの名前とエラーが、同じ `jamuru.log` に書かれる。接続・入室の段階の遷移（`[session] connecting_server -> error: …`）は、バックエンドと画面の両方が書く | must |
+| REQ-GUI-018 | 部屋のパスワードは `jamuru.log` に書かれない（画面側の出力にも、設定の要約にも） | must |
+| REQ-GUI-019 | 環境変数 `JAMURU_LOG` で出力レベルを上書きできる。既定は自分のクレートが debug、依存クレートが info | must |
 | REQ-GUI-020 | 設定の Diagnostics タブにログのフォルダを開くボタンがあり、開けないときはフォルダの場所を示す | must |
 | REQ-GUI-021 | 公開ビルドでも、画面が呼ぶプラグインのコマンド（起動時の URL の取得・イベントの購読）が拒否されず、招待リンクが画面に届く | must |
-| REQ-GUI-022 | `jamjam.log` に書かれる、人や場所を特定できる値は既定で伏せられる: IP アドレス（STUN で分かる公開アドレス・候補アドレス）の末尾、オーディオデバイス ID のシリアル番号、デバイス名の所有者（`Taro's AirPods` の `Taro`）、ルーム ID・招待コードの先頭 2 文字より後ろ、参加者の識別子（UUID）とこの端末の識別子（26 文字）の先頭 4 文字より後ろ、参加者の表示名（`peer1` のような連番にする）、ホームフォルダのユーザー名（`~`にする）。環境変数 `JAMJAM_LOG_REDACT=off` で無効化できる（[ADR-065](./adr/ADR-065-personal-information-before-1-0-0.md)） | must |
+| REQ-GUI-022 | `jamuru.log` に書かれる、人や場所を特定できる値は既定で伏せられる: IP アドレス（STUN で分かる公開アドレス・候補アドレス）の末尾、オーディオデバイス ID のシリアル番号、デバイス名の所有者（`Taro's AirPods` の `Taro`）、ルーム ID・招待コードの先頭 2 文字より後ろ、参加者の識別子（UUID）とこの端末の識別子（26 文字）の先頭 4 文字より後ろ、参加者の表示名（`peer1` のような連番にする）、ホームフォルダのユーザー名（`~`にする）。環境変数 `JAMURU_LOG_REDACT=off` で無効化できる（[ADR-065](./adr/ADR-065-personal-information-before-1-0-0.md)） | must |
 | REQ-GUI-023 | 他の参加者やサーバーから届く文字列（チャットの本文・送り主の名前・参加者の名前）は HTML として解釈されず、文字としてそのまま表示される | must |
 | REQ-GUI-024 | 音声の設定（入出力デバイス・入出力チャンネル・送信チャンネル数・バッファサイズ・サンプルレート・プリセット）の変更は、設定ウィンドウからも E2E の制御チャネルからも同じ 1 つの処理で適用される。変更は保存され、接続中のセッションが追従できるものは即座に追従し（バッファサイズ・サンプルレートは次の接続から）、開いている全ウィンドウに変更後の設定が届く（届く順が前後しても、新しい設定が古い設定で上書きされない）。提供されていない値（無いデバイス・デバイスに無いチャンネル・保存できないバッファサイズ）と、保存できなかった変更は、設定を変えない | must |
 | REQ-GUI-025 | E2E の制御チャネルから、アプリが登録している任意のコマンドを、画面と同じ経路（webview の IPC）で呼べる。コマンドの戻り値とエラーはそのまま返り、登録されていないコマンドはエラーになる | must |
@@ -307,7 +307,7 @@ REQ-RMT-001〜003・007・030・031 の「2 台のアプリの間で実際に動
 | ID | 要求 | criticality |
 |----|------|------------|
 | REQ-DIST-001 | macOS 向けの成果物が、マイクを使う理由（`NSMicrophoneUsageDescription`）を空でない文字列で宣言している | must |
-| REQ-DIST-002 | アプリ識別子が `me.koeda.jamjam` である | must |
+| REQ-DIST-002 | アプリ識別子が `me.koeda.jamuru` である | must |
 | REQ-DIST-003 | webview の CSP が有効で、スクリプトは同梱の資産だけ、接続先は Tauri の IPC だけに限られ、リモートのオリジンを 1 つも許可しない | must |
 | REQ-DIST-004 | webview に Tauri API のグローバル（`window.__TAURI__`）を公開しない | must |
 | REQ-DIST-005 | リリースビルドは本番のサーバー（`https://`、ループバックでないホスト）を使い、開発ビルドはローカルのサーバー（`http://localhost:17890`）を使う。使うサーバーはコアライブラリの 1 か所で決まり、UI と Tauri コマンドはサーバーの URL を持たない。本番のサーバーはソースに書かず、リリースのビルド時に渡す（渡さなければビルドが失敗する）。シグナリングの接続先はそのサーバーに問い合わせる（REQ-CON-028） | must |
@@ -319,7 +319,7 @@ REQ-DIST-005 の決定は [ADR-030](./adr/ADR-030-signaling-url-by-build-profile
 
 REQ-DIST-007 の生成は `scripts/third-party-licenses.py`（cargo-about が Rust のクレート、`ui/package-lock.json` が npm を読む）。`--check` は生成物と、それを作った入力（ロックファイル・`about.toml`・`deny.toml`・`packaging/third-party/`・このスクリプト）のハッシュを突き合わせる。生成物の手編集も落ちる。`tests/third_party_licenses_test.rs` が `--check` と、MPL-2.0 の 5 件（`cssparser` `cssparser-macros` `dtoa-short` `option-ext` `selectors`）にソースの入手先があることを検証する。許可リストの検査は CI の `licenses` ジョブ（`cargo deny check licenses`）。
 
-REQ-DIST-008 の表示は `scripts/appimage-bundled-libraries.py` が `release.yml` の Ubuntu のビルドで作り、`jamjam-linux-bundled-libraries.txt` として AppImage と同じリリースに置く（アプリに同梱する `LICENSES.txt` がその場所を案内する）。どのライブラリが入るかはビルドの環境で変わるため、一覧を手で持たない。`tests/appimage_bundled_libraries_test.rs` が、`dpkg-query` と `/usr/share` を差し替えて、パッケージ名・版・ソースの入手先・著作権ファイル・ライセンス本文が表示に入ることと、引けないライブラリがあれば失敗することを検証する。実際の AppImage での引き当ては、リリースのワークフローの実行で確かめる。
+REQ-DIST-008 の表示は `scripts/appimage-bundled-libraries.py` が `release.yml` の Ubuntu のビルドで作り、`jamuru-linux-bundled-libraries.txt` として AppImage と同じリリースに置く（アプリに同梱する `LICENSES.txt` がその場所を案内する）。どのライブラリが入るかはビルドの環境で変わるため、一覧を手で持たない。`tests/appimage_bundled_libraries_test.rs` が、`dpkg-query` と `/usr/share` を差し替えて、パッケージ名・版・ソースの入手先・著作権ファイル・ライセンス本文が表示に入ることと、引けないライブラリがあれば失敗することを検証する。実際の AppImage での引き当ては、リリースのワークフローの実行で確かめる。
 
 REQ-DIST-001 の宣言が実行時に効くこと（マイク許可ダイアログに説明が出て、プロセスが終了しないこと）は macOS 実機でしか確かめられない。本要求は宣言の存在までを検証範囲とする。
 
@@ -368,7 +368,7 @@ REQ-UPD-001 の「新しい版を確かめて入れる」を通しで動かす�
 
 ## REQ-CLI: CLI 振る舞い要求
 
-CLI（`jamjam` バイナリ）は**デバッグ効率のために存在する**。GUI E2E（[ADR-025](./adr/ADR-025-gui-e2e-control-channel.md)）の代替ではなく、GUI を立ち上げずにセッションを再現・観察するための手段である（[ADR-027](./adr/ADR-027-cli-scope.md)）。GUI と同じ設定ファイルを読み書きするため、CLI で選んだデバイス・プリセットで GUI が起動する。
+CLI（`jamuru` バイナリ）は**デバッグ効率のために存在する**。GUI E2E（[ADR-025](./adr/ADR-025-gui-e2e-control-channel.md)）の代替ではなく、GUI を立ち上げずにセッションを再現・観察するための手段である（[ADR-027](./adr/ADR-027-cli-scope.md)）。GUI と同じ設定ファイルを読み書きするため、CLI で選んだデバイス・プリセットで GUI が起動する。
 
 CLI にあって GUI に無い機能（`--input-tone` などのデバイスの代わり、`--duration` `--report-json` による計測）は許容する。同等性は GUI → CLI の一方向のみを対象とする。
 
