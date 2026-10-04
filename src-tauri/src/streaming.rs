@@ -28,9 +28,10 @@ use jamjam::audio::{
 #[cfg(target_os = "windows")]
 use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
 use jamjam::network::{
-    required_bps, status_label, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
-    BandwidthVerdict, Connection, ConnectionState, ConnectionStats, LatencyBreakdown, LinkFacts,
-    LinkIdentity, LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo, QualityMonitor,
+    audio_packet_duration_ms, required_bps, status_label, AudioEncodingConfig, BandwidthEstimator,
+    BandwidthStatus, BandwidthVerdict, Connection, ConnectionState, ConnectionStats,
+    LatencyBreakdown, LinkFacts, LinkIdentity, LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo,
+    QualityMonitor,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
@@ -465,7 +466,7 @@ impl StreamingState {
 
         // `from_audio_config` leaves the jitter buffer at 0 because it only knows
         // the audio configuration. Without this the breakdown shown to the user
-        // omits the buffer entirely - up to 42.67ms on high-quality (ADR-019).
+        // omits the buffer entirely - up to 21.33ms on high-quality (ADR-019, ADR-070).
         let delay_us = self.jitter_buffer_delay_us.load(Ordering::SeqCst);
         info.set_jitter_buffer_ms(delay_us as f32 / 1000.0);
         info
@@ -1964,7 +1965,9 @@ async fn run_audio_streaming(
         .map_err(|e| format!("Failed to configure audio encoding: {}", e))?;
 
     let jitter_buffer_frames = preset.jitter_buffer_frames();
-    let frame_duration_ms = (buffer_size as f32 / sample_rate as f32) * 1000.0;
+    // The buffer counts packets, and a frame too big for one packet goes as
+    // several (ADR-070), so its depth lasts packets long, not frames long.
+    let packet_duration_ms = audio_packet_duration_ms(buffer_size, WIRE_CHANNELS, sample_rate);
     // Received audio waits in the play-out buffer, and only there, until the
     // output callback takes it (ADR-028). The CLI uses the same path.
     let receive = ReceivePath::new(codec_type, sample_rate, buffer_size, jitter_buffer_frames)
@@ -1978,7 +1981,7 @@ async fn run_audio_streaming(
     // switch, an adaptation and a reconnect all reach the display the same way
     // (ADR-031).
     let mut announced_delay_frames = jitter_buffer_frames;
-    let jitter_buffer_delay_ms = jitter_buffer_frames as f32 * frame_duration_ms;
+    let jitter_buffer_delay_ms = jitter_buffer_frames as f32 * packet_duration_ms;
     shared_jitter_delay_us.store((jitter_buffer_delay_ms * 1000.0) as u32, Ordering::SeqCst);
 
     // Reports quality changes on the edge rather than on every stats poll.
@@ -2692,7 +2695,7 @@ async fn run_audio_streaming(
         if channel_count != announced_channel_count {
             if let Ok(conn) = connection_arc.try_lock() {
                 let updated = LatencyInfoMessage {
-                    jitter_buffer_ms: announced_delay_frames as f32 * frame_duration_ms,
+                    jitter_buffer_ms: announced_delay_frames as f32 * packet_duration_ms,
                     ..local_latency_info.clone()
                 };
                 if let Err(e) = conn.send_latency_info(&updated).await {
@@ -2704,7 +2707,7 @@ async fn run_audio_streaming(
 
         let delay_frames = receive.delay_frames();
         if delay_frames != announced_delay_frames {
-            let delay_ms = delay_frames as f32 * frame_duration_ms;
+            let delay_ms = delay_frames as f32 * packet_duration_ms;
             shared_jitter_delay_us.store((delay_ms * 1000.0) as u32, Ordering::SeqCst);
 
             if let Ok(conn) = connection_arc.try_lock() {

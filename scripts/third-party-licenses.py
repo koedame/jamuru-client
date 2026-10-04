@@ -44,6 +44,7 @@ INPUTS = [
     "ui/package-lock.json",
     "about.toml",
     "deny.toml",
+    "LICENSE",
     "scripts/third-party-licenses.py",
 ]
 EXTRA_DIR = ROOT / "packaging/third-party"
@@ -73,19 +74,20 @@ TERMS AND CONDITIONS
 
 1. PERMITTED USES
    - View and read the source code for educational or transparency purposes
-   - Use Official Binaries distributed by the copyright holder
+   - Use Official Binaries distributed by the copyright holder for any purpose
 
 2. RESTRICTIONS
    - Modification, adaptation, or creating derivative works is NOT permitted
    - Redistribution, sublicensing, or transfer is NOT permitted
-   - Commercial use is NOT permitted
+   - Selling or providing the software, or a service built on it, to others is NOT permitted
    - Building, compiling, or executing from source code is NOT permitted
    - Creating competing products or services is NOT permitted
+   - Removing or altering copyright notices or the License is NOT permitted
 
 3. NO WARRANTY
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 
-For full license terms, see: https://github.com/koedame/jamjam-client/blob/main/LICENSE
+For full license terms, see: https://github.com/koedame/jamjam-client/blob/HEAD/LICENSE
 """
 
 
@@ -334,7 +336,7 @@ def check() -> int:
         have_inputs, have_body, body = parse_header(path.read_bytes().decode("utf-8"), fmt)
         rel = path.relative_to(ROOT)
         if have_inputs != want:
-            bad.append(f"{rel}: built from different inputs (lock files, about.toml, deny.toml, packaging/third-party or this script changed)")
+            bad.append(f"{rel}: built from different inputs (lock files, about.toml, deny.toml, LICENSE, packaging/third-party or this script changed)")
         elif have_body != sha256_bytes(body.encode()):
             bad.append(f"{rel}: edited by hand")
     if bad:

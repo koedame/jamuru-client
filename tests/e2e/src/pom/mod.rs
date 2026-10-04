@@ -20,7 +20,7 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use driver::{Driver, DriverResult};
-use screens::{ConnectionScreen, HelperScreen, SessionScreen, SettingsScreen};
+use screens::{ConnectionScreen, ConsentScreen, HelperScreen, SessionScreen, SettingsScreen};
 
 /// How long to wait for the app to answer its first health check. Generous
 /// because it covers process start plus webview creation on a cold cache.
@@ -99,6 +99,29 @@ impl App {
         args: &[&str],
         env: &[(&str, &str)],
     ) -> DriverResult<Self> {
+        Self::launch_binary_with_terms(
+            binary,
+            input_device,
+            output_device,
+            settings,
+            identity,
+            args,
+            env,
+            Terms::Agreed,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn launch_binary_with_terms(
+        binary: &Path,
+        input_device: Option<&str>,
+        output_device: Option<&str>,
+        settings: &str,
+        identity: Option<&[u8; 32]>,
+        args: &[&str],
+        env: &[(&str, &str)],
+        terms: Terms,
+    ) -> DriverResult<Self> {
         if !binary.exists() {
             return Err(format!(
                 "app binary not found at {}. Build it first:\n  \
@@ -115,7 +138,7 @@ impl App {
         // needs no test-only override for this.
         let home =
             tempfile::tempdir().map_err(|e| format!("could not create a temp HOME: {}", e))?;
-        seed_config(home.path(), input_device, output_device, settings)?;
+        seed_config(home.path(), input_device, output_device, settings, terms)?;
         if let Some(secret) = identity {
             seed_identity(home.path(), secret)?;
         }
@@ -204,6 +227,27 @@ impl App {
             &[],
             &[],
         )
+    }
+
+    /// Launches the debug build as someone who has not agreed to the terms of
+    /// use yet (a first launch), with the jamjam server pinned to
+    /// `server_url`.
+    pub fn launch_first_run_with_server_url(server_url: &str) -> DriverResult<Self> {
+        Self::launch_binary_with_terms(
+            &default_binary_path(),
+            None,
+            None,
+            &server_url_setting(server_url),
+            None,
+            &[],
+            &[],
+            Terms::NotYet,
+        )
+    }
+
+    /// The consent screen shown on a first launch.
+    pub fn consent_screen(&self) -> ConsentScreen<'_> {
+        ConsentScreen::new(&self.driver)
     }
 
     /// Launches the debug build as the device whose secret key is `secret`
@@ -330,6 +374,16 @@ impl Drop for App {
     }
 }
 
+/// Whether the throwaway `$HOME` starts with the terms of use agreed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Terms {
+    /// The config says so; the app starts as it does for someone who has
+    /// already agreed.
+    Agreed,
+    /// A first launch: the app asks first and reaches no server until then.
+    NotYet,
+}
+
 /// The `config.toml` line that pins the jamjam server.
 fn server_url_setting(server_url: &str) -> String {
     format!("server_url = {:?}\n", server_url)
@@ -346,14 +400,20 @@ fn seed_config(
     input_device: Option<&str>,
     output_device: Option<&str>,
     settings: &str,
+    terms: Terms,
 ) -> DriverResult<()> {
-    if input_device.is_none() && output_device.is_none() && settings.is_empty() {
-        return Ok(());
-    }
-
     let config_dir = config_dir(home)?;
 
     let mut toml = String::new();
+    // The user has agreed to the terms of use, as every scenario but the
+    // first-launch one assumes: until they have, the app shows the consent
+    // screen and reaches no server.
+    if terms == Terms::Agreed {
+        toml.push_str(&format!(
+            "terms_version = {}\n",
+            jamjam::config::TERMS_VERSION
+        ));
+    }
     if let Some(device) = input_device {
         // The app stores cpal's stable device id, not the display name a
         // scenario passes in here - resolve it the same way the app does
@@ -367,6 +427,9 @@ fn seed_config(
     }
     toml.push_str(settings);
 
+    if toml.is_empty() {
+        return Ok(());
+    }
     let path = config_dir.join("config.toml");
     std::fs::write(&path, toml).map_err(|e| format!("could not write {}: {}", path.display(), e))
 }

@@ -29,12 +29,17 @@ import {
   usageSendPreviousHang,
   reportProblemPreview as readReportProblemPreview,
   reportProblemSend,
+  termsGet,
+  termsGetLicense,
+  termsOpenPage,
+  type TermsPage,
   type Hang,
 } from "../../lib/tauri";
 import { useWindowEvent } from "../../hooks/useWindowEvents";
 import { useAudioSettingsTab } from "./useAudioSettingsTab";
 import { SettingsPanel, type SettingsTabId, type Language } from "./index";
 import type { ReportProblemState } from "./tabs/DiagnosticsTab";
+import { TermsViewer } from "../Terms/TermsViewer";
 
 export interface SettingsPanelAdapterProps {
   /** Initial tab to show */
@@ -189,6 +194,34 @@ export function SettingsPanelAdapter({
     usagePreviousHangAttachesLog()
       .then(setPreviousHangAttachesLog)
       .catch((err) => console.error("Failed to read whether the hang report attaches the log:", err));
+  }, []);
+
+  // The terms of use and the license are read in a dialog here; the privacy
+  // and announcements pages open in the browser.
+  const [termsViewer, setTermsViewer] = useState<{
+    title: string;
+    text: string;
+    format: "markdown" | "plain";
+  } | null>(null);
+
+  const handleOpenTerms = useCallback(() => {
+    termsGet()
+      .then((terms) =>
+        setTermsViewer({ title: t("settings.legal.terms"), text: terms.text, format: "markdown" })
+      )
+      .catch((err) => console.error("Failed to read the terms of use:", err));
+  }, [t]);
+
+  const handleOpenLicense = useCallback(() => {
+    termsGetLicense()
+      .then((text) =>
+        setTermsViewer({ title: t("settings.legal.license"), text, format: "plain" })
+      )
+      .catch((err) => console.error("Failed to read the license:", err));
+  }, [t]);
+
+  const handleOpenPage = useCallback((page: TermsPage) => {
+    termsOpenPage(page).catch((err) => console.error("Failed to open the page:", err));
   }, []);
 
   // Handlers
@@ -388,6 +421,7 @@ export function SettingsPanelAdapter({
   );
 
   return (
+    <>
     <SettingsPanel
       initialTab={initialTab}
       language={language}
@@ -399,6 +433,12 @@ export function SettingsPanelAdapter({
       isLoading={isLoading}
       onLanguageChange={handleLanguageChange}
       onServerUrlChange={handleServerUrlChange}
+      legal={{
+        onOpenTerms: handleOpenTerms,
+        onOpenLicense: handleOpenLicense,
+        onOpenPrivacy: () => handleOpenPage("privacy"),
+        onOpenAnnouncements: () => handleOpenPage("announcements"),
+      }}
       onDisplayNameChange={handleDisplayNameChange}
       diagnosticsState={diagnosticsState}
       diagnosticsProgress={diagnosticsProgress}
@@ -428,6 +468,8 @@ export function SettingsPanelAdapter({
       onSendReportProblem={handleSendReportProblem}
       onCancelReportProblem={handleCancelReportProblem}
     />
+    {termsViewer && <TermsViewer {...termsViewer} onClose={() => setTermsViewer(null)} />}
+    </>
   );
 }
 

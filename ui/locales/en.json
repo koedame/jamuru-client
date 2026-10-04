@@ -439,6 +439,13 @@
       "themeDark": "Dark",
       "themeLight": "Light",
       "themeSystem": "System"
+    },
+    "legal": {
+      "title": "Terms and policies",
+      "terms": "Terms of Use",
+      "license": "License",
+      "privacy": "Privacy and security (opens in the browser)",
+      "announcements": "Announcements (opens in the browser)"
     }
   },
   "status": {
@@ -761,6 +768,19 @@
     "window": {
       "banner": "You are working in {{name}}'s app. What you change here changes theirs.",
       "waiting": "Waiting for {{name}}'s app to be in the room"
+    }
+  },
+  "terms": {
+    "consent": {
+      "title": "Before you start",
+      "ipNotice": "When you join a room, the other people in the room can see your IP address.",
+      "textLabel": "Terms of Use",
+      "agree": "I have read the Terms of Use and agree to them.",
+      "adult": "I am 18 or older. If I am under 18, I have my parent or guardian’s consent.",
+      "start": "Agree and start",
+      "accepting": "Saving...",
+      "error": "Could not save your agreement: {{message}}",
+      "decline": "If you do not agree, close this window. Nothing is sent to the server until you agree."
     }
   }
 }
