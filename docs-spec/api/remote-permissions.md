@@ -84,6 +84,10 @@
 | `config_get_server_url` | 接続先のサーバーを読む |
 | `config_set_server_url` | 接続先のサーバーを変える |
 | `config_get_effective_server_url` | 実際に使う接続先を読む |
+| `terms_get` | 利用規約の本文と、同意済みかを読む |
+| `terms_get_license` | ライセンスの本文を読む |
+| `terms_accept` | 利用規約に同意する |
+| `terms_open_page` | プライバシーの説明・お知らせのページをブラウザで開く |
 | `window_open_settings` | 設定ウィンドウを開く |
 | `window_close_settings` | 設定ウィンドウを閉じる |
 | `window_toggle_chat` | チャットウィンドウを開閉する |

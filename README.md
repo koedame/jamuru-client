@@ -82,7 +82,7 @@ See [ADR-029](./docs-spec/adr/ADR-029-distribution-app-settings.md).
 This software is released under a custom Source Available license. The source code is publicly available for transparency purposes, but usage is restricted:
 
 - **Permitted**: Viewing source code, using official binaries
-- **Not Permitted**: Modification, redistribution, commercial use, building from source, creating competing products
+- **Not Permitted**: Modification, redistribution, providing it as a service to others, building from source, creating competing products
 
 See [LICENSE](./LICENSE) for full terms and [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) for third-party component licenses.
 

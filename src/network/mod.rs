@@ -21,7 +21,8 @@ mod stun;
 mod transport;
 
 pub use bandwidth::{
-    required_bps, status_label, BandwidthEstimator, BandwidthStatus, BandwidthVerdict,
+    audio_packet_duration_ms, required_bps, status_label, BandwidthEstimator, BandwidthStatus,
+    BandwidthVerdict,
 };
 pub use clock::{clock_offset_secs, CLOCK_SKEW_NOTICE_SECS};
 pub use connection::{

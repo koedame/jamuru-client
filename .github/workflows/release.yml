@@ -37,6 +37,12 @@ jobs:
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "release tag: '${tag}'"
 
+      # A stable release (a tag without a `-`) publishes the terms: they need
+      # a date of enactment, and the pages the app opens must exist.
+      - name: Check the terms of a stable release
+        if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+        run: scripts/check-terms-for-release.sh
+
   build:
     name: Build (${{ matrix.os }})
     needs: prepare
