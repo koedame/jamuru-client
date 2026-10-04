@@ -1,4 +1,4 @@
-# jamjam UI 仕様書
+# jamuru UI 仕様書
 
 Claude Code が UI 実装を効率的に進めるための仕様書インデックス。
 

@@ -117,14 +117,14 @@ interface SettingsPanelProps {
   previousHang?: Hang | null;               // 前回終了しなかった記録（無ければ節を出さない）
   onSendPreviousHang?: (send: boolean) => void; // 指定時のみ previousHang があれば節を表示
   previousHangAnswered?: boolean;           // 答えた後、節を短い確認表示に切り替える
-  previousHangAttachesLog?: boolean;        // 「送る」が jamjam.log も添えるか（1.0.0 未満は true）
+  previousHangAttachesLog?: boolean;        // 「送る」が jamuru.log も添えるか（1.0.0 未満は true）
   usageReporting?: boolean;                 // 利用状況を送る設定（既定オフ）
   onUsageReportingChange?: (enabled: boolean) => void; // 指定時のみ診断タブに利用状況の節を表示
   usagePreview?: string | null;             // 次に送る NDJSON（null = まだ見ていない）
   onShowUsagePreview?: () => void;          // 「送る内容を見る」
   usagePreviewError?: string | null;        // 保存や読み出しに失敗した理由
   reportProblemState?: ReportProblemState;  // 既定 "idle"
-  reportProblemPreview?: string | null;     // 送る jamjam.log の内容（読み込み前は null）
+  reportProblemPreview?: string | null;     // 送る jamuru.log の内容（読み込み前は null）
   reportProblemComment?: string;
   reportProblemError?: string | null;       // 読み込み・送信に失敗した理由
   onOpenReportProblem?: () => void;         // 指定時のみ診断タブに「問題を報告」の節を表示。押すとログを読み込む
@@ -138,7 +138,7 @@ type ReportProblemState = "idle" | "loading" | "ready" | "sending" | "sent" | "e
 type Language = "ja" | "en";
 ```
 
-**テーマ選択は廃止した。** jamjam は現状ダーク専用ブランドであり（`tokens.css` の light は dark を複製）、`ui.pen` の一般タブも言語のみを持つ。このため `theme` / `onThemeChange` は SettingsPanel から削除した。
+**テーマ選択は廃止した。** jamuru は現状ダーク専用ブランドであり（`tokens.css` の light は dark を複製）、`ui.pen` の一般タブも言語のみを持つ。このため `theme` / `onThemeChange` は SettingsPanel から削除した。
 
 タブ順は `ui.pen` に合わせて **一般 → デバイス → プロフィール → 診断**。各タブにアイコンを表示する。
 初期表示タブは一覧の並び順とは独立に `デバイス`（`initialTab` のデフォルト値）。
@@ -270,7 +270,7 @@ stateDiagram-v2
 - **complete**: スコア（`score/100`, Inter）＋ 再診断ボタン（refresh アイコン）＋ 結果カード（ネットワーク／オーディオ／CPU／推奨設定）＋ 問題点
   - 各カード: 見出しアイコン＋タイトル＋グレードバッジ（A=success / B=warning / C=danger / Unknown=非表示）、行は `label`＋`value`（mono）。RTT・ジッタ・パケットロスは良好時 `--color-success`
   - 問題点: 件数バッジ＋カード（カテゴリ／重大度バッジ。Warning=warning、Error=danger、Info=中立）
-- **前回についての節**（idle / complete の、利用状況の節の上。`onSendPreviousHang` 指定かつ `previousHang` があるときだけ）: 見出し「前回について」＋ 前回どの処理（終了処理・再起動・更新の適用・音声デバイスを開く処理・不明のどれか）で止まっていたようかを書いた説明文 ＋「報告を送る」「送らない」ボタン。どちらかを押すと `previousHangAnswered` になり、節は短い確認表示（「わかりました。」）に切り替わる（[ADR-056](../../adr/ADR-056-hang-detection-and-reporting.md)）。`previousHangAttachesLog` が true のとき（1.0.0 未満のアプリ版）、説明文は「送る」で現在の `jamjam.log` も添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く（[ADR-059](../../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）
+- **前回についての節**（idle / complete の、利用状況の節の上。`onSendPreviousHang` 指定かつ `previousHang` があるときだけ）: 見出し「前回について」＋ 前回どの処理（終了処理・再起動・更新の適用・音声デバイスを開く処理・不明のどれか）で止まっていたようかを書いた説明文 ＋「報告を送る」「送らない」ボタン。どちらかを押すと `previousHangAnswered` になり、節は短い確認表示（「わかりました。」）に切り替わる（[ADR-056](../../adr/ADR-056-hang-detection-and-reporting.md)）。`previousHangAttachesLog` が true のとき（1.0.0 未満のアプリ版）、説明文は「送る」で現在の `jamuru.log` も添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く（[ADR-059](../../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）
 - **利用状況の節**（idle / complete の、ログファイルの節の上。`onUsageReportingChange` 指定時のみ）: 見出し「利用状況の送信」＋ スイッチ「利用状況を送る」（`role="switch"`。**既定オフ**）＋ 説明文 ＋ 「送る内容を見る」ボタン。説明文は次の 5 段で、英語・日本語の両方がある
   1. 既定はオフ。オンにすると動作の様子をサーバーに送る。何のために送るか（特定の機材や回線の不具合を見つけて直す）
   2. 送るもの: アプリの版・OS・CPU とメモリ・音声デバイスの名前と ID と対応・設定（自前サーバーの URL はホストとポートまで）・セッションごとの集計（経路の種類と接続の所要時間を含む）・自分の IP アドレス・エラーの種別・クラッシュの位置
@@ -279,11 +279,11 @@ stateDiagram-v2
   5. オンにすると乱数のインストール ID を作る。オフにすると、この ID と未送信の内容を捨てる
 
   「送る内容を見る」を押すと、次に送る NDJSON をそのまま（`install_id` を含めて）等幅で表示する。押すたびに読み直す。内容が空のとき、オフなら「オフです。何も集めず、何も送らず、インストール ID もありません」、オンなら「送る予定の内容はまだありません」を表示する。表示中にスイッチをオフにすると、表示を読み直して空にする。保存できなかったときはスイッチを戻し、理由を `role="alert"` で表示する。初回起動でも、この節以外の場所にも、ダイアログは出さない（[ADR-037](../../adr/ADR-037-usage-reporting-opt-in.md)）
-- **ログファイルの節**（idle / complete の末尾。`onOpenLogFolder` 指定時のみ）: 見出し「ログファイル」＋ 説明（不具合の報告に `jamjam.log` を添える）＋ 「ログのフォルダを開く」ボタン。押すと OS のファイルマネージャで `jamjam.log` のあるフォルダを開き、そのパスをボタンの下に表示する。開けなかったときは理由（パスを含む）を `role="alert"` で表示する（[ADR-036](../../adr/ADR-036-diagnostic-log-file.md)）
+- **ログファイルの節**（idle / complete の末尾。`onOpenLogFolder` 指定時のみ）: 見出し「ログファイル」＋ 説明（不具合の報告に `jamuru.log` を添える）＋ 「ログのフォルダを開く」ボタン。押すと OS のファイルマネージャで `jamuru.log` のあるフォルダを開き、そのパスをボタンの下に表示する。開けなかったときは理由（パスを含む）を `role="alert"` で表示する（[ADR-036](../../adr/ADR-036-diagnostic-log-file.md)）
 - **問題を報告の節**（ログファイルの節のさらに下。`onOpenReportProblem` 指定時のみ。[ADR-058](../../adr/ADR-058-report-a-problem.md)）: 状態は `reportProblemState`
   - **idle**: 見出し「問題を報告」＋ 説明（今困っていることを、ログと一言のコメントを添えて送る）＋「問題を報告する」ボタン（`onOpenReportProblem`）
   - **loading**: 「読み込み中...」
-  - **ready**: 送る `jamjam.log` の内容（`reportProblemPreview`、等幅・スクロール可の読み取り専用領域）＋ コメント欄（`textarea`、`maxLength=2000`、プレースホルダ「何が起きましたか？（任意）」、`reportProblemComment` / `onReportProblemCommentChange`）＋「送信する」（`onSendReportProblem`）「やめる」（`onCancelReportProblem`）ボタン。専用の同意チェックボックスは無く、「送信する」を押す操作自体が同意である（REQ-RPT-001）
+  - **ready**: 送る `jamuru.log` の内容（`reportProblemPreview`、等幅・スクロール可の読み取り専用領域）＋ コメント欄（`textarea`、`maxLength=2000`、プレースホルダ「何が起きましたか？（任意）」、`reportProblemComment` / `onReportProblemCommentChange`）＋「送信する」（`onSendReportProblem`）「やめる」（`onCancelReportProblem`）ボタン。専用の同意チェックボックスは無く、「送信する」を押す操作自体が同意である（REQ-RPT-001）
   - **sending**: ボタンを無効化し「送信中...」
   - **sent**: 「送信しました。ありがとうございます。」＋「閉じる」ボタン（`onCancelReportProblem` で idle に戻す）
   - **error**: `reportProblemError` を `role="alert"` で表示＋「もう一度試す」（`onSendReportProblem`）「やめる」ボタン

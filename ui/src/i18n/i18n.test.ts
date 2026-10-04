@@ -27,7 +27,7 @@ describe('i18n', () => {
 
   describe('locale detection', () => {
     // Given the system locale is Japanese and config.toml has no language setting
-    // When jamjam starts for the first time
+    // When jamuru starts for the first time
     // Then the UI is displayed in Japanese
     //
     // The detector reads the system locale via `navigator`; what this asserts is
@@ -101,7 +101,7 @@ describe('i18n', () => {
 
   describe('persistence', () => {
     // Given the user changed the language to Japanese
-    // When jamjam is restarted
+    // When jamuru is restarted
     // Then the UI is still in Japanese
     //
     // Persistence is delegated to the detector's localStorage cache. A real

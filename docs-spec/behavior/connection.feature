@@ -1,10 +1,10 @@
 # This specification is the source of truth. Sync implementation when changed.
 
 Feature: セッション接続
-  ミュージシャンがjamjamを使用してセッションに接続する
+  ミュージシャンがjamuruを使用してセッションに接続する
 
   Background:
-    Given jamjamアプリケーションが起動している
+    Given jamuruアプリケーションが起動している
     And オーディオデバイスが正常に認識されている
 
   # ルーム作成
@@ -13,7 +13,7 @@ Feature: セッション接続
   Scenario: ルームを作成する
     When ユーザーが「ルーム作成」を選択する
     Then 新しいルームIDが生成される
-    And 招待URL（例: jamjam://join/abc123）が表示される
+    And 招待URL（例: jamuru://join/abc123）が表示される
     And 招待コード（9文字英数字）が表示される
     And ユーザーは作成者として、他の参加者と同じ権限でルームに参加している
 
@@ -31,7 +31,7 @@ Feature: セッション接続
   @REQ-CON-103 @must
   Scenario: 招待URLでルームに参加する
     Given 作成者がルームを作成済み
-    When ユーザーが招待URL「jamjam://join/abc123」を開く
+    When ユーザーが招待URL「jamuru://join/abc123」を開く
     Then ルームへの接続が開始される
     And 接続成功後、セッション画面が表示される
 
@@ -110,7 +110,7 @@ Feature: セッション接続
   # 公開アドレス1本ではなく、同一ネットワーク内の相手には直接届くLANアドレスも試す。
   @REQ-CON-113 @must
   Scenario: 同一LAN内のアプリ同士が接続する
-    Given 2つのjamjamアプリが同じLAN（同じNATの内側）で起動している
+    Given 2つのjamuruアプリが同じLAN（同じNATの内側）で起動している
     When 一方がルームを作成し、もう一方が招待コードで参加する
     Then 双方が自分のLANアドレスとSTUN経由の公開アドレスの両方を候補として publish する
     And 音声はLANアドレス宛に直接送られ、ルーターが公開アドレスへの折り返しに

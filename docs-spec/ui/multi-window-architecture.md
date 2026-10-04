@@ -1,6 +1,6 @@
 # マルチウィンドウアーキテクチャ
 
-jamjam のマルチウィンドウ構成を定義する。
+jamuru のマルチウィンドウ構成を定義する。
 
 > **関連**: [architecture.md](../architecture.md) Section 8, [screens/README.md](./screens/README.md)
 
@@ -123,7 +123,7 @@ stateDiagram-v2
 
 ```
 ┌────────────────────────────────┐
-│          jamjam               │
+│          jamuru               │
 ├────────────────────────────────┤
 │                                │
 │    ┌────────────────────┐      │
@@ -348,7 +348,7 @@ JoinRoom サイズを初期値とし、接続後は `window_resize_main` が動�
   "app": {
     "windows": [
       {
-        "title": "jamjam - P2P Audio",
+        "title": "jamuru - P2P Audio",
         "width": 600,
         "height": 700,
         "resizable": true,
@@ -407,7 +407,7 @@ pub fn create_mixer_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         labels::MIXER,
         WebviewUrl::App("index.html#/mixer".into()),
     )
-    .title("jamjam - Mixer")
+    .title("jamuru - Mixer")
     .inner_size(800.0, 600.0)
     .min_inner_size(600.0, 400.0)
     .resizable(true)
@@ -421,7 +421,7 @@ pub fn create_chat_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         labels::CHAT,
         WebviewUrl::App("index.html#/chat".into()),
     )
-    .title("jamjam - Chat")
+    .title("jamuru - Chat")
     .inner_size(400.0, 500.0)
     .min_inner_size(300.0, 400.0)
     .resizable(true)
@@ -458,9 +458,9 @@ pub fn create_chat_window(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 ```json
 {
-  "window.connection.title": "jamjam",
-  "window.mixer.title": "jamjam - ミキサー",
-  "window.chat.title": "jamjam - チャット",
+  "window.connection.title": "jamuru",
+  "window.mixer.title": "jamuru - ミキサー",
+  "window.chat.title": "jamuru - チャット",
   "window.settings.title": "設定",
   "window.mixer.closeConfirm": "セッションから退室しますか？",
   "window.chat.hidden": "チャットウィンドウを非表示にしました"

@@ -1,4 +1,4 @@
-//! Page object model for the jamjam desktop app (ADR-025).
+//! Page object model for the jamuru desktop app (ADR-025).
 //!
 //! Scenarios describe what a *user* does and sees. They go through the
 //! screens in [`screens`]; they never see a CSS selector, a window label or
@@ -29,7 +29,7 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// Default for waits on UI transitions.
 pub const UI_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A running jamjam app under test.
+/// A running jamuru app under test.
 pub struct App {
     driver: Driver,
     process: Child,
@@ -60,7 +60,7 @@ impl App {
     }
 
     /// [`Self::launch_binary_with_devices`], also setting environment variables
-    /// for the app (for example `JAMJAM_LOG`).
+    /// for the app (for example `JAMURU_LOG`).
     pub fn launch_binary_with_env(
         binary: &Path,
         input_device: Option<&str>,
@@ -70,14 +70,14 @@ impl App {
         Self::launch_binary_seeded(binary, input_device, output_device, "", None, &[], env)
     }
 
-    /// Launches the release build with the jamjam server pinned to
+    /// Launches the release build with the jamuru server pinned to
     /// `server_url` and `args` on its command line (an invite link, as the OS
     /// passes it).
     ///
     /// A release build uses the server it was built with unless the config
     /// says otherwise, and the scenarios that need the app connected use a
     /// local one. Build it first, with any remote server - the config replaces it:
-    /// `JAMJAM_SERVER_URL=https://jamjam.example.com cargo build --release --manifest-path src-tauri/Cargo.toml --features e2e-control`
+    /// `JAMJAM_SERVER_URL=https://jamuru.example.com cargo build --release --manifest-path src-tauri/Cargo.toml --features e2e-control`
     pub fn launch_release(server_url: &str, args: &[&str]) -> DriverResult<Self> {
         Self::launch_binary_seeded(
             &release_binary_path(),
@@ -212,7 +212,7 @@ impl App {
         )
     }
 
-    /// Launches the debug build with the jamjam server pinned to
+    /// Launches the debug build with the jamuru server pinned to
     /// `server_url`, for scenarios about what the connection screen shows
     /// when that URL is wrong or unreachable (a leftover dev/test value in
     /// `config.toml`, for example). [`Self::launch_release`] is the
@@ -230,7 +230,7 @@ impl App {
     }
 
     /// Launches the debug build as someone who has not agreed to the terms of
-    /// use yet (a first launch), with the jamjam server pinned to
+    /// use yet (a first launch), with the jamuru server pinned to
     /// `server_url`.
     pub fn launch_first_run_with_server_url(server_url: &str) -> DriverResult<Self> {
         Self::launch_binary_with_terms(
@@ -271,24 +271,24 @@ impl App {
     pub fn log_file_path(&self) -> PathBuf {
         let home = self._home.path();
         if cfg!(target_os = "macos") {
-            home.join("Library/Logs/me.koeda.jamjam/jamjam.log")
+            home.join("Library/Logs/me.koeda.jamuru/jamuru.log")
         } else if cfg!(target_os = "windows") {
-            home.join("AppData/Local/me.koeda.jamjam/logs/jamjam.log")
+            home.join("AppData/Local/me.koeda.jamuru/logs/jamuru.log")
         } else {
-            home.join(".local/share/me.koeda.jamjam/logs/jamjam.log")
+            home.join(".local/share/me.koeda.jamuru/logs/jamuru.log")
         }
     }
 
     /// Where the app keeps the install ID and the record of a crash, inside the
-    /// throwaway `$HOME` (`ProjectDirs` of `jamjam`, then `usage`).
+    /// throwaway `$HOME` (`ProjectDirs` of `jamuru`, then `usage`).
     pub fn usage_state_dir(&self) -> PathBuf {
         let home = self._home.path();
         if cfg!(target_os = "macos") {
-            home.join("Library/Application Support/jamjam/usage")
+            home.join("Library/Application Support/jamuru/usage")
         } else if cfg!(target_os = "windows") {
-            home.join("AppData/Local/jamjam/data/usage")
+            home.join("AppData/Local/jamuru/data/usage")
         } else {
-            home.join(".local/share/jamjam/usage")
+            home.join(".local/share/jamuru/usage")
         }
     }
 
@@ -384,7 +384,7 @@ enum Terms {
     NotYet,
 }
 
-/// The `config.toml` line that pins the jamjam server.
+/// The `config.toml` line that pins the jamuru server.
 fn server_url_setting(server_url: &str) -> String {
     format!("server_url = {:?}\n", server_url)
 }
@@ -449,11 +449,11 @@ fn seed_identity(home: &Path, secret: &[u8; 32]) -> DriverResult<()> {
 /// The app's config directory under the throwaway `$HOME`, created if missing.
 fn config_dir(home: &Path) -> DriverResult<PathBuf> {
     let dir = if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/jamjam")
+        home.join("Library/Application Support/jamuru")
     } else if cfg!(target_os = "windows") {
-        home.join("AppData/Roaming/jamjam/config")
+        home.join("AppData/Roaming/jamuru/config")
     } else {
-        home.join(".config/jamjam")
+        home.join(".config/jamuru")
     };
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("could not create {}: {}", dir.display(), e))?;
@@ -465,9 +465,9 @@ fn default_binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../src-tauri/target/debug")
         .join(if cfg!(windows) {
-            "jamjam-app.exe"
+            "jamuru-app.exe"
         } else {
-            "jamjam-app"
+            "jamuru-app"
         })
 }
 
@@ -476,9 +476,9 @@ fn release_binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../src-tauri/target/release")
         .join(if cfg!(windows) {
-            "jamjam-app.exe"
+            "jamuru-app.exe"
         } else {
-            "jamjam-app"
+            "jamuru-app"
         })
 }
 

@@ -1,10 +1,10 @@
 # This specification is the source of truth. Sync implementation when changed.
 
 Feature: 音声品質
-  jamjamでの音声品質に関する振る舞い
+  jamuruでの音声品質に関する振る舞い
 
   Background:
-    Given jamjamアプリケーションが起動している
+    Given jamuruアプリケーションが起動している
     And オーディオデバイスが正常に認識されている
     And セッションに接続済み
 

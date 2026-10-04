@@ -1,4 +1,4 @@
-//! jamjam - Low-latency P2P audio communication for musicians
+//! jamuru - Low-latency P2P audio communication for musicians
 
 use std::io::Write as _;
 use std::net::SocketAddr;
@@ -28,7 +28,7 @@ use jamjam::network::{
 use jamjam::protocol::LatencyInfoMessage;
 
 #[derive(Parser)]
-#[command(name = "jamjam")]
+#[command(name = "jamuru")]
 #[command(about = "Low-latency P2P audio communication for musicians")]
 #[command(version)]
 struct Cli {
@@ -43,11 +43,11 @@ struct Cli {
 /// Audio settings shared by every command that opens a session.
 ///
 /// All optional: an unset flag falls back to the preset and then to the
-/// config file the GUI writes, so `jamjam` and the app behave the same way
+/// config file the GUI writes, so `jamuru` and the app behave the same way
 /// without repeating the flags (ADR-027).
 #[derive(clap::Args, Clone, Debug)]
 struct AudioArgs {
-    /// Preset name (see `jamjam preset list`)
+    /// Preset name (see `jamuru preset list`)
     #[arg(long)]
     preset: Option<String>,
 
@@ -121,7 +121,7 @@ enum Commands {
 
     /// Create a room on a signaling server and print its invite code
     CreateRoom {
-        /// jamjam server URL (e.g., https://example.com). The CLI asks it
+        /// jamuru server URL (e.g., https://example.com). The CLI asks it
         /// where its signaling server is
         #[arg(short, long)]
         server: String,
@@ -147,7 +147,7 @@ enum Commands {
 
     /// Join a room via signaling server
     JoinRoom {
-        /// jamjam server URL (e.g., https://example.com). The CLI asks it
+        /// jamuru server URL (e.g., https://example.com). The CLI asks it
         /// where its signaling server is
         #[arg(short, long)]
         server: String,
@@ -277,7 +277,7 @@ impl AudioArgs {
         let preset = match &self.preset {
             Some(name) => AudioPreset::from_name(name).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "unknown preset {:?}. `jamjam preset list` shows the available ones",
+                    "unknown preset {:?}. `jamuru preset list` shows the available ones",
                     name
                 )
             })?,
@@ -362,7 +362,7 @@ fn resolve_device_choice(
     }
     if !available.iter().any(|device| device.name == name) {
         anyhow::bail!(
-            "no {} device named {:?}. `jamjam devices list` shows what this machine has",
+            "no {} device named {:?}. `jamuru devices list` shows what this machine has",
             kind,
             name
         );
@@ -400,7 +400,7 @@ fn list_presets() {
 fn use_preset(name: &str) -> Result<()> {
     let preset = AudioPreset::from_name(name).ok_or_else(|| {
         anyhow::anyhow!(
-            "unknown preset {:?}. `jamjam preset list` shows the available ones",
+            "unknown preset {:?}. `jamuru preset list` shows the available ones",
             name
         )
     })?;
@@ -796,7 +796,7 @@ async fn run_room_session(
         anyhow::bail!("--report-json reports the audio, which --chat-only does not open");
     }
 
-    info!("Connecting through the jamjam server: {}", server);
+    info!("Connecting through the jamuru server: {}", server);
     let client = signaling_client(&server);
     let mut conn = client.connect().await?;
 
@@ -833,7 +833,7 @@ async fn run_room_session(
             println!("\nRoom created: {}", room_id);
             println!("Invite code:  {}", invite_code);
             println!(
-                "Others join with:\n  jamjam join-room --server {} --room {}",
+                "Others join with:\n  jamuru join-room --server {} --room {}",
                 server, invite_code
             );
             println!("Your peer ID: {}", peer_id);

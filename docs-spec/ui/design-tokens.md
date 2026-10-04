@@ -1,6 +1,6 @@
 # デザイントークン
 
-jamjam UI で使用する CSS Custom Properties（CSS変数）の定義。
+jamuru UI で使用する CSS Custom Properties（CSS変数）の定義。
 
 > **実装先**: `ui/src/styles/tokens.css`
 

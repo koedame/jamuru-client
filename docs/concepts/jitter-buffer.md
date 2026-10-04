@@ -52,7 +52,7 @@
 
 ## 動作モード
 
-jamjamでは3つの動作モードを提供しています。
+jamuruでは3つの動作モードを提供しています。
 
 ### 1. 適応的モード（Adaptive）
 
@@ -141,21 +141,21 @@ WiFiやモバイル回線では、ジッターが大きいためパススルー�
 しかし、パケットが完全にロスト（消失）した場合は、バッファでは対処できません。
 その場合は **PLC（Packet Loss Concealment）** や **FEC（Forward Error Correction）** が使われます。
 
-## jamjamでの設定方法
+## jamuruでの設定方法
 
 ### プリセットを使用する場合
 
 ```
-jamjam preset use zero-latency    # パススルー（0フレーム）
-jamjam preset use balanced        # 適応的（1-10フレーム）
+jamuru preset use zero-latency    # パススルー（0フレーム）
+jamuru preset use balanced        # 適応的（1-10フレーム）
 ```
 
 ### 手動で設定する場合
 
 ```
-jamjam config set jitter-buffer.mode adaptive
-jamjam config set jitter-buffer.min-frames 1
-jamjam config set jitter-buffer.max-frames 10
+jamuru config set jitter-buffer.mode adaptive
+jamuru config set jitter-buffer.min-frames 1
+jamuru config set jitter-buffer.max-frames 10
 ```
 
 ## まとめ

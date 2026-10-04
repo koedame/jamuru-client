@@ -22,7 +22,7 @@ pub(crate) const HANG_FILE: &str = "hang.json";
 /// `None` when the OS gives no data directory, in which case nothing is
 /// collected.
 pub fn state_dir() -> Option<PathBuf> {
-    ProjectDirs::from("", "", "jamjam").map(|dirs| dirs.data_local_dir().join("usage"))
+    ProjectDirs::from("", "", "jamuru").map(|dirs| dirs.data_local_dir().join("usage"))
 }
 
 /// 16 random bytes as 32 lowercase hex characters.

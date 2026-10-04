@@ -364,7 +364,7 @@ fn forget_helper<R: Runtime>(app: &AppHandle<R>, session: &str) {
 /// The window a helper works in. Closing it stops the help.
 fn open_window<R: Runtime>(app: &AppHandle<R>, label: &str, peer_name: &str) -> tauri::Result<()> {
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html#/help".into()))
-        .title(format!("jamjam - {}", peer_name))
+        .title(format!("jamuru - {}", peer_name))
         .inner_size(1134.0, 700.0)
         .min_inner_size(800.0, 500.0)
         .resizable(true)

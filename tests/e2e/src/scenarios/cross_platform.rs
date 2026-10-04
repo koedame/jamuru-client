@@ -73,10 +73,10 @@ impl CrossPlatformTest {
         match (host_nodes, client_nodes) {
             (Some(hosts), Some(clients)) if !hosts.is_empty() && !clients.is_empty() => {
                 // Driving a registered remote node needs an SSH control channel
-                // to start jamjam there and collect the captured audio back.
+                // to start jamuru there and collect the captured audio back.
                 TestResult::not_implemented(
                     scenario,
-                    "nodes are registered but there is no remote control channel to run jamjam on them",
+                    "nodes are registered but there is no remote control channel to run jamuru on them",
                 )
             }
             _ => TestResult {

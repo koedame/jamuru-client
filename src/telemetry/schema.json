@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/koedame/jamjam-client/src/telemetry/schema.json",
-  "title": "jamjam usage log line",
+  "$id": "https://github.com/koedame/jamuru-client/src/telemetry/schema.json",
+  "title": "jamuru usage log line",
   "description": "One line of the usage log the app sends when the user turns 'usage reporting' on. Every line is one JSON object: the envelope below plus the fields of its event. Values not listed here are rejected.",
   "type": "object",
   "$ref": "#/$defs/envelope",

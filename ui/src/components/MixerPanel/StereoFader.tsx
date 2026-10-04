@@ -1,7 +1,7 @@
 /**
  * StereoFader - Vertical volume fader
  *
- * jamjam brand (ui.pen Molecules/Fader/Stereo): recessed vertical track with a
+ * jamuru brand (ui.pen Molecules/Fader/Stereo): recessed vertical track with a
  * green glow fill from the bottom up to the thumb, a light rectangular thumb,
  * and a 0 dB reference line (unity gain = volume 80).
  */

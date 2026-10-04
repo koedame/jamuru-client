@@ -1,7 +1,7 @@
 /**
  * DevicesTab - Audio device settings
  *
- * Design: jamjam brand (ui.pen Screens/Settings, Devices tab).
+ * Design: jamuru brand (ui.pen Screens/Settings, Devices tab).
  */
 
 import { useTranslation } from "react-i18next";

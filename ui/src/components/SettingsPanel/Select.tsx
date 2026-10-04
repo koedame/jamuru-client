@@ -1,7 +1,7 @@
 /**
  * Select - Dropdown select component
  *
- * Design: jamjam brand (ui.pen Screens/Settings). A native <select> is layered
+ * Design: jamuru brand (ui.pen Screens/Settings). A native <select> is layered
  * at opacity 0 over a custom-styled value + chevron so we keep full native
  * keyboard/screen-reader behaviour while matching the flat dark visual.
  */

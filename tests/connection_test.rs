@@ -7,7 +7,7 @@ mod common;
 use jamjam::network::{Connection, Session, SessionConfig};
 
 /// Test: Create a session
-/// Given jamjam application is running
+/// Given jamuru application is running
 /// When user selects "Create Session"
 /// Then session is created
 #[tokio::test]
@@ -172,7 +172,7 @@ async fn test_session_repeated_recreate() {
 // ---------------------------------------------------------------------------
 
 /// Given the creator has created a room
-/// When the user opens the invite URL "jamjam://join/ABC234XYZ"
+/// When the user opens the invite URL "jamuru://join/ABC234XYZ"
 /// Then the room code is recovered so the join can start
 ///
 /// The OS-level registration that hands the URL to the app is platform plumbing;
@@ -189,7 +189,7 @@ fn test_invite_url_round_trips() {
         let code = InviteCode::generate();
         let url = invite_url(code.as_str());
         assert!(
-            url.starts_with("jamjam://join/"),
+            url.starts_with("jamuru://join/"),
             "unexpected invite URL: {}",
             url
         );
@@ -198,29 +198,29 @@ fn test_invite_url_round_trips() {
 
     // A lower-cased link still works: mail clients and chat apps do this.
     assert_eq!(
-        parse_invite_url("jamjam://join/abc234xyz"),
+        parse_invite_url("jamuru://join/abc234xyz"),
         Some("ABC234XYZ".to_string())
     );
 
     // Query strings and a trailing slash are tolerated.
     assert_eq!(
-        parse_invite_url("jamjam://join/ABC234XYZ?from=chat"),
+        parse_invite_url("jamuru://join/ABC234XYZ?from=chat"),
         Some("ABC234XYZ".to_string())
     );
     assert_eq!(
-        parse_invite_url("jamjam://join/ABC234XYZ/"),
+        parse_invite_url("jamuru://join/ABC234XYZ/"),
         Some("ABC234XYZ".to_string())
     );
 
     // Anything else must be refused rather than half-interpreted.
     for rejected in [
         "https://example.com/join/ABC234XYZ", // wrong scheme
-        "jamjam://leave/ABC234XYZ",           // wrong action
-        "jamjam://join/ABC",                  // too short
-        "jamjam://join/ABC2345",              // too long
-        "jamjam://join/ABC01I",               // excluded confusing characters
-        "jamjam://join/",                     // no code
-        "jamjam://join/ABC234XYZ/extra",      // deeper path
+        "jamuru://leave/ABC234XYZ",           // wrong action
+        "jamuru://join/ABC",                  // too short
+        "jamuru://join/ABC2345",              // too long
+        "jamuru://join/ABC01I",               // excluded confusing characters
+        "jamuru://join/",                     // no code
+        "jamuru://join/ABC234XYZ/extra",      // deeper path
         "",
     ] {
         assert_eq!(

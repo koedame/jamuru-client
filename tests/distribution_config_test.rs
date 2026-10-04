@@ -76,7 +76,7 @@ fn macos_bundle_declares_why_it_uses_the_microphone() {
 fn identifier_is_the_one_released_under() {
     assert_eq!(
         tauri_conf()["identifier"],
-        "me.koeda.jamjam",
+        "me.koeda.jamuru",
         "the identifier decides where the webview keeps user data; changing it \
          after release loses that data"
     );
@@ -285,16 +285,16 @@ fn the_source_names_no_production_server() {
 #[test]
 fn a_release_is_only_given_a_remote_server_over_tls() {
     for url in [
-        "https://jamjam.example.com",
-        "https://jamjam.example.com:443/base",
+        "https://jamuru.example.com",
+        "https://jamuru.example.com:443/base",
         "https://[2001:db8::1]:8443",
     ] {
         assert_eq!(release_server_url_problem(url), None, "{} was refused", url);
     }
     for url in [
         "",
-        "http://jamjam.example.com",
-        "wss://jamjam.example.com",
+        "http://jamuru.example.com",
+        "wss://jamuru.example.com",
         "https://",
         "https://localhost",
         "https://LOCALHOST:17890",
@@ -317,7 +317,7 @@ fn a_release_is_only_given_a_remote_server_over_tls() {
 }
 
 /// `cargo tauri dev` and the GUI E2E suite build without optimisation and
-/// must keep using a jamjam server on this machine, on the development port
+/// must keep using a jamuru server on this machine, on the development port
 /// 17890 that the GUI E2E suite's server occupies.
 ///
 /// Verifies: REQ-DIST-005
@@ -349,7 +349,7 @@ fn the_default_follows_the_build_profile() {
 /// The pages of this repository's documents that the app opens in the browser
 /// (the privacy page and the announcements, from the settings screen). They
 /// are published documents, not a server the app connects to.
-const PUBLISHED_DOCS_PREFIX: &str = "https://github.com/koedame/jamjam-client/blob/HEAD/docs/";
+const PUBLISHED_DOCS_PREFIX: &str = "https://github.com/koedame/jamuru-client/blob/HEAD/docs/";
 
 /// The server is decided in one place (`jamjam::config`), and the signaling
 /// server by the server itself. A URL written into the UI or the Tauri
@@ -422,8 +422,8 @@ fn host_of_strips_scheme_port_and_path() {
         "signaling.example.com"
     );
     assert_eq!(
-        host_of("https://user@jamjam.example.com/base"),
-        "jamjam.example.com"
+        host_of("https://user@jamuru.example.com/base"),
+        "jamuru.example.com"
     );
     assert_eq!(host_of("ws://localhost:17890/ws"), "localhost");
     assert_eq!(host_of("ws://[::1]:17890"), "[::1]");
@@ -512,7 +512,7 @@ fn updates_come_from_the_latest_release_only() {
     assert_eq!(
         endpoints,
         &serde_json::json!([
-            "https://github.com/koedame/jamjam-client/releases/latest/download/latest.json"
+            "https://github.com/koedame/jamuru-client/releases/latest/download/latest.json"
         ])
     );
 }
@@ -530,7 +530,7 @@ fn a_beta_looks_for_updates_in_the_beta_channel_and_changes_nothing_else() {
         conf["plugins"]["updater"],
         serde_json::json!({
             "endpoints": [
-                "https://github.com/koedame/jamjam-client/releases/download/beta-channel/latest.json"
+                "https://github.com/koedame/jamuru-client/releases/download/beta-channel/latest.json"
             ]
         }),
         "the beta settings must only say where to look; the key and the checks come from tauri.updater.conf.json"

@@ -1,6 +1,6 @@
 //! Finding the signaling server (`GET /api/v1/signaling`)
 //!
-//! The app holds no signaling address. It holds the address of the jamjam
+//! The app holds no signaling address. It holds the address of the jamuru
 //! server ([`crate::config::DEFAULT_SERVER_URL`], or `server_url` in
 //! `config.toml`) and asks it where to connect each time it connects, so the
 //! signaling server can move without a new release of the app (ADR-030).
@@ -25,7 +25,7 @@ pub struct SignalingEndpoint {
     pub url: String,
 }
 
-/// Asks the jamjam server at `server_url` where its signaling server is.
+/// Asks the jamuru server at `server_url` where its signaling server is.
 ///
 /// Redirects are not followed: the answer must come from the server that was
 /// asked, over the scheme it was asked with (a redirect to `http://` would let

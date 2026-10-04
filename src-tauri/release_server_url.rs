@@ -1,4 +1,4 @@
-//! The rule for the jamjam server a release build is given (ADR-030).
+//! The rule for the jamuru server a release build is given (ADR-030).
 //!
 //! Shared by the app's build script, which enforces it, and
 //! `tests/distribution_config_test.rs`, which pins it down. Only `std`, as a
@@ -11,7 +11,7 @@ use std::net::IpAddr;
 pub fn release_server_url_problem(url: &str) -> Option<&'static str> {
     if url.is_empty() {
         return Some(
-            "a release build needs JAMJAM_SERVER_URL: the jamjam server the app asks for its signaling server",
+            "a release build needs JAMJAM_SERVER_URL: the jamuru server the app asks for its signaling server",
         );
     }
     let Some(rest) = url.strip_prefix("https://") else {

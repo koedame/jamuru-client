@@ -109,17 +109,17 @@ def main(argv: list) -> int:
 
     out: list = []
     out.append(
-        "jamjam for Linux (AppImage): libraries bundled from the build system\n"
+        "jamuru for Linux (AppImage): libraries bundled from the build system\n"
         + "=" * 70 + "\n\n"
         "The AppImage contains shared libraries copied from the Ubuntu system it was\n"
         "built on. They are free software under their own licenses, many of them the\n"
-        "GNU Lesser General Public License; jamjam does not change them. This file\n"
+        "GNU Lesser General Public License; jamuru does not change them. This file\n"
         "lists them, reproduces each package's copyright file and the license texts\n"
         "those files refer to, and says where the source code is.\n\n"
         "Source code: the \"Source\" line of each package below links to the Ubuntu\n"
         "source package of exactly that version. For the three years from the release\n"
         "of the AppImage, the same source is also available on request through\n"
-        "https://github.com/koedame/jamjam-client/issues.\n\n"
+        "https://github.com/koedame/jamuru-client/issues.\n\n"
         "Replacing a library: an AppImage can be unpacked with `--appimage-extract`;\n"
         "the libraries are ordinary files in squashfs-root/usr/lib.\n"
     )

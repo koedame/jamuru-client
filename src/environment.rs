@@ -23,7 +23,7 @@ pub fn ram_gb() -> Option<u32> {
     round_ram_gb(system.total_memory())
 }
 
-/// Name of the audio host jamjam opens devices through: `coreaudio`, `wasapi`,
+/// Name of the audio host jamuru opens devices through: `coreaudio`, `wasapi`,
 /// `asio`, `alsa`, `jack`, ...
 pub fn audio_host() -> String {
     cpal::default_host().id().to_string()
