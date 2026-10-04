@@ -1,6 +1,6 @@
 //! Diagnostic log file (ADR-036).
 //!
-//! Every build, including the one users install, writes `jamjam.log` to the
+//! Every build, including the one users install, writes `jamuru.log` to the
 //! OS log directory. A release app has no console and no developer tools, so
 //! this file is the only way to see what the app did when something does not
 //! work. Rust `tracing` events, the core library's events and the webview's
@@ -22,8 +22,8 @@ use tauri_plugin_log::{log, RotationStrategy, Target, TargetKind};
 
 use crate::config::{AppConfig, ConfigState};
 
-/// `jamjam.log` in the OS log directory.
-const LOG_FILE_STEM: &str = "jamjam";
+/// `jamuru.log` in the OS log directory.
+const LOG_FILE_STEM: &str = "jamuru";
 
 /// A file is rotated once a write would push it past this size.
 const MAX_FILE_BYTES: u128 = 5 * 1024 * 1024;
@@ -31,15 +31,15 @@ const MAX_FILE_BYTES: u128 = 5 * 1024 * 1024;
 /// The active file plus two older generations.
 const KEPT_FILES: usize = 3;
 
-/// Overrides the levels, e.g. `JAMJAM_LOG=trace` or `JAMJAM_LOG=info,jamjam=trace`.
-pub const ENV_VAR: &str = "JAMJAM_LOG";
+/// Overrides the levels, e.g. `JAMURU_LOG=trace` or `JAMURU_LOG=info,jamuru=trace`.
+pub const ENV_VAR: &str = "JAMURU_LOG";
 
 /// Target of the lines that come from the webview.
 const WEBVIEW_TARGET: &str = "webview";
 
 /// Targets that are this project's own code (the core library, this crate and
 /// the webview). They log at debug by default, dependencies at info.
-const OWN_TARGETS: [&str; 3] = ["jamjam", "jamjam_app_lib", WEBVIEW_TARGET];
+const OWN_TARGETS: [&str; 3] = ["jamuru", "jamjam_app_lib", WEBVIEW_TARGET];
 
 /// One console call can carry a whole array or DOM dump. Without a cap a single
 /// line could rotate the useful history out of the file.
@@ -61,7 +61,7 @@ const SECRET_KEYS: [&str; 4] = ["password", "passwd", "secret", "token"];
 /// unmasked, for when a NAT/LAN fallback bug needs the real values.
 /// Default is to mask them: the file is the thing users are told to attach
 /// to a bug report, most often a public GitHub issue.
-pub const REDACT_ENV_VAR: &str = "JAMJAM_LOG_REDACT";
+pub const REDACT_ENV_VAR: &str = "JAMURU_LOG_REDACT";
 
 pub(crate) fn redaction_enabled() -> bool {
     parse_redact_flag(std::env::var(REDACT_ENV_VAR).ok().as_deref())
@@ -76,7 +76,7 @@ fn parse_redact_flag(value: Option<&str>) -> bool {
 pub struct LogSpec {
     default: log::LevelFilter,
     targets: Vec<(String, log::LevelFilter)>,
-    /// Parts of `JAMJAM_LOG` that are not a level or `target=level`.
+    /// Parts of `JAMURU_LOG` that are not a level or `target=level`.
     ignored: Vec<String>,
 }
 
@@ -99,7 +99,7 @@ impl LogSpec {
 
     /// Comma-separated parts. A bare level sets every target, this project's own
     /// included; `target=level` sets one target and wins over the bare level
-    /// wherever the two are written (`jamjam=trace,info` and `info,jamjam=trace`
+    /// wherever the two are written (`jamuru=trace,info` and `info,jamuru=trace`
     /// mean the same).
     pub fn parse(spec: Option<&str>) -> Self {
         let mut parsed = Self::defaults();
@@ -297,18 +297,18 @@ fn builder(spec: &LogSpec) -> tauri_plugin_log::Builder {
 /// directory cannot be created, and a diagnostic feature must not be able to
 /// keep the app from starting. Without a log file the app runs as before.
 pub fn init<R: Runtime>(spec: LogSpec) -> TauriPlugin<R> {
-    tauri::plugin::Builder::new("jamjam-log")
+    tauri::plugin::Builder::new("jamuru-log")
         .setup(move |app, _api| {
             match builder(&spec).split(app) {
                 Ok((_, max_level, logger)) => {
                     let logger = Box::new(SiteLimiter::new(logger));
                     if let Err(e) = tauri_plugin_log::attach_logger(max_level, logger) {
-                        eprintln!("jamjam: another logger is already installed: {}", e);
+                        eprintln!("jamuru: another logger is already installed: {}", e);
                     } else {
                         install_panic_hook();
                     }
                 }
-                Err(e) => eprintln!("jamjam: could not open the log file: {}", e),
+                Err(e) => eprintln!("jamuru: could not open the log file: {}", e),
             }
             Ok(())
         })
@@ -334,7 +334,7 @@ fn install_panic_hook() {
 /// log is and which settings were in effect.
 pub fn log_startup<R: Runtime>(app: &AppHandle<R>, spec: &LogSpec) {
     tracing::info!(
-        "jamjam {} starting (os={} arch={})",
+        "jamuru {} starting (os={} arch={})",
         app.package_info().version,
         std::env::consts::OS,
         std::env::consts::ARCH
@@ -489,7 +489,7 @@ fn secret_value_range(text: &str, key_end: usize) -> Option<(usize, usize)> {
 /// or link-local, not from the exact host part.
 ///
 /// `enabled` is threaded in rather than read from the environment here so
-/// this stays a pure function: [`redaction_enabled`] reads `JAMJAM_LOG_REDACT`.
+/// this stays a pure function: [`redaction_enabled`] reads `JAMURU_LOG_REDACT`.
 fn redact_network_identifiers(text: &str, enabled: bool) -> String {
     if !enabled {
         return text.to_string();
@@ -850,7 +850,7 @@ pub async fn log_frontend(level: String, message: String, webview: tauri::Webvie
     log::log!(target: WEBVIEW_TARGET, level, "{}", webview_line(webview.label(), &message));
 }
 
-/// Opens the folder that holds `jamjam.log` in the OS file manager and returns
+/// Opens the folder that holds `jamuru.log` in the OS file manager and returns
 /// its path, so the settings screen can also show where it is.
 #[tauri::command]
 pub fn log_open_dir(app: AppHandle) -> Result<String, String> {
@@ -901,7 +901,7 @@ mod tests {
     fn env_var_unset_logs_own_code_at_debug_and_dependencies_at_info() {
         let spec = LogSpec::parse(None);
 
-        assert_eq!(level_of(&spec, "jamjam"), LevelFilter::Debug);
+        assert_eq!(level_of(&spec, "jamuru"), LevelFilter::Debug);
         assert_eq!(level_of(&spec, "jamjam_app_lib"), LevelFilter::Debug);
         assert_eq!(level_of(&spec, "webview"), LevelFilter::Debug);
         assert_eq!(level_of(&spec, "tao"), LevelFilter::Info);
@@ -912,7 +912,7 @@ mod tests {
     fn env_var_is_a_bare_level_applies_to_own_code_and_dependencies() {
         let spec = LogSpec::parse(Some("trace"));
 
-        assert_eq!(level_of(&spec, "jamjam"), LevelFilter::Trace);
+        assert_eq!(level_of(&spec, "jamuru"), LevelFilter::Trace);
         assert_eq!(level_of(&spec, "tao"), LevelFilter::Trace);
     }
 
@@ -923,16 +923,16 @@ mod tests {
 
         assert_eq!(level_of(&spec, "tao"), LevelFilter::Debug);
         assert_eq!(level_of(&spec, "wry"), LevelFilter::Info);
-        assert_eq!(level_of(&spec, "jamjam"), LevelFilter::Info);
+        assert_eq!(level_of(&spec, "jamuru"), LevelFilter::Info);
     }
 
     /// Verifies: REQ-GUI-019
     #[test]
     fn env_var_names_a_target_and_a_bare_level_the_target_wins_in_either_order() {
-        for spec in ["jamjam=trace,info", "info,jamjam=trace"] {
+        for spec in ["jamuru=trace,info", "info,jamuru=trace"] {
             let spec = LogSpec::parse(Some(spec));
 
-            assert_eq!(level_of(&spec, "jamjam"), LevelFilter::Trace);
+            assert_eq!(level_of(&spec, "jamuru"), LevelFilter::Trace);
             assert_eq!(level_of(&spec, "jamjam_app_lib"), LevelFilter::Info);
             assert_eq!(level_of(&spec, "tao"), LevelFilter::Info);
         }
@@ -941,9 +941,9 @@ mod tests {
     /// Verifies: REQ-GUI-019
     #[test]
     fn env_var_has_an_invalid_part_the_rest_still_applies_and_the_part_is_reported() {
-        let spec = LogSpec::parse(Some("loud,jamjam=trace,tao=,=debug"));
+        let spec = LogSpec::parse(Some("loud,jamuru=trace,tao=,=debug"));
 
-        assert_eq!(level_of(&spec, "jamjam"), LevelFilter::Trace);
+        assert_eq!(level_of(&spec, "jamuru"), LevelFilter::Trace);
         assert_eq!(spec.ignored, vec!["loud", "tao=", "=debug"]);
     }
 
@@ -967,7 +967,7 @@ mod tests {
             &log::Record::builder()
                 .args(format_args!("{}", message))
                 .level(log::Level::Warn)
-                .target("jamjam")
+                .target("jamuru")
                 .file(Some("connection.rs"))
                 .line(Some(line))
                 .build(),
@@ -1256,16 +1256,16 @@ mod tests {
 
         for (text, expected) in [
             (
-                "log file: /Users/taro/Library/Logs/jp.jamjam/jamjam.log",
-                "log file: ~/Library/Logs/jp.jamjam/jamjam.log",
+                "log file: /Users/taro/Library/Logs/jp.jamuru/jamuru.log",
+                "log file: ~/Library/Logs/jp.jamuru/jamuru.log",
             ),
             (
-                "opened /home/taro/.config/jamjam",
-                "opened ~/.config/jamjam",
+                "opened /home/taro/.config/jamuru",
+                "opened ~/.config/jamuru",
             ),
             (
-                "C:\\Users\\Taro Y\\AppData\\Roaming\\jamjam",
-                "~\\AppData\\Roaming\\jamjam",
+                "C:\\Users\\Taro Y\\AppData\\Roaming\\jamuru",
+                "~\\AppData\\Roaming\\jamuru",
             ),
             ("/usr/lib/libasound.so", "/usr/lib/libasound.so"),
         ] {
@@ -1340,7 +1340,7 @@ mod tests {
                 Duration::from_secs(clock_reader.load(std::sync::atomic::Ordering::SeqCst))
             }),
         );
-        let ci_path = "/Users/runner/work/jamjam-client/jamjam-client/src/network/connection.rs";
+        let ci_path = "/Users/runner/work/jamuru-client/jamuru-client/src/network/connection.rs";
 
         for i in 0..20 {
             let message = format!("bad frame {}", i);
@@ -1349,7 +1349,7 @@ mod tests {
                 &log::Record::builder()
                     .args(format_args!("{}", message))
                     .level(log::Level::Warn)
-                    .target("jamjam")
+                    .target("jamuru")
                     .file(Some(ci_path))
                     .line(Some(1057))
                     .build(),
@@ -1361,7 +1361,7 @@ mod tests {
             &log::Record::builder()
                 .args(format_args!("bad frame 20"))
                 .level(log::Level::Warn)
-                .target("jamjam")
+                .target("jamuru")
                 .file(Some(ci_path))
                 .line(Some(1057))
                 .build(),
@@ -1398,18 +1398,18 @@ mod tests {
     #[test]
     fn opener_is_missing_the_error_names_the_log_folder() {
         let err =
-            open_dir_with("jamjam-no-such-opener", Path::new("/logs/me.koeda.jamjam")).unwrap_err();
+            open_dir_with("jamuru-no-such-opener", Path::new("/logs/me.koeda.jamuru")).unwrap_err();
 
-        assert!(err.contains("/logs/me.koeda.jamjam"), "{}", err);
+        assert!(err.contains("/logs/me.koeda.jamuru"), "{}", err);
     }
 
     #[cfg(unix)]
     /// Verifies: REQ-GUI-020
     #[test]
     fn opener_starts_the_result_is_the_log_folder_path() {
-        let opened = open_dir_with("true", Path::new("/logs/me.koeda.jamjam"));
+        let opened = open_dir_with("true", Path::new("/logs/me.koeda.jamuru"));
 
-        assert_eq!(opened, Ok("/logs/me.koeda.jamjam".to_string()));
+        assert_eq!(opened, Ok("/logs/me.koeda.jamuru".to_string()));
     }
 
     /// Verifies: REQ-GUI-018

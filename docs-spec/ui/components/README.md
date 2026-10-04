@@ -1,13 +1,13 @@
 # コンポーネントカタログ
 
-jamjam で使用する UI コンポーネントの一覧と仕様。
+jamuru で使用する UI コンポーネントの一覧と仕様。
 
 ---
 
 ## コンポーネント階層図
 
 ```
-jamjam UI
+jamuru UI
 ├── ConnectionPanel          # 接続画面
 │   ├── ConnectionHeader
 │   ├── CreateRoomButton

@@ -4,7 +4,7 @@ import { TermsViewer } from "./TermsViewer";
 
 const terms = `# 利用規約
 
-jamjam を使う方に、使い始める前に知っておいてほしいことを、この規約にまとめます。
+jamuru を使う方に、使い始める前に知っておいてほしいことを、この規約にまとめます。
 
 ## 第 1 条（本サービスでできること）
 

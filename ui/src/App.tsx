@@ -1,7 +1,7 @@
 /**
  * Main Application
  *
- * Root component for the jamjam P2P audio application.
+ * Root component for the jamuru P2P audio application.
  * Settings opens in a separate Tauri window. So does the window someone
  * helping works in, which draws the helped app's screen (`HelperScreen`).
  * Diagnostics are integrated into the Settings window's Diagnostics tab.

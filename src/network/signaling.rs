@@ -481,8 +481,8 @@ impl std::fmt::Display for InviteCode {
     }
 }
 
-/// URL scheme used by invite links (`jamjam://join/ABC234XYZ`)
-pub const INVITE_URL_SCHEME: &str = "jamjam";
+/// URL scheme used by invite links (`jamuru://join/ABC234XYZ`)
+pub const INVITE_URL_SCHEME: &str = "jamuru";
 
 /// Path segment that identifies a join link
 const INVITE_URL_PATH: &str = "join";
@@ -491,7 +491,7 @@ const INVITE_URL_PATH: &str = "join";
 ///
 /// ```
 /// use jamjam::network::invite_url;
-/// assert_eq!(invite_url("ABC234XYZ"), "jamjam://join/ABC234XYZ");
+/// assert_eq!(invite_url("ABC234XYZ"), "jamuru://join/ABC234XYZ");
 /// ```
 pub fn invite_url(invite_code: &str) -> String {
     format!(
@@ -502,7 +502,7 @@ pub fn invite_url(invite_code: &str) -> String {
 
 /// Extract the invite code from an invite URL (REQ-CON-103)
 ///
-/// Returns `None` unless the URL uses the `jamjam` scheme, names the `join`
+/// Returns `None` unless the URL uses the `jamuru` scheme, names the `join`
 /// path, and carries a code that parses as an [`InviteCode`]. Rejecting a
 /// malformed code here means the join attempt fails locally with a clear cause
 /// rather than as a "room not found" from the server.
@@ -512,7 +512,7 @@ pub fn invite_url(invite_code: &str) -> String {
 ///
 /// ```
 /// use jamjam::network::parse_invite_url;
-/// assert_eq!(parse_invite_url("jamjam://join/ABC234XYZ"), Some("ABC234XYZ".to_string()));
+/// assert_eq!(parse_invite_url("jamuru://join/ABC234XYZ"), Some("ABC234XYZ".to_string()));
 /// assert_eq!(parse_invite_url("https://example.com/join/ABC234XYZ"), None);
 /// ```
 pub fn parse_invite_url(url: &str) -> Option<String> {
@@ -520,7 +520,7 @@ pub fn parse_invite_url(url: &str) -> Option<String> {
     let rest = url.trim().strip_prefix(&prefix)?;
 
     // Tolerate a trailing slash or query string, but nothing further down a path:
-    // `jamjam://join/ABC234XYZ/extra` is not a code this function should guess at.
+    // `jamuru://join/ABC234XYZ/extra` is not a code this function should guess at.
     let code = rest
         .split(['?', '#'])
         .next()
@@ -540,7 +540,7 @@ pub fn parse_invite_url(url: &str) -> Option<String> {
 
 /// Signaling client for connecting to a signaling server
 ///
-/// Knows the jamjam server, not the signaling server: [`Self::connect`] asks
+/// Knows the jamuru server, not the signaling server: [`Self::connect`] asks
 /// the server where its signaling is (`GET /api/v1/signaling`) and connects
 /// there, proving the device identity (ADR-024). There is no anonymous
 /// connection.
@@ -550,7 +550,7 @@ pub struct SignalingClient {
 }
 
 impl SignalingClient {
-    /// A client for the jamjam server at `server_url` (`http://` or
+    /// A client for the jamuru server at `server_url` (`http://` or
     /// `https://`), connecting as `device_identity`.
     pub fn new(server_url: &str, device_identity: Arc<DeviceIdentity>) -> Self {
         ensure_crypto_provider_installed();
@@ -560,7 +560,7 @@ impl SignalingClient {
         }
     }
 
-    /// The jamjam server this client asks for the signaling server.
+    /// The jamuru server this client asks for the signaling server.
     pub fn server_url(&self) -> &str {
         &self.server_url
     }

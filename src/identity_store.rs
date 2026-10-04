@@ -1,6 +1,6 @@
 //! Where this installation's device identity lives (ADR-024)
 //!
-//! jamjam has no account registration. The first time the app or the CLI
+//! jamuru has no account registration. The first time the app or the CLI
 //! connects, it generates an Ed25519 key pair (see
 //! [`crate::network::DeviceIdentity`]), stores the secret key in the config
 //! directory, and reuses it from then on: the app and the CLI on one machine

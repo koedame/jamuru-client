@@ -1,4 +1,4 @@
-//! CPU performance diagnostics for jamjam
+//! CPU performance diagnostics for jamuru
 //!
 //! Provides CPU performance checks including:
 //! - Processing capability benchmark

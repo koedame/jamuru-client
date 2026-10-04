@@ -21,7 +21,7 @@ set -euo pipefail
 
 tag=${1:?usage: $0 <tag> <artifacts directory>}
 artifacts=${2:?usage: $0 <tag> <artifacts directory>}
-repository=${GITHUB_REPOSITORY:-koedame/jamjam-client}
+repository=${GITHUB_REPOSITORY:-koedame/jamuru-client}
 conf=src-tauri/tauri.conf.json
 
 conf_version=$(jq -r .version "$conf")
@@ -68,11 +68,11 @@ add_platform() {
     '.[$key] = {url: $url, signature: ($signature | rtrimstr("\n"))}' <<< "$platforms")
 }
 
-add_platform darwin-aarch64-app "$artifacts/jamjam-macos-arm64/**/*.app.tar.gz"
-add_platform darwin-x86_64-app "$artifacts/jamjam-macos-x64/**/*.app.tar.gz"
-add_platform linux-x86_64-appimage "$artifacts/jamjam-linux-x64/**/*.AppImage"
-add_platform windows-x86_64-nsis "$artifacts/jamjam-windows-x64/**/*-setup.exe"
-add_platform windows-x86_64-msi "$artifacts/jamjam-windows-x64/**/*.msi"
+add_platform darwin-aarch64-app "$artifacts/jamuru-macos-arm64/**/*.app.tar.gz"
+add_platform darwin-x86_64-app "$artifacts/jamuru-macos-x64/**/*.app.tar.gz"
+add_platform linux-x86_64-appimage "$artifacts/jamuru-linux-x64/**/*.AppImage"
+add_platform windows-x86_64-nsis "$artifacts/jamuru-windows-x64/**/*-setup.exe"
+add_platform windows-x86_64-msi "$artifacts/jamuru-windows-x64/**/*.msi"
 
 jq -n \
   --arg version "$version" \

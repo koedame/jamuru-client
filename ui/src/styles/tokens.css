@@ -1,5 +1,5 @@
 /**
- * Design Tokens - jamjam UI
+ * Design Tokens - jamuru UI
  *
  * All styling should use these CSS custom properties.
  * This enables theme switching (dark/light) and design consistency.
@@ -40,7 +40,7 @@ body {
 :root,
 :root[data-theme="dark"] {
   /* === Background ===
-     jamjam brand palette (ui.pen, Pencil schema 2.14, 2026-07-18改訂).
+     jamuru brand palette (ui.pen, Pencil schema 2.14, 2026-07-18改訂).
      page < card (card is lighter than page) < row (row is the darkest,
      used for recessed inputs/meters). */
   --color-bg-primary: #1C1C1E;
@@ -103,7 +103,7 @@ body {
 
 /* ===================================================================
    COLOR TOKENS - Light Theme
-   No ui.pen light-mode spec exists (jamjam is a dark-only brand for now,
+   No ui.pen light-mode spec exists (jamuru is a dark-only brand for now,
    like most pro-audio tools), so "light" intentionally mirrors "dark"
    exactly rather than keeping a stale palette. The theme switcher UI stays
    functional; only the light *values* changed.

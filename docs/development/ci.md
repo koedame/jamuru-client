@@ -4,7 +4,7 @@
 
 # CI/CD
 
-jamjamの継続的インテグレーション（CI）と継続的デリバリー（CD）について説明します。
+jamuruの継続的インテグレーション（CI）と継続的デリバリー（CD）について説明します。
 
 ## 概要
 
@@ -85,8 +85,8 @@ main・develop ブランチへの push またはタグ作成時に実行され�
 
 | きっかけ | 公開されるもの | Homebrew |
 |---------|---------------|----------|
-| `vX.Y.Z-beta.N` のタグ（develop か feature ブランチに打つ） | ベータ版。GitHub の pre-release になり "Latest" には載らない | `jamjam@beta` を更新 |
-| `vX.Y.Z` のタグ（main に打つ） | 正式版 | `jamjam` を更新 |
+| `vX.Y.Z-beta.N` のタグ（develop か feature ブランチに打つ） | ベータ版。GitHub の pre-release になり "Latest" には載らない | `jamuru@beta` を更新 |
+| `vX.Y.Z` のタグ（main に打つ） | 正式版 | `jamuru` を更新 |
 | 手動起動 | 何も公開しない（ビルドの予行演習） | 更新しない |
 
 リリースのビルドは、更新用の成果物と署名（`.sig`）も作り、更新情報 `latest.json` を Release に添えます（[ADR-041](../../docs-spec/adr/ADR-041-self-update.md)）。正式版のタグ `vX.Y.Z` は、`src-tauri/tauri.conf.json` の版と同じでなければ、更新情報を作る段階で失敗します。先に版を上げてからタグを打ってください。

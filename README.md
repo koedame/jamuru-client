@@ -1,4 +1,4 @@
-# jamjam
+# jamuru
 
 P2P Audio Communication for Musicians
 
@@ -6,7 +6,7 @@ Low-latency peer-to-peer audio communication application for macOS, Windows, and
 
 ## Documentation
 
-- [Storybook](https://koedame.github.io/jamjam-client/) - UI component library and design system
+- [Storybook](https://koedame.github.io/jamuru-client/) - UI component library and design system
 
 ### In-Repository Development Docs
 
@@ -35,8 +35,8 @@ See [docs/development/](./docs/development/building.md) for detailed development
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Clone the repository
-git clone https://github.com/koedame/jamjam-client.git
-cd jamjam-client
+git clone https://github.com/koedame/jamuru-client.git
+cd jamuru-client
 
 # Build core library
 cargo build
@@ -54,26 +54,10 @@ cargo test
 cargo tauri dev
 
 # Production build (pass the server the app asks for its signaling server)
-JAMJAM_SERVER_URL=https://<jamjam server> cargo tauri build
+JAMJAM_SERVER_URL=https://<jamuru server> cargo tauri build
 ```
 
 The built application will be in `src-tauri/target/release/bundle/`.
-
-#### App identifier change (`com.jamjam.app` → `me.koeda.jamjam`)
-
-If you ran the app before the identifier changed, the UI language choice and
-recently used emojis reset once: the webview keeps them per identifier.
-`config.toml` and the device identity are unaffected, as their location
-comes from the app name `jamjam`. No migration is needed; pick the language
-again in the app. The old webview data can be deleted:
-
-| Platform | Old webview data |
-|----------|------------------|
-| macOS | `~/Library/WebKit/com.jamjam.app` (WKWebView's default store) |
-| Linux | `~/.local/share/com.jamjam.app` |
-| Windows | `%LOCALAPPDATA%\com.jamjam.app` |
-
-See [ADR-029](./docs-spec/adr/ADR-029-distribution-app-settings.md).
 
 ## License
 
@@ -88,4 +72,4 @@ See [LICENSE](./LICENSE) for full terms and [THIRD_PARTY_LICENSES.md](./THIRD_PA
 
 ## Trademarks
 
-ASIO is a trademark of Steinberg Media Technologies GmbH. jamjam is not affiliated with or endorsed by Steinberg. All other product names are the property of their respective owners.
+ASIO is a trademark of Steinberg Media Technologies GmbH. jamuru is not affiliated with or endorsed by Steinberg. All other product names are the property of their respective owners.

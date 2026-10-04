@@ -228,7 +228,7 @@ mod tests {
     use super::*;
 
     /// The public document lists what a person who is helping may do, from
-    /// this table. Regenerate with `JAMJAM_UPDATE_REMOTE_PERMISSIONS=1 cargo test -p jamjam-app rpc::spec`.
+    /// this table. Regenerate with `JAMJAM_UPDATE_REMOTE_PERMISSIONS=1 cargo test -p jamuru-app rpc::spec`.
     const DOC_PATH: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../docs-spec/api/remote-permissions.md"

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "jamjam",
+  "productName": "jamuru",
   "version": "0.1.0",
-  "identifier": "me.koeda.jamjam",
+  "identifier": "me.koeda.jamuru",
   "build": {
     "beforeDevCommand": "npm run tauri:dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "jamjam - P2P Audio",
+        "title": "jamuru - P2P Audio",
         "width": 600,
         "height": 700,
         "resizable": true,
@@ -60,7 +60,7 @@
     "deep-link": {
       "desktop": {
         "schemes": [
-          "jamjam"
+          "jamuru"
         ]
       }
     }

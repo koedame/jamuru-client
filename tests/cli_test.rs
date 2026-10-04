@@ -1,4 +1,4 @@
-//! Integration tests for the `jamjam` CLI (ADR-027).
+//! Integration tests for the `jamuru` CLI (ADR-027).
 //!
 //! The CLI exists so a session can be driven without the GUI while debugging,
 //! which means these tests run the real binary: they would have caught that
@@ -18,7 +18,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
 /// The binary cargo just built for this test.
-const JAMJAM: &str = env!("CARGO_BIN_EXE_jamjam");
+const JAMURU: &str = env!("CARGO_BIN_EXE_jamuru");
 
 /// How long to wait for a line the CLI is expected to print. Generous: the
 /// binary starts and opens its sockets before it prints anything.
@@ -28,23 +28,23 @@ const OUTPUT_TIMEOUT: Duration = Duration::from_secs(20);
 /// the `directories` crate derives for this platform.
 fn config_path(home: &Path) -> PathBuf {
     let dir = if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/jamjam")
+        home.join("Library/Application Support/jamuru")
     } else if cfg!(target_os = "windows") {
-        home.join("AppData/Roaming/jamjam/config")
+        home.join("AppData/Roaming/jamuru/config")
     } else {
-        home.join(".config/jamjam")
+        home.join(".config/jamuru")
     };
     dir.join("config.toml")
 }
 
 /// Runs the CLI with an isolated `$HOME` and collects its output.
 fn run(home: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(JAMJAM)
+    Command::new(JAMURU)
         .args(args)
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .output()
-        .expect("the jamjam binary should run")
+        .expect("the jamuru binary should run")
 }
 
 /// A CLI process whose stdout is read line by line in the background, so a
@@ -56,7 +56,7 @@ struct Running {
 
 impl Running {
     fn start(home: &Path, args: &[&str]) -> Self {
-        let mut child = Command::new(JAMJAM)
+        let mut child = Command::new(JAMURU)
             .args(args)
             .env("HOME", home)
             .env("XDG_CONFIG_HOME", home.join(".config"))
@@ -64,7 +64,7 @@ impl Running {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .expect("the jamjam binary should start");
+            .expect("the jamuru binary should start");
 
         let stdout = child.stdout.take().expect("stdout is piped");
         let (tx, lines) = channel();

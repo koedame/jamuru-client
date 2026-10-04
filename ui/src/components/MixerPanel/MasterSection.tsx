@@ -1,7 +1,7 @@
 /**
  * MasterSection - Horizontal master output meter
  *
- * jamjam brand (ui.pen Molecules/Meter/MasterHorizontal): a display-only master
+ * jamuru brand (ui.pen Molecules/Meter/MasterHorizontal): a display-only master
  * bus meter shown in the room sidebar. Title + dB read-out on top, then L/R
  * horizontal level bars with a 0 dB reference marker. No mute control.
  */

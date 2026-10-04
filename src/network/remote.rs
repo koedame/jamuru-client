@@ -39,7 +39,7 @@ pub struct RemoteEnrollment {
     pub url: String,
 }
 
-/// Asks the jamjam server at `server_url` whether this installation is
+/// Asks the jamuru server at `server_url` whether this installation is
 /// enrolled, proving the device identity (ADR-024). Nothing else is sent.
 ///
 /// Redirects are not followed, for the reason given for the signaling question

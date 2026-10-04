@@ -1,4 +1,4 @@
-//! Integration tests for jamjam E2E testing
+//! Integration tests for jamuru E2E testing
 //!
 //! These tests verify the E2E test infrastructure works correctly.
 

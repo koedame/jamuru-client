@@ -133,7 +133,7 @@ impl UsageState {
     /// included) is a normal exit, so it does not on its own mean the
     /// confirmation screen has asked yet. While reporting is already on,
     /// this is queued at once like a crash and the pending file is cleared;
-    /// `jamjam.log` is not attached, because turning reporting on is consent
+    /// `jamuru.log` is not attached, because turning reporting on is consent
     /// to the aggregated items only and the log can carry other people's
     /// identifiers (ADR-065). While it is off, it is kept (in memory and on
     /// disk, so a further restart before the screen asks still finds it)
@@ -431,7 +431,7 @@ pub fn usage_previous_hang(state: tauri::State<'_, UsageState>) -> Option<Hang> 
 }
 
 /// Whether answering "send" to [`usage_previous_hang`] also attaches
-/// `jamjam.log` ([`attaches_log`]), so the confirmation screen can say so
+/// `jamuru.log` ([`attaches_log`]), so the confirmation screen can say so
 /// accurately (ADR-059).
 #[tauri::command]
 pub fn usage_previous_hang_attaches_log(app: AppHandle) -> bool {
@@ -439,7 +439,7 @@ pub fn usage_previous_hang_attaches_log(app: AppHandle) -> bool {
 }
 
 /// Before 1.0.0, only verification users run the app, so the confirmed hang
-/// report (ADR-059) also attaches `jamjam.log` through the "Report a problem"
+/// report (ADR-059) also attaches `jamuru.log` through the "Report a problem"
 /// send path. The automatic one sent while reporting is already on never
 /// does (ADR-065). From 1.0.0 neither does.
 fn major_attaches_log(major: u64) -> bool {
@@ -450,7 +450,7 @@ fn attaches_log<R: Runtime>(app: &AppHandle<R>) -> bool {
     major_attaches_log(app.package_info().version.major)
 }
 
-/// The comment sent with the `jamjam.log` [`attaches_log`] attaches to the
+/// The comment sent with the `jamuru.log` [`attaches_log`] attaches to the
 /// confirmed hang report, naming the stage and launch it is
 /// about so a report read on the server side does not need to be matched up
 /// with the structured `hang` event by anything but this text (the same
@@ -467,7 +467,7 @@ fn hang_report_comment(hang: &Hang, launch_id: &str) -> String {
 /// way, `usage_previous_hang` returns `None` afterwards.
 ///
 /// While `send` is true and [`attaches_log`] holds, this also sends
-/// `jamjam.log` through the same path "Report a problem" uses
+/// `jamuru.log` through the same path "Report a problem" uses
 /// (`report_problem::send_log_report`), so the two features share one
 /// receiver and one body shape instead of a second one being built here
 /// (ADR-059). That send is best-effort: a failure is logged and does not
@@ -498,7 +498,7 @@ async fn send_previous_hang<R: Runtime>(app: &AppHandle<R>, send: bool) -> Resul
         if attaches_log(app) {
             let comment = hang_report_comment(&pending.hang, &pending.launch_id);
             if let Err(err) = crate::report_problem::send_log_report(app, &comment).await {
-                tracing::warn!("hang report: could not attach jamjam.log: {err}");
+                tracing::warn!("hang report: could not attach jamuru.log: {err}");
             }
         }
     }
@@ -1358,7 +1358,7 @@ mod tests {
     /// A device with usage reporting already on never shows the
     /// confirmation screen: the incident is queued into the structured
     /// report at once, like a crash, and nothing is left pending for a
-    /// screen to ask about. `jamjam.log` is not attached on this path
+    /// screen to ask about. `jamuru.log` is not attached on this path
     /// (ADR-065).
     ///
     /// Verifies: REQ-TEL-019
