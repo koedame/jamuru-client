@@ -19,7 +19,7 @@ use super::bandwidth::{samples_per_audio_packet, UDP_IP_OVERHEAD_BYTES};
 use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket};
-use super::link_facts::{route_preference, LinkFacts, RouteOverride};
+use super::link_facts::{route_handicap, route_preference, LinkFacts, RouteOverride};
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
 use super::transport::UdpTransport;
@@ -317,17 +317,27 @@ impl<'a> Probing<'a> {
             return Verdict::WaitUntil(settled);
         }
 
+        // Routes are compared by the median plus what the kind of route is held to
+        let score = |i: usize| {
+            self.median(i)
+                .map(|m| m + route_handicap(self.candidates[i]))
+        };
+        let best = pool
+            .iter()
+            .filter_map(|&i| score(i))
+            .min()
+            .expect("the fastest candidate has a score");
         let index = pool
             .iter()
             .copied()
-            .filter(|&i| self.median(i).is_some_and(|m| m <= fastest + NEAR_ENOUGH))
+            .filter(|&i| score(i).is_some_and(|s| s <= best + NEAR_ENOUGH))
             .max_by_key(|&i| {
                 (
                     route_preference(self.candidates[i]),
-                    std::cmp::Reverse(self.median(i)),
+                    std::cmp::Reverse(score(i)),
                 )
             })
-            .expect("the fastest candidate is among them");
+            .expect("the best candidate is among them");
         Verdict::Fastest {
             index,
             rtt: self.median(index).expect("it has a round trip"),
@@ -1006,6 +1016,24 @@ impl Connection {
                 rtt,
                 replies,
             } => {
+                for (i, addr) in candidates.iter().enumerate() {
+                    if probing.reply_count(i) > 0 {
+                        let round_trips: Vec<String> = probing.rtt[i]
+                            .iter()
+                            .map(|rtt| match rtt {
+                                Some(rtt) => format!("{:.1}", rtt.as_secs_f32() * 1000.0),
+                                None => "-".to_string(),
+                            })
+                            .collect();
+                        debug!(
+                            "Candidate {} answered {} of {} probes, round trips (ms): {}",
+                            addr,
+                            probing.reply_count(i),
+                            probing.sent_count(i),
+                            round_trips.join(" ")
+                        );
+                    }
+                }
                 info!(
                     "Selected candidate: {} (median round trip {:.1} ms of {} replies, the shortest of {} candidates)",
                     candidates[index],
@@ -2373,6 +2401,37 @@ mod tests {
         let verdict = settled(&probing, t0);
 
         assert_eq!(chosen(verdict, &candidates), candidates[1]);
+    }
+
+    /// A Tailscale path that looks a little faster in a 1 s check can still be a relay that
+    /// stalls afterwards; the public address that answers as well is used.
+    ///
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_tailscale_address_is_only_a_little_faster_than_a_public_one_the_public_one_is_used() {
+        let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        answer_probes(&mut probing, t0, 0, [48_000; 5]);
+        answer_probes(&mut probing, t0, 1, [52_000; 5]);
+
+        let verdict = settled(&probing, t0);
+
+        assert_eq!(chosen(verdict, &candidates), candidates[1]);
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_tailscale_address_is_much_faster_than_a_public_one_the_tailscale_one_is_used() {
+        let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        answer_probes(&mut probing, t0, 0, [20_000; 5]);
+        answer_probes(&mut probing, t0, 1, [52_000; 5]);
+
+        let verdict = settled(&probing, t0);
+
+        assert_eq!(chosen(verdict, &candidates), candidates[0]);
     }
 
     /// Verifies: REQ-CON-115
