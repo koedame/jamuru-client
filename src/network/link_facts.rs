@@ -9,7 +9,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -79,6 +79,22 @@ pub(super) fn route_preference(addr: SocketAddr) -> u32 {
     match LinkRoute::of(addr) {
         LinkRoute::Lan | LinkRoute::Loopback => NEAREST_ROUTE_PREFERENCE,
         LinkRoute::Public => 2,
+    }
+}
+
+/// How much slower than a public address a route through an overlay is held to be when
+/// the two are compared by round trip. An overlay that answers may be relayed (Tailscale's
+/// DERP), and a relay can stall for seconds after a check that looked fine, so it has to be
+/// clearly faster than the public address to be used, not merely level with it.
+pub(super) const OVERLAY_HANDICAP: Duration = Duration::from_millis(10);
+
+/// What is added to a round trip to `addr` before routes are compared:
+/// [`OVERLAY_HANDICAP`] for an overlay address, nothing for any other.
+pub(super) fn route_handicap(addr: SocketAddr) -> Duration {
+    if is_overlay(addr.ip()) {
+        OVERLAY_HANDICAP
+    } else {
+        Duration::ZERO
     }
 }
 
@@ -293,6 +309,14 @@ mod tests {
 
         assert!(public > overlay, "{public} > {overlay}");
         assert!(public_v6 > overlay, "{public_v6} > {overlay}");
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_the_address_is_a_tailscale_one_its_round_trip_is_held_to_be_longer_than_any_others() {
+        assert_eq!(route_handicap(addr("100.68.50.7:5000")), OVERLAY_HANDICAP);
+        assert_eq!(route_handicap(addr("203.0.113.7:5000")), Duration::ZERO);
+        assert_eq!(route_handicap(addr("192.168.1.20:5000")), Duration::ZERO);
     }
 
     /// Verifies: REQ-CON-115
