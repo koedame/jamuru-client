@@ -432,7 +432,13 @@ impl AudioEngine {
 
         let route = self.playback_route;
         let sample_rate = self.config.sample_rate;
-        let frame_size = self.config.frame_size;
+        let period = output_period_frames(self.config.frame_size);
+        if period != self.config.frame_size {
+            info!(
+                "Playback opens with a period of {} frames, not the frame size {}",
+                period, self.config.frame_size
+            );
+        }
         let wanted = device_id.cloned();
         let err_fn = self.stream_error_handler();
 
@@ -449,12 +455,12 @@ impl AudioEngine {
             let stream_config = StreamConfig {
                 channels: device_channels as u16,
                 sample_rate,
-                buffer_size: cpal::BufferSize::Fixed(frame_size),
+                buffer_size: cpal::BufferSize::Fixed(period),
             };
 
             let mut puller = RoutedPuller {
                 puller: FramePuller::new(frame_samples, fill_frame),
-                stereo: vec![0.0; frame_size as usize * 2 * 4],
+                stereo: vec![0.0; period as usize * 2 * 4],
                 device_channels,
                 route,
                 sample_rate,
@@ -556,6 +562,24 @@ fn stream_open_error(error: cpal::Error) -> AudioError {
 fn open_channel_count(device: &cpal::Device, input: bool, sample_rate: u32, needed: usize) -> u16 {
     let offered = offered_channel_counts(device, input, sample_rate);
     smallest_channel_count(&offered, needed).unwrap_or(needed as u16)
+}
+
+/// The smallest output period PipeWire's ALSA plugin starts playback with.
+/// It raises a smaller period to this internally and raises no POLLOUT until
+/// that much is free, so a stream opened at two periods of less (cpal's start
+/// threshold) never gets past its first write and plays nothing.
+const LINUX_MIN_OUTPUT_PERIOD: u32 = 64;
+
+/// How many frames the output device is asked for at a time. The frame source
+/// carries the remainder of a request over to the next (`FramePuller`), so a
+/// period longer than the session's frame costs no samples; PipeWire's period
+/// floor is this value already, so it costs no latency there either.
+fn output_period_frames(frame_size: u32) -> u32 {
+    if cfg!(target_os = "linux") {
+        frame_size.max(LINUX_MIN_OUTPUT_PERIOD)
+    } else {
+        frame_size
+    }
 }
 
 /// Hands the device the stereo a frame source produces, on the channels the
@@ -721,6 +745,65 @@ mod tests {
         assert!(matches!(result, Err(AudioError::DeviceUnresponsive(_))));
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(!engine.is_playback_running());
+    }
+
+    /// PipeWire's ALSA plugin raises no POLLOUT for a period under 64 frames,
+    /// so a stream opened at 32 or 48 never plays (cpal 0.18, pipewire 1.4.2).
+    ///
+    /// Verifies: REQ-AUD-036
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn on_linux_an_output_period_is_never_under_64_frames() {
+        assert_eq!(output_period_frames(32), 64);
+        assert_eq!(output_period_frames(48), 64);
+        assert_eq!(output_period_frames(64), 64);
+        assert_eq!(output_period_frames(128), 128);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn off_linux_the_output_period_is_the_frame_size() {
+        assert_eq!(output_period_frames(32), 32);
+    }
+
+    /// The period alone proves nothing about the device: this opens the
+    /// system's default output at a frame size of 32 and counts how often the
+    /// device asks for samples. Skipped where there is no output device to
+    /// open (CI without PipeWire).
+    ///
+    /// Verifies: REQ-AUD-036
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn on_linux_playback_at_a_frame_size_of_32_is_asked_for_samples() {
+        use cpal::traits::HostTrait;
+        if cpal::default_host().default_output_device().is_none() {
+            eprintln!("skipped: no default output device");
+            return;
+        }
+        for frame_size in [32u32, 48] {
+            let mut engine = AudioEngine::new(AudioConfig {
+                frame_size,
+                ..AudioConfig::default()
+            });
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counted = calls.clone();
+            let opened =
+                engine.start_playback_with_source(None, frame_size as usize * 2, move |_| {
+                    counted.fetch_add(1, Ordering::Relaxed);
+                    0
+                });
+            if opened.is_err() {
+                eprintln!("skipped: the default output device does not open");
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+            engine.stop_playback();
+            let asked = calls.load(Ordering::Relaxed);
+            assert!(
+                asked > 10,
+                "frame size {frame_size}: the device asked the source {asked} times in 1 s"
+            );
+        }
     }
 
     /// A source that writes `frame_len` samples per call, counting up from 0,
