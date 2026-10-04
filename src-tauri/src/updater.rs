@@ -19,10 +19,11 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::config;
+use crate::watchdog::Watchdog;
 use crate::windows;
 
 /// Left alone so the first frames and the audio device setup are not competing
@@ -210,10 +211,19 @@ async fn install_newer<R: Runtime>(
     wait_for_session: bool,
 ) -> Result<Option<String>, UpdateError> {
     let turn = GATE.begin()?;
-    let checked = within("checking for a release", CHECK_LIMIT, async {
-        app.updater()?.check().await
-    })
-    .await?;
+    // The Windows updater ends the process itself once the installer has
+    // started, without `RunEvent::Exit`; without this the next launch would
+    // report every update as a launch that did not end cleanly.
+    let hook_app = app.clone();
+    let updater = app
+        .updater_builder()
+        .on_before_exit(move || {
+            if let Some(watchdog) = hook_app.try_state::<Watchdog>() {
+                watchdog.handing_over_to_installer();
+            }
+        })
+        .build()?;
+    let checked = within("checking for a release", CHECK_LIMIT, updater.check()).await?;
     let Some(update) = checked else {
         tracing::debug!("No newer release");
         return Ok(None);
@@ -245,7 +255,12 @@ async fn install_newer<R: Runtime>(
     };
 
     let version = update.version.clone();
-    install(update, bytes, turn).await?;
+    if let Err(e) = install(update, bytes, turn).await {
+        if let Some(watchdog) = app.try_state::<Watchdog>() {
+            watchdog.handover_failed();
+        }
+        return Err(e);
+    }
     Ok(Some(version))
 }
 

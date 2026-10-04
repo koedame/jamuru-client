@@ -149,6 +149,7 @@ pub fn run() {
     let previous_incident = watchdog::previous_incident(usage.reporter());
     usage.apply_previous_incident(previous_incident);
     let watchdog = watchdog::Watchdog::install(usage.reporter().clone());
+    app.manage(watchdog.clone());
     if usage.reporter().is_enabled() {
         usage.report_launch(startup_config);
     }

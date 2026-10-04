@@ -104,7 +104,7 @@ sequenceDiagram
 - `usage_reporting` がオフのときは記録を保持し（`UsageReporter::previous_hang`）、Diagnostics タブの案内から「送る」を選んだときだけ、送信のためだけに作って送信後に必ず捨てるインストール ID でこの 1 件を送る（`UsageReporter::send_one_off_hang`。`usage_reporting` 自体はオンにならない。REQ-TEL-020）。「送らない」を選べば記録はそのまま捨てる
 - **アプリの版が 1.0.0 未満のときは、「送る」を選ぶと現在の `jamuru.log` も追加で送る**（`src-tauri/src/usage.rs` の `attaches_log`。ADR-058「問題を報告」と同じ送り先・同じ本文の作り方を再利用する。REQ-TEL-021・[ADR-059](../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）。1.0.0 以上ではこの追加送信をしない
 - どちらの経路も送るコメントに区間名と起動 ID を機械的に埋めるので、利用ログ側の `hang` 行の `launch_id` と突き合わせられる
-- **確認していない記録は、再起動をまたいでも残る。** `usage_reporting` がオフの間、まだ確認していない記録は `pending_hang.json` にも書く（`watchdog::save_pending_hang` / `read_pending_hang` / `clear_pending_hang`）。再起動（自動更新の適用を含む）は通常の `RunEvent::Exit` を経て `running.json` を消すので、次の起動が見るのはその再起動自身の痕跡だけになるが、`pending_hang.json` は確認が済む（Diagnostics タブが答えを送る）かオンの状態で自動送信されるまで残る（REQ-TEL-022）
+- **確認していない記録は、再起動をまたいでも残る。** `usage_reporting` がオフの間、まだ確認していない記録は `pending_hang.json` にも書く（`watchdog::save_pending_hang` / `read_pending_hang` / `clear_pending_hang`）。再起動（自動更新の適用を含む）は通常の `RunEvent::Exit` を経て `running.json` を消すので（Windows の更新だけは、インストーラーを起動したあとアップデーター自身が `process::exit` で終わるため、その直前の `on_before_exit` で `Watchdog::handing_over_to_installer` が消す。起動できなかったときは `handover_failed` が戻す。REQ-TEL-024）、次の起動が見るのはその再起動自身の痕跡だけになるが、`pending_hang.json` は確認が済む（Diagnostics タブが答えを送る）かオンの状態で自動送信されるまで残る（REQ-TEL-022）
 
 ## 送る内容を見る
 
