@@ -82,12 +82,12 @@ tauri = { version = "2", features = ["test"] }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_System_Threading"] }
 # `debug.screenshot` on Windows goes to WebView2 (`CapturePreview`), which writes
-# a PNG into an `IStream`. `windows-webview2` is the 0.61 that webview2-com is
-# built on; the 0.62 above would make the stream a different type.
-webview2-com = { version = "0.38", optional = true }
-windows-webview2 = { package = "windows", version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"], optional = true }
+# a PNG into an `IStream`. The `Win32_System_Com*` features are for that stream,
+# and it has to be the same `windows` version webview2-com is built on (0.62);
+# a second `windows` entry cannot be declared, so they share this one.
+windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"] }
+webview2-com = { version = "0.39", optional = true }
 
 # `debug.screenshot` on Linux asks WebKitGTK for a snapshot of the window and
 # writes it as a PNG. cairo-rs is pinned to the version webkit2gtk's own
@@ -137,7 +137,6 @@ debug-tools = [
     "dep:objc2-foundation",
     "dep:objc2-web-kit",
     "dep:webview2-com",
-    "dep:windows-webview2",
     "jamjam/fault-injection",
     "jamjam/device-loop",
 ]
