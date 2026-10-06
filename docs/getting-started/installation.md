@@ -64,6 +64,14 @@ auto_update = false
 
 `config.toml` の場所は [トラブルシューティング](./troubleshooting.md) を参照してください。
 
+#### 旧名 jamjam の版から更新した場合
+
+アプリの名前を jamjam から jamuru に変えたため、設定の置き場も `jamjam` から `jamuru` のフォルダに変わりました。旧名の版の設定・端末の鍵・同意の記録は引き継がれないので、更新後の最初の起動で同意の画面がもう一度出て、端末の ID も新しくなります。旧名のフォルダは使われなくなります。不要なら削除して構いません。
+
+- Linux: `~/.config/jamjam`
+- macOS: `~/Library/Application Support/jamjam`
+- Windows: `%APPDATA%\jamjam`
+
 ### リリースビルドからのインストール
 
 1. [GitHub Releases](https://github.com/koedame/jamuru-client/releases) から最新版をダウンロード
