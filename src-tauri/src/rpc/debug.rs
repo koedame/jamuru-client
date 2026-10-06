@@ -448,7 +448,7 @@ async fn screenshot<R: Runtime>(
 ) -> Result<Value, RpcError> {
     use webview2_com::CapturePreviewCompletedHandler;
     use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
-    use windows_webview2::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
+    use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
 
     let label = params
         .window
@@ -514,10 +514,8 @@ async fn screenshot<R: Runtime>(
 /// the PNG header (width and height are the two big-endian words after the
 /// `IHDR` tag).
 #[cfg(target_os = "windows")]
-fn png_of(
-    stream: &windows_webview2::Win32::System::Com::IStream,
-) -> Result<(i32, i32, Vec<u8>), String> {
-    use windows_webview2::Win32::System::Com::{STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET};
+fn png_of(stream: &windows::Win32::System::Com::IStream) -> Result<(i32, i32, Vec<u8>), String> {
+    use windows::Win32::System::Com::{STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET};
 
     let mut stat = STATSTG::default();
     unsafe { stream.Stat(&mut stat, STATFLAG_NONAME) }.map_err(|e| e.to_string())?;
