@@ -18,7 +18,7 @@
 
 ### デザイン
 
-jamjam ブランドガイド準拠（ui.pen Screens/JoinRoom、2026-07-18 刷新）:
+jamuru ブランドガイド準拠（ui.pen Screens/JoinRoom、2026-07-18 刷新）:
 - 背景は黒3階調（`bg-page` < `bg-card` < 逆に `bg-row` が最暗）、アクセントは `accent-blue`
 - 見出し・本文は Inter、コード表示は Roboto Mono
 - 1px ボーダー、`--radius-control`（8px）角丸
@@ -34,10 +34,10 @@ jamjam ブランドガイド準拠（ui.pen Screens/JoinRoom、2026-07-18 刷新
 
 ```
 ┌──────────────────────────────────────┐
-│ jamjam                          [⚙]  │  ← ヘッダー（ロゴ+設定、画面幅いっぱい）
+│ jamuru                          [⚙]  │  ← ヘッダー（ロゴ+設定、画面幅いっぱい）
 ├──────────────────────────────────────┤
 │                                       │
-│         jamjam へようこそ            │  ← ウェルカムタイトル
+│         jamuru へようこそ            │  ← ウェルカムタイトル
 │   低遅延で高品質な音声セッションを    │  ← ウェルカムサブタイトル
 │         始めましょう                 │
 │                                       │
@@ -64,7 +64,7 @@ jamjam ブランドガイド準拠（ui.pen Screens/JoinRoom、2026-07-18 刷新
 
 ```
 ┌────────────────────────────────┐
-│          jamjam               │
+│          jamuru               │
 ├────────────────────────────────┤
 │                                │
 │                                │
@@ -80,9 +80,9 @@ jamjam ブランドガイド準拠（ui.pen Screens/JoinRoom、2026-07-18 刷新
 
 ```
 ┌──────────────────────────────────────┐
-│ jamjam                          [⚙]  │
+│ jamuru                          [⚙]  │
 ├──────────────────────────────────────┤
-│         jamjam へようこそ            │
+│         jamuru へようこそ            │
 │   低遅延で高品質な音声セッションを    │
 │         始めましょう                 │
 │    ┌────────────────────────────┐    │
@@ -452,7 +452,7 @@ stateDiagram-v2
 
 ```json
 {
-  "connection.title": "jamjam",
+  "connection.title": "jamuru",
   "connection.createRoom": "ルームを作成",
   "connection.or": "または",
   "connection.codeLabel": "招待コード",
@@ -625,7 +625,7 @@ export interface ConnectionPanelProps {
 
 ```json
 {
-  "session.welcome.title": "jamjam へようこそ",
+  "session.welcome.title": "jamuru へようこそ",
   "session.welcome.subtitle": "低遅延で高品質な音声セッションを始めましょう",
   "session.testRoom.title": "テストルーム",
   "session.testRoom.description": "動作確認用のテストルームに接続します"

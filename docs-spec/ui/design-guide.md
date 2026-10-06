@@ -1,6 +1,6 @@
-# デザインガイド - jamjam UI
+# デザインガイド - jamuru UI
 
-jamjam のビジュアルデザイン方針。MixerPanel をトンマナのベースとする。
+jamuru のビジュアルデザイン方針。MixerPanel をトンマナのベースとする。
 
 ---
 

@@ -1,4 +1,4 @@
-//! jamjam - Low-latency P2P audio communication for musicians
+//! jamuru - Low-latency P2P audio communication for musicians
 //!
 //! This library provides the core functionality for real-time audio
 //! streaming between musicians over a network.

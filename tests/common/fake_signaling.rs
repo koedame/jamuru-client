@@ -1,4 +1,4 @@
-//! A jamjam server on this machine, for tests that run the real CLI in a room.
+//! A jamuru server on this machine, for tests that run the real CLI in a room.
 //!
 //! It answers `GET /api/v1/signaling` with its own WebSocket, takes the device identity headers
 //! without checking them, and keeps rooms the way the real server does for what the CLI uses:

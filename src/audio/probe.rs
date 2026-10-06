@@ -1,4 +1,4 @@
-//! Round-trip timing through the whole audio path, for `jamjam ... --input-bursts`.
+//! Round-trip timing through the whole audio path, for `jamuru ... --input-bursts`.
 //!
 //! A continuous tone cannot say which sound came back for which one that was
 //! sent. A short burst every [`BURST_INTERVAL`] can: each burst is stamped when

@@ -79,7 +79,7 @@ Windows で ASIO ドライバ選択時にデバイス遅延 3ms 以下になる�
 
 固まった呼び出しに上限を付け、開き直しをセッションのスレッドの外に出した（設定の読み書き・別のデバイスへの切り替え・ネットワークが待たされない）。Linux では、仮想デバイスと本物のシグナリングサーバーで、アプリと CLI の 2 台を同じルームに入れ、`debug.device_hang` で開く・一覧の呼び出しを止めて確かめた: 設定の変更は 3 秒（一覧の上限）で返り、次からは待たない。止まっている間も受信パケットは増え続け、接続は切れない。8 秒で「入力デバイスが応答しません」が画面に出て、止めを解いて選び直すと消える。
 
-macOS の固まりそのもの（`coreaudiod` かドライバ）は、2026-09-26 23:19（beta.20）と、27 日 2:54（beta.22 に自動更新した直後の最初の入室）に AG06 の取り込みを開く呼び出しで起きた。ほかにも同じ日のログに、開くのに 137 秒（音声が止まって 761 秒後）と 4.6 秒（8232 秒後）かかった記録がある。jamjam の再起動の直後だけでなく、間が空いたあとや直後にも起きる。`debug.restart` の 13 秒後（beta.21）では起きなかった。
+macOS の固まりそのもの（`coreaudiod` かドライバ）は、2026-09-26 23:19（beta.20）と、27 日 2:54（beta.22 に自動更新した直後の最初の入室）に AG06 の取り込みを開く呼び出しで起きた。ほかにも同じ日のログに、開くのに 137 秒（音声が止まって 761 秒後）と 4.6 秒（8232 秒後）かかった記録がある。jamuru の再起動の直後だけでなく、間が空いたあとや直後にも起きる。`debug.restart` の 13 秒後（beta.21）では起きなかった。
 
 beta.22 の Mac 実機（AG06 入出力 1/2 番・送信 2ch・バッファ 64）での結果:
 
@@ -106,7 +106,7 @@ beta.22 の Mac 実機（AG06 入出力 1/2 番・送信 2ch・バッファ 64�
 
 スキーム登録と受け取りハンドラは実装・検証済み（REQ-CON-103）。OS への登録はインストール済みアプリでのみ有効なため、動作確認はビルド後に行う。
 
-- [ ] `cargo tauri build` 後、`jamjam://join/<コード>` をブラウザやターミナルから開いてアプリが起動・参加することを確認
+- [ ] `cargo tauri build` 後、`jamuru://join/<コード>` をブラウザやターミナルから開いてアプリが起動・参加することを確認
 - [ ] 起動中のアプリに対してリンクを開いた場合も参加すること
 
 ### 端末アイデンティティの動作確認（REQ-IDT-001 / REQ-IDT-006）
@@ -121,7 +121,7 @@ beta.22 の Mac 実機（AG06 入出力 1/2 番・送信 2ch・バッファ 64�
 
 `NSMicrophoneUsageDescription` の宣言は `src-tauri/Info.plist` にあり、存在は `tests/distribution_config_test.rs` が検証している（ADR-029）。Tauri がそれをバンドルの Info.plist にマージし、macOS がそれを読んでプロセスを終了させないことは、macOS で作ったバンドルでしか確かめられない。
 
-- [ ] macOS で `cargo tauri build` し、`jamjam.app/Contents/Info.plist` に `NSMicrophoneUsageDescription` があること
+- [ ] macOS で `cargo tauri build` し、`jamuru.app/Contents/Info.plist` に `NSMicrophoneUsageDescription` があること
 - [ ] そのアプリを初回起動してセッションに入ると、説明文付きのマイク許可ダイアログが出て、許可後に音声が送れること（ターミナルから `cargo tauri dev` で起動すると権限がターミナルのものになるため、Finder から起動する）
 
 ### GUI E2E の残りギャップ（ADR-025 / ADR-026）
@@ -171,9 +171,9 @@ ADR-022 で**対象外**と決定済み。
 
 自分の音（A）・参加者ごとの音（B）・ミックス後の音（C）を、DAW や配信ソフトが選べる出力デバイスとして同時に提供する機能（2ch ずつ、計 6ch）。
 
-**方針（確定）**: 「特定の既存デバイスに出力する」方式（ユーザーが BlackHole・VB-Audio Virtual Cable 等を別途インストールする前提）は、それを持っていない人には使えず用途が狭いため採らない。**jamjam 自身が仮想デバイスとして OBS / DAW から選べる状態を作る**。
+**方針（確定）**: 「特定の既存デバイスに出力する」方式（ユーザーが BlackHole・VB-Audio Virtual Cable 等を別途インストールする前提）は、それを持っていない人には使えず用途が狭いため採らない。**jamuru 自身が仮想デバイスとして OBS / DAW から選べる状態を作る**。
 
-- **Linux（実装済み）**: アプリ起動時に `pw-loopback` を子プロセスとして立て、シンク面（`jamjam-recording-output-in`。ここへアプリが書く）とソース面（`jamjam-recording-output-out`。DAW/OBS はこちらを選ぶ）の仮想デバイスペアを 1 プロセスで作る。書き込みは `pw-cat --playback` を子プロセスにして標準入力へ流す。プロセスを kill するだけで両方のノードが消えるので、`pw-cli create-node` のノード ID を控えて `destroy` する管理が要らない（`libpipewire` への直接リンクも不要 = `libpipewire-0.3-dev` をビルド環境に足さずに済む）。`src/audio/virtual_output.rs` の `VirtualOutputSink` として実装済み。手元の PipeWire + `pw-loopback` + `pw-cat` で実際にノード生成〜書き込みが動くことを確認済み（下記「検証」）
+- **Linux（実装済み）**: アプリ起動時に `pw-loopback` を子プロセスとして立て、シンク面（`jamuru-recording-output-in`。ここへアプリが書く）とソース面（`jamuru-recording-output-out`。DAW/OBS はこちらを選ぶ）の仮想デバイスペアを 1 プロセスで作る。書き込みは `pw-cat --playback` を子プロセスにして標準入力へ流す。プロセスを kill するだけで両方のノードが消えるので、`pw-cli create-node` のノード ID を控えて `destroy` する管理が要らない（`libpipewire` への直接リンクも不要 = `libpipewire-0.3-dev` をビルド環境に足さずに済む）。`src/audio/virtual_output.rs` の `VirtualOutputSink` として実装済み。手元の PipeWire + `pw-loopback` + `pw-cat` で実際にノード生成〜書き込みが動くことを確認済み（下記「検証」）
 - **macOS / Windows（未着手・別チケット）**: OS の制約上、仮想デバイスを実行時に動的生成する API が無い。macOS は署名・notarize 済みの Core Audio HAL plugin をインストーラでバンドルし `/Library/Audio/Plug-Ins/HAL/` に導入、Windows は署名済みの仮想オーディオドライバをインストーラでバンドルする方式になる（一度インストールすれば以降は常設デバイスとして、Linux 版と同じ書き込み口を使い回せる）。コード署名・notarize インフラと実機がこの環境に無く、調査・実装ができない
 - **B のチャンネル数（確定）**: 現状のセッションは 1 対 1 のみ（`Roster.streaming_with: Option<Uuid>`）で、3 人以上のフルメッシュ音声（REQ-LAT-102）はまだ無い。B は当面「参加者 1 人ぶん」の固定 2ch とし、メッシュ音声が実装されたときに広げる
 - **配線（実装済み・Linux）**: `src/audio/virtual_output.rs` に `RecordingFeed`（`A`/`B`/`C` それぞれのロックフリーなリングバッファタップと、それらを 6ch にまとめて `VirtualOutputSink` へ書く専用の書き込みスレッド）を追加。`streaming.rs` の `run_audio_streaming` がセッション開始時に起動し、`start_capture_ring`（A: マイクのドライな生データ、mono なら両ch に複製）・`mix_peers`（B: 受信直後・フェーダー/パン適用前）・`playout_source`（C: `LocalMonitor` 加算後、実際に再生される音そのもの）へタップを配線した。入力/出力デバイスの切り替え時（`reopen_capture` / `playout_job`）も `LocalMonitor` の tap と同じ要領でタップを取り直す。書き込みスレッドはリアルタイムのオーディオコールバックとは別スレッドなので、既存の禁則（アロケーション・ブロッキング I/O 禁止）はコールバック側にだけ及び、タップへの `push_stereo` / `push_mono` はロックフリーで満杯なら黙って捨てる。PipeWire 未検出・起動失敗時は `RecordingFeed::start` が `None` を返し、セッションはそのまま録音/配信出力なしで続行する
@@ -209,5 +209,5 @@ ADR-022 で**対象外**と決定済み。
 - ✅ CLI に GUI のコア操作を追加（ADR-027）。`create-room`（招待コード発行）・セッション中の `/mute` `/stats`・`preset list|use`・`devices set` を追加し、設定ファイルを GUI と共有（`AppConfig` をコアライブラリへ移動）。CLI はデバッグ用途と位置づけ、E2E 自動化は GUI E2E が担うと決定。`architecture.md` §8.2 の「全機能をCLIから利用可能」という記述が実態と一致していなかったのを解消
 - ✅ GUI 同士の音声経路を成立させた（ADR-026）。アドレス交換の欠落・受信ループがネットワークタスクを飢餓させる問題・ジッタバッファが未到着を損失と扱う問題の 3 つを修正し、参加応答に招待コードを含めた（参加者が別のルームコードを表示していた）。実音声 GUI E2E で検証（REQ-GUI-012〜015、REQ-CON-024〜026、REQ-AUD-030、REQ-LAT-029）。要求 116 件・`must` 111 件・検証済み 113 件
 - ✅ GUI E2E 制御チャネルとページオブジェクトモデルを導入（ADR-025）。実アプリを起動して DOM を読み・操作する層を追加し、V字右辺の GUI の穴を埋めた。シグナリングサーバー + 2 アプリ構成で参加者一覧・ミキサー・チャットまで自動化。19 シナリオ（REQ-GUI-001〜011）。レベルメーターの RMS 計算を1関数に統合し検証（REQ-AUD-029、3箇所の重複を解消）。要求 107 件・`must` 102 件・検証済み 104 件
-- ✅ 配布前にアプリ設定を固めた（ADR-029）。macOS のマイク使用の説明（`Info.plist`）を宣言し、アプリ識別子を `me.koeda.jamjam` に変更し、CSP を有効化して `window.__TAURI__` の公開をやめた。CSP がインラインのスクリプトを止めることと、GUI E2E が変更前と同じ結果になることを Linux で確認。設定は `tests/distribution_config_test.rs` で固定（REQ-DIST-001〜004）
+- ✅ 配布前にアプリ設定を固めた（ADR-029）。macOS のマイク使用の説明（`Info.plist`）を宣言し、アプリ識別子を `me.koeda.jamuru` に変更し、CSP を有効化して `window.__TAURI__` の公開をやめた。CSP がインラインのスクリプトを止めることと、GUI E2E が変更前と同じ結果になることを Linux で確認。設定は `tests/distribution_config_test.rs` で固定（REQ-DIST-001〜004）
 - ✅ 再生中の段数変更と自動調整を実際の遅延に効かせた（ADR-031）。段数を増やすときは無音を挟み、減らすときはフレームを捨てる。プリセット切替が接続時の範囲で切られていた問題を直し、`adapt()` を受信経路から 1 秒ごとに呼んで REQ-LAT-108 の通知を実装（判定は直近の区間の補間率、縮めるのは 10 区間続いてから、パススルーは固定）

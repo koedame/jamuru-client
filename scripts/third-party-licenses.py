@@ -51,8 +51,8 @@ EXTRA_DIR = ROOT / "packaging/third-party"
 HEADER_KEY = "inputs-sha256"
 BODY_KEY = "body-sha256"
 
-LINUX_NOTICE_ASSET = "jamjam-linux-bundled-libraries.txt"
-RELEASES_URL = "https://github.com/koedame/jamjam-client/releases"
+LINUX_NOTICE_ASSET = "jamuru-linux-bundled-libraries.txt"
+RELEASES_URL = "https://github.com/koedame/jamuru-client/releases"
 
 # Static: what is not derived from a lockfile.
 EXTRA_SOURCES = {
@@ -65,9 +65,9 @@ EXTRA_SOURCES = {
 }
 
 JAMJAM_TXT_HEADER = """\
-jamjam - License Information
+jamuru - License Information
 
-jamjam is licensed under the jamjam Source Available License.
+jamuru is licensed under the jamuru Source Available License.
 Copyright (c) 2024 koedame
 
 TERMS AND CONDITIONS
@@ -87,7 +87,7 @@ TERMS AND CONDITIONS
 3. NO WARRANTY
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 
-For full license terms, see: https://github.com/koedame/jamjam-client/blob/HEAD/LICENSE
+For full license terms, see: https://github.com/koedame/jamuru-client/blob/HEAD/LICENSE
 """
 
 
@@ -253,11 +253,11 @@ def render(cargo: dict, npm: dict, extra: list, fmt: str) -> str:
 
     h1("Third-Party Licenses")
     out.append(
-        "jamjam includes the third-party software listed here. Each is used under its own\n"
+        "jamuru includes the third-party software listed here. Each is used under its own\n"
         "license; the copyright notices and license texts below are reproduced as those\n"
-        "licenses require. jamjam's own license is in LICENSE.\n"
+        "licenses require. jamuru's own license is in LICENSE.\n"
         if md
-        else "jamjam includes the third-party software listed here. Each is used under its\n"
+        else "jamuru includes the third-party software listed here. Each is used under its\n"
         "own license; the copyright notices and license texts below are reproduced as\n"
         "those licenses require.\n"
     )

@@ -2368,7 +2368,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "jamjam-app"
+name = "jamuru-app"
 version = "0.1.0"
 dependencies = [
  "axum",

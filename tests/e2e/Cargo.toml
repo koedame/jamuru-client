@@ -3,13 +3,13 @@ name = "jamjam-e2e-tests"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "End-to-end test infrastructure for jamjam"
+description = "End-to-end test infrastructure for jamuru"
 
 # Keep this package independent from root workspace
 [workspace]
 
 [dependencies]
-# Core jamjam library
+# Core jamuru library
 jamjam = { path = "../.." }
 
 # Async runtime

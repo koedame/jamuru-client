@@ -84,7 +84,7 @@ esac
             .arg(tag)
             .current_dir(repo_root())
             .env("GH", self.dir.path().join("gh"))
-            .env("GITHUB_REPOSITORY", "koedame/jamjam-client")
+            .env("GITHUB_REPOSITORY", "koedame/jamuru-client")
             .env("GITHUB_SHA", "0000000") // needed only if beta-channel does not exist yet
             .output()
             .expect("bash is needed to run scripts/publish-beta-channel-rollback.sh")

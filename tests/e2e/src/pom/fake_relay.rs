@@ -76,7 +76,7 @@ impl FakeRelay {
         })
     }
 
-    /// The jamjam server URL to give the app.
+    /// The jamuru server URL to give the app.
     pub fn server_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }

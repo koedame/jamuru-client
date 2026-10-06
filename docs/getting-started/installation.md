@@ -4,7 +4,7 @@
 
 # インストール
 
-jamjamをインストールする方法を説明します。
+jamuruをインストールする方法を説明します。
 
 ## システム要件
 
@@ -19,7 +19,7 @@ jamjamをインストールする方法を説明します。
 - オーディオインターフェース（ASIO/CoreAudio/ALSA対応）
 - 安定したインターネット接続
 
-> ASIO は Steinberg Media Technologies GmbH の商標です。jamjam は Steinberg と提携・承認の関係にありません。
+> ASIO は Steinberg Media Technologies GmbH の商標です。jamuru は Steinberg と提携・承認の関係にありません。
 
 ## インストール方法
 
@@ -28,31 +28,31 @@ jamjamをインストールする方法を説明します。
 Homebrew を使っているなら tap を追加して cask で入れられます。
 
 ```bash
-brew install --cask koedame/tap/jamjam
+brew install --cask koedame/tap/jamuru
 ```
 
-更新はアプリが自分で行います（後述の「自動更新」）。`brew upgrade --cask jamjam` でも更新できます。削除は `brew uninstall --cask jamjam`（設定ファイルごと消すなら `brew uninstall --zap --cask jamjam`）。
+更新はアプリが自分で行います（後述の「自動更新」）。`brew upgrade --cask jamuru` でも更新できます。削除は `brew uninstall --cask jamuru`（設定ファイルごと消すなら `brew uninstall --zap --cask jamuru`）。
 
-Homebrew はダウンロードしたものに Gatekeeper の隔離属性を付けます。付いたままだと公証なしのアプリは 「"jamjam.app" is damaged and can't be opened.」で開けないため、cask 側でインストール後に属性を外しています。そのため brew で入れた場合は下の「署名なしアプリの警告」の手順は要りません。
-cask が指すのは [GitHub Releases](https://github.com/koedame/jamjam-client/releases) に公開済みのタグで、リリースのたびに自動更新されます。
+Homebrew はダウンロードしたものに Gatekeeper の隔離属性を付けます。付いたままだと公証なしのアプリは 「"jamuru.app" is damaged and can't be opened.」で開けないため、cask 側でインストール後に属性を外しています。そのため brew で入れた場合は下の「署名なしアプリの警告」の手順は要りません。
+cask が指すのは [GitHub Releases](https://github.com/koedame/jamuru-client/releases) に公開済みのタグで、リリースのたびに自動更新されます。
 
 #### ベータ版を試す
 
-正式版より先に動作を確かめたい人向けに、動作を確かめたい変更ごとにベータ版（`v0.2.0-beta.7` のようなタグ）を作り、`jamjam@beta` として配っています。`brew install --cask koedame/tap/jamjam` や `brew upgrade` でベータ版が入ることはなく、正式版を使う人は何もしなくて構いません。
+正式版より先に動作を確かめたい人向けに、動作を確かめたい変更ごとにベータ版（`v0.2.0-beta.7` のようなタグ）を作り、`jamuru@beta` として配っています。`brew install --cask koedame/tap/jamuru` や `brew upgrade` でベータ版が入ることはなく、正式版を使う人は何もしなくて構いません。
 
 ```bash
-brew install --cask koedame/tap/jamjam@beta
+brew install --cask koedame/tap/jamuru@beta
 ```
 
-正式版とベータ版は同じ `jamjam.app` を入れるため同時には入れられません。正式版に戻すときは `brew uninstall --cask jamjam@beta` のあとで `brew install --cask koedame/tap/jamjam` を実行してください。ベータ版の更新は `brew upgrade --cask jamjam@beta` です。
+正式版とベータ版は同じ `jamuru.app` を入れるため同時には入れられません。正式版に戻すときは `brew uninstall --cask jamuru@beta` のあとで `brew install --cask koedame/tap/jamuru` を実行してください。ベータ版の更新は `brew upgrade --cask jamuru@beta` です。
 
 ### 自動更新
 
-新しい正式版が出ると、jamjam が自分で入れ替えます。操作は要りません。
+新しい正式版が出ると、jamuru が自分で入れ替えます。操作は要りません。
 
 - 起動の少しあとと、その後 6 時間おきに、新しい版が出ていないかを GitHub から確かめます。あれば、ダウンロードして署名を確かめ、入れて、再起動します。
 - **セッションの途中では入れません。** セッションを抜けたあとに入れます。
-- ベータ版も自動更新されます。次のベータ版が出るとそれに、同じ版の正式版が出たときは正式版に更新されます。beta.17 までのベータ版は自動更新の取得先が正しくなかったので、一度だけ `brew upgrade --cask jamjam@beta` などで入れ替えてください。
+- ベータ版も自動更新されます。次のベータ版が出るとそれに、同じ版の正式版が出たときは正式版に更新されます。beta.17 までのベータ版は自動更新の取得先が正しくなかったので、一度だけ `brew upgrade --cask jamuru@beta` などで入れ替えてください。
 - 対応するのは、Windows の `.exe`（`-setup.exe`）、macOS、Linux の AppImage です。Windows の `.msi` は全ユーザー向けで、管理者権限なしには入れ替えられないので自動更新しません（新しい版の `.msi` を管理者権限で入れてください）。Linux の `.deb` で入れた場合は、パッケージ管理（`apt`）で更新してください。
 - 自分でビルドしたアプリは、自動更新しません。
 
@@ -66,7 +66,7 @@ auto_update = false
 
 ### リリースビルドからのインストール
 
-1. [GitHub Releases](https://github.com/koedame/jamjam-client/releases) から最新版をダウンロード
+1. [GitHub Releases](https://github.com/koedame/jamuru-client/releases) から最新版をダウンロード
 2. 各プラットフォーム用のインストーラを実行:
    - Windows: `.exe`（自動更新する）または `.msi`（全ユーザー向け・自動更新しない）
    - macOS: `.dmg`
@@ -86,12 +86,12 @@ Windows Defender SmartScreen の警告が表示された場合:
 
 #### macOS での起動方法
 
-初回起動時に「"jamjam.app"は開かれませんでした。Appleは"jamjam.app"にMacに損害を与えたり
+初回起動時に「"jamuru.app"は開かれませんでした。Appleは"jamuru.app"にMacに損害を与えたり
 プライバシーを侵害する可能性のあるマルウェアが含まれていないことを確認できませんでした。」と
 表示された場合（このダイアログを閉じるボタンしかなく、ここからは開けません）:
 
 1. **システム設定** → **プライバシーとセキュリティ**
-2. 「jamjamは開発元を確認できないため、使用がブロックされました」の横にある「このまま開く」をクリック
+2. 「jamuruは開発元を確認できないため、使用がブロックされました」の横にある「このまま開く」をクリック
 
 macOS 14 (Sonoma) 以前では、Finder でアプリケーションを右クリック（または Control + クリック）して
 「開く」を選ぶ方法も使えます。**macOS 15 (Sequoia) 以降ではこの右クリックからの手順は廃止されており、
@@ -102,8 +102,8 @@ macOS 14 (Sonoma) 以前では、Finder でアプリケーションを右クリ�
 AppImage の場合、実行権限を付与してから起動:
 
 ```bash
-chmod +x jamjam_*.AppImage
-./jamjam_*.AppImage
+chmod +x jamuru_*.AppImage
+./jamuru_*.AppImage
 ```
 
 ## 次のステップ
@@ -112,5 +112,5 @@ chmod +x jamjam_*.AppImage
 
 > [!NOTE]
 > **プライバシーについて**
-> jamjamはP2P通信を使用するため、セッション参加者間でIPアドレスが共有されます。
+> jamuruはP2P通信を使用するため、セッション参加者間でIPアドレスが共有されます。
 > 詳細は[プライバシーとセキュリティ](privacy.md)をご確認ください。

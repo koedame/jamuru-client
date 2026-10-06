@@ -69,7 +69,7 @@ pub struct AppStart {
     pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_host: Option<AudioHost>,
-    /// Whether the app talks to the jamjam server it was built for, rather
+    /// Whether the app talks to the jamuru server it was built for, rather
     /// than one the user set in `server_url`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_is_default: Option<bool>,

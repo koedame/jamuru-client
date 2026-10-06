@@ -651,7 +651,7 @@ export interface AppConfig {
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
   language: string | null;
-  /** Whether the app may tell the jamjam server how it runs (off unless the user turns it on) */
+  /** Whether the app may tell the jamuru server how it runs (off unless the user turns it on) */
   usage_reporting: boolean;
   /** Whether the app installs a new release by itself (on unless the user turns it off in config.toml) */
   auto_update: boolean;
@@ -1003,7 +1003,7 @@ export interface DeviceDiagnostics {
   is_asio: boolean;
   /** Supported sample rates */
   supported_sample_rates: number[];
-  /** Whether 48kHz is supported (required for jamjam) */
+  /** Whether 48kHz is supported (required for jamuru) */
   supports_48khz: boolean;
   /** Supported channel counts */
   supported_channels: number[];
@@ -1278,7 +1278,7 @@ export async function windowResizeMain(
 // =============================================================================
 
 /**
- * Open the folder that holds `jamjam.log` in the OS file manager.
+ * Open the folder that holds `jamuru.log` in the OS file manager.
  *
  * @returns The folder's path, so it can be shown when the file manager cannot be opened
  */
@@ -1322,7 +1322,7 @@ export async function usagePreviousHang(): Promise<Hang | null> {
 
 /**
  * Whether answering "send" to `usagePreviousHang` also attaches the current
- * `jamjam.log` (ADR-059): true before the app's 1.0.0 release, so the
+ * `jamuru.log` (ADR-059): true before the app's 1.0.0 release, so the
  * confirmation can say so accurately.
  */
 export async function usagePreviousHangAttachesLog(): Promise<boolean> {
@@ -1332,7 +1332,7 @@ export async function usagePreviousHangAttachesLog(): Promise<boolean> {
 /**
  * Answers the one pending hang report found at startup. When
  * `usagePreviousHangAttachesLog` is true, `send: true` also submits the
- * current `jamjam.log` through the same intake "Report a problem" uses.
+ * current `jamuru.log` through the same intake "Report a problem" uses.
  *
  * @param send `true` sends it on its own without turning usage reporting on; `false` discards it
  */
@@ -1345,7 +1345,7 @@ export async function usageSendPreviousHang(send: boolean): Promise<void> {
 // =============================================================================
 
 /**
- * The `jamjam.log` content `reportProblemSend` would submit right now
+ * The `jamuru.log` content `reportProblemSend` would submit right now
  * (masked, tail-capped), exactly as it will be sent.
  */
 export async function reportProblemPreview(): Promise<string> {
@@ -1353,7 +1353,7 @@ export async function reportProblemPreview(): Promise<string> {
 }
 
 /**
- * Sends the current `jamjam.log` (masked, capped) and `comment` (capped at
+ * Sends the current `jamuru.log` (masked, capped) and `comment` (capped at
  * 2000 Unicode scalar values) to the problem report intake. Pressing this
  * is the only consent asked; it does not read or change `usage_reporting`.
  */

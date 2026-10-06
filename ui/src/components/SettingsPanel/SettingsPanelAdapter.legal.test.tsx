@@ -24,7 +24,7 @@ function fakeBackend() {
       case 'terms_get':
         return { version: 1, accepted: true, text: '# 利用規約\n\n## 第 1 条（本サービスでできること）' };
       case 'terms_get_license':
-        return 'jamjam Source Available License\n\n1. DEFINITIONS';
+        return 'jamuru Source Available License\n\n1. DEFINITIONS';
       case 'config_load':
         return { usage_reporting: false, buffer_size: 64 };
       case 'settings_get':
@@ -76,7 +76,7 @@ describe('the terms rows in the settings screen', () => {
     fireEvent.click(await screen.findByTestId('settings-legal-license'));
 
     const dialog = await screen.findByRole('dialog', { name: 'License' });
-    expect(dialog).toHaveTextContent('jamjam Source Available License');
+    expect(dialog).toHaveTextContent('jamuru Source Available License');
   });
 
   // Verifies: REQ-TRM-004

@@ -52,7 +52,7 @@ fn the_installers_bundle_the_generated_notices() {
     );
 
     let bundled = read("src-tauri/resources/LICENSES.txt");
-    assert!(bundled.contains("jamjam Source Available License"));
+    assert!(bundled.contains("jamuru Source Available License"));
     // Rust crates, npm packages and the code copied into the source are all in it.
     assert!(bundled.contains("Mozilla Public License Version 2.0"));
     assert!(bundled.contains("SIL OPEN FONT LICENSE Version 1.1"));

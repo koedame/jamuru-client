@@ -1,6 +1,6 @@
 //! Per-installation device identity (ADR-024)
 //!
-//! jamjam has no account registration. Instead, each installation generates
+//! jamuru has no account registration. Instead, each installation generates
 //! an Ed25519 key pair on first launch and derives a globally unique device
 //! identifier from its public key. The identifier is presented on the
 //! signaling WebSocket handshake together with a signature, so a client can
@@ -16,7 +16,7 @@ use rand::TryRng;
 use sha2::{Digest, Sha256};
 
 /// Prefix mixed into every signed payload so a signature produced here can
-/// never be replayed as a signature for some other jamjam protocol. The
+/// never be replayed as a signature for some other jamuru protocol. The
 /// version suffix lets a future scheme change be distinguished on the wire.
 const SIGNATURE_DOMAIN: &str = "jamjam-device-v1:";
 

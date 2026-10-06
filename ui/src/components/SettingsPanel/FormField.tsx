@@ -1,7 +1,7 @@
 /**
  * FormField - form row layout component
  *
- * Design: jamjam brand (ui.pen Screens/Settings). Two layouts:
+ * Design: jamuru brand (ui.pen Screens/Settings). Two layouts:
  * - `stacked`: label above the control, optional hint below (device / profile).
  * - `row`: title + description on the left, control on the right (audio settings).
  */

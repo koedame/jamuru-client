@@ -73,7 +73,7 @@ impl ConfigState {
             .map_err(|e| format!("Failed to lock config: {}", e))
     }
 
-    /// The jamjam server to connect through (ADR-030)
+    /// The jamuru server to connect through (ADR-030)
     ///
     /// Falls back to the build default when the config cannot be read, so the
     /// connection screen and diagnostics always use the same server.
@@ -156,7 +156,7 @@ pub fn config_set_usage_reporting(
     Ok(())
 }
 
-/// Get the jamjam server URL from configuration
+/// Get the jamuru server URL from configuration
 ///
 /// Returns None if using the default server.
 #[tauri::command]
@@ -167,7 +167,7 @@ pub fn config_get_server_url(
     Ok(config.server_url)
 }
 
-/// Set the jamjam server URL in configuration
+/// Set the jamuru server URL in configuration
 ///
 /// Pass None to use the default server.
 #[tauri::command]
@@ -179,7 +179,7 @@ pub fn config_set_server_url(
     Ok(())
 }
 
-/// Get the jamjam server URL the app will actually use.
+/// Get the jamuru server URL the app will actually use.
 ///
 /// Unlike [`config_get_server_url`], never `None`: resolves to the build
 /// default when no override is configured, so the UI can always show what it
@@ -210,8 +210,10 @@ pub fn config_get_preset(state: tauri::State<'_, ConfigState>) -> Result<String,
 /// List all available presets
 #[tauri::command]
 pub fn config_list_presets() -> Vec<PresetInfo> {
+    let offered = jamjam::config::offered_buffer_sizes();
     AudioPreset::all()
         .into_iter()
+        .filter(|p| offered.contains(&p.frame_size()))
         .map(|p| PresetInfo {
             id: p.name().to_string(),
             buffer_size: p.frame_size(),

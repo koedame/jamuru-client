@@ -2,7 +2,7 @@
  * PanSlider - Horizontal pan control
  *
  * Range: -100 (full left) to 100 (full right), 0 = center.
- * jamjam brand (ui.pen Molecules/Slider/Pan): the pan value label ("C"/"L10"/
+ * jamuru brand (ui.pen Molecules/Slider/Pan): the pan value label ("C"/"L10"/
  * "R25") sits at the top-center of the control, with a yellow thumb and a green
  * fill from the center detent to the thumb.
  */

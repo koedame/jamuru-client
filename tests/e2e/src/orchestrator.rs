@@ -113,7 +113,7 @@ impl TestOrchestrator {
         result
     }
 
-    /// Run a loopback test through a real jamjam process on `node`
+    /// Run a loopback test through a real jamuru process on `node`
     ///
     /// Driving the audio path of a separate process needs virtual audio devices
     /// bound to it. The in-process audio path is already covered by
@@ -125,7 +125,7 @@ impl TestOrchestrator {
 
         TestResult::not_implemented(
             scenario,
-            "needs virtual audio devices bound to a spawned jamjam process; \
+            "needs virtual audio devices bound to a spawned jamuru process; \
              the in-process audio path is covered by scenarios::loopback",
         )
     }

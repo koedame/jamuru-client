@@ -19,7 +19,7 @@
 set -euo pipefail
 
 manifest=${1:?usage: $0 <latest.json>}
-repository=${GITHUB_REPOSITORY:-koedame/jamjam-client}
+repository=${GITHUB_REPOSITORY:-koedame/jamuru-client}
 gh=${GH:-gh}
 channel=beta-channel
 

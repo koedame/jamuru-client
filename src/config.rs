@@ -1,13 +1,13 @@
 //! Configuration persistence
 //!
-//! Provides TOML-based configuration file management for the jamjam application.
+//! Provides TOML-based configuration file management for the jamuru application.
 //! Lives in the core library because the CLI and the GUI share one config file:
 //! a device or preset chosen from either is what the other starts with
 //! (ADR-027). The Tauri command wrappers stay in `src-tauri/src/config.rs`.
 //! Configuration is stored in platform-specific directories:
-//! - Linux: ~/.config/jamjam/config.toml
-//! - Windows: %APPDATA%\jamjam\config.toml
-//! - macOS: ~/Library/Application Support/jamjam/config.toml
+//! - Linux: ~/.config/jamuru/config.toml
+//! - Windows: %APPDATA%\jamuru\config.toml
+//! - macOS: ~/Library/Application Support/jamuru/config.toml
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,8 +15,10 @@ use std::path::{Path, PathBuf};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::audio::LINUX_MIN_OUTPUT_PERIOD;
+
 /// Application name used for configuration directory
-const APP_NAME: &str = "jamjam";
+const APP_NAME: &str = "jamuru";
 
 /// Default buffer size in samples (64 samples @ 48kHz = 1.33ms)
 const DEFAULT_BUFFER_SIZE: u32 = 64;
@@ -41,7 +43,24 @@ pub const MAX_DEVICE_CHANNELS: u32 = 64;
 /// The same set as the presets' frame sizes (`AudioPreset::frame_size`).
 pub const VALID_BUFFER_SIZES: [u32; 4] = [32, 64, 128, 256];
 
-/// jamjam server a development build uses: one running on this machine on the
+/// The buffer sizes the settings offer on this platform: [`VALID_BUFFER_SIZES`]
+/// without the ones the device cannot run at. On Linux PipeWire's period is at
+/// least [`LINUX_MIN_OUTPUT_PERIOD`] frames, so a smaller buffer size only
+/// arrives in lumps of that many frames (REQ-AUD-037). The config file and the
+/// CLI still take any of [`VALID_BUFFER_SIZES`].
+pub fn offered_buffer_sizes() -> Vec<u32> {
+    let floor = if cfg!(target_os = "linux") {
+        LINUX_MIN_OUTPUT_PERIOD
+    } else {
+        0
+    };
+    VALID_BUFFER_SIZES
+        .into_iter()
+        .filter(|&samples| samples >= floor)
+        .collect()
+}
+
+/// jamuru server a development build uses: one running on this machine on the
 /// development port 17890 (ADR-030).
 ///
 /// The app asks the server where its signaling server is each time it
@@ -49,7 +68,7 @@ pub const VALID_BUFFER_SIZES: [u32; 4] = [32, 64, 128, 256];
 /// address the app holds.
 pub const DEV_SERVER_URL: &str = "http://localhost:17890";
 
-/// jamjam server a release build uses (ADR-030).
+/// jamuru server a release build uses (ADR-030).
 ///
 /// The source does not name it: whoever builds the release passes it in
 /// `JAMJAM_SERVER_URL` at compile time. The app's build script refuses to
@@ -57,7 +76,7 @@ pub const DEV_SERVER_URL: &str = "http://localhost:17890";
 /// CLI and the library, which do not use a default server.
 pub const RELEASE_SERVER_URL: Option<&str> = option_env!("JAMJAM_SERVER_URL");
 
-/// jamjam server used when `server_url` is not set.
+/// jamuru server used when `server_url` is not set.
 ///
 /// Chosen by the build profile at compile time, so a release build carries
 /// only the production URL and `cargo tauri dev` keeps using the local
@@ -114,7 +133,7 @@ fn default_transmit_channels() -> u32 {
 
 /// Application configuration
 ///
-/// Contains all persistent settings for the jamjam application.
+/// Contains all persistent settings for the jamuru application.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     /// Selected input device ID (None = system default)
@@ -129,7 +148,7 @@ pub struct AppConfig {
     #[serde(default = "default_buffer_size")]
     pub buffer_size: u32,
 
-    /// Custom jamjam server URL (None = use the build's default server)
+    /// Custom jamuru server URL (None = use the build's default server)
     #[serde(default)]
     pub server_url: Option<String>,
 
@@ -172,7 +191,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub language: Option<String>,
 
-    /// Whether the app may tell the jamjam server how it runs (`telemetry`).
+    /// Whether the app may tell the jamuru server how it runs (`telemetry`).
     /// Off unless the user turns it on.
     #[serde(default)]
     pub usage_reporting: bool,
@@ -236,7 +255,7 @@ impl AppConfig {
         self.terms_version == Some(TERMS_VERSION)
     }
 
-    /// The jamjam server to use: the configured one, or
+    /// The jamuru server to use: the configured one, or
     /// [`DEFAULT_SERVER_URL`]
     pub fn effective_server_url(&self) -> &str {
         self.server_url.as_deref().unwrap_or(DEFAULT_SERVER_URL)
@@ -474,6 +493,24 @@ mod tests {
             ..Default::default()
         };
         assert!(config.validate().is_err());
+    }
+
+    /// The settings stop offering 32 on Linux, but the file and the CLI still
+    /// take it (a PipeWire set to a period of 32, the measuring tools).
+    ///
+    /// Verifies: REQ-AUD-037
+    #[test]
+    fn a_buffer_size_the_settings_do_not_offer_is_still_valid_in_the_config() {
+        for samples in VALID_BUFFER_SIZES {
+            let config = AppConfig {
+                buffer_size: samples,
+                ..Default::default()
+            };
+            assert!(config.validate().is_ok(), "{samples} was refused");
+        }
+        assert!(offered_buffer_sizes()
+            .iter()
+            .all(|samples| VALID_BUFFER_SIZES.contains(samples)));
     }
 
     #[test]

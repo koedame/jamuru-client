@@ -1,6 +1,6 @@
 /**
  * ConnectionPanel - Session connection interface
- * jamjam brand guide compliant (ui.pen Screens/JoinRoom), no Tauri dependencies
+ * jamuru brand guide compliant (ui.pen Screens/JoinRoom), no Tauri dependencies
  */
 import { useState, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -95,7 +95,7 @@ export function ConnectionPanel({
   onCancel,
   onRetry,
   onOpenSettings,
-  title = "jamjam",
+  title = "jamuru",
   welcomeTitle: welcomeTitleProp,
   welcomeSubtitle: welcomeSubtitleProp,
   createRoomText: createRoomTextProp,

@@ -71,7 +71,7 @@ const ALLOWED_ENGLISH: { file: string; text?: string; reason: string }[] = [
   },
   {
     file: '../screens/MainScreen.tsx',
-    text: 'jamjam',
+    text: 'jamuru',
     reason: 'the product name is not translated',
   },
 ];

@@ -53,7 +53,7 @@ function Catalog() {
           UI Component Catalog
         </h1>
         <p style={{ color: "var(--color-text-secondary)" }}>
-          jamjam - Development Preview
+          jamuru - Development Preview
         </p>
       </header>
 

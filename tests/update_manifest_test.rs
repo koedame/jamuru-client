@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const BUNDLES: [(&str, &str); 5] = [
-    ("jamjam-macos-arm64/macos", "jamjam_aarch64.app.tar.gz"),
-    ("jamjam-macos-x64/macos", "jamjam_x64.app.tar.gz"),
-    ("jamjam-linux-x64/bundle/appimage", "jamjam_amd64.AppImage"),
-    ("jamjam-windows-x64/bundle/nsis", "jamjam_x64-setup.exe"),
-    ("jamjam-windows-x64/bundle/msi", "jamjam_x64_en-US.msi"),
+    ("jamuru-macos-arm64/macos", "jamuru_aarch64.app.tar.gz"),
+    ("jamuru-macos-x64/macos", "jamuru_x64.app.tar.gz"),
+    ("jamuru-linux-x64/bundle/appimage", "jamuru_amd64.AppImage"),
+    ("jamuru-windows-x64/bundle/nsis", "jamuru_x64-setup.exe"),
+    ("jamuru-windows-x64/bundle/msi", "jamuru_x64_en-US.msi"),
 ];
 
 fn repo_root() -> PathBuf {
@@ -74,7 +74,7 @@ fn run(tag: &str, dir: &Path) -> Output {
         .arg(tag)
         .arg(dir)
         .current_dir(repo_root())
-        .env("GITHUB_REPOSITORY", "koedame/jamjam-client")
+        .env("GITHUB_REPOSITORY", "koedame/jamuru-client")
         .output()
         .expect("bash is needed to run scripts/make-update-manifest.sh")
 }
@@ -111,13 +111,13 @@ fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_a
     assert_eq!(
         platforms["darwin-aarch64-app"]["url"],
         format!(
-            "https://github.com/koedame/jamjam-client/releases/download/v{version}/jamjam_aarch64.app.tar.gz"
+            "https://github.com/koedame/jamuru-client/releases/download/v{version}/jamuru_aarch64.app.tar.gz"
         )
     );
     // The apps decode this exact text, so it is the file's content, untouched.
     let on_disk = std::fs::read_to_string(
         dir.path()
-            .join("jamjam-macos-arm64/macos/jamjam_aarch64.app.tar.gz.sig"),
+            .join("jamuru-macos-arm64/macos/jamuru_aarch64.app.tar.gz.sig"),
     )
     .unwrap();
     assert_eq!(
@@ -159,7 +159,7 @@ fn when_the_tag_is_a_beta_of_the_built_version_the_manifest_is_for_the_beta_buil
     assert_eq!(
         manifest["platforms"]["linux-x86_64-appimage"]["url"],
         format!(
-            "https://github.com/koedame/jamjam-client/releases/download/v{version}-beta.7/jamjam_amd64.AppImage"
+            "https://github.com/koedame/jamuru-client/releases/download/v{version}-beta.7/jamuru_amd64.AppImage"
         )
     );
 }
@@ -229,8 +229,8 @@ fn when_a_signature_names_no_version_no_manifest_is_written() {
     artifacts(dir.path(), &version);
     std::fs::write(
         dir.path()
-            .join("jamjam-linux-x64/bundle/appimage/jamjam_amd64.AppImage.sig"),
-        signature("timestamp:1\tfile:jamjam_amd64.AppImage"),
+            .join("jamuru-linux-x64/bundle/appimage/jamuru_amd64.AppImage.sig"),
+        signature("timestamp:1\tfile:jamuru_amd64.AppImage"),
     )
     .unwrap();
 
@@ -248,7 +248,7 @@ fn when_a_platforms_bundle_is_missing_no_manifest_is_written() {
     artifacts(dir.path(), &version);
     std::fs::remove_file(
         dir.path()
-            .join("jamjam-windows-x64/bundle/msi/jamjam_x64_en-US.msi.sig"),
+            .join("jamuru-windows-x64/bundle/msi/jamuru_x64_en-US.msi.sig"),
     )
     .unwrap();
 
