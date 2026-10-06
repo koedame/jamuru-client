@@ -1,4 +1,4 @@
-//! Audio diagnostics for jamjam
+//! Audio diagnostics for jamuru
 //!
 //! Provides audio device checks including:
 //! - Input/output device detection and capabilities
@@ -31,7 +31,7 @@ pub struct DeviceDiagnostics {
     pub is_asio: bool,
     /// Supported sample rates
     pub supported_sample_rates: Vec<u32>,
-    /// Whether 48kHz is supported (required for jamjam)
+    /// Whether 48kHz is supported (required for jamuru)
     pub supports_48khz: bool,
     /// Supported channel counts
     pub supported_channels: Vec<u16>,
@@ -455,8 +455,9 @@ impl AudioDiagnostics {
 
         #[cfg(target_os = "linux")]
         let (supports_32, supports_64, min_buffer) = {
-            // Linux with PipeWire/JACK can support low latency
-            (true, true, Some(32u32))
+            // PipeWire's period is at least 64 frames (REQ-AUD-036), so a
+            // buffer of 32 arrives in lumps of 64 and the receiver breaks up
+            (false, true, Some(64u32))
         };
 
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -529,6 +530,19 @@ mod tests {
         let support = LowLatencySupport::default();
         assert!(support.supports_128_samples);
         assert!(!support.asio_available);
+    }
+
+    /// PipeWire's period is at least 64 frames, so the diagnostics must not
+    /// call Linux capable of 32 (the zero-latency preset follows from it).
+    ///
+    /// Verifies: REQ-AUD-037
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn on_linux_the_diagnostics_do_not_claim_a_buffer_of_32() {
+        let support = AudioDiagnostics::detect_low_latency_support(&[], &[]);
+        assert!(!support.supports_32_samples);
+        assert!(support.supports_64_samples);
+        assert_eq!(support.min_buffer_size, Some(64));
     }
 
     #[test]

@@ -51,7 +51,7 @@ pub fn create_connection_window(app: &AppHandle) -> tauri::Result<()> {
         labels::CONNECTION,
         WebviewUrl::App("index.html".into()),
     )
-    .title("jamjam")
+    .title("jamuru")
     .inner_size(400.0, 300.0)
     .min_inner_size(320.0, 280.0)
     .resizable(false)
@@ -79,7 +79,7 @@ pub fn create_mixer_window(app: &AppHandle) -> tauri::Result<()> {
         labels::MIXER,
         WebviewUrl::App("index.html#/mixer".into()),
     )
-    .title("jamjam - Mixer")
+    .title("jamuru - Mixer")
     .inner_size(800.0, 600.0)
     .min_inner_size(600.0, 400.0)
     .resizable(true)
@@ -106,7 +106,7 @@ pub fn create_chat_window(app: &AppHandle) -> tauri::Result<()> {
         labels::CHAT,
         WebviewUrl::App("index.html#/chat".into()),
     )
-    .title("jamjam - Chat")
+    .title("jamuru - Chat")
     .inner_size(400.0, 500.0)
     .min_inner_size(300.0, 400.0)
     .resizable(true)
@@ -135,7 +135,7 @@ pub fn create_settings_window(app: &AppHandle) -> tauri::Result<()> {
         labels::SETTINGS,
         WebviewUrl::App("index.html#/settings".into()),
     )
-    .title("jamjam - Settings")
+    .title("jamuru - Settings")
     .inner_size(720.0, 560.0)
     .resizable(false)
     .center()

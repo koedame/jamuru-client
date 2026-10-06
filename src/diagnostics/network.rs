@@ -1,4 +1,4 @@
-//! Network diagnostics for jamjam
+//! Network diagnostics for jamuru
 //!
 //! Provides network environment checks including:
 //! - IPv4/IPv6 support detection

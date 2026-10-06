@@ -1,6 +1,6 @@
 # トラブルシューティング
 
-jamjamで問題が発生した場合の解決方法をまとめています。
+jamuruで問題が発生した場合の解決方法をまとめています。
 
 ## 接続の問題
 
@@ -17,7 +17,7 @@ jamjamで問題が発生した場合の解決方法をまとめています。
    - 設定ファイル `config.toml` の `server_url` で接続先を変えている場合は、その URL が正しいか確認
 
 3. **ファイアウォール設定**
-   - jamjamがネットワークアクセスを許可されているか確認
+   - jamuruがネットワークアクセスを許可されているか確認
    - Windows: 「Windows セキュリティ」→「ファイアウォールとネットワーク保護」
    - macOS: 「システム設定」→「ネットワーク」→「ファイアウォール」
 
@@ -115,7 +115,7 @@ jamjamで問題が発生した場合の解決方法をまとめています。
    ```
 2. AppImageの場合、実行権限を付与:
    ```bash
-   chmod +x jamjam.AppImage
+   chmod +x jamuru.AppImage
    ```
 
 ### 設定が保存されない
@@ -124,9 +124,9 @@ jamjamで問題が発生した場合の解決方法をまとめています。
 
 **解決策**:
 1. 設定ファイルの場所を確認:
-   - Linux: `~/.config/jamjam/config.toml`
-   - macOS: `~/Library/Application Support/jamjam/config.toml`
-   - Windows: `%APPDATA%\jamjam\config.toml`
+   - Linux: `~/.config/jamuru/config.toml`
+   - macOS: `~/Library/Application Support/jamuru/config.toml`
+   - Windows: `%APPDATA%\jamuru\config.toml`
 
 2. ディレクトリの書き込み権限を確認
 
@@ -139,31 +139,31 @@ jamjamで問題が発生した場合の解決方法をまとめています。
 2. 設定ファイルを削除して初期化:
    ```bash
    # Linux/macOS
-   rm -rf ~/.config/jamjam/
+   rm -rf ~/.config/jamuru/
 
    # Windows (PowerShell)
-   Remove-Item -Recurse $env:APPDATA\jamjam
+   Remove-Item -Recurse $env:APPDATA\jamuru
    ```
 
 ## テストユーザー向け追加情報
 
 ### ログの取得
 
-jamjam は動作の記録を `jamjam.log` に書き続けます。ボタンが反応しない、接続できないなど、画面からは原因が分からないときは、このファイルを問題報告に添えてください。
+jamuru は動作の記録を `jamuru.log` に書き続けます。ボタンが反応しない、接続できないなど、画面からは原因が分からないときは、このファイルを問題報告に添えてください。
 
 1. アプリを起動
 2. 問題を再現
 3. 設定画面の「診断」タブにある「ログのフォルダを開く」を押す。フォルダが開かない環境では、次の場所を直接開く:
-   - Linux: `~/.local/share/me.koeda.jamjam/logs/`
-   - macOS: `~/Library/Logs/me.koeda.jamjam/`
-   - Windows: `%LOCALAPPDATA%\me.koeda.jamjam\logs\`
-4. `jamjam.log` を添付する
+   - Linux: `~/.local/share/me.koeda.jamuru/logs/`
+   - macOS: `~/Library/Logs/me.koeda.jamuru/`
+   - Windows: `%LOCALAPPDATA%\me.koeda.jamuru\logs\`
+4. `jamuru.log` を添付する
 
 書かれる内容: アプリのバージョン・OS・設定（サーバーURL、選んだオーディオデバイス、バッファサイズ）、サーバーへの接続と部屋の作成・参加・退出、オーディオの開始と停止、失敗したコマンドとそのエラー、画面側の状態の遷移とエラー。部屋のパスワードと、招待リンクの招待コードは書かれません。
 
-IP アドレスとオーディオデバイスの ID は既定でマスクされます（例: `203.0.113.x`、デバイス名のみ表示してシリアル番号は伏せる）。NAT やネットワーク経路の問題を自分で調べたいときは、環境変数 `JAMJAM_LOG_REDACT=off` を付けて起動するとマスクされていない値が書かれます。
+IP アドレスとオーディオデバイスの ID は既定でマスクされます（例: `203.0.113.x`、デバイス名のみ表示してシリアル番号は伏せる）。NAT やネットワーク経路の問題を自分で調べたいときは、環境変数 `JAMURU_LOG_REDACT=off` を付けて起動するとマスクされていない値が書かれます。
 
-`jamjam.log` が 5 MB を超えると `jamjam_<日時>.log` に改名され、新しい `jamjam.log` に書き始めます。残るのは現在のファイルと古い 2 世代までです。詳しく見たいときは、環境変数 `JAMJAM_LOG` で出力レベルを変えて起動できます（例: `JAMJAM_LOG=trace`。`jamjam=trace,info` のように対象ごとの指定も可）。
+`jamuru.log` が 5 MB を超えると `jamuru_<日時>.log` に改名され、新しい `jamuru.log` に書き始めます。残るのは現在のファイルと古い 2 世代までです。詳しく見たいときは、環境変数 `JAMURU_LOG` で出力レベルを変えて起動できます（例: `JAMURU_LOG=trace`。`jamuru=trace,info` のように対象ごとの指定も可）。
 
 接続のとき、アプリは相手の全アドレス（同じ LAN・公開・Tailscale など）に確認を 5 回ずつ送り、往復時間の中央値が最も短いものを選びます（Tailscale は中継になっていることがあるので、公開アドレスより 10 ms 以上速いときだけ選びます）。どれを選んだかはログの `Selected candidate` に出ます。経路を指定して試したいときは、環境変数 `JAMJAM_ROUTE` に `lan`・`public`・`tailscale`・IP アドレスのいずれかを入れて起動します（例: `JAMJAM_ROUTE=public`）。その種類のアドレスだけで接続し、該当するアドレスが相手に無ければ接続できません。
 
@@ -173,7 +173,7 @@ IP アドレスとオーディオデバイスの ID は既定でマスクされ�
 
 1. **環境情報**
    - OS（Windows/macOS/Linux）とバージョン
-   - jamjamのバージョン
+   - jamuruのバージョン
    - 使用しているオーディオデバイス
 
 2. **問題の詳細**
@@ -182,10 +182,10 @@ IP アドレスとオーディオデバイスの ID は既定でマスクされ�
    - 実際の動作
    - エラーメッセージ（ある場合）
 
-3. **ログファイル**（`jamjam.log`。取得方法は上の「ログの取得」）
+3. **ログファイル**（`jamuru.log`。取得方法は上の「ログの取得」）
 
 ### フィードバック
 
 テストへの参加ありがとうございます。フィードバックは以下の方法でお寄せください:
 
-- [GitHub Issues](https://github.com/koedame/jamjam-client/issues): バグ報告・機能リクエスト・質問
+- [GitHub Issues](https://github.com/koedame/jamuru-client/issues): バグ報告・機能リクエスト・質問

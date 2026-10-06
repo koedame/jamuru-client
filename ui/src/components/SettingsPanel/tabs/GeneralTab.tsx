@@ -1,7 +1,7 @@
 /**
  * GeneralTab - General settings (language)
  *
- * Design: jamjam is a dark-only brand (see tokens.css), so the theme selector
+ * Design: jamuru is a dark-only brand (see tokens.css), so the theme selector
  * from the previous design is intentionally omitted; only language remains.
  */
 

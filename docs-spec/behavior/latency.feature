@@ -1,10 +1,10 @@
 # This specification is the source of truth. Sync implementation when changed.
 
 Feature: 遅延管理
-  jamjamでの遅延に関する振る舞い
+  jamuruでの遅延に関する振る舞い
 
   Background:
-    Given jamjamアプリケーションが起動している
+    Given jamuruアプリケーションが起動している
     And オーディオデバイスが正常に認識されている
     And セッションに接続済み
 

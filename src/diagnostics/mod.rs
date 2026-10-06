@@ -1,4 +1,4 @@
-//! Self-diagnosis module for jamjam
+//! Self-diagnosis module for jamuru
 //!
 //! Provides environment diagnostics for users to verify their setup before
 //! joining a session. Includes network, audio, and CPU performance checks.

@@ -4,7 +4,7 @@
 
 ## Overview
 
-アプリが動いた様子を jamjam サーバーへ送る仕組み。**利用者が設定 `usage_reporting` をオンにしたときだけ**動く。既定はオフで、オフの間は何も収集せず、何も送らず、インストール ID も作らない（REQ-TEL-001）。
+アプリが動いた様子を jamuru サーバーへ送る仕組み。**利用者が設定 `usage_reporting` をオンにしたときだけ**動く。既定はオフで、オフの間は何も収集せず、何も送らず、インストール ID も作らない（REQ-TEL-001）。
 
 実装は `src/telemetry/`（コアライブラリ）と `src-tauri/src/usage.rs`（アプリへの接続）。要求は [REQ-TEL](../requirements.md#req-tel-利用状況の送信設計要求)。
 
@@ -64,7 +64,7 @@
 sequenceDiagram
     participant App as アプリ
     participant Rep as UsageReporter
-    participant Srv as jamjam サーバー
+    participant Srv as jamuru サーバー
 
     App->>Rep: 起動（usage_reporting が true のときだけ）
     Rep->>Rep: 前回のクラッシュ・app_start・audio_env を記録
@@ -100,11 +100,11 @@ sequenceDiagram
 
 **この記録は `usage_reporting` の設定を見ずに、常にローカルへ書く。** クラッシュと違い、固まりに気づくこと自体は同意を要らないものとし、送るかどうかだけを同意にかける。
 
-- `usage_reporting` がオンなら、次の起動でクラッシュと同じように自動で `hang` として送る（`UsageReporter::record_previous_hang`）。**この自動送信に `jamjam.log` は添えない**（オンにしたことは集計した項目への同意で、他の参加者の識別子を含みうるログまでは含まないため。REQ-TEL-023・[ADR-065](../adr/ADR-065-personal-information-before-1-0-0.md)）
+- `usage_reporting` がオンなら、次の起動でクラッシュと同じように自動で `hang` として送る（`UsageReporter::record_previous_hang`）。**この自動送信に `jamuru.log` は添えない**（オンにしたことは集計した項目への同意で、他の参加者の識別子を含みうるログまでは含まないため。REQ-TEL-023・[ADR-065](../adr/ADR-065-personal-information-before-1-0-0.md)）
 - `usage_reporting` がオフのときは記録を保持し（`UsageReporter::previous_hang`）、Diagnostics タブの案内から「送る」を選んだときだけ、送信のためだけに作って送信後に必ず捨てるインストール ID でこの 1 件を送る（`UsageReporter::send_one_off_hang`。`usage_reporting` 自体はオンにならない。REQ-TEL-020）。「送らない」を選べば記録はそのまま捨てる
-- **アプリの版が 1.0.0 未満のときは、「送る」を選ぶと現在の `jamjam.log` も追加で送る**（`src-tauri/src/usage.rs` の `attaches_log`。ADR-058「問題を報告」と同じ送り先・同じ本文の作り方を再利用する。REQ-TEL-021・[ADR-059](../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）。1.0.0 以上ではこの追加送信をしない
+- **アプリの版が 1.0.0 未満のときは、「送る」を選ぶと現在の `jamuru.log` も追加で送る**（`src-tauri/src/usage.rs` の `attaches_log`。ADR-058「問題を報告」と同じ送り先・同じ本文の作り方を再利用する。REQ-TEL-021・[ADR-059](../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）。1.0.0 以上ではこの追加送信をしない
 - どちらの経路も送るコメントに区間名と起動 ID を機械的に埋めるので、利用ログ側の `hang` 行の `launch_id` と突き合わせられる
-- **確認していない記録は、再起動をまたいでも残る。** `usage_reporting` がオフの間、まだ確認していない記録は `pending_hang.json` にも書く（`watchdog::save_pending_hang` / `read_pending_hang` / `clear_pending_hang`）。再起動（自動更新の適用を含む）は通常の `RunEvent::Exit` を経て `running.json` を消すので、次の起動が見るのはその再起動自身の痕跡だけになるが、`pending_hang.json` は確認が済む（Diagnostics タブが答えを送る）かオンの状態で自動送信されるまで残る（REQ-TEL-022）
+- **確認していない記録は、再起動をまたいでも残る。** `usage_reporting` がオフの間、まだ確認していない記録は `pending_hang.json` にも書く（`watchdog::save_pending_hang` / `read_pending_hang` / `clear_pending_hang`）。再起動（自動更新の適用を含む）は通常の `RunEvent::Exit` を経て `running.json` を消すので（Windows の更新だけは、インストーラーを起動したあとアップデーター自身が `process::exit` で終わるため、その直前の `on_before_exit` で `Watchdog::handing_over_to_installer` が消す。起動できなかったときは `handover_failed` が戻す。REQ-TEL-024）、次の起動が見るのはその再起動自身の痕跡だけになるが、`pending_hang.json` は確認が済む（Diagnostics タブが答えを送る）かオンの状態で自動送信されるまで残る（REQ-TEL-022）
 
 ## 送る内容を見る
 
@@ -142,9 +142,9 @@ sequenceDiagram
 
 ## 診断ログとの関係
 
-`jamjam.log`（[ADR-036](../adr/ADR-036-diagnostic-log-file.md)）は端末の中に留まる。この仕組みとは別経路で、そのマスク処理も使わない。外に出てよいものは `schema.json` と `LEFT_OUT` だけで決まる。
+`jamuru.log`（[ADR-036](../adr/ADR-036-diagnostic-log-file.md)）は端末の中に留まる。この仕組みとは別経路で、そのマスク処理も使わない。外に出てよいものは `schema.json` と `LEFT_OUT` だけで決まる。
 
-`jamjam.log` を利用者が手動で送る「問題を報告」（[ADR-058](../adr/ADR-058-report-a-problem.md)）は、この仕組みとも別の第 3 の経路で、`usage_reporting` の設定を読まず・変えない。詳細は ADR-058。
+`jamuru.log` を利用者が手動で送る「問題を報告」（[ADR-058](../adr/ADR-058-report-a-problem.md)）は、この仕組みとも別の第 3 の経路で、`usage_reporting` の設定を読まず・変えない。詳細は ADR-058。
 
 ## Public API（`jamjam::telemetry`）
 

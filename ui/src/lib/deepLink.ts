@@ -1,7 +1,7 @@
 /**
  * Invite link handling (REQ-CON-103)
  *
- * The OS hands `jamjam://join/<code>` to the app via the deep-link plugin. The
+ * The OS hands `jamuru://join/<code>` to the app via the deep-link plugin. The
  * scheme is declared in `src-tauri/tauri.conf.json` under `plugins.deep-link`.
  *
  * Parsing mirrors `parse_invite_url` in `src/network/signaling.rs`: same scheme,
@@ -13,7 +13,7 @@
 import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import { isValidInviteCode } from './inviteCode';
 
-const INVITE_URL_PREFIX = 'jamjam://join/';
+const INVITE_URL_PREFIX = 'jamuru://join/';
 
 /**
  * Extract the invite code from an invite URL, or null if it is not one.

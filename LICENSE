@@ -1,4 +1,4 @@
-jamjam Source Available License
+jamuru Source Available License
 
 Copyright (c) 2024 koedame
 
@@ -6,7 +6,7 @@ TERMS AND CONDITIONS
 
 1. DEFINITIONS
 
-"Software" means the jamjam source code, documentation, and any associated
+"Software" means the jamuru source code, documentation, and any associated
 files in this repository.
 
 "Official Binary" means executable files distributed by the copyright holder
@@ -54,4 +54,4 @@ the right to use these components under their original licenses.
 7. CONTACT
 
 For licensing inquiries, please contact the copyright holder through the
-repository's issue tracker: https://github.com/koedame/jamjam-client/issues
+repository's issue tracker: https://github.com/koedame/jamuru-client/issues

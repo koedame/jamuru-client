@@ -16,7 +16,7 @@ if grep -n '○月○日' docs/terms.md; then
   failed=1
 fi
 
-urls=$(grep -ohE 'https://github\.com/koedame/jamjam-client/blob/[^")> ]+' \
+urls=$(grep -ohE 'https://github\.com/koedame/jamuru-client/blob/[^")> ]+' \
   src-tauri/src/terms.rs docs/terms.md | sort -u)
 if [ -z "$urls" ]; then
   echo "FAIL: found no link to the repository's pages - the scan is not reading the terms" >&2

@@ -1,8 +1,9 @@
 <!-- このドキュメントは実装の正です。変更時は実装も同期すること -->
 
-# jamjam Specification Documents
+# jamuru Specification Documents
 
 本ディレクトリは仕様書を格納する。
+アプリの旧名は jamjam。`adr/` の決定記録は当時の名前（jamjam）のまま残している。
 すべてのドキュメントは実装の唯一の正とする。
 
 ---
@@ -55,7 +56,7 @@
 | [ADR-030](./adr/ADR-030-signaling-url-by-build-profile.md) | シグナリングサーバーの接続先をビルドの種別で決め、1 か所に置く |
 | [ADR-033](./adr/ADR-033-local-monitoring.md) | ローカルモニタリングを、出力コールバックへ入力を直接混ぜて実現する |
 | [ADR-035](./adr/ADR-035-stun-through-the-audio-socket.md) | 公開アドレスは音声ソケット自身から STUN に問い合わせて公開する |
-| [ADR-036](./adr/ADR-036-diagnostic-log-file.md) | 公開ビルドでも診断ログファイル `jamjam.log` を書く（画面側の出力と失敗したコマンドを含む） |
+| [ADR-036](./adr/ADR-036-diagnostic-log-file.md) | 公開ビルドでも診断ログファイル `jamuru.log` を書く（画面側の出力と失敗したコマンドを含む） |
 | [ADR-037](./adr/ADR-037-usage-reporting-opt-in.md) | 利用状況の送信は、利用者が設定でオンにしたときだけ。送るもの・外す 5 項目・止め方 |
 | [ADR-038](./adr/ADR-038-transmit-channels-select-capture.md) | 送信チャンネル設定は取り込むチャンネル数を決める。線路は常にステレオ |
 | [ADR-039](./adr/ADR-039-cli-round-trip-measurement.md) | CLI が区切りのある信号で音声経路の往復遅延を測り、JSON に残す |

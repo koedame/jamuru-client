@@ -18,7 +18,7 @@
 set -euo pipefail
 
 tag=${1:?usage: $0 <release-tag>}
-repository=${GITHUB_REPOSITORY:-koedame/jamjam-client}
+repository=${GITHUB_REPOSITORY:-koedame/jamuru-client}
 gh=${GH:-gh}
 here=$(dirname "$0")
 

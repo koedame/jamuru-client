@@ -8,11 +8,11 @@ use crate::{TestConfig, TestResult, TestStatus};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
-/// Every mesh scenario needs a cluster of hosts running real jamjam processes.
+/// Every mesh scenario needs a cluster of hosts running real jamuru processes.
 /// Until one exists, they report NotImplemented instead of a fabricated
 /// measurement (ADR-018).
 const MISSING_CLUSTER: &str =
-    "needs a cluster of hosts running one jamjam process per node; not set up yet";
+    "needs a cluster of hosts running one jamuru process per node; not set up yet";
 
 /// Maximum participants for full mesh testing
 pub const MAX_MESH_SIZE: usize = 8;

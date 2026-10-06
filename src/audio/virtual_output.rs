@@ -58,10 +58,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(5);
 pub const CHANNELS: usize = 6;
 
 /// Node name a DAW or OBS picks as a recording input.
-pub const NODE_NAME_OUT: &str = "jamjam-recording-output";
+pub const NODE_NAME_OUT: &str = "jamuru-recording-output";
 
 /// Node name this app writes to (the same virtual cable's other end).
-const NODE_NAME_IN: &str = "jamjam-recording-output-in";
+const NODE_NAME_IN: &str = "jamuru-recording-output-in";
 
 /// Owns the `pw-loopback` device pair and the `pw-cat` writer feeding it.
 /// Dropping this kills both child processes, which tears down the PipeWire
@@ -85,7 +85,7 @@ impl VirtualOutputSink {
             .arg("--capture-props")
             .arg(format!(
                 "media.class=Audio/Sink node.name={NODE_NAME_IN} \
-                 node.description=\"JamJam Recording Output\""
+                 node.description=\"Jamuru Recording Output\""
             ))
             .arg("--playback-props")
             .arg(format!(
@@ -272,7 +272,7 @@ impl RecordingFeed {
 
         let block_frames = (sample_rate as f32 * POLL_INTERVAL.as_secs_f32()).round() as usize;
         let writer = std::thread::Builder::new()
-            .name("jamjam-recording-writer".into())
+            .name("jamuru-recording-writer".into())
             .spawn({
                 let stop = stop.clone();
                 let sources = [a.consumer.clone(), b.consumer.clone(), c.consumer.clone()];

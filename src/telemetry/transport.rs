@@ -29,7 +29,7 @@ pub trait Transport: Send + Sync {
     fn send(&self, body: Vec<u8>) -> Delivery<'_>;
 }
 
-/// Sends to the jamjam server the build was made for.
+/// Sends to the jamuru server the build was made for.
 pub struct HttpTransport {
     endpoint: String,
 }

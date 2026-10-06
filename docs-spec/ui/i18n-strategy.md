@@ -1,6 +1,6 @@
 # 国際化（i18n）戦略
 
-jamjam の多言語対応の設計と実装方針。
+jamuru の多言語対応の設計と実装方針。
 
 > **関連 ADR**: [ADR-007-i18n-library.md](../adr/ADR-007-i18n-library.md)
 

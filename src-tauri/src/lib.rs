@@ -93,7 +93,7 @@ pub fn run() {
         // First: the logger exists before anything below can log (ADR-036).
         .plugin(logging::init(log_spec.clone()))
         .plugin(tauri_plugin_shell::init())
-        // Hands `jamjam://join/<code>` links from the OS to the app (REQ-CON-103).
+        // Hands `jamuru://join/<code>` links from the OS to the app (REQ-CON-103).
         // The scheme is declared in tauri.conf.json under plugins.deep-link.
         .plugin(tauri_plugin_deep_link::init());
     if self_updating {
@@ -149,6 +149,7 @@ pub fn run() {
     let previous_incident = watchdog::previous_incident(usage.reporter());
     usage.apply_previous_incident(previous_incident);
     let watchdog = watchdog::Watchdog::install(usage.reporter().clone());
+    app.manage(watchdog.clone());
     if usage.reporter().is_enabled() {
         usage.report_launch(startup_config);
     }

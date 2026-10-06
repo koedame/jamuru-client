@@ -44,7 +44,7 @@ create_aggregate_device() {
     echo "2. Click '+' button at bottom left"
     echo "3. Select 'Create Aggregate Device'"
     echo "4. Check both '$BLACKHOLE_NAME' and your built-in audio device"
-    echo "5. Name it 'jamjam Test Device'"
+    echo "5. Name it 'jamuru Test Device'"
     echo ""
     echo "For CI environments, use a pre-configured system or skip aggregate device."
 }

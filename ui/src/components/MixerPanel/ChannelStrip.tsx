@@ -1,6 +1,6 @@
 /**
  * ChannelStrip - Single channel in the mixer panel
- * jamjam brand (ui.pen Organisms/ChannelStrip): quality badge, pan slider,
+ * jamuru brand (ui.pen Organisms/ChannelStrip): quality badge, pan slider,
  * fader + meter with dB read-outs, name, and a mute button. The local strip
  * also carries the monitor button (hear yourself without the network delay).
  */
