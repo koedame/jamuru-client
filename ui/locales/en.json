@@ -154,6 +154,7 @@
   },
   "mixer": {
     "title": "Mixer",
+    "loudNotice": "Loud sound can damage your hearing and equipment. Lower the volume before connecting, then raise it slowly.",
     "self": "You",
     "master": "Master",
     "channel": {
