@@ -26,7 +26,7 @@ MIT・Apache-2.0・BSD・MPL-2.0 は、配るときに著作権表示とライ�
   `cargo test`（`tests/third_party_licenses_test.rs`）・CI・リリースが回す。依存を更新する PR は、
   作り直した生成物を同じ PR に含める。Dependabot の PR は、`.github/workflows/dependabot-licenses.yml` が作り直して PR のブランチに 1 コミット足す
   （Dependabot の `pull_request` の実行は書き込めないので `pull_request_target` で動かし、Dependabot 自身の同一リポジトリの PR・
-  マニフェストとロックファイルだけを変える PR・トークンを渡さない生成の段、の 3 つで絞る。push は他のワークフローを起こさないので、CI は `workflow_dispatch` で起こす）
+  マニフェストとロックファイルだけを変える PR・トークンを渡さない生成の段、の 3 つで絞る。push が起こした CI は承認待ちで止まるので、ワークフローが承認する）
 - **Linux の AppImage** には、ビルドした環境のシステムのライブラリ（GTK・WebKitGTK・GLib・GStreamer など。LGPL が多い）が同梱される。
   どれが入るかはビルドの環境で変わる（0.1.0 と beta.48 の AppImage でも違っていた）ので、一覧は手で持たず、
   リリースのビルドが AppImage から作る（`scripts/appimage-bundled-libraries.py`。`dpkg` で引き、著作権ファイル・ライセンス本文・
