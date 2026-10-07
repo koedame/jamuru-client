@@ -44,6 +44,12 @@ const RTT_SAMPLE_COUNT: usize = 10;
 /// Maximum pending pings before discarding old ones
 const MAX_PENDING_PINGS: usize = 10;
 
+/// The longest a ping that has not come back counts as the round trip of the link
+///
+/// A round trip that is growing is not in the samples until it ends, so a ping still out
+/// is the only sign of it. Capped so that a peer that never answers is still given up on.
+const UNANSWERED_PING_CAP: Duration = Duration::from_millis(2500);
+
 /// How often our key is sent while the peer has not shown it has it
 const KEY_EXCHANGE_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -374,6 +380,9 @@ struct RttMeasurement {
     jitter_ms: f32,
     /// Pending ping sequences with sent timestamps (monotonic instant)
     pending_pings: HashMap<u32, Instant>,
+    /// When the newest ping that came back was sent: pings sent before it that did not come
+    /// back were lost, and say nothing of how long an answer takes
+    last_answered_sent_at: Option<Instant>,
     /// Recent RTT samples for averaging
     rtt_samples: VecDeque<f32>,
     /// Next ping sequence number
@@ -388,6 +397,7 @@ impl Default for RttMeasurement {
             rtt_ms: None,
             jitter_ms: 0.0,
             pending_pings: HashMap::new(),
+            last_answered_sent_at: None,
             rtt_samples: VecDeque::with_capacity(RTT_SAMPLE_COUNT),
             next_ping_seq: 0,
             time_reference: Instant::now(),
@@ -401,13 +411,25 @@ impl RttMeasurement {
         self.time_reference.elapsed().as_micros() as u64
     }
 
-    /// The slowest of the recent round trips, or `None` before the first pong
+    /// The slowest of the recent round trips, counting the pings sent since the last answer
+    /// for as long as they have been out, or `None` before there is any
     fn slowest_recent(&self) -> Option<Duration> {
-        self.rtt_samples
+        let answered = self
+            .rtt_samples
             .iter()
             .copied()
             .reduce(f32::max)
-            .map(|ms| Duration::from_secs_f32(ms / 1000.0))
+            .map(|ms| Duration::from_secs_f32(ms / 1000.0));
+        let unanswered = self
+            .pending_pings
+            .values()
+            .filter(|&&sent| {
+                self.last_answered_sent_at
+                    .is_none_or(|newest| sent > newest)
+            })
+            .map(|sent| sent.elapsed().min(UNANSWERED_PING_CAP))
+            .max();
+        answered.max(unanswered)
     }
 
     /// Create a ping message and record the send time
@@ -435,6 +457,12 @@ impl RttMeasurement {
     fn process_pong(&mut self, pong: &LatencyPong) {
         if let Some(sent_time) = self.pending_pings.remove(&pong.ping_sequence) {
             let rtt = sent_time.elapsed().as_secs_f32() * 1000.0; // Convert to ms
+            if self
+                .last_answered_sent_at
+                .is_none_or(|newest| sent_time > newest)
+            {
+                self.last_answered_sent_at = Some(sent_time);
+            }
 
             // Update RTT samples
             if self.rtt_samples.len() >= RTT_SAMPLE_COUNT {
@@ -2968,6 +2996,57 @@ mod tests {
         assert!(due < wait);
         assert_eq!(route.follow(lan, wait), None);
         assert_eq!(route.current, vpn);
+    }
+
+    /// A round trip that is growing is in no sample until it ends: the ping still out is
+    /// the only sign of it.
+    ///
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_a_ping_is_still_out_it_counts_for_as_long_as_it_has_been_out() {
+        let mut rtt = RttMeasurement::default();
+        rtt.rtt_samples.push_back(50.0);
+        rtt.pending_pings
+            .insert(0, Instant::now() - Duration::from_millis(1200));
+
+        let slowest = rtt.slowest_recent().unwrap();
+
+        assert!(slowest >= Duration::from_millis(1200), "{:?}", slowest);
+        assert!(slowest < Duration::from_millis(1500), "{:?}", slowest);
+    }
+
+    /// A ping that never comes back must not count for ever: the peer is given up on
+    ///
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_a_ping_has_been_out_very_long_it_counts_only_up_to_the_cap() {
+        let mut rtt = RttMeasurement::default();
+        rtt.pending_pings
+            .insert(0, Instant::now() - Duration::from_secs(30));
+
+        assert_eq!(rtt.slowest_recent(), Some(UNANSWERED_PING_CAP));
+    }
+
+    /// A ping sent before one that was answered was lost, and says nothing of how long an
+    /// answer takes
+    ///
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_a_later_ping_was_answered_an_earlier_one_still_out_does_not_count() {
+        let mut rtt = RttMeasurement::default();
+        let lost = rtt.create_ping();
+        std::thread::sleep(Duration::from_millis(20));
+        let answered = rtt.create_ping();
+        rtt.pending_pings
+            .insert(lost.ping_sequence, Instant::now() - Duration::from_secs(5));
+        rtt.process_pong(&LatencyPong {
+            original_sent_time_us: answered.sent_time_us,
+            ping_sequence: answered.ping_sequence,
+        });
+
+        let slowest = rtt.slowest_recent().unwrap();
+
+        assert!(slowest < Duration::from_millis(500), "{:?}", slowest);
     }
 
     /// Verifies: REQ-CON-114
