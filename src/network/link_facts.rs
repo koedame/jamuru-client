@@ -9,7 +9,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -65,16 +65,84 @@ impl LinkRoute {
 pub(super) const NEAREST_ROUTE_PREFERENCE: u32 = 3;
 
 /// How good a route to `addr` is expected to be, the higher the better: inside
-/// a local network (3), through an overlay network such as Tailscale (2), any
-/// other address (1). A peer on the same LAN is a hop away; an overlay adds an
-/// encrypted tunnel on top of the same wire; a public address crosses the NAT.
+/// a local network (3), any other address (2), through an overlay network such
+/// as Tailscale (1). This ranks routes that cannot be timed (a peer that does
+/// not answer the connectivity check's probes) and breaks ties between routes
+/// whose round trips are alike. A peer on the same LAN is a hop away. A public
+/// address that answers is a direct path across the NAT. An overlay that
+/// answers may be a direct path too, but it may as well be a relay (Tailscale's
+/// DERP), so it is never better than a public address that answers.
 pub(super) fn route_preference(addr: SocketAddr) -> u32 {
     if is_overlay(addr.ip()) {
-        return 2;
+        return 1;
     }
     match LinkRoute::of(addr) {
         LinkRoute::Lan | LinkRoute::Loopback => NEAREST_ROUTE_PREFERENCE,
-        LinkRoute::Public => 1,
+        LinkRoute::Public => 2,
+    }
+}
+
+/// How much slower than a public address a route through an overlay is held to be when
+/// the two are compared by round trip. An overlay that answers may be relayed (Tailscale's
+/// DERP), and a relay can stall for seconds after a check that looked fine, so it has to be
+/// clearly faster than the public address to be used, not merely level with it.
+pub(super) const OVERLAY_HANDICAP: Duration = Duration::from_millis(10);
+
+/// What is added to a round trip to `addr` before routes are compared:
+/// [`OVERLAY_HANDICAP`] for an overlay address, nothing for any other.
+pub(super) fn route_handicap(addr: SocketAddr) -> Duration {
+    if is_overlay(addr.ip()) {
+        OVERLAY_HANDICAP
+    } else {
+        Duration::ZERO
+    }
+}
+
+/// Which of the peer's addresses a connection may use, when a developer pins it
+/// with the `JAMJAM_ROUTE` environment variable. Without it the connection
+/// measures every address and takes the nearest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RouteOverride {
+    /// `lan`: addresses inside a local network
+    Lan,
+    /// `public`: addresses that are neither a LAN's nor an overlay's
+    Public,
+    /// `tailscale`: addresses in Tailscale's range
+    Overlay,
+    /// An IP address: that host, on any port
+    Host(IpAddr),
+}
+
+impl RouteOverride {
+    /// The route named by `JAMJAM_ROUTE`; `None` when it is unset or empty.
+    /// A value that names nothing is an error, so a typo does not quietly
+    /// leave the route unpinned.
+    pub(super) fn from_env() -> Result<Option<Self>, String> {
+        match std::env::var("JAMJAM_ROUTE") {
+            Ok(value) if !value.trim().is_empty() => Self::parse(&value).map(Some),
+            _ => Ok(None),
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, String> {
+        let value = value.trim();
+        match value.to_ascii_lowercase().as_str() {
+            "lan" => Ok(Self::Lan),
+            "public" => Ok(Self::Public),
+            "tailscale" | "overlay" => Ok(Self::Overlay),
+            _ => value.parse::<IpAddr>().map(Self::Host).map_err(|_| {
+                format!("JAMJAM_ROUTE={value:?} is none of lan, public, tailscale or an IP address")
+            }),
+        }
+    }
+
+    pub(super) fn allows(self, addr: SocketAddr) -> bool {
+        match self {
+            Self::Lan => route_preference(addr) == NEAREST_ROUTE_PREFERENCE,
+            Self::Public => route_preference(addr) == 2,
+            Self::Overlay => is_overlay(addr.ip()),
+            Self::Host(ip) => addr.ip() == ip,
+        }
     }
 }
 
@@ -228,8 +296,27 @@ mod tests {
         let overlay = route_preference(addr("100.68.50.7:5000"));
         let public = route_preference(addr("203.0.113.7:5000"));
 
+        assert!(lan > public, "{lan} > {public}");
         assert!(lan > overlay, "{lan} > {overlay}");
-        assert!(overlay > public, "{overlay} > {public}");
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_a_public_address_and_a_tailscale_address_both_answer_the_public_one_is_preferred() {
+        let overlay = route_preference(addr("100.68.50.7:5000"));
+        let public = route_preference(addr("203.0.113.7:5000"));
+        let public_v6 = route_preference(addr("[2001:db8::7]:5000"));
+
+        assert!(public > overlay, "{public} > {overlay}");
+        assert!(public_v6 > overlay, "{public_v6} > {overlay}");
+    }
+
+    /// Verifies: REQ-CON-115
+    #[test]
+    fn when_the_address_is_a_tailscale_one_its_round_trip_is_held_to_be_longer_than_any_others() {
+        assert_eq!(route_handicap(addr("100.68.50.7:5000")), OVERLAY_HANDICAP);
+        assert_eq!(route_handicap(addr("203.0.113.7:5000")), Duration::ZERO);
+        assert_eq!(route_handicap(addr("192.168.1.20:5000")), Duration::ZERO);
     }
 
     /// Verifies: REQ-CON-115
@@ -240,11 +327,46 @@ mod tests {
             "100.127.255.254:5000",
             "[fd7a:115c:a1e0::1]:5000",
         ] {
-            assert_eq!(route_preference(addr(text)), 2, "{text}");
+            assert_eq!(route_preference(addr(text)), 1, "{text}");
         }
         for text in ["100.63.255.255:5000", "100.128.0.1:5000", "[fd00::1]:5000"] {
-            assert_ne!(route_preference(addr(text)), 2, "{text}");
+            assert_ne!(route_preference(addr(text)), 1, "{text}");
         }
+    }
+
+    #[test]
+    fn when_a_route_is_pinned_only_the_addresses_of_that_kind_are_allowed() {
+        let lan = addr("192.168.1.20:5000");
+        let overlay = addr("100.68.50.7:5000");
+        let public = addr("203.0.113.7:5000");
+
+        assert!(RouteOverride::Lan.allows(lan));
+        assert!(!RouteOverride::Lan.allows(overlay) && !RouteOverride::Lan.allows(public));
+        assert!(RouteOverride::Overlay.allows(overlay));
+        assert!(!RouteOverride::Overlay.allows(lan) && !RouteOverride::Overlay.allows(public));
+        assert!(RouteOverride::Public.allows(public));
+        assert!(!RouteOverride::Public.allows(lan) && !RouteOverride::Public.allows(overlay));
+        assert!(RouteOverride::Host(public.ip()).allows(addr("203.0.113.7:6000")));
+        assert!(!RouteOverride::Host(public.ip()).allows(lan));
+    }
+
+    #[test]
+    fn when_the_pinned_route_is_written_in_any_case_or_as_an_address_it_is_read() {
+        assert_eq!(RouteOverride::parse(" LAN "), Ok(RouteOverride::Lan));
+        assert_eq!(
+            RouteOverride::parse("Tailscale"),
+            Ok(RouteOverride::Overlay)
+        );
+        assert_eq!(RouteOverride::parse("public"), Ok(RouteOverride::Public));
+        assert_eq!(
+            RouteOverride::parse("203.0.113.7"),
+            Ok(RouteOverride::Host("203.0.113.7".parse().unwrap()))
+        );
+    }
+
+    #[test]
+    fn when_the_pinned_route_names_nothing_it_is_an_error() {
+        assert!(RouteOverride::parse("wifi").is_err());
     }
 
     #[test]
