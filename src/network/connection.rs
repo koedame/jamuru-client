@@ -401,6 +401,15 @@ impl RttMeasurement {
         self.time_reference.elapsed().as_micros() as u64
     }
 
+    /// The slowest of the recent round trips, or `None` before the first pong
+    fn slowest_recent(&self) -> Option<Duration> {
+        self.rtt_samples
+            .iter()
+            .copied()
+            .reduce(f32::max)
+            .map(|ms| Duration::from_secs_f32(ms / 1000.0))
+    }
+
     /// Create a ping message and record the send time
     fn create_ping(&mut self) -> LatencyPing {
         let seq = self.next_ping_seq;
@@ -669,6 +678,22 @@ impl ReconnectConfig {
                 self.check_interval
             },
         }
+    }
+
+    /// How long the peer may go without answering a ping before the route looks past
+    /// the address in use
+    ///
+    /// `detect_after` suits a link that answers within a keep-alive interval. On a link
+    /// whose round trip is long, the answer to the first ping sent after the route
+    /// moved cannot be back before one interval (the wait for the next ping) plus the
+    /// round trip, so a fixed wait moves the route again before that answer can arrive.
+    /// The wait spans the next ping and the slowest recent round trip with the same
+    /// margin again, and never exceeds `give_up_after`.
+    fn answer_wait(&self, slowest_round_trip: Option<Duration>) -> Duration {
+        let slowest = slowest_round_trip.unwrap_or(Duration::ZERO);
+        self.detect_after
+            .max(self.keep_alive_interval + slowest * 2)
+            .min(self.give_up_after.max(self.detect_after))
     }
 }
 
@@ -1573,7 +1598,7 @@ impl Connection {
         let route = self.route.clone();
         let secure_link = self.secure_link.clone();
         let pending_latency_info = self.pending_latency_info.clone();
-        let follow_after = self.reconnect_config.detect_after;
+        let reconnect_config = self.reconnect_config;
         let sequence = Arc::new(AtomicU32::new(1_000_000)); // Separate sequence for pong responses
 
         let handle = tokio::spawn(async move {
@@ -1612,6 +1637,8 @@ impl Connection {
                 // Its key counts: until the keys are agreed nothing else it sends
                 // is accepted, and no key can come back to it before the route
                 // is there.
+                let follow_after =
+                    reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
                 let followed = route.lock().follow(addr, follow_after);
                 if let Some(left) = followed {
                     info!(
@@ -1893,7 +1920,7 @@ impl Connection {
         let rtt_measurement = self.rtt_measurement.clone();
         let secure_link = self.secure_link.clone();
         let keep_alive_interval = self.reconnect_config.keep_alive_interval;
-        let probe_others_after = self.reconnect_config.detect_after;
+        let reconnect_config = self.reconnect_config;
 
         let handle = tokio::spawn(async move {
             let mut interval = interval(keep_alive_interval);
@@ -1930,6 +1957,8 @@ impl Connection {
                 // No answer to our pings: the peer may not be reached on this
                 // address. Let it hear from us on its other ones too, so that
                 // it is heard from there and the route can follow (REQ-CON-114).
+                let probe_others_after =
+                    reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
                 let others = {
                     let route = route.lock();
                     if route.answered_at.elapsed() >= probe_others_after {
@@ -2874,6 +2903,84 @@ mod tests {
         }
 
         assert!(conn1.link_facts().snapshot().first_audio_ms.is_some());
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_the_round_trip_is_short_the_peer_gets_the_configured_wait_to_answer() {
+        let config = ReconnectConfig::default().validated();
+
+        assert_eq!(config.answer_wait(None), config.detect_after);
+        assert_eq!(
+            config.answer_wait(Some(Duration::from_millis(60))),
+            config.detect_after
+        );
+    }
+
+    /// The tethered link of the 10/7 check: round trips of 1.1 to 1.6 s. The first ping
+    /// after the route moves goes out up to one interval later and its answer takes a
+    /// round trip, so the wait has to outlast both or the route moves back first.
+    ///
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_the_round_trip_is_long_the_peer_gets_time_for_the_answer_to_the_next_ping() {
+        let config = ReconnectConfig::default().validated();
+        let slowest = Duration::from_millis(1600);
+
+        let wait = config.answer_wait(Some(slowest));
+
+        assert!(
+            wait > config.keep_alive_interval + slowest,
+            "{:?} ends before the answer to the next ping can be back",
+            wait
+        );
+        assert!(wait > config.detect_after);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_the_round_trip_is_extreme_the_wait_stops_at_giving_up() {
+        let config = ReconnectConfig::default().validated();
+
+        assert_eq!(
+            config.answer_wait(Some(Duration::from_secs(30))),
+            config.give_up_after
+        );
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_a_slow_link_has_just_moved_the_route_it_is_not_moved_back_before_the_answer_is_due() {
+        let config = ReconnectConfig::default().validated();
+        let lan = addr("192.168.1.10:5000");
+        let vpn = addr("100.64.0.2:5000");
+        let mut route = Route::new(lan, vec![(vpn, true)]);
+        let mut rtt = RttMeasurement::default();
+        for ms in [1100.0, 1600.0, 1300.0] {
+            rtt.rtt_samples.push_back(ms);
+        }
+        let wait = config.answer_wait(rtt.slowest_recent());
+        assert_eq!(route.follow(vpn, Duration::ZERO), Some(lan));
+
+        // The answer is due one interval plus a round trip after the move: still inside
+        // the wait, so a packet from the old address does not move the route back
+        let due = config.keep_alive_interval + Duration::from_millis(1600);
+        assert!(due < wait);
+        assert_eq!(route.follow(lan, wait), None);
+        assert_eq!(route.current, vpn);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn the_slowest_recent_round_trip_is_unmeasured_before_the_first_pong() {
+        let mut rtt = RttMeasurement::default();
+        assert_eq!(rtt.slowest_recent(), None);
+
+        rtt.rtt_samples.push_back(80.0);
+        rtt.rtt_samples.push_back(250.0);
+        rtt.rtt_samples.push_back(120.0);
+
+        assert_eq!(rtt.slowest_recent(), Some(Duration::from_millis(250)));
     }
 
     /// A `detect_after` below two keep-alive intervals would declare loss on a
