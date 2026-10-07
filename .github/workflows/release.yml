@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  # A rehearsal on develop, to keep the build cache the beta builds restore.
+  schedule:
+    - cron: '17 18 * * 0'
   workflow_dispatch:
 
 permissions:
@@ -102,16 +105,25 @@ jobs:
           restore-keys: |
             cargo-git-
 
-      - name: Cache cargo target
-        uses: actions/cache@v6
+      # The app is its own workspace (src-tauri), so its build is under
+      # src-tauri/target, one directory per target. A tag run cannot read what
+      # another tag run saved (a cache is visible to its own ref and the
+      # default branch only), so the weekly rehearsal on develop is what fills
+      # this; a tag run only restores it and saves nothing.
+      - name: Restore cargo target
+        id: cache-target
+        uses: actions/cache/restore@v6
         with:
-          path: target
-          key: cargo-target-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          path: |
+            src-tauri/target
+            !src-tauri/target/**/bundle
+          key: cargo-target-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            cargo-target-${{ runner.os }}-
+            cargo-target-release-${{ matrix.target }}-
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2"
+        shell: bash
+        run: scripts/install-tauri-cli.sh
 
       # A beta is built as X.Y.Z-N, not as X.Y.Z: two betas of one version are
       # otherwise the same version, and an installed beta never updates to the
@@ -150,6 +162,15 @@ jobs:
         # own place to look for updates and its own version (ADR-045); a
         # release and a rehearsal (no tag) do not.
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json ${{ contains(needs.prepare.outputs.tag, '-') && format('--config src-tauri/tauri.updater.beta.conf.json --config {0}/build-version.conf.json --features debug-remote', runner.temp) || '' }}
+
+      - name: Save cargo target
+        if: github.ref_type != 'tag' && steps.cache-target.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            src-tauri/target
+            !src-tauri/target/**/bundle
+          key: cargo-target-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
       # The notices bundled into the installers are generated from the lock
       # files (scripts/third-party-licenses.py). Stops the release when a
