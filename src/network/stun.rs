@@ -427,4 +427,67 @@ mod tests {
         assert_eq!(result.port(), 8080);
         assert_eq!(result.ip().to_string(), "2001:db8::1");
     }
+
+    /// A STUN server on this machine that answers one binding request by
+    /// reporting `reported` as the sender's address. Returns its `host:port`.
+    async fn answering_server(reported: SocketAddr) -> String {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 576];
+            let (len, from) = socket.recv_from(&mut buf).await.unwrap();
+            assert!(len >= 20);
+
+            let SocketAddr::V4(reported) = reported else {
+                unreachable!("the test reports an IPv4 address");
+            };
+            let mut attr = vec![0x00, 0x01];
+            attr.extend_from_slice(&(reported.port() ^ (MAGIC_COOKIE >> 16) as u16).to_be_bytes());
+            attr.extend_from_slice(&(u32::from(*reported.ip()) ^ MAGIC_COOKIE).to_be_bytes());
+
+            let mut response = Vec::new();
+            response.extend_from_slice(&BINDING_RESPONSE.to_be_bytes());
+            response.extend_from_slice(&((4 + attr.len()) as u16).to_be_bytes());
+            response.extend_from_slice(&buf[4..20]); // magic cookie + transaction ID
+            response.extend_from_slice(&XOR_MAPPED_ADDRESS.to_be_bytes());
+            response.extend_from_slice(&(attr.len() as u16).to_be_bytes());
+            response.extend_from_slice(&attr);
+            socket.send_to(&response, from).await.unwrap();
+        });
+        addr.to_string()
+    }
+
+    #[tokio::test]
+    async fn test_discovery_falls_through_unresolvable_and_silent_servers_to_one_that_answers() {
+        let reported: SocketAddr = "203.0.113.7:40000".parse().unwrap();
+        let answering = answering_server(reported).await;
+        // Accepts the datagram and never replies, like a server that dropped us.
+        let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let silent_addr = silent.local_addr().unwrap().to_string();
+
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client = StunClient::with_timeout(socket, 300);
+        let result = client
+            .discover_public_address_from(&[
+                "stun-down.invalid:3478",
+                silent_addr.as_str(),
+                answering.as_str(),
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(result.mapped_address, reported);
+        assert_eq!(result.server, answering);
+    }
+
+    #[tokio::test]
+    async fn test_discovery_fails_when_no_server_answers() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client = StunClient::with_timeout(socket, 300);
+        let result = client
+            .discover_public_address_from(&["stun-down.invalid:3478"])
+            .await;
+
+        assert!(matches!(result, Err(NetworkError::StunFailed(_))));
+    }
 }

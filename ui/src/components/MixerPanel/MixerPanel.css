@@ -21,6 +21,12 @@
   color: var(--color-text-primary);
 }
 
+.mixer-panel__notice {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
 .mixer-panel__channels {
   display: flex;
   gap: var(--space-md);
