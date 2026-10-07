@@ -19,6 +19,10 @@ pub const HEADER_SIZE: usize = 12;
 /// 1500 - 20 - 8 - 12 = 1460 bytes
 pub const MAX_PAYLOAD_SIZE: usize = 1460;
 
+const ROUTE_PROBE_REQUEST: u8 = 1;
+const ROUTE_PROBE_REPLY: u8 = 2;
+const ROUTE_PROBE_SIZE: usize = 5;
+
 /// Packet types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
@@ -151,6 +155,48 @@ impl Packet {
             flags: PacketFlags::default(),
             payload: Vec::new(),
         }
+    }
+
+    /// A keep-alive that asks the peer to send one back carrying the same `token`, so the
+    /// sender can time the round trip on the address it went to
+    ///
+    /// A peer that does not know the request takes it for an ordinary keep-alive and sends
+    /// nothing back. Unlike a latency ping it may go before the link has agreed its keys:
+    /// it holds only a number the sender chose.
+    pub fn route_probe(sequence: u32, token: u32) -> Self {
+        Self::keep_alive_with(sequence, ROUTE_PROBE_REQUEST, token)
+    }
+
+    /// The keep-alive that answers a [`Self::route_probe`]
+    pub fn route_probe_reply(sequence: u32, token: u32) -> Self {
+        Self::keep_alive_with(sequence, ROUTE_PROBE_REPLY, token)
+    }
+
+    /// Whether this is a [`Self::route_probe`] (`false`) or a [`Self::route_probe_reply`]
+    /// (`true`), and its token. `None` for any other packet, including a plain keep-alive.
+    pub fn route_probe_token(&self) -> Option<(bool, u32)> {
+        if self.packet_type != PacketType::KeepAlive || self.payload.len() != ROUTE_PROBE_SIZE {
+            return None;
+        }
+        let reply = match self.payload[0] {
+            ROUTE_PROBE_REQUEST => false,
+            ROUTE_PROBE_REPLY => true,
+            _ => return None,
+        };
+        let token = u32::from_be_bytes([
+            self.payload[1],
+            self.payload[2],
+            self.payload[3],
+            self.payload[4],
+        ]);
+        Some((reply, token))
+    }
+
+    fn keep_alive_with(sequence: u32, kind: u8, token: u32) -> Self {
+        let mut packet = Self::keep_alive(sequence);
+        packet.payload.push(kind);
+        packet.payload.extend_from_slice(&token.to_be_bytes());
+        packet
     }
 
     /// Create a new latency ping packet
@@ -435,6 +481,34 @@ impl LatencyInfoMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn when_a_route_probe_is_sent_the_peer_reads_its_token_and_that_it_is_a_request() {
+        let bytes = Packet::route_probe(7, 0xABCD).to_bytes();
+
+        let packet = Packet::from_bytes(&bytes).expect("a keep-alive with a payload decodes");
+
+        assert_eq!(packet.packet_type, PacketType::KeepAlive);
+        assert_eq!(packet.route_probe_token(), Some((false, 0xABCD)));
+    }
+
+    #[test]
+    fn when_a_route_probe_is_answered_the_reply_carries_the_token_and_is_not_a_request() {
+        let bytes = Packet::route_probe_reply(8, 0xABCD).to_bytes();
+
+        let packet = Packet::from_bytes(&bytes).unwrap();
+
+        assert_eq!(packet.route_probe_token(), Some((true, 0xABCD)));
+    }
+
+    #[test]
+    fn when_a_keep_alive_carries_nothing_it_is_not_a_route_probe() {
+        assert_eq!(Packet::keep_alive(1).route_probe_token(), None);
+        assert_eq!(
+            Packet::audio(1, 0, vec![1, 0, 0, 0, 0]).route_probe_token(),
+            None
+        );
+    }
 
     #[test]
     fn test_packet_roundtrip() {
