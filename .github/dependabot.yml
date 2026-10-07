@@ -48,6 +48,11 @@ updates:
     ignore:
       - dependency-name: "bincode"
         update-types: ["version-update:semver-major"]
+      # cairo-rs has to stay on the gtk 0.18 line that webkit2gtk uses (see
+      # src-tauri/Cargo.toml); a newer one makes its `Surface` an unrelated type.
+      # Move it together with webkit2gtk, by hand.
+      - dependency-name: "cairo-rs"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     target-branch: "develop"

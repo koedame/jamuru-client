@@ -98,6 +98,9 @@ export function MixerPanel({
   return (
     <div className="mixer-panel" data-testid="mixer-panel" role="region" aria-label={t("mixer.title")}>
       <span className="mixer-panel__title">{t("mixer.title")}</span>
+      <p className="mixer-panel__notice" data-testid="mixer-loud-notice">
+        {t("mixer.loudNotice")}
+      </p>
 
       <div className="mixer-panel__channels">
         <div className="mixer-panel__section">{localChannels.map(renderStrip)}</div>

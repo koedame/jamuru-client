@@ -23,8 +23,10 @@ MIT・Apache-2.0・BSD・MPL-2.0 は、配るときに著作権表示とライ�
   `MIT OR Apache-2.0 OR LGPL-2.1-or-later` のように許可されたものを選べる依存は通る
 - `--check` は cargo-about を回さず（数分かかる）、生成物と、その入力（ロックファイル・`about.toml`・`deny.toml`・
   `packaging/third-party/`・スクリプト）のハッシュを突き合わせる。入力が変わったのに作り直していない・生成物を手で編集した、のどちらも落ちる。
-  `cargo test`（`tests/third_party_licenses_test.rs`）・CI・リリースが回す。依存を更新する PR（Dependabot を含む）は、
-  作り直した生成物を同じ PR に含める
+  `cargo test`（`tests/third_party_licenses_test.rs`）・CI・リリースが回す。依存を更新する PR は、
+  作り直した生成物を同じ PR に含める。Dependabot の PR は、`.github/workflows/dependabot-licenses.yml` が作り直して PR のブランチに 1 コミット足す
+  （Dependabot の `pull_request` の実行は書き込めないので `pull_request_target` で動かし、Dependabot 自身の同一リポジトリの PR・
+  マニフェストとロックファイルだけを変える PR・トークンを渡さない生成の段、の 3 つで絞る。push が起こした CI は承認待ちで止まるので、ワークフローが承認する）
 - **Linux の AppImage** には、ビルドした環境のシステムのライブラリ（GTK・WebKitGTK・GLib・GStreamer など。LGPL が多い）が同梱される。
   どれが入るかはビルドの環境で変わる（0.1.0 と beta.48 の AppImage でも違っていた）ので、一覧は手で持たず、
   リリースのビルドが AppImage から作る（`scripts/appimage-bundled-libraries.py`。`dpkg` で引き、著作権ファイル・ライセンス本文・
@@ -32,7 +34,8 @@ MIT・Apache-2.0・BSD・MPL-2.0 は、配るときに著作権表示とライ�
 
 ## Consequences
 
-- 依存を上げるたびに `scripts/third-party-licenses.py` を回して生成物をコミットする（約 2 分。cargo-about が要る）
+- 依存を上げるたびに `scripts/third-party-licenses.py` を回して生成物をコミットする（約 2 分。cargo-about が要る）。Dependabot の PR では自動で回る
+- Dependabot は他人が足したコミットのある PR を自動では rebase しなくなる。遅れたら `@dependabot recreate` で作り直す（ワークフローがまた生成物を足す）
 - 生成物は約 700KB で、インストーラーが同じ大きさだけ増える
 - AppImage に LGPL のライブラリを同梱することと、LICENSE の「改変・再配布・自己ビルドの禁止」の関係は、この ADR では決めない。
   配り方（AppImage を続けるか、`.deb` だけにするか）は別に判断する
