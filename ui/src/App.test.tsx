@@ -85,7 +85,9 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText('main screen')).toBeInTheDocument();
-    expect(mainScreenMounted).toHaveBeenCalledTimes(1);
+    // The mount is recorded in an effect, which runs after the element is
+    // already in the document.
+    await waitFor(() => expect(mainScreenMounted).toHaveBeenCalledTimes(1));
   });
 
   // The backend holds back everything that reaches the network until the
