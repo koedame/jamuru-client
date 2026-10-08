@@ -149,6 +149,14 @@ impl Route {
         self.answered_at = Instant::now();
     }
 
+    /// Starts the wait for the peer's first answer `after` from now instead of at once
+    ///
+    /// No ping goes out before the keys are agreed, which takes a round trip, so on a
+    /// slow link the peer cannot be blamed for silence in that time.
+    fn start_waiting_for_an_answer_in(&mut self, after: Duration) {
+        self.answered_at = Instant::now() + after;
+    }
+
     /// Moves to `from` when a packet arrived from there, we can send to it,
     /// and the peer has not answered for `after`. Returns the address left.
     fn follow(&mut self, from: SocketAddr, after: Duration) -> Option<SocketAddr> {
@@ -385,6 +393,9 @@ struct RttMeasurement {
     last_answered_sent_at: Option<Instant>,
     /// Recent RTT samples for averaging
     rtt_samples: VecDeque<f32>,
+    /// The round trip the connectivity check timed on the route taken up: all that is known of
+    /// the link until the first ping is answered
+    route_round_trip: Option<Duration>,
     /// Next ping sequence number
     next_ping_seq: u32,
     /// Monotonic time reference for timestamps
@@ -399,6 +410,7 @@ impl Default for RttMeasurement {
             pending_pings: HashMap::new(),
             last_answered_sent_at: None,
             rtt_samples: VecDeque::with_capacity(RTT_SAMPLE_COUNT),
+            route_round_trip: None,
             next_ping_seq: 0,
             time_reference: Instant::now(),
         }
@@ -413,13 +425,16 @@ impl RttMeasurement {
 
     /// The slowest of the recent round trips, counting the pings sent since the last answer
     /// for as long as they have been out, or `None` before there is any
+    ///
+    /// Until a ping has been answered, the round trip the connectivity check timed stands in.
     fn slowest_recent(&self) -> Option<Duration> {
         let answered = self
             .rtt_samples
             .iter()
             .copied()
             .reduce(f32::max)
-            .map(|ms| Duration::from_secs_f32(ms / 1000.0));
+            .map(|ms| Duration::from_secs_f32(ms / 1000.0))
+            .or(self.route_round_trip);
         let unanswered = self
             .pending_pings
             .values()
@@ -1063,12 +1078,14 @@ impl Connection {
                 .collect()
         };
 
+        let mut selected_rtt = None;
         let selected = match verdict {
             Verdict::Fastest {
                 index,
                 rtt,
                 replies,
             } => {
+                selected_rtt = Some(rtt);
                 for (i, addr) in candidates.iter().enumerate() {
                     if probing.reply_count(i) > 0 {
                         let round_trips: Vec<String> = probing.rtt[i]
@@ -1103,7 +1120,14 @@ impl Connection {
 
         match selected {
             Some(selected_addr) => {
-                *self.route.lock() = Route::new(selected_addr, other_candidates(selected_addr));
+                let mut route = Route::new(selected_addr, other_candidates(selected_addr));
+                if let Some(rtt) = selected_rtt {
+                    // The keys take a round trip to agree, then the first ping goes out
+                    // within an interval and takes a round trip to be answered
+                    route.start_waiting_for_an_answer_in(rtt);
+                    self.rtt_measurement.write().route_round_trip = Some(rtt);
+                }
+                *self.route.lock() = route;
 
                 // Record connection start time
                 if let Ok(mut start) = self.connection_start.lock() {
@@ -2848,6 +2872,65 @@ mod tests {
         assert_eq!(conn1.state(), ConnectionState::Connected);
     }
 
+    /// A relay between `a` and `b` at its own address that hands every datagram on after `delay`
+    async fn delaying_relay(a: SocketAddr, b: SocketAddr, delay: Duration) -> SocketAddr {
+        let socket = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let relay = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            while let Ok((len, from)) = socket.recv_from(&mut buf).await {
+                let to = if from == a { b } else { a };
+                let datagram = buf[..len].to_vec();
+                let socket = socket.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(delay).await;
+                    let _ = socket.send_to(&datagram, to).await;
+                });
+            }
+        });
+        relay
+    }
+
+    /// Two peers joined over two paths with the same round trip, longer than the keep-alive
+    /// interval (the 10/7 tether's 1.3 s round trip on a 1 s interval, at a tenth). The keys
+    /// take a round trip to agree, so the first ping is answered later than the configured wait
+    /// after the route was taken up. That silence is not the peer failing to answer: neither
+    /// peer may leave the route it chose.
+    ///
+    /// Verifies: REQ-CON-114
+    #[tokio::test]
+    async fn when_the_round_trip_is_longer_than_the_keep_alive_interval_the_route_chosen_is_kept() {
+        let config = ReconnectConfig {
+            keep_alive_interval: Duration::from_millis(100),
+            detect_after: Duration::from_millis(200),
+            give_up_after: Duration::from_secs(30),
+            check_interval: Duration::from_millis(50),
+        };
+        let mut a = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut b = Connection::new("127.0.0.1:0").await.unwrap();
+        a.set_reconnect_config(config);
+        b.set_reconnect_config(config);
+        let one_way = Duration::from_millis(65);
+        let first = delaying_relay(a.local_addr(), b.local_addr(), one_way).await;
+        let second = delaying_relay(a.local_addr(), b.local_addr(), one_way).await;
+
+        let candidates = [first, second];
+        let (from_a, from_b) = tokio::join!(
+            a.connect_with_candidates(&candidates),
+            b.connect_with_candidates(&candidates)
+        );
+        from_a.unwrap();
+        from_b.unwrap();
+        let (chosen_by_a, chosen_by_b) = (a.remote_addr(), b.remote_addr());
+
+        // Long enough for the first ping to be answered and for several more
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        assert_eq!(a.remote_addr(), chosen_by_a, "a left the route it chose");
+        assert_eq!(b.remote_addr(), chosen_by_b, "b left the route it chose");
+        assert!(a.rtt_ms().is_some() && b.rtt_ms().is_some());
+    }
+
     /// Verifies: REQ-NET-029
     #[tokio::test]
     async fn when_a_frame_is_too_big_for_one_packet_it_is_sent_as_packets_that_fit() {
@@ -3058,6 +3141,20 @@ mod tests {
         rtt.rtt_samples.push_back(80.0);
         rtt.rtt_samples.push_back(250.0);
         rtt.rtt_samples.push_back(120.0);
+
+        assert_eq!(rtt.slowest_recent(), Some(Duration::from_millis(250)));
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn before_the_first_pong_the_round_trip_the_connectivity_check_timed_is_the_slowest() {
+        let mut rtt = RttMeasurement {
+            route_round_trip: Some(Duration::from_millis(1300)),
+            ..RttMeasurement::default()
+        };
+        assert_eq!(rtt.slowest_recent(), Some(Duration::from_millis(1300)));
+
+        rtt.rtt_samples.push_back(250.0);
 
         assert_eq!(rtt.slowest_recent(), Some(Duration::from_millis(250)));
     }
