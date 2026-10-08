@@ -1,0 +1,71 @@
+name: Audit
+
+# Dependencies are checked against the RustSec advisory database (cargo) and
+# the npm advisory database. A new advisory can appear without any change to
+# this repository, so besides pull requests that touch a lock file and pushes,
+# this runs every week; a failing scheduled run is how a freshly published
+# advisory reaches us.
+#
+# Only vulnerabilities fail the job. cargo-audit reports unmaintained, unsound
+# and yanked crates as warnings, and those are left to Dependabot. npm fails
+# from "high" up.
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.lock"
+      - "src-tauri/Cargo.lock"
+      - "tests/e2e/Cargo.lock"
+      - "ui/package-lock.json"
+      - ".github/workflows/audit.yml"
+  push:
+    branches:
+      - main
+      - develop
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    name: Cargo advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-audit
+
+      # The three workspaces have separate lock files.
+      - name: Audit the core library
+        run: cargo audit --file Cargo.lock
+
+      - name: Audit the app
+        run: cargo audit --file src-tauri/Cargo.lock
+
+      - name: Audit the e2e crate
+        run: cargo audit --file tests/e2e/Cargo.lock
+
+  npm-audit:
+    name: npm advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Audit the UI dependencies
+        run: npm audit --package-lock-only --audit-level=high
