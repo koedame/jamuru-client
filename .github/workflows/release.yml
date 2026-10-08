@@ -122,6 +122,14 @@ jobs:
           restore-keys: |
             cargo-target-release-${{ matrix.target }}-
 
+      # The cache is saved without the bundle directories, but a Windows restore
+      # brought back the installers of the build that saved it (`jamuru_0.1.0_*`),
+      # and the release then found two installers where it expects one. Whatever
+      # is in the bundle directory now is not this build's.
+      - name: Drop the installers a cache brought back
+        shell: bash
+        run: rm -rf "src-tauri/target/${{ matrix.target }}/release/bundle"
+
       - name: Install Tauri CLI
         shell: bash
         run: scripts/install-tauri-cli.sh
