@@ -11,13 +11,13 @@ use tracing::{debug, error, info, warn};
 
 use super::channels::{pick_channels, place_stereo, smallest_channel_count, OutputRoute};
 use super::device::{
-    display_name, input_open_rate, offered_channel_counts, resolve_input_device,
+    display_name, input_open_rate, offered_channel_counts, output_open_rate, resolve_input_device,
     resolve_output_device, DeviceId,
 };
 use super::driver::{StreamHost, OPEN_TIMEOUT};
 use super::error::AudioError;
 use super::fault::{self, Call};
-use super::resampler::CaptureResampler;
+use super::resampler::{CaptureResampler, ResamplerError};
 
 /// Events that can occur during audio streaming
 #[derive(Debug, Clone)]
@@ -450,20 +450,35 @@ impl AudioEngine {
                 "Playback device: {}",
                 display_name(&device).unwrap_or_default()
             );
+            // A device that runs at another rate is opened at its own, and
+            // the stereo the source makes is converted to it below
+            let device_rate = output_open_rate(&device, sample_rate, route.channels_needed());
             let device_channels =
-                open_channel_count(&device, false, sample_rate, route.channels_needed()) as usize;
+                open_channel_count(&device, false, device_rate, route.channels_needed()) as usize;
             let stream_config = StreamConfig {
                 channels: device_channels as u16,
-                sample_rate,
+                sample_rate: device_rate,
                 buffer_size: cpal::BufferSize::Fixed(period),
             };
 
+            let source = if device_rate == sample_rate {
+                FramePuller::new(frame_samples, fill_frame)
+            } else {
+                let source =
+                    FramePuller::converting(frame_samples, fill_frame, sample_rate, device_rate)
+                        .map_err(|e| AudioError::UnsupportedConfig(e.to_string()))?;
+                info!(
+                    "Playback opens at {} Hz and is converted from the session's {} Hz",
+                    device_rate, sample_rate
+                );
+                source
+            };
             let mut puller = RoutedPuller {
-                puller: FramePuller::new(frame_samples, fill_frame),
+                puller: source,
                 stereo: vec![0.0; period as usize * 2 * 4],
                 device_channels,
                 route,
-                sample_rate,
+                sample_rate: device_rate,
             };
 
             let stream = device
@@ -638,13 +653,26 @@ impl<F: FnMut(&mut [f32]) -> usize> RoutedPuller<F> {
 /// Hands device-sized requests what a frame source produces, in frames.
 ///
 /// The source is asked for a frame only when the device has used up the last
-/// one, so nothing is fetched ahead of the clock.
+/// one, so nothing is fetched ahead of the clock. When the device runs at
+/// another rate than the source makes audio at, each frame is converted to the
+/// device's rate before it is handed on.
 pub(crate) struct FramePuller<F> {
     fill_frame: F,
     frame: Vec<f32>,
+    /// Present when the device's rate is not the source's
+    conversion: Option<Conversion>,
     filled: usize,
     taken: usize,
 }
+
+/// A source frame converted to the device's rate, waiting to be taken
+struct Conversion {
+    resampler: CaptureResampler,
+    converted: Vec<f32>,
+}
+
+/// Interleaved channels of what a frame source makes
+const SOURCE_CHANNELS: usize = 2;
 
 impl<F: FnMut(&mut [f32]) -> usize> FramePuller<F> {
     pub(crate) fn new(frame_samples: usize, fill_frame: F) -> Self {
@@ -654,26 +682,77 @@ impl<F: FnMut(&mut [f32]) -> usize> FramePuller<F> {
         Self {
             fill_frame,
             frame: vec![0.0f32; frame_samples.max(1) * 3],
+            conversion: None,
             filled: 0,
             taken: 0,
+        }
+    }
+
+    /// A puller whose requests are in `device_rate`, from a source that makes
+    /// stereo at `source_rate`.
+    pub(crate) fn converting(
+        frame_samples: usize,
+        fill_frame: F,
+        source_rate: u32,
+        device_rate: u32,
+    ) -> Result<Self, ResamplerError> {
+        let resampler = CaptureResampler::new(source_rate, device_rate, SOURCE_CHANNELS)?;
+        let mut puller = Self::new(frame_samples, fill_frame);
+        // The widest frame, converted, with room for the chunk the resampler
+        // holds back: the callback never grows it
+        let widest_frames = puller.frame.len() / SOURCE_CHANNELS + CaptureResampler::CHUNK_FRAMES;
+        let reserve = (widest_frames * device_rate as usize).div_ceil(source_rate as usize)
+            + CaptureResampler::CHUNK_FRAMES;
+        puller.conversion = Some(Conversion {
+            resampler,
+            converted: Vec::with_capacity(reserve * SOURCE_CHANNELS),
+        });
+        Ok(puller)
+    }
+
+    /// Makes the next frame ready to take. False when the source has nothing
+    /// to say.
+    fn refill(&mut self) -> bool {
+        self.taken = 0;
+        loop {
+            let made = (self.fill_frame)(&mut self.frame).min(self.frame.len());
+            let Some(conversion) = self.conversion.as_mut() else {
+                self.filled = made;
+                return made > 0;
+            };
+            if made == 0 {
+                self.filled = 0;
+                return false;
+            }
+            conversion.converted.clear();
+            let converted = &mut conversion.converted;
+            conversion
+                .resampler
+                .process(&self.frame[..made], |out| converted.extend_from_slice(out));
+            // The resampler works in chunks, so a short frame can yield nothing
+            // yet: take the next one rather than call that silence
+            if !conversion.converted.is_empty() {
+                self.filled = conversion.converted.len();
+                return true;
+            }
         }
     }
 
     fn fill(&mut self, data: &mut [f32]) {
         let mut written = 0;
         while written < data.len() {
-            if self.taken == self.filled {
-                self.filled = (self.fill_frame)(&mut self.frame).min(self.frame.len());
-                self.taken = 0;
-                if self.filled == 0 {
-                    // A source with nothing to say still has to leave the
-                    // device with samples.
-                    data[written..].fill(0.0);
-                    return;
-                }
+            if self.taken == self.filled && !self.refill() {
+                // A source with nothing to say still has to leave the
+                // device with samples.
+                data[written..].fill(0.0);
+                return;
             }
+            let ready = match &self.conversion {
+                Some(conversion) => &conversion.converted,
+                None => &self.frame,
+            };
             let n = (data.len() - written).min(self.filled - self.taken);
-            data[written..written + n].copy_from_slice(&self.frame[self.taken..self.taken + n]);
+            data[written..written + n].copy_from_slice(&ready[self.taken..self.taken + n]);
             written += n;
             self.taken += n;
         }
@@ -713,6 +792,117 @@ mod tests {
     fn the_engine_can_be_sent_to_another_thread() {
         fn is_send<T: Send>() {}
         is_send::<AudioEngine>();
+    }
+
+    /// A source making a 1 kHz tone on the left channel and silence on the
+    /// right, `frame_samples` interleaved samples at a time, at 48000 Hz.
+    fn left_tone(frame_samples: usize) -> impl FnMut(&mut [f32]) -> usize {
+        let mut frame_index = 0usize;
+        move |out: &mut [f32]| {
+            for frame in out[..frame_samples].as_chunks_mut::<2>().0 {
+                frame[0] = (std::f32::consts::TAU * 1000.0 * frame_index as f32 / 48000.0).sin();
+                frame[1] = 0.0;
+                frame_index += 1;
+            }
+            frame_samples
+        }
+    }
+
+    /// Plays `seconds` of the source through `puller`, `request` samples per
+    /// device callback, and returns what the device was handed.
+    fn play(
+        puller: &mut FramePuller<impl FnMut(&mut [f32]) -> usize>,
+        device_rate: u32,
+        seconds: u32,
+        request: usize,
+    ) -> Vec<f32> {
+        let total = device_rate as usize * 2 * seconds as usize;
+        let mut played = Vec::with_capacity(total);
+        let mut data = vec![0.0f32; request];
+        while played.len() < total {
+            puller.fill(&mut data);
+            played.extend_from_slice(&data);
+        }
+        played
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_the_device_runs_at_half_the_session_rate_the_tone_keeps_its_pitch_and_its_channel() {
+        let mut puller = FramePuller::converting(128, left_tone(128), 48000, 24000).unwrap();
+
+        let played = play(&mut puller, 24000, 1, 240);
+
+        let left: Vec<f32> = played.iter().step_by(2).copied().collect();
+        let right = played.iter().skip(1).step_by(2);
+        let rising = left
+            .windows(2)
+            .filter(|w| w[0] <= 0.0 && w[1] > 0.0)
+            .count();
+        assert!(
+            (999..=1001).contains(&rising),
+            "{rising} cycles in a second of a 1 kHz tone"
+        );
+        assert!(right.into_iter().all(|x| x.abs() < 1e-6));
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_the_device_runs_above_the_session_rate_the_tone_keeps_its_pitch() {
+        let mut puller = FramePuller::converting(128, left_tone(128), 48000, 96000).unwrap();
+
+        let played = play(&mut puller, 96000, 1, 960);
+
+        let left: Vec<f32> = played.iter().step_by(2).copied().collect();
+        let rising = left
+            .windows(2)
+            .filter(|w| w[0] <= 0.0 && w[1] > 0.0)
+            .count();
+        assert!(
+            (999..=1001).contains(&rising),
+            "{rising} cycles in a second of a 1 kHz tone"
+        );
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_the_source_makes_less_than_a_conversion_chunk_the_device_still_gets_the_audio() {
+        // 3 frames a call: the resampler needs 8 to produce anything
+        let mut puller = FramePuller::converting(6, left_tone(6), 48000, 24000).unwrap();
+
+        let played = play(&mut puller, 24000, 1, 240);
+
+        let silent = played.iter().filter(|x| x.abs() < 1e-6).count();
+        assert!(
+            silent < played.len() * 3 / 4,
+            "{silent} of {} samples are silence",
+            played.len()
+        );
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_the_source_has_nothing_to_say_the_converted_device_is_left_silent() {
+        let mut puller = FramePuller::converting(128, |_: &mut [f32]| 0, 48000, 24000).unwrap();
+        let mut data = vec![1.0f32; 240];
+
+        puller.fill(&mut data);
+
+        assert!(data.iter().all(|x| *x == 0.0));
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_playing_through_a_conversion_the_device_callback_does_not_grow_its_buffers() {
+        let mut puller = FramePuller::converting(128, left_tone(128), 48000, 44100).unwrap();
+        let reserved = puller.conversion.as_ref().unwrap().converted.capacity();
+
+        play(&mut puller, 44100, 1, 441 * 2);
+
+        assert_eq!(
+            puller.conversion.as_ref().unwrap().converted.capacity(),
+            reserved
+        );
     }
 
     /// Verifies: REQ-AUD-123
