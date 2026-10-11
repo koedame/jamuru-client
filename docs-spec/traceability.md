@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 259 |
-| うち must | 252 |
+| 要求 総数 | 260 |
+| うち must | 253 |
 | うち should | 7 |
-| 検証済み | 230 |
+| 検証済み | 231 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -61,6 +61,7 @@
 | REQ-AUD-124 | must | 入力デバイスがセッションのサンプルレートで開けないときは、デバイスが対応するレートで開いて、アプリ側でセッションのレートに変換する | `docs-spec/behavior/audio-quality.feature` | `src/audio/device.rs`::a_device_that_offers_nothing_is_asked_for_the_wanted_rate<br/>`src/audio/device.rs`::a_rate_offered_only_with_too_few_channels_is_not_chosen<br/>`src/audio/device.rs`::when_the_device_offers_only_44100_it_is_opened_at_44100<br/>`src/audio/device.rs`::when_the_device_offers_the_wanted_rate_it_is_opened_at_that_rate<br/>`src/audio/device.rs`::when_two_offered_rates_are_equally_near_the_higher_one_is_used<br/>`src/audio/resampler.rs`::a_capture_converted_from_44100_to_48000_keeps_the_level_of_music_up_to_15khz<br/>`src/audio/resampler.rs`::a_capture_converted_to_another_rate_has_the_length_of_the_rate_ratio<br/>`src/audio/resampler.rs`::a_capture_gives_the_same_audio_however_the_device_cuts_it_into_callbacks<br/>`src/audio/resampler.rs`::a_stereo_capture_keeps_each_channel_to_itself<br/>`src/audio/resampler.rs`::the_conversion_delays_a_sound_by_under_a_third_of_a_millisecond |
 | REQ-AUD-125 | must | 入力デバイスがどのレートでも開けなくても、セッションは続き、相手の音は聞こえ、画面に直し方が出る | `docs-spec/behavior/audio-quality.feature` | `src-tauri/src/streaming.rs`::when_the_input_does_not_open_at_the_session_rate_the_session_goes_on_and_says_which_rate<br/>`src-tauri/src/streaming.rs`::when_the_input_opens_nothing_is_reported<br/>`src-tauri/src/streaming.rs`::when_the_input_refuses_for_any_other_reason_the_session_goes_on_too<br/>`ui/src/screens/MainScreen.test.tsx`::入力デバイスが 48000Hz で開けないとき、デバイスの名前とレートを添えて、形式を合わせるよう知らせること |
 | REQ-AUD-126 | must | 同じASIOドライバを入力と出力の両方に選ぶと、1つのASIOセッションとして開く | `docs-spec/behavior/audio-quality.feature` | `src-tauri/src/streaming.rs`::a_non_asio_device_on_either_side_is_not_a_shared_driver<br/>`src-tauri/src/streaming.rs`::the_same_asio_driver_on_both_sides_is_the_shared_driver<br/>`src-tauri/src/streaming.rs`::two_different_asio_drivers_are_not_a_shared_driver<br/>`src-tauri/src/streaming.rs`::with_no_device_on_either_side_there_is_no_shared_driver |
+| REQ-AUD-127 | must | macOS で出力デバイスが別のサンプルレートで動いているときは、デバイスのレートで開いて、アプリ側でセッションのレートから変換する | `docs-spec/behavior/audio-quality.feature` | `src/audio/device.rs`::when_opening_does_not_rewrite_the_device_rate_the_output_opens_at_an_offered_rate<br/>`src/audio/device.rs`::when_opening_would_rewrite_the_device_rate_the_output_opens_at_the_rate_the_device_runs_at<br/>`src/audio/device.rs`::when_the_device_already_runs_at_the_wanted_rate_the_output_opens_at_it<br/>`src/audio/device.rs`::when_the_device_does_not_say_its_rate_the_output_opens_at_an_offered_rate<br/>`src/audio/engine.rs`::when_playing_through_a_conversion_the_device_callback_does_not_grow_its_buffers<br/>`src/audio/engine.rs`::when_the_device_runs_above_the_session_rate_the_tone_keeps_its_pitch<br/>`src/audio/engine.rs`::when_the_device_runs_at_half_the_session_rate_the_tone_keeps_its_pitch_and_its_channel<br/>`src/audio/engine.rs`::when_the_source_has_nothing_to_say_the_converted_device_is_left_silent<br/>`src/audio/engine.rs`::when_the_source_makes_less_than_a_conversion_chunk_the_device_still_gets_the_audio |
 | REQ-CLI-001 | must | CLI でルームを作成でき、招待コードが表示される。他の参加者はそのコードで参加し、チャットが双方に届く | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CLI-002 | must | セッション中のコマンド（`/mute` `/unmute` `/stats` `/help` `/quit`）が解釈され、ミュート状態が切り替わる。コマンド以外はチャットとして送られる | `docs-spec/requirements.md` | `src/main.rs`::muting_without_audio_reports_that_there_is_nothing_to_mute<br/>`src/main.rs`::only_commands_are_intercepted<br/>`src/main.rs`::session_commands_are_recognised_and_act |
 | REQ-CLI-003 | must | プリセットの選択を保存でき、GUI と同じ設定ファイルに書かれる。未知のプリセット名は拒否される | `docs-spec/requirements.md` | `tests/cli_test.rs`::preset_use_refuses_a_name_that_is_not_a_preset<br/>`tests/cli_test.rs`::preset_use_saves_the_choice_where_the_app_reads_it |
