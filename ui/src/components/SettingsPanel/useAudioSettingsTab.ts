@@ -41,7 +41,12 @@ function shownDevice(devices: AudioDeviceInfo[], chosen: string | null): string 
 }
 
 function toDeviceInfo(device: AudioDeviceInfo) {
-  return { id: device.id, name: device.name, isDefault: device.is_default };
+  return {
+    id: device.id,
+    name: device.name,
+    isDefault: device.is_default,
+    isBluetooth: device.is_bluetooth,
+  };
 }
 
 export type AudioSettingsTabProps = Omit<DevicesTabProps, "isLoading">;

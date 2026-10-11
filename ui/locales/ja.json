@@ -211,6 +211,8 @@
       "channelL": "L/MONO",
       "channelR": "R",
       "selectDevice": "デバイスを選択",
+      "bluetoothMark": "Bluetooth",
+      "bluetoothWarning": "Bluetooth のデバイスは機器自体の遅延が加わり、マイクを使っている間は音質も下がります。低遅延・高音質で演奏するには、有線のヘッドホンやオーディオインターフェースをお勧めします。",
       "transmitChannels": "送信チャンネル",
       "transmitChannelsDesc": "送信する音声のチャンネル数",
       "mono": "モノラル",

@@ -587,6 +587,7 @@ mod tests {
             supported_channels: channels.to_vec(),
             is_default,
             is_asio: false,
+            is_bluetooth: false,
         }
     }
 
