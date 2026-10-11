@@ -115,6 +115,13 @@ sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # license.
 azo = "0.2"
 
+# How CoreAudio says a device is connected (Bluetooth or not), which `cpal`
+# does not pass on. Both are already pulled in by `cpal`; only the features
+# are named here.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "AudioHardware"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString"] }
+
 [dev-dependencies]
 # Testing
 tokio-test = "0.4"

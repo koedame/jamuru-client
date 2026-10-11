@@ -2322,6 +2322,8 @@ dependencies = [
  "hkdf",
  "libloading 0.9.0",
  "local-ip-address",
+ "objc2-core-audio",
+ "objc2-core-foundation",
  "parking_lot",
  "rand",
  "reqwest",
