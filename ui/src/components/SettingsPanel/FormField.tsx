@@ -22,6 +22,8 @@ export interface FormFieldProps {
   hint?: string;
   /** Error message */
   error?: string;
+  /** Warning shown below the control; the choice stays allowed */
+  warning?: string;
   /** Layout orientation */
   orientation?: FormFieldOrientation;
   /** Field content (input, select, etc.) */
@@ -34,6 +36,7 @@ export function FormField({
   description,
   hint,
   error,
+  warning,
   orientation = "stacked",
   children,
 }: FormFieldProps) {
@@ -51,6 +54,11 @@ export function FormField({
         {children}
         {hint && !error && <p className="form-field__hint">{hint}</p>}
         {error && <p className="form-field__error">{error}</p>}
+        {warning && (
+          <p className="form-field__warning" role="status">
+            {warning}
+          </p>
+        )}
       </div>
     </div>
   );

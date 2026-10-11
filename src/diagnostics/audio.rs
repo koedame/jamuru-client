@@ -608,6 +608,7 @@ mod tests {
                 supported_channels: vec![2],
                 is_default: true,
                 is_asio: false,
+                is_bluetooth: false,
             };
             (Ok(vec![device]), Some(format!("{:?}", direction)))
         });

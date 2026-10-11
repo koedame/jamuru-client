@@ -21,6 +21,7 @@ pub struct AudioDeviceInfo {
     pub supported_channels: Vec<u16>,
     pub is_default: bool,
     pub is_asio: bool,
+    pub is_bluetooth: bool,
 }
 
 /// One direction's device list, and the call that has hung, if one has
@@ -145,6 +146,7 @@ fn list_inputs() -> Result<Vec<AudioDeviceInfo>, String> {
             supported_channels: d.supported_channels,
             is_default: d.is_default,
             is_asio: d.is_asio,
+            is_bluetooth: d.is_bluetooth,
         })
         .collect();
     log_devices("input", &devices);
@@ -166,6 +168,7 @@ fn list_outputs() -> Result<Vec<AudioDeviceInfo>, String> {
             supported_channels: d.supported_channels,
             is_default: d.is_default,
             is_asio: d.is_asio,
+            is_bluetooth: d.is_bluetooth,
         })
         .collect();
     log_devices("output", &devices);
@@ -234,6 +237,7 @@ mod tests {
             supported_channels: vec![2],
             is_default: true,
             is_asio: false,
+            is_bluetooth: false,
         }])
     }
 
