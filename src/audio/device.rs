@@ -304,12 +304,13 @@ fn capabilities(
 /// the last resort for a device whose transport cannot be read.
 pub(crate) fn is_bluetooth(device: &cpal::Device, name: &str) -> bool {
     #[cfg(target_os = "macos")]
-    if let Some(bluetooth) = device
-        .id()
-        .ok()
-        .and_then(|id| super::transport::is_bluetooth(id.id()))
-    {
-        return bluetooth;
+    if let Ok(id) = device.id() {
+        match super::transport::is_bluetooth(id.id()) {
+            Some(bluetooth) => return bluetooth,
+            None => tracing::warn!(
+                "CoreAudio did not report the transport type of {id}; going by the device name"
+            ),
+        }
     }
     let interface = device
         .description()
