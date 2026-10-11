@@ -195,6 +195,38 @@ pub(crate) fn input_open_rate(device: &cpal::Device, wanted: u32, needed: usize)
     )
 }
 
+/// The sample rate to open `output` devices at: the rate the device runs at
+/// now where opening a stream at another rate would rewrite the device's own
+/// clock, otherwise what [`input_open_rate`] picks for an input.
+///
+/// macOS sets the device's nominal rate to the stream's and waits for the
+/// change. A Bluetooth headset in its call mode (AirPods while their
+/// microphone is in use) is fixed at 24000 Hz or so, never confirms the
+/// change, and the open fails after a second. The rate is also the device's
+/// for every other program, so it is left alone.
+pub(crate) fn output_open_rate(device: &cpal::Device, wanted: u32, needed: usize) -> u32 {
+    let current = device
+        .default_output_config()
+        .ok()
+        .map(|config| config.sample_rate());
+    pick_output_rate(
+        rate_to_open(
+            device.supported_output_configs().into_iter().flatten(),
+            needed,
+            wanted,
+        ),
+        current,
+        cfg!(target_os = "macos"),
+    )
+}
+
+fn pick_output_rate(offered: u32, current: Option<u32>, rewrites_device_rate: bool) -> u32 {
+    match current {
+        Some(current) if rewrites_device_rate => current,
+        _ => offered,
+    }
+}
+
 fn rate_to_open(
     configs: impl IntoIterator<Item = cpal::SupportedStreamConfigRange>,
     needed: usize,
@@ -360,6 +392,30 @@ mod tests {
     fn when_two_offered_rates_are_equally_near_the_higher_one_is_used() {
         let configs = [config_at(2, 44000, 44000), config_at(2, 52000, 52000)];
         assert_eq!(rate_to_open(configs, 2, 48000), 52000);
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_opening_would_rewrite_the_device_rate_the_output_opens_at_the_rate_it_runs_at() {
+        assert_eq!(pick_output_rate(48000, Some(24000), true), 24000);
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_the_device_already_runs_at_the_wanted_rate_the_output_opens_at_it() {
+        assert_eq!(pick_output_rate(48000, Some(48000), true), 48000);
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_opening_does_not_rewrite_the_device_rate_the_output_opens_at_an_offered_rate() {
+        assert_eq!(pick_output_rate(48000, Some(44100), false), 48000);
+    }
+
+    /// Verifies: REQ-AUD-127
+    #[test]
+    fn when_the_device_does_not_say_its_rate_the_output_opens_at_an_offered_rate() {
+        assert_eq!(pick_output_rate(44100, None, true), 44100);
     }
 
     /// Verifies: REQ-AUD-124
