@@ -1310,6 +1310,8 @@ dependencies = [
  "jsonschema",
  "libloading",
  "local-ip-address",
+ "objc2-core-audio",
+ "objc2-core-foundation",
  "opus",
  "parking_lot",
  "rand",

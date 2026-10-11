@@ -299,14 +299,32 @@ fn capabilities(
 /// the best quality.
 ///
 /// `cpal` names the connection on Windows (WASAPI), PipeWire and Android, but
-/// not on macOS, where it leaves AirPods as an unknown interface; there the
-/// device's name is all there is to go by.
+/// not on macOS, where it leaves AirPods as an unknown interface. There
+/// CoreAudio is asked for the device's transport type; the device's name is
+/// the last resort for a device whose transport cannot be read.
 pub(crate) fn is_bluetooth(device: &cpal::Device, name: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    if let Some(bluetooth) = device
+        .id()
+        .ok()
+        .and_then(|id| super::transport::is_bluetooth(id.id()))
+    {
+        return bluetooth;
+    }
     let interface = device
         .description()
         .map(|description| description.interface_type())
         .unwrap_or_default();
     looks_bluetooth(interface, name)
+}
+
+/// Whether a CoreAudio transport type (`kAudioDevicePropertyTransportType`,
+/// a four-character code) is Bluetooth or Bluetooth LE.
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn is_bluetooth_transport(transport: u32) -> bool {
+    const BLUETOOTH: u32 = u32::from_be_bytes(*b"blue");
+    const BLUETOOTH_LE: u32 = u32::from_be_bytes(*b"blea");
+    transport == BLUETOOTH || transport == BLUETOOTH_LE
 }
 
 fn looks_bluetooth(interface: cpal::InterfaceType, name: &str) -> bool {
@@ -321,7 +339,8 @@ fn looks_bluetooth(interface: cpal::InterfaceType, name: &str) -> bool {
 }
 
 /// Lower-case parts of the names Bluetooth audio devices go by when the
-/// system does not say how they are connected.
+/// system does not say how they are connected (macOS when CoreAudio cannot be
+/// read, and any host that reports an unknown interface).
 const BLUETOOTH_NAME_MARKS: &[&str] = &["bluetooth", "airpods", "hands-free", "handsfree", "beats"];
 
 /// Check if device is an ASIO device (Windows only)
@@ -473,6 +492,22 @@ mod tests {
             cpal::InterfaceType::Bluetooth,
             "Headphones"
         ));
+    }
+
+    /// Verifies: REQ-GUI-026
+    #[test]
+    fn when_coreaudio_says_the_transport_is_bluetooth_or_bluetooth_le_it_is_bluetooth() {
+        assert!(is_bluetooth_transport(0x626c_7565)); // 'blue'
+        assert!(is_bluetooth_transport(0x626c_6561)); // 'blea'
+    }
+
+    /// Verifies: REQ-GUI-026
+    #[test]
+    fn when_coreaudio_says_the_transport_is_usb_built_in_or_virtual_it_is_not_bluetooth() {
+        assert!(!is_bluetooth_transport(0x7573_6220)); // 'usb '
+        assert!(!is_bluetooth_transport(0x626c_746e)); // 'bltn'
+        assert!(!is_bluetooth_transport(0x7669_7274)); // 'virt'
+        assert!(!is_bluetooth_transport(0));
     }
 
     /// Verifies: REQ-GUI-026
