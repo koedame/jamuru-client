@@ -264,6 +264,7 @@ export interface AudioDeviceInfo {
   supported_channels: number[];
   is_default: boolean;
   is_asio: boolean;
+  is_bluetooth: boolean;
 }
 
 // ============================================================================

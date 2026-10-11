@@ -21,8 +21,8 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const sampleDevices = [
-  { id: "default", name: "MacBook Pro Microphone", supported_sample_rates: [48000], supported_channels: [1, 2], is_default: true, is_asio: false },
-  { id: "usb-1", name: "Focusrite Scarlett 2i2", supported_sample_rates: [44100, 48000, 96000], supported_channels: [1, 2], is_default: false, is_asio: false },
+  { id: "default", name: "MacBook Pro Microphone", supported_sample_rates: [48000], supported_channels: [1, 2], is_default: true, is_asio: false, is_bluetooth: false },
+  { id: "usb-1", name: "Focusrite Scarlett 2i2", supported_sample_rates: [44100, 48000, 96000], supported_channels: [1, 2], is_default: false, is_asio: false, is_bluetooth: false },
 ];
 
 export const Default: Story = {
