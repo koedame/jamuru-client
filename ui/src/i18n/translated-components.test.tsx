@@ -215,10 +215,10 @@ const diagnosticsResult: CompleteDiagnosticsResult = {
 const backend: Record<string, unknown> = {
   settings_get: audioSettings({
     input_devices: [
-      { id: 'in1', name: 'Mic', supported_sample_rates: [48000], supported_channels: [1, 2, 3], is_default: true, is_asio: false },
+      { id: 'in1', name: 'Mic', supported_sample_rates: [48000], supported_channels: [1, 2, 3], is_default: true, is_asio: false, is_bluetooth: false },
     ],
     output_devices: [
-      { id: 'out1', name: 'Speaker', supported_sample_rates: [48000], supported_channels: [1, 2], is_default: true, is_asio: false },
+      { id: 'out1', name: 'Speaker', supported_sample_rates: [48000], supported_channels: [1, 2], is_default: true, is_asio: false, is_bluetooth: false },
     ],
     input_device_id: 'in1',
     output_device_id: 'out1',
@@ -365,7 +365,7 @@ describe('components without hard-coded text', () => {
         <SessionStats network={network} latency={latency} />
         <DeviceSelector
           type="input"
-          devices={[{ id: 'a', name: 'Mic', is_default: true, is_asio: false, supported_sample_rates: [], supported_channels: [] }]}
+          devices={[{ id: 'a', name: 'Mic', is_default: true, is_asio: false, is_bluetooth: false, supported_sample_rates: [], supported_channels: [] }]}
           selectedDeviceId="a"
           onDeviceChange={() => {}}
         />

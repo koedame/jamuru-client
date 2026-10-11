@@ -108,6 +108,7 @@ fn probe_driver(meta: &DriverMetadata) -> Option<AudioDevice> {
         supported_channels,
         is_default: false,
         is_asio: true,
+        is_bluetooth: false,
     })
 }
 

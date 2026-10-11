@@ -310,6 +310,7 @@ pub(crate) fn settings_with_devices(ids: &[&str]) -> AudioSettings {
         supported_channels: vec![2],
         is_default: false,
         is_asio: false,
+        is_bluetooth: false,
     };
     AudioSettings {
         revision: 0,

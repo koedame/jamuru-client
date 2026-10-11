@@ -13,6 +13,8 @@ export interface DeviceInfo {
   id: string;
   name: string;
   isDefault?: boolean;
+  /** A Bluetooth device: not suited to the lowest latency and best quality */
+  isBluetooth?: boolean;
 }
 
 export interface DevicesTabProps {
@@ -107,15 +109,24 @@ export function DevicesTab({
 }: DevicesTabProps) {
   const { t } = useTranslation();
 
-  const inputDeviceOptions: SelectOption[] = inputDevices.map((d) => ({
-    value: d.id,
-    label: d.isDefault ? `${d.name} (${t("common.default", "Default")})` : d.name,
-  }));
+  const deviceOption = (d: DeviceInfo): SelectOption => {
+    const marks = [
+      d.isDefault ? t("common.default", "Default") : null,
+      d.isBluetooth ? t("settings.devices.bluetoothMark", "Bluetooth") : null,
+    ].filter(Boolean);
+    return { value: d.id, label: marks.length > 0 ? `${d.name} (${marks.join(", ")})` : d.name };
+  };
+  const inputDeviceOptions: SelectOption[] = inputDevices.map(deviceOption);
+  const outputDeviceOptions: SelectOption[] = outputDevices.map(deviceOption);
 
-  const outputDeviceOptions: SelectOption[] = outputDevices.map((d) => ({
-    value: d.id,
-    label: d.isDefault ? `${d.name} (${t("common.default", "Default")})` : d.name,
-  }));
+  // A Bluetooth device is warned about, never refused.
+  const bluetoothWarning = (devices: DeviceInfo[], selectedId: string | null) =>
+    devices.find((d) => d.id === selectedId)?.isBluetooth
+      ? t(
+          "settings.devices.bluetoothWarning",
+          "Bluetooth devices add delay of their own, and their sound quality drops while the microphone is in use. For the lowest latency and the best sound, use wired headphones or an audio interface."
+        )
+      : undefined;
 
   // Add "None" option for R channel (makes it mono)
   const noneOption: SelectOption = { value: "", label: t("common.none", "None") };
@@ -138,6 +149,7 @@ export function DevicesTab({
       <FormField
         label={t("settings.devices.inputDevice", "Input Device")}
         htmlFor="input-device"
+        warning={bluetoothWarning(inputDevices, selectedInputId)}
       >
         <Select
           id="input-device"
@@ -153,6 +165,7 @@ export function DevicesTab({
       <FormField
         label={t("settings.devices.outputDevice", "Output Device")}
         htmlFor="output-device"
+        warning={bluetoothWarning(outputDevices, selectedOutputId)}
       >
         <Select
           id="output-device"
