@@ -38,6 +38,8 @@ pub struct AudioDevice {
     pub is_default: bool,
     /// ASIO support (Windows only)
     pub is_asio: bool,
+    /// Whether the device is a Bluetooth one (see [`is_bluetooth`])
+    pub is_bluetooth: bool,
 }
 
 /// List available input (capture) devices
@@ -65,6 +67,7 @@ pub fn list_input_devices() -> Result<Vec<AudioDevice>, AudioError> {
                 capabilities(device.supported_input_configs().into_iter().flatten());
             Some(AudioDevice {
                 id: DeviceId(id),
+                is_bluetooth: is_bluetooth(&device, &name),
                 name,
                 supported_sample_rates: sample_rates,
                 supported_channels: channels,
@@ -103,6 +106,7 @@ pub fn list_output_devices() -> Result<Vec<AudioDevice>, AudioError> {
                 capabilities(device.supported_output_configs().into_iter().flatten());
             Some(AudioDevice {
                 id: DeviceId(id),
+                is_bluetooth: is_bluetooth(&device, &name),
                 name,
                 supported_sample_rates: sample_rates,
                 supported_channels: channels,
@@ -289,6 +293,37 @@ fn capabilities(
     (sample_rates, channels)
 }
 
+/// Whether `device` is a Bluetooth one, which adds tens of milliseconds of
+/// its own and drops to a narrow-band call mode while its microphone is in
+/// use, so it does not suit a session that is after the lowest latency and
+/// the best quality.
+///
+/// `cpal` names the connection on Windows (WASAPI), PipeWire and Android, but
+/// not on macOS, where it leaves AirPods as an unknown interface; there the
+/// device's name is all there is to go by.
+pub(crate) fn is_bluetooth(device: &cpal::Device, name: &str) -> bool {
+    let interface = device
+        .description()
+        .map(|description| description.interface_type())
+        .unwrap_or_default();
+    looks_bluetooth(interface, name)
+}
+
+fn looks_bluetooth(interface: cpal::InterfaceType, name: &str) -> bool {
+    match interface {
+        cpal::InterfaceType::Bluetooth => true,
+        cpal::InterfaceType::Unknown => {
+            let name = name.to_lowercase();
+            BLUETOOTH_NAME_MARKS.iter().any(|mark| name.contains(mark))
+        }
+        _ => false,
+    }
+}
+
+/// Lower-case parts of the names Bluetooth audio devices go by when the
+/// system does not say how they are connected.
+const BLUETOOTH_NAME_MARKS: &[&str] = &["bluetooth", "airpods", "hands-free", "handsfree", "beats"];
+
 /// Check if device is an ASIO device (Windows only)
 #[cfg(target_os = "windows")]
 fn is_asio_device(device: &cpal::Device) -> bool {
@@ -429,6 +464,51 @@ mod tests {
     #[test]
     fn a_device_that_offers_nothing_is_asked_for_the_wanted_rate() {
         assert_eq!(rate_to_open([], 2, 48000), 48000);
+    }
+
+    /// Verifies: REQ-GUI-026
+    #[test]
+    fn when_the_system_says_the_device_is_bluetooth_it_is_bluetooth() {
+        assert!(looks_bluetooth(
+            cpal::InterfaceType::Bluetooth,
+            "Headphones"
+        ));
+    }
+
+    /// Verifies: REQ-GUI-026
+    #[test]
+    fn when_the_system_does_not_say_but_the_name_is_airpods_the_device_is_bluetooth() {
+        assert!(looks_bluetooth(
+            cpal::InterfaceType::Unknown,
+            "Taro's AirPods Pro"
+        ));
+        assert!(looks_bluetooth(
+            cpal::InterfaceType::Unknown,
+            "Hands-Free AG Audio"
+        ));
+    }
+
+    /// Verifies: REQ-GUI-026
+    #[test]
+    fn when_the_system_says_the_device_is_usb_a_bluetooth_looking_name_does_not_make_it_bluetooth()
+    {
+        assert!(!looks_bluetooth(
+            cpal::InterfaceType::Usb,
+            "Bluetooth Dongle Interface"
+        ));
+    }
+
+    /// Verifies: REQ-GUI-026
+    #[test]
+    fn when_the_device_is_unknown_and_its_name_is_ordinary_it_is_not_bluetooth() {
+        assert!(!looks_bluetooth(
+            cpal::InterfaceType::Unknown,
+            "Scarlett 2i2 USB"
+        ));
+        assert!(!looks_bluetooth(
+            cpal::InterfaceType::Unknown,
+            "MacBook Pro Microphone"
+        ));
     }
 
     /// A device id that no longer exists must be an error, not a silent

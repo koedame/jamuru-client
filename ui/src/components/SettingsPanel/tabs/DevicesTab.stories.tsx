@@ -96,3 +96,13 @@ export const Loading: Story = {
     isLoading: true,
   },
 };
+
+export const BluetoothSelected: Story = {
+  args: {
+    ...baseArgs,
+    inputDevices: [...inputDevices, { id: "bt-in", name: "Taro's AirPods", isBluetooth: true }],
+    outputDevices: [...outputDevices, { id: "bt-out", name: "Taro's AirPods", isBluetooth: true }],
+    selectedInputId: "bt-in",
+    selectedOutputId: "bt-out",
+  },
+};
