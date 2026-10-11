@@ -20,6 +20,8 @@ mod preset;
 mod probe;
 mod resampler;
 mod stream;
+#[cfg(target_os = "macos")]
+mod transport;
 mod virtual_output;
 
 #[cfg(target_os = "windows")]
