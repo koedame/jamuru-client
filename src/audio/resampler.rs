@@ -200,7 +200,7 @@ pub struct CaptureResampler {
 impl CaptureResampler {
     /// Frames per resampler call. Small, so that little waits for the next
     /// device callback (which can be 10 ms away) to complete a chunk.
-    const CHUNK_FRAMES: usize = 8;
+    pub(crate) const CHUNK_FRAMES: usize = 8;
 
     pub fn new(
         device_rate: u32,
