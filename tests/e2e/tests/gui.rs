@@ -19,10 +19,14 @@
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
+use common::fake_signaling::FakeSignaling;
 use jamjam_e2e_tests::pom::fake_relay::{FakeRelay, Target};
 use jamjam_e2e_tests::pom::loopback_audio;
 use jamjam_e2e_tests::pom::screens::{ConnectionState, SettingsTab};
 use jamjam_e2e_tests::pom::{App, UI_TIMEOUT};
+
+#[path = "../../common/mod.rs"]
+mod common;
 
 static APP_LOCK: Mutex<()> = Mutex::new(());
 
@@ -573,6 +577,133 @@ fn a_failed_start_up_connection_is_written_to_the_log_file_from_both_sides() {
         log.contains("invoke session_connect failed"),
         "the failed command is missing:\n{}",
         log
+    );
+}
+
+/// A peer for a room to hold: it answers the key exchange and says nothing
+/// else, which is all the app needs to call the link up. It sends no audio
+/// back, so a machine's speakers stay quiet while the scenario runs.
+struct AnsweringPeer {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl AnsweringPeer {
+    fn start(peer: common::Peer) -> Self {
+        use std::sync::atomic::Ordering;
+
+        peer.socket
+            .set_read_timeout(Some(Duration::from_millis(20)))
+            .expect("set a read timeout");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping = stop.clone();
+        let thread = std::thread::spawn(move || {
+            while !stopping.load(Ordering::SeqCst) {
+                let _ = peer.recv();
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for AnsweringPeer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Every run of `a.b.c.d` digits in `text`.
+fn ipv4_addresses(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let mut found = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit()
+            || (i > 0 && (bytes[i - 1] == b'.' || bytes[i - 1].is_ascii_alphanumeric()))
+        {
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        let mut groups = 0;
+        loop {
+            let start = j;
+            while j < bytes.len() && bytes[j].is_ascii_digit() && j - start < 3 {
+                j += 1;
+            }
+            if j == start {
+                break;
+            }
+            groups += 1;
+            if groups == 4 || j >= bytes.len() || bytes[j] != b'.' {
+                break;
+            }
+            j += 1;
+        }
+        if groups == 4 {
+            found.push(text[i..j].to_string());
+        }
+        i = j.max(i + 1);
+    }
+    found
+}
+
+#[test]
+fn text_with_ipv4_addresses_the_unmasked_ones_are_found() {
+    assert_eq!(
+        ipv4_addresses("Connected to 203.0.113.67:61711 and [192.168.1.x]:5 v0.1.0.2 1.2.3"),
+        vec!["203.0.113.67".to_string()]
+    );
+}
+
+/// A user who starts the app from a desktop launcher on Linux has its
+/// standard output and standard error in the system journal. The diagnostic
+/// log masks addresses; what the app prints to the console must not carry the
+/// other end's address either. The app is put in a room with a peer on
+/// loopback and everything it printed is searched.
+///
+/// Verifies: REQ-GUI-022
+#[test]
+fn in_a_room_with_a_peer_the_apps_console_output_holds_no_ip_address() {
+    let _guard = exclusive();
+    let peer = common::Peer::bind();
+    let peer_addr = peer.local_addr();
+    let server = FakeSignaling::start_with_resident_at("echo", peer_addr);
+    let _peer = AnsweringPeer::start(peer);
+
+    let app = App::launch_with_server_url(server.url()).expect("the app should launch");
+    app.connection_screen()
+        .wait_until_interactive(UI_TIMEOUT)
+        .unwrap_or_else(|e| panic!("{}\nThe log holds:\n{}", e, app.log_text()));
+    app.invoke("session_join", serde_json::json!({ "code": "echo" }))
+        .expect("the control channel should answer")
+        .expect("joining the room should succeed");
+
+    // The app says it is streaming once the link is up, on the console and
+    // not only in the file, so the search below has something to look through.
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        app.console_text().contains("Streaming active")
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "the app never reported streaming with the peer. The console holds:\n{}\nThe log holds:\n{}",
+            app.console_text(),
+            app.log_text()
+        )
+    });
+    let console = app.console_text();
+    let found = ipv4_addresses(&console);
+    assert!(
+        found.is_empty(),
+        "the console holds IP addresses {:?}:\n{}",
+        found,
+        console
     );
 }
 
