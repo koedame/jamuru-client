@@ -184,6 +184,10 @@ app_commands! {
     [Access::ALL] "診断からおすすめのプリセットを読む" crate::diagnostics::diagnostics_get_recommended_preset;
     [Access::ALL] "ゼロレイテンシーモードが使えるかを調べる" crate::diagnostics::diagnostics_check_zero_latency;
 
+    // Only a version number, and only for the person's own screen: a helper's
+    // screen is the helped app's, and a newer release is not theirs to act on.
+    [Access::NO_HELP] "自分で入れ替えられない配布形態に、新しい版が出ているかを読む" crate::updater::update_notice_get;
+
     // The person's own windows: a helper's screen has its own.
     [Access::NO_HELP] "設定ウィンドウを開く" crate::windows::window_open_settings;
     [Access::NO_HELP] "設定ウィンドウを閉じる" crate::windows::window_close_settings;
