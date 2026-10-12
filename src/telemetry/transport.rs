@@ -60,12 +60,21 @@ impl Transport for HttpTransport {
         Box::pin(async move {
             // Redirects are not followed: a redirect would send the lines
             // somewhere the build did not name.
-            let Ok(client) = reqwest::Client::builder()
+            let bytes = body.len();
+            let client = match reqwest::Client::builder()
                 .timeout(SEND_TIMEOUT)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
-            else {
-                return false;
+            {
+                Ok(client) => client,
+                Err(e) => {
+                    tracing::warn!(
+                        "Usage log batch ({} bytes) not sent: {}",
+                        bytes,
+                        e.without_url()
+                    );
+                    return false;
+                }
             };
             let sent = client
                 .post(&self.endpoint)
@@ -73,7 +82,30 @@ impl Transport for HttpTransport {
                 .body(body)
                 .send()
                 .await;
-            matches!(sent, Ok(response) if response.status() == reqwest::StatusCode::NO_CONTENT)
+            match sent {
+                Ok(response) => {
+                    let status = response.status();
+                    let taken = status == reqwest::StatusCode::NO_CONTENT;
+                    if taken {
+                        tracing::info!("Usage log batch ({} bytes) sent", bytes);
+                    } else {
+                        tracing::warn!(
+                            "Usage log batch ({} bytes) not taken: server answered {}",
+                            bytes,
+                            status
+                        );
+                    }
+                    taken
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Usage log batch ({} bytes) not sent: {}",
+                        bytes,
+                        e.without_url()
+                    );
+                    false
+                }
+            }
         })
     }
 }
