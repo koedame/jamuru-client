@@ -602,6 +602,18 @@ export interface MixerSnapshot {
 /** Event the backend sends with the new snapshot whenever a fader moves */
 export const MIXER_CHANGED = "mixer:changed";
 
+/** Event the backend sends, with the version, when it finds a newer release this package cannot install by itself */
+export const UPDATE_AVAILABLE = "update:available";
+
+/**
+ * The version of a newer release found by a package that cannot replace itself
+ * (a Linux `.deb`, a Windows `.msi`; ADR-076), or `null` while none was found.
+ * Packages that update themselves never have one.
+ */
+export async function updateNoticeGet(): Promise<string | null> {
+  return (await invoke<string | null | undefined>("update_notice_get")) ?? null;
+}
+
 /** Where the faders stand */
 export async function mixerGet(): Promise<MixerSnapshot> {
   return invoke("mixer_get");

@@ -88,6 +88,7 @@
 | `terms_get_license` | ライセンスの本文を読む |
 | `terms_accept` | 利用規約に同意する |
 | `terms_open_page` | プライバシーの説明・お知らせのページをブラウザで開く |
+| `update_notice_get` | 自分で入れ替えられない配布形態に、新しい版が出ているかを読む |
 | `window_open_settings` | 設定ウィンドウを開く |
 | `window_close_settings` | 設定ウィンドウを閉じる |
 | `window_toggle_chat` | チャットウィンドウを開閉する |
