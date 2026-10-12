@@ -607,6 +607,7 @@
     "disconnected": "Disconnected",
     "bandwidthRecovered": "Bandwidth recovered",
     "delayAdjusted": "Buffer size adjusted",
+    "newerRelease": "A new version, {{version}}, is out. Please reinstall to update",
     "deviceProblem": {
       "named": " ({{device}})",
       "unresponsive": {
