@@ -52,6 +52,8 @@ import {
   mixerSetPeerPan,
   mixerSetPeerMuted,
   MIXER_CHANGED,
+  UPDATE_AVAILABLE,
+  updateNoticeGet,
   type MixerPeerStrip,
   type MixerSnapshot,
   configGetSampleRate,
@@ -184,6 +186,30 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       unlisten?.();
     };
   }, [showMixer]);
+
+  // A package that cannot replace itself is only told that a newer release
+  // exists (ADR-076). A helper's window draws the helped app's screen, and the
+  // release is not the helper's to act on.
+  const [newerVersion, setNewerVersion] = useState<string | null>(null);
+  useEffect(() => {
+    if (helping) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listenEvent<string>(UPDATE_AVAILABLE, setNewerVersion)
+      .then((stop) => {
+        if (cancelled) {
+          stop();
+          return;
+        }
+        unlisten = stop;
+        return updateNoticeGet().then((version) => version && setNewerVersion(version));
+      })
+      .catch((e) => console.error("Failed to read the newer release:", e));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [helping]);
 
   const phase = session?.phase ?? "connecting_server";
   const room = session?.room ?? null;
@@ -977,6 +1003,11 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
   return (
     <div className="main-screen">
+      {newerVersion && (
+        <p className="main-update-notice" role="status" data-testid="update-notice">
+          {t("notification.newerRelease", { version: newerVersion })}
+        </p>
+      )}
       {showConnectionPanel ? (
         <main className="main-content main-content--flush">
           {renderConnectionPanel()}
