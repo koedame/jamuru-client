@@ -605,6 +605,7 @@
     "disconnected": "切断しました",
     "bandwidthRecovered": "帯域が回復しました",
     "delayAdjusted": "バッファサイズを調整しました",
+    "newerRelease": "新しい版 {{version}} が出ています。入れ直してください",
     "deviceProblem": {
       "named": "（{{device}}）",
       "unresponsive": {
