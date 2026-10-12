@@ -1,9 +1,9 @@
 ---
-sidebar_label: "ADR-075: Notify a Newer Release to Packages That Cannot Self-Update"
-sidebar_position: 75
+sidebar_label: "ADR-076: Notify a Newer Release to Packages That Cannot Self-Update"
+sidebar_position: 76
 ---
 
-# ADR-075: 自分で入れ替えられない配布形態にも、新しい版が出たことを画面で知らせる
+# ADR-076: 自分で入れ替えられない配布形態にも、新しい版が出たことを画面で知らせる
 
 ## Status
 

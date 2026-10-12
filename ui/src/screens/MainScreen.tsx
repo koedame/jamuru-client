@@ -188,7 +188,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   }, [showMixer]);
 
   // A package that cannot replace itself is only told that a newer release
-  // exists (ADR-075). A helper's window draws the helped app's screen, and the
+  // exists (ADR-076). A helper's window draws the helped app's screen, and the
   // release is not the helper's to act on.
   const [newerVersion, setNewerVersion] = useState<string | null>(null);
   useEffect(() => {

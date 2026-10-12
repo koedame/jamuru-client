@@ -607,7 +607,7 @@ export const UPDATE_AVAILABLE = "update:available";
 
 /**
  * The version of a newer release found by a package that cannot replace itself
- * (a Linux `.deb`, a Windows `.msi`; ADR-075), or `null` while none was found.
+ * (a Linux `.deb`, a Windows `.msi`; ADR-076), or `null` while none was found.
  * Packages that update themselves never have one.
  */
 export async function updateNoticeGet(): Promise<string | null> {
