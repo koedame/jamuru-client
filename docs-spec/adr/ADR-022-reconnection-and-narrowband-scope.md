@@ -26,10 +26,14 @@ stateDiagram-v2
     Connected --> Reconnecting: 沈黙 >= detect_after（既定2秒）
     Reconnecting --> Connected: パケット受信
     Reconnecting --> Failed: 沈黙 >= give_up_after（既定10秒）
+    Failed --> Connected: パケット受信（回線が戻った）
     Failed --> Reconnecting: reconnect()（ユーザーが選択）
     Connected --> Disconnected: disconnect()
     Reconnecting --> Disconnected: disconnect()
+    Failed --> Disconnected: disconnect()
 ```
+
+`Failed` は「ユーザーに尋ねる」ための表示上の区切りであり、受信・keep-alive・沈黙の監視のループは止めない（接続が確立してから `disconnect()` まで動き続ける）。ループを止めると、回線が戻っても相手のパケットを読む者がおらず、`reconnect()` を呼んでも 10 秒後にまた `Failed` になる（10/13、10〜30 秒の断で観測）。`Failed` のあいだも keep-alive は送り続け、相手のパケットが届けば利用者の操作なしで `Connected` に戻る。`reconnect()` は沈黙の数え直し（満了までの猶予を取り直す）と受信状態の初期化をする。
 
 | パラメータ | 既定値 | 根拠 |
 |-----------|-------|------|
