@@ -71,4 +71,22 @@ describe('the consent screen', () => {
     expect(screen.getByTestId('consent-ip-notice')).toHaveTextContent('IP アドレスが見えます');
     expect(screen.getByText('同意して始める')).toBeInTheDocument();
   });
+
+  // Verifies: REQ-TRM-006
+  it('the screen is shown in English, a line says the terms are in Japanese only and for users in Japan', () => {
+    render(<ConsentScreen text={TEXT} onAccept={() => {}} />);
+
+    expect(screen.getByTestId('consent-japanese-only-notice')).toHaveTextContent(
+      'available in Japanese only'
+    );
+    expect(screen.getByTestId('consent-japanese-only-notice')).toHaveTextContent('users in Japan');
+  });
+
+  // Verifies: REQ-TRM-006
+  it('the screen is shown in Japanese, the line about Japanese-only terms is not shown', async () => {
+    await i18n.changeLanguage('ja');
+    render(<ConsentScreen text={TEXT} onAccept={() => {}} />);
+
+    expect(screen.queryByTestId('consent-japanese-only-notice')).not.toBeInTheDocument();
+  });
 });
