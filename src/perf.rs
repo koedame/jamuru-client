@@ -23,6 +23,8 @@ pub static RECEIVE_LOOP: Timer = Timer::new();
 
 static INPUT_XRUNS: AtomicU64 = AtomicU64::new(0);
 static OUTPUT_XRUNS: AtomicU64 = AtomicU64::new(0);
+static INPUT_REOPENS: AtomicU64 = AtomicU64::new(0);
+static OUTPUT_REOPENS: AtomicU64 = AtomicU64::new(0);
 
 /// Starts timing passes. Until this is called nothing is timed.
 pub fn enable() {
@@ -42,6 +44,16 @@ pub fn count_input_xrun() {
 /// Counts an xrun the audio host reported on the output stream.
 pub fn count_output_xrun() {
     OUTPUT_XRUNS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Counts an input stream opened again because it had stopped calling back.
+pub fn count_input_reopen() {
+    INPUT_REOPENS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Counts an output stream opened again because it had stopped calling back.
+pub fn count_output_reopen() {
+    OUTPUT_REOPENS.fetch_add(1, Ordering::Relaxed);
 }
 
 /// How long passes of one kind took: how many, their total and the longest.
@@ -91,6 +103,9 @@ pub struct Report {
     pub receive_loop: PassStats,
     pub input_xruns: u64,
     pub output_xruns: u64,
+    /// Streams opened again because they had stopped calling back
+    pub input_reopens: u64,
+    pub output_reopens: u64,
 }
 
 /// A stretch of time that ends with [`Window::finish`].
@@ -100,6 +115,8 @@ pub struct Window {
     receive: (u64, u64),
     input_xruns: u64,
     output_xruns: u64,
+    input_reopens: u64,
+    output_reopens: u64,
 }
 
 impl Window {
@@ -119,6 +136,8 @@ impl Window {
             receive: mark(&RECEIVE_LOOP),
             input_xruns: INPUT_XRUNS.load(Ordering::Relaxed),
             output_xruns: OUTPUT_XRUNS.load(Ordering::Relaxed),
+            input_reopens: INPUT_REOPENS.load(Ordering::Relaxed),
+            output_reopens: OUTPUT_REOPENS.load(Ordering::Relaxed),
         }
     }
 
@@ -151,6 +170,12 @@ impl Window {
             output_xruns: OUTPUT_XRUNS
                 .load(Ordering::Relaxed)
                 .saturating_sub(self.output_xruns),
+            input_reopens: INPUT_REOPENS
+                .load(Ordering::Relaxed)
+                .saturating_sub(self.input_reopens),
+            output_reopens: OUTPUT_REOPENS
+                .load(Ordering::Relaxed)
+                .saturating_sub(self.output_reopens),
         }
     }
 }
