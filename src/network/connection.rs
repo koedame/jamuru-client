@@ -782,6 +782,9 @@ pub struct Connection {
     bytes_sent: Arc<AtomicU64>,
     bytes_received: Arc<AtomicU64>,
     last_received: Arc<std::sync::Mutex<Instant>>,
+    /// When the user last asked for a new attempt: the give-up time is counted from here
+    /// when that is later than the last packet
+    retry_at: Arc<std::sync::Mutex<Instant>>,
     audio_callback: Option<Arc<AudioCallback>>,
     /// Encoder for outgoing audio. `None` until `set_audio_encoding` is called,
     /// in which case PCM is used inline for backward compatibility.
@@ -874,6 +877,7 @@ impl Connection {
             bytes_sent: Arc::new(AtomicU64::new(0)),
             bytes_received: Arc::new(AtomicU64::new(0)),
             last_received: Arc::new(std::sync::Mutex::new(Instant::now())),
+            retry_at: Arc::new(std::sync::Mutex::new(Instant::now())),
             audio_callback: None,
             encoder: None,
             fec_encoder: None,
@@ -1335,10 +1339,10 @@ impl Connection {
         match self.state() {
             ConnectionState::Disconnected => Err(NetworkError::NotConnected),
             ConnectionState::Reconnecting | ConnectionState::Failed => {
-                // Treat the link as alive again for the purposes of the
-                // give-up deadline, so the user gets a full attempt.
-                if let Ok(mut last) = self.last_received.lock() {
-                    *last = Instant::now();
+                // The give-up deadline runs from now, so the user gets a full
+                // attempt. The link is not called up until a packet arrives.
+                if let Ok(mut at) = self.retry_at.lock() {
+                    *at = Instant::now();
                 }
                 self.reset_receive_state();
                 self.set_state(ConnectionState::Reconnecting);
@@ -1879,6 +1883,7 @@ impl Connection {
 
         let state = self.state.clone();
         let last_received = self.last_received.clone();
+        let retry_at = self.retry_at.clone();
         let config = self.reconnect_config;
         let fec_decoder = self.fec_decoder.clone();
         let sequence_tracker_for_monitor = self.sequence_tracker.clone();
@@ -1897,13 +1902,13 @@ impl Connection {
                     break;
                 }
 
-                let silence = match last_received.lock() {
-                    Ok(last) => last.elapsed(),
-                    Err(_) => continue,
+                let (silence, attempt) = match (last_received.lock(), retry_at.lock()) {
+                    (Ok(last), Ok(retry)) => (last.elapsed(), last.elapsed().min(retry.elapsed())),
+                    _ => continue,
                 };
                 let remote_addr = route.lock().current;
 
-                let next = if silence >= config.give_up_after {
+                let next = if attempt >= config.give_up_after {
                     // Automatic recovery has had long enough. Ask the user
                     // (REQ-CON-110); the keep-alives go on, so the link is
                     // taken up again if the peer is heard.

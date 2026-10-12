@@ -574,8 +574,12 @@ async fn when_the_user_reconnects_after_recovery_gave_up_audio_flows_once_the_li
     listener.reconnect().expect("user-initiated retry");
     assert_eq!(sender.state(), ConnectionState::Reconnecting);
 
-    // The link is still down: the retry is a whole attempt, not an instant verdict
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The link is still down: nothing has been heard, so the retry does not report it up
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(sender.state(), ConnectionState::Reconnecting);
+
+    // and it is a whole attempt, not an instant verdict
+    tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(sender.state(), ConnectionState::Reconnecting);
     assert!(wait_for_state(&sender, ConnectionState::Failed, Duration::from_secs(3)).await);
 
