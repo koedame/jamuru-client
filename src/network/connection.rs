@@ -38,6 +38,12 @@ const PROBE_ROUNDS: usize = 5;
 /// How long the connectivity check waits between one round of probes and the next
 const ROUND_INTERVAL: Duration = Duration::from_millis(80);
 
+/// How many probes the connectivity check sends to a candidate, beyond the scheduled
+/// rounds, because the peer's probe came from it while none of ours was answered. Behind a
+/// NAT that lets in only what we have sent to, ours were dropped until the peer's own
+/// first probe opened its side, and the scheduled rounds are over by then.
+const TRIGGERED_PROBES: usize = 3;
+
 /// Number of RTT samples to keep for averaging
 const RTT_SAMPLE_COUNT: usize = 10;
 
@@ -217,10 +223,23 @@ fn probe_token(round: usize, index: usize) -> u32 {
 struct Probing<'a> {
     candidates: &'a [SocketAddr],
     /// When the probe of each round went out to the candidate. A probe that did not go out
-    /// is not a route, however its packets reach us (REQ-CON-114)
+    /// is not a route, however its packets reach us (REQ-CON-114). The rounds after the
+    /// scheduled ones are the probes sent in answer to the peer's ([`TRIGGERED_PROBES`])
     sent_at: Vec<Vec<Option<Instant>>>,
     /// The round trip of each probe, once its reply came
     rtt: Vec<Vec<Option<Duration>>>,
+    /// How many probes in answer to the peer's went to each candidate
+    triggered: Vec<usize>,
+}
+
+/// What to send back for a probe the peer sent us
+#[derive(Debug, PartialEq)]
+struct ProbeAnswer {
+    /// The token the reply to the peer's probe carries
+    reply_token: u32,
+    /// The token of a probe of our own to send to the peer at once, when its probe came from
+    /// an address none of ours has been answered by (see [`TRIGGERED_PROBES`])
+    probe_back: Option<u32>,
 }
 
 /// What the check has settled on, or how long it has to wait
@@ -243,8 +262,9 @@ impl<'a> Probing<'a> {
         let n = candidates.len();
         Self {
             candidates,
-            sent_at: vec![vec![None; PROBE_ROUNDS]; n],
-            rtt: vec![vec![None; PROBE_ROUNDS]; n],
+            sent_at: vec![vec![None; PROBE_ROUNDS + TRIGGERED_PROBES]; n],
+            rtt: vec![vec![None; PROBE_ROUNDS + TRIGGERED_PROBES]; n],
+            triggered: vec![0; n],
         }
     }
 
@@ -273,9 +293,13 @@ impl<'a> Probing<'a> {
         replies.get(replies.len().checked_sub(1)? / 2).copied()
     }
 
-    /// Take in a datagram that reached the socket. Returns the token to send back to
-    /// `from` when the peer asked for one.
-    fn hear(&mut self, from: SocketAddr, bytes: &[u8], now: Instant) -> Option<u32> {
+    /// Take in a datagram that reached the socket. Returns what to send back to `from` when
+    /// the peer asked for a reply.
+    ///
+    /// A probe that reaches us shows that the path works from the peer to us, and that the
+    /// peer's NAT, if any, now lets us in: our own probe sent back at once is the first to
+    /// get through when the scheduled ones were all dropped.
+    fn hear(&mut self, from: SocketAddr, bytes: &[u8], now: Instant) -> Option<ProbeAnswer> {
         let sendable: Vec<bool> = (0..self.candidates.len())
             .map(|i| self.sendable(i))
             .collect();
@@ -285,11 +309,24 @@ impl<'a> Probing<'a> {
         let index = self.candidates.iter().position(|&addr| addr == from)?;
         let (reply, token) = Packet::from_bytes(bytes)?.route_probe_token()?;
         if !reply {
-            return Some(token);
+            let probe_back = (self.reply_count(index) == 0
+                && self.triggered[index] < TRIGGERED_PROBES)
+                .then(|| {
+                    let round = PROBE_ROUNDS + self.triggered[index];
+                    self.triggered[index] += 1;
+                    probe_token(round, index)
+                });
+            return Some(ProbeAnswer {
+                reply_token: token,
+                probe_back,
+            });
         }
         // A reply counts only for the address and the round its probe went to
         let (round, named) = ((token >> 16) as usize, (token & 0xFFFF) as usize);
-        if named == index && round < PROBE_ROUNDS && self.rtt[index][round].is_none() {
+        if named == index
+            && round < PROBE_ROUNDS + TRIGGERED_PROBES
+            && self.rtt[index][round].is_none()
+        {
             self.rtt[index][round] =
                 self.sent_at[index][round].map(|sent| now.saturating_duration_since(sent));
         }
@@ -321,7 +358,7 @@ impl<'a> Probing<'a> {
         // passed since it went out
         let settled = (0..self.candidates.len())
             .flat_map(|i| {
-                (0..PROBE_ROUNDS)
+                (0..PROBE_ROUNDS + TRIGGERED_PROBES)
                     .filter(move |&round| self.rtt[i][round].is_none())
                     .filter_map(move |round| self.sent_at[i][round])
             })
@@ -1601,10 +1638,21 @@ impl Connection {
             }
         };
         let (bytes, from) = heard;
-        if let Some(token) = probing.hear(from, &bytes, Instant::now()) {
-            let reply = Packet::route_probe_reply(self.next_sequence(), token);
+        if let Some(answer) = probing.hear(from, &bytes, Instant::now()) {
+            let reply = Packet::route_probe_reply(self.next_sequence(), answer.reply_token);
             if let Err(e) = send_sealed(&self.transport, &self.secure_link, reply, from).await {
                 debug!("Failed to answer the probe from {}: {}", from, e);
+            }
+            if let Some(token) = answer.probe_back {
+                let probe = Packet::route_probe(self.next_sequence(), token);
+                match send_sealed(&self.transport, &self.secure_link, probe, from).await {
+                    Ok(_) => {
+                        let (round, index) = ((token >> 16) as usize, (token & 0xFFFF) as usize);
+                        probing.sent(index, round, Instant::now());
+                        debug!("Sent a probe back to {} for the one it sent", from);
+                    }
+                    Err(e) => debug!("Failed to probe {} back: {}", from, e),
+                }
             }
         }
         self.note_latency_info_heard_while_probing(&bytes);
@@ -2683,8 +2731,74 @@ mod tests {
         let asked = probing.hear(candidates[0], &Packet::route_probe(0, 42).to_bytes(), now);
         let plain = probing.hear(candidates[0], &Packet::keep_alive(1).to_bytes(), now);
 
-        assert_eq!(asked, Some(42));
+        assert_eq!(asked.map(|answer| answer.reply_token), Some(42));
         assert_eq!(plain, None);
+    }
+
+    /// Verifies: REQ-CON-132
+    #[test]
+    fn when_the_peer_probes_an_address_none_of_ours_was_answered_by_a_probe_goes_back_to_it() {
+        let candidates = [addr("203.0.113.7:5000")];
+        let mut probing = probed(&candidates, Instant::now());
+        let asked = Packet::route_probe(0, 42).to_bytes();
+
+        let answer = probing.hear(candidates[0], &asked, Instant::now()).unwrap();
+
+        assert_eq!(answer.reply_token, 42);
+        assert_eq!(answer.probe_back, Some(probe_token(PROBE_ROUNDS, 0)));
+    }
+
+    /// Verifies: REQ-CON-132
+    #[test]
+    fn when_the_peer_keeps_probing_an_address_no_more_than_the_limit_of_probes_go_back() {
+        let candidates = [addr("203.0.113.7:5000")];
+        let mut probing = probed(&candidates, Instant::now());
+        let asked = Packet::route_probe(0, 42).to_bytes();
+
+        let sent_back = (0..TRIGGERED_PROBES + 4)
+            .filter_map(|_| probing.hear(candidates[0], &asked, Instant::now()))
+            .filter(|answer| answer.probe_back.is_some())
+            .count();
+
+        assert_eq!(sent_back, TRIGGERED_PROBES);
+    }
+
+    /// Verifies: REQ-CON-132
+    #[test]
+    fn when_one_of_our_probes_to_the_address_was_answered_none_goes_back_for_the_peers() {
+        let candidates = [addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        reply_from(&mut probing, 0, 0, 0, t0 + Duration::from_millis(30));
+        let asked = Packet::route_probe(0, 42).to_bytes();
+
+        let answer = probing.hear(candidates[0], &asked, Instant::now()).unwrap();
+
+        assert_eq!(answer.probe_back, None);
+    }
+
+    /// Verifies: REQ-CON-132
+    #[test]
+    fn when_the_probe_sent_back_is_answered_the_address_is_a_route() {
+        let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+        let asked = Packet::route_probe(0, 42).to_bytes();
+        let back = probing
+            .hear(candidates[1], &asked, t0 + Duration::from_millis(400))
+            .and_then(|answer| answer.probe_back)
+            .unwrap();
+        probing.sent(1, (back >> 16) as usize, t0 + Duration::from_millis(400));
+
+        reply_from(
+            &mut probing,
+            1,
+            1,
+            PROBE_ROUNDS,
+            t0 + Duration::from_millis(430),
+        );
+
+        assert_eq!(chosen(settled(&probing, t0), &candidates), candidates[1]);
     }
 
     /// A peer that answers no probe is not chosen from its own keep-alives: only a measured
@@ -2788,6 +2902,79 @@ mod tests {
                 snapshot.connect_ms.is_some_and(|ms| ms < 800),
                 "the probes take their rounds and then no grace: {snapshot:?}"
             );
+        }
+    }
+
+    /// A NAT in front of `inside` that lets `outside` in only once `inside` has sent to it.
+    /// Returns the address `outside` is to use for `inside`, and the address `inside` is to
+    /// use for `outside`.
+    async fn address_restricted_nat(
+        inside: SocketAddr,
+        outside: SocketAddr,
+    ) -> (SocketAddr, SocketAddr) {
+        let public = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let private = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let (public_at, private_at) = (public.local_addr().unwrap(), private.local_addr().unwrap());
+        let opened = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let (public, private, opened) = (public.clone(), private.clone(), opened.clone());
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                while let Ok((len, from)) = private.recv_from(&mut buf).await {
+                    if from == inside {
+                        opened.store(true, Ordering::SeqCst);
+                        let _ = public.send_to(&buf[..len], outside).await;
+                    }
+                }
+            });
+        }
+        tokio::spawn(async move {
+            let mut buf = [0u8; 2048];
+            while let Ok((len, from)) = public.recv_from(&mut buf).await {
+                if from == outside && opened.load(Ordering::SeqCst) {
+                    let _ = private.send_to(&buf[..len], inside).await;
+                }
+            }
+        });
+        (public_at, private_at)
+    }
+
+    /// A peer behind a NAT hears nothing from the other until it has sent to it, so whoever
+    /// probes first is not heard at all. Each side's own probes were all dropped or all
+    /// answered by the time the other's first one arrived, depending on who was late.
+    ///
+    /// Verifies: REQ-CON-132
+    #[tokio::test]
+    async fn when_a_nat_lets_the_peer_in_only_after_we_sent_to_it_both_connect_however_late_either_probes(
+    ) {
+        for (outside_late, inside_late) in [(0, 0), (0, 150), (0, 400), (0, 900), (400, 0)] {
+            let mut outside = Connection::new("127.0.0.1:0").await.unwrap();
+            let mut inside = Connection::new("127.0.0.1:0").await.unwrap();
+            let (seen_from_outside, seen_from_inside) =
+                address_restricted_nat(inside.local_addr(), outside.local_addr()).await;
+            let outside_candidates = [addr("127.0.0.1:59999"), seen_from_outside];
+            let inside_candidates = [addr("127.0.0.1:59998"), seen_from_inside];
+
+            let (from_outside, from_inside) = tokio::join!(
+                async {
+                    tokio::time::sleep(Duration::from_millis(outside_late)).await;
+                    outside.connect_with_candidates(&outside_candidates).await
+                },
+                async {
+                    tokio::time::sleep(Duration::from_millis(inside_late)).await;
+                    inside.connect_with_candidates(&inside_candidates).await
+                }
+            );
+
+            from_outside.unwrap();
+            from_inside.unwrap();
+            let when = format!("outside probes {outside_late} ms late, inside {inside_late} ms");
+            assert_eq!(outside.remote_addr(), seen_from_outside, "{when}");
+            assert_eq!(inside.remote_addr(), seen_from_inside, "{when}");
+            for conn in [&outside, &inside] {
+                let snapshot = conn.link_facts().snapshot();
+                assert_eq!(snapshot.route_confirmed, Some(true), "{when}: {snapshot:?}");
+            }
         }
     }
 
