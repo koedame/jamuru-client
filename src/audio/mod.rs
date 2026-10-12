@@ -13,6 +13,7 @@ mod engine;
 mod error;
 pub mod fault;
 mod flight;
+mod heartbeat;
 mod monitor;
 mod playout;
 mod plc;
@@ -45,6 +46,7 @@ pub use flight::{
     Event as FlightEvent, FlightRecorder, Kind as FlightKind, Report as FlightReport,
     CAPACITY as FLIGHT_CAPACITY,
 };
+pub use heartbeat::{Heartbeat, StallGuard, Verdict, MAX_REOPENS, STALL_AFTER};
 pub use monitor::{LocalMonitor, MonitorTap, MONITOR_MARGIN_FRAMES};
 pub use playout::{
     PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult, PlayoutStats, WriteOutcome,

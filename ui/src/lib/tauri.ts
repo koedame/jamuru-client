@@ -519,8 +519,10 @@ export interface DeviceProblem {
   /**
    * "unresponsive": the driver did not answer in time. "failed": it refused.
    * "unsupported_format": it does not open at the session's sample rate.
+   * "stalled": it is open but stopped delivering audio, and opening it again
+   * did not bring it back.
    */
-  trouble: "unresponsive" | "failed" | "unsupported_format";
+  trouble: "unresponsive" | "failed" | "unsupported_format" | "stalled";
   /** The device's name, when the system's list has one for it */
   device: string | null;
   /** The sample rate the session asked the device to open at */
