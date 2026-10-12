@@ -620,6 +620,10 @@
       "unsupported_format": {
         "input": "Couldn't open the input device{{name}} at {{rate}} Hz. In your sound settings, set this device's format to {{rate}} Hz",
         "output": "Couldn't open the output device{{name}} at {{rate}} Hz. In your sound settings, set this device's format to {{rate}} Hz"
+      },
+      "stalled": {
+        "input": "The input device{{name}} stopped delivering audio, and opening it again didn't help. Leave the room and join again",
+        "output": "The output device{{name}} stopped playing audio, and opening it again didn't help. Leave the room and join again"
       }
     }
   },

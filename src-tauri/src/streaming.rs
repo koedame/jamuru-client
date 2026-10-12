@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use jamjam::audio::{
     capture_attempts, capture_to_wire, pan_received, AudioConfig, AudioEngine, AudioError,
     AudioPreset, DeviceId, FlightKind, FlightRecorder, GainRamp, LocalMonitor, MonitorTap,
-    OutputRoute, PeerRateChange, PlayoutResult, ReceivePath, RecordingFeed, RecordingTap,
+    OutputRoute, PeerRateChange, PlayoutResult, ReceivePath, RecordingFeed, RecordingTap, Verdict,
     ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
@@ -764,6 +764,9 @@ pub enum DeviceTrouble {
     /// The device does not open at the session's sample rate, and no rate it
     /// offers helped. Its format can be changed in the system's sound settings.
     UnsupportedFormat,
+    /// The stream is open but its callback is no longer called, and opening it
+    /// again did not bring it back (REQ-AUD-128)
+    Stalled,
 }
 
 /// A device the audio thread could not open, for the UI to tell the user
@@ -789,6 +792,23 @@ fn note_device_problem(
     sample_rate: u32,
     error: &AudioError,
 ) {
+    let trouble = match error {
+        AudioError::DeviceUnresponsive(_) => DeviceTrouble::Unresponsive,
+        AudioError::UnsupportedConfig(_) => DeviceTrouble::UnsupportedFormat,
+        _ => DeviceTrouble::Failed,
+    };
+    note_trouble(problems, side, device, sample_rate, trouble);
+}
+
+/// Records `trouble` with the `side` device, replacing what was recorded for
+/// that side
+fn note_trouble(
+    problems: &RwLock<Vec<DeviceProblem>>,
+    side: DeviceSide,
+    device: Option<&DeviceId>,
+    sample_rate: u32,
+    trouble: DeviceTrouble,
+) {
     let listed = match side {
         DeviceSide::Input => crate::audio::input_devices(),
         DeviceSide::Output => crate::audio::output_devices(),
@@ -803,11 +823,6 @@ fn note_device_problem(
                 .filter(|_| device.is_none())
         })
         .map(|d| d.name.clone());
-    let trouble = match error {
-        AudioError::DeviceUnresponsive(_) => DeviceTrouble::Unresponsive,
-        AudioError::UnsupportedConfig(_) => DeviceTrouble::UnsupportedFormat,
-        _ => DeviceTrouble::Failed,
-    };
     if let Ok(mut problems) = problems.write() {
         problems.retain(|p| p.side != side);
         problems.push(DeviceProblem {
@@ -2022,7 +2037,9 @@ async fn run_audio_streaming(
     #[cfg(target_os = "windows")]
     let mut asio_session: Option<AsioDuplex> = None;
 
-    let capture_ring = match &asio_driver {
+    // The ring, and whether the input opened: one that did not has no stream
+    // to watch
+    let (capture_ring, capture_opened) = match &asio_driver {
         #[cfg(target_os = "windows")]
         Some(driver_name) => match open_asio(
             driver_name,
@@ -2049,7 +2066,7 @@ async fn run_audio_streaming(
                 clear_device_problem(device_problems, DeviceSide::Input);
                 clear_device_problem(device_problems, DeviceSide::Output);
                 asio_session = Some(session);
-                ring
+                (ring, true)
             }
             Err(e) => {
                 note_device_problem(
@@ -2082,6 +2099,7 @@ async fn run_audio_streaming(
                 &monitor,
                 recording_feed.as_deref(),
             );
+            let opened_ok = opened.is_ok();
             let ring = capture_or_silence(
                 opened,
                 wanted_channels,
@@ -2124,19 +2142,43 @@ async fn run_audio_streaming(
                 return Err(format!("Failed to start playback: {}", e));
             }
             tracing::info!("Playback started on {:?}", output_id);
-            ring
+            (ring, opened_ok)
         }
     };
     let capture_channels = capture_ring.channels;
     let capture_ring = Arc::new(std::sync::Mutex::new(capture_ring));
 
     let mut capture = DeviceSlot::new("input", capture_config, capture_engine, input_id.clone());
+    if !capture_opened {
+        capture = capture.without_stream();
+    }
     let mut playback: DeviceSlot<()> = DeviceSlot::new(
         "output",
         playback_config,
         playback_engine,
         output_id.clone(),
     );
+
+    // What the thread that opens the input device runs, for a new device, new
+    // channels, and a stream that stopped calling back: the ring is made
+    // anew, and the send thread takes it once the open has finished.
+    let capture_job = |device: Option<DeviceId>, wanted: u16, picks: (u32, Option<u32>)| {
+        let input_level = input_level_for_capture.clone();
+        let monitor = monitor.clone();
+        let recording_feed = recording_feed.clone();
+        move |engine: &mut AudioEngine| {
+            start_capture_ring(
+                engine,
+                device.as_ref(),
+                wanted,
+                picks,
+                buffer_size as usize,
+                &input_level,
+                &monitor,
+                recording_feed.as_deref(),
+            )
+        }
+    };
 
     // What the thread that switches the output device runs: the stream is
     // rebuilt around the same play-out buffer, so the audio already waiting
@@ -2570,22 +2612,8 @@ async fn run_audio_streaming(
         }
 
         if let Some(device_id) = reopen_capture {
-            let device = device_id.clone();
-            let input_level = input_level_for_capture.clone();
-            let monitor = monitor.clone();
-            let recording_feed = recording_feed.clone();
-            capture.switch(device_id, move |engine| {
-                start_capture_ring(
-                    engine,
-                    device.as_ref(),
-                    wanted_channels,
-                    input_channels,
-                    buffer_size as usize,
-                    &input_level,
-                    &monitor,
-                    recording_feed.as_deref(),
-                )
-            });
+            let job = capture_job(device_id.clone(), wanted_channels, input_channels);
+            capture.switch(device_id, job);
         }
         if let Some(device_id) = reopen_playback {
             let device = device_id.clone();
@@ -2664,6 +2692,65 @@ async fn run_audio_streaming(
                         sample_rate,
                         &e,
                     );
+                }
+            }
+        }
+
+        // A stream that has stopped calling back raises no error and leaves
+        // the session connected, so the callbacks are watched: one silent
+        // for a second is opened again, and one that stays silent is told to
+        // the user (REQ-AUD-128). ASIO has its own session, not watched here.
+        #[cfg(target_os = "windows")]
+        let streams_watched = asio_driver_in_use.is_none();
+        #[cfg(not(target_os = "windows"))]
+        let streams_watched = true;
+        if streams_watched {
+            let now = std::time::Instant::now();
+            match capture.watch(now) {
+                Verdict::Flowing => {}
+                Verdict::Reopen => {
+                    tracing::warn!("The input stopped calling back; opening it again");
+                    jamjam::perf::count_input_reopen();
+                    let device = capture.device().cloned();
+                    let job = capture_job(device.clone(), wanted_channels, input_channels);
+                    capture.switch(device, job);
+                }
+                Verdict::GiveUp => {
+                    tracing::error!("The input is still silent after being opened again");
+                    note_trouble(
+                        device_problems,
+                        DeviceSide::Input,
+                        capture.device(),
+                        sample_rate,
+                        DeviceTrouble::Stalled,
+                    );
+                }
+                Verdict::Resumed => {
+                    tracing::info!("The input calls back again");
+                    clear_device_problem(device_problems, DeviceSide::Input);
+                }
+            }
+            match playback.watch(now) {
+                Verdict::Flowing => {}
+                Verdict::Reopen => {
+                    tracing::warn!("The output stopped calling back; opening it again");
+                    jamjam::perf::count_output_reopen();
+                    let device = playback.device().cloned();
+                    playback.switch(device.clone(), playout_job(device, output_channels));
+                }
+                Verdict::GiveUp => {
+                    tracing::error!("The output is still silent after being opened again");
+                    note_trouble(
+                        device_problems,
+                        DeviceSide::Output,
+                        playback.device(),
+                        sample_rate,
+                        DeviceTrouble::Stalled,
+                    );
+                }
+                Verdict::Resumed => {
+                    tracing::info!("The output calls back again");
+                    clear_device_problem(device_problems, DeviceSide::Output);
                 }
             }
         }
