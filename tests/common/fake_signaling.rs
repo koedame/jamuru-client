@@ -2,9 +2,9 @@
 //!
 //! It answers `GET /api/v1/signaling` with its own WebSocket, takes the device identity headers
 //! without checking them, and keeps rooms the way the real server does for what the CLI uses:
-//! create, join, publish an address, chat, leave. Whoever publishes an address is announced at
-//! `127.0.0.1` on the port of its audio socket, so two CLIs reach each other on any machine,
-//! whatever interfaces it has.
+//! create, join, list (always empty), publish an address, chat, leave. Whoever publishes an
+//! address is announced at `127.0.0.1` on the port of its audio socket, so two CLIs reach each
+//! other on any machine, whatever interfaces it has.
 
 #![allow(dead_code)]
 
@@ -256,6 +256,9 @@ async fn serve(mut stream: TcpStream, addr: SocketAddr, state: Arc<Mutex<State>>
                 if let Some(room) = state.rooms.iter().find(|room| &room.id == room_id) {
                     tell_the_others(room, peer_id, chat);
                 }
+            }
+            SignalingMessage::ListRooms => {
+                let _ = tx.send(SignalingMessage::RoomList { rooms: Vec::new() });
             }
             SignalingMessage::LeaveRoom => break,
             _ => {}
