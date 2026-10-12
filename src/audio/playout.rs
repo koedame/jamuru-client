@@ -69,6 +69,12 @@ const DEPTH_WINDOW_READS: u32 = 500;
 /// is the playing phase: the count moves by one as a frame arrives and is
 /// read. Two means the buffer never needed what it held.
 const TRIM_WHEN_EXCESS_AT_LEAST: u32 = 2;
+/// Reads in a row that found nothing after which the sender is taken to be
+/// silent - muted, or gone - rather than late. About half a second at
+/// 64-sample frames and 48 kHz. Those reads say nothing about the link, so
+/// adaptation does not count them, and the first frame after them starts the
+/// buffer again at the delay it had.
+const SILENT_AFTER_STARVED_READS: u32 = 375;
 
 /// How the buffer is sized and how long it holds audio back.
 ///
@@ -223,6 +229,11 @@ pub struct PlayoutBuffer {
     adapt_seen: u64,
     /// Concealed and starved reads at the last adaptation window.
     adapt_missed: u64,
+    /// Starved reads in a row since a frame last played or was concealed.
+    starved_streak: u32,
+    /// Starved reads that adaptation leaves out because they were part of a
+    /// streak of [`SILENT_AFTER_STARVED_READS`] or more.
+    silent_reads: u64,
     /// Consecutive adaptation windows with almost no missing frame.
     clean_windows: u32,
     /// Clean windows in a row the next shrink waits for. Doubles when a shrink
@@ -279,6 +290,8 @@ impl PlayoutBuffer {
             pending_shift: 0,
             adapt_seen: 0,
             adapt_missed: 0,
+            starved_streak: 0,
+            silent_reads: 0,
             clean_windows: 0,
             shrink_after_windows: CLEAN_WINDOWS_BEFORE_SHRINK,
             windows_since_shrink: None,
@@ -299,6 +312,18 @@ impl PlayoutBuffer {
         // the nominal length, and forcing it to be would change pitch.
         if samples.is_empty() || samples.len() > self.config.slot_samples() {
             return WriteOutcome::WrongLength;
+        }
+
+        // The sender was silent and has started again: wait for the delay to
+        // build up before playing, as at the start, so the first frames after
+        // a mute are not played with nothing behind them.
+        if self.playing
+            && self.starved_streak >= SILENT_AFTER_STARVED_READS
+            && self
+                .play_sequence
+                .is_some_and(|next| sequence.wrapping_sub(next) as i32 >= 0)
+        {
+            self.resync_to(sequence);
         }
 
         match self.play_sequence {
@@ -404,8 +429,15 @@ impl PlayoutBuffer {
             let mut read = silence(out, self.last_len);
             read.result = PlayoutResult::Starved;
             self.stats.frames_starved += 1;
+            self.starved_streak = self.starved_streak.saturating_add(1);
+            if self.starved_streak == SILENT_AFTER_STARVED_READS {
+                self.silent_reads += u64::from(SILENT_AFTER_STARVED_READS);
+            } else if self.starved_streak > SILENT_AFTER_STARVED_READS {
+                self.silent_reads += 1;
+            }
             return read;
         }
+        self.starved_streak = 0;
         self.play_sequence = Some(sequence.wrapping_add(1));
 
         if self.slots[slot].sequence == Some(sequence) {
@@ -492,6 +524,12 @@ impl PlayoutBuffer {
     /// concealed, so leaving them out let a link drop a frame in a hundred
     /// without the delay ever moving.
     ///
+    /// Starved reads in a run of [`SILENT_AFTER_STARVED_READS`] or more are
+    /// left out of both counts: the peer has muted or stopped sending, which
+    /// no delay would cure, and growing for it left the delay at its ceiling
+    /// long after the peer came back. A stretch made only of them decides
+    /// nothing and does not count as clean either.
+    ///
     /// Call it on a timer, not per frame: the point is to follow the link, not
     /// to react to one packet. It judges the stretch since its previous
     /// decision rather than the whole session - a burst of loss early on must
@@ -503,13 +541,23 @@ impl PlayoutBuffer {
     /// and forth: a shrink that is followed by a grow within
     /// [`BOUNCE_WITHIN_WINDOWS`] was wrong, and the next one waits twice as long.
     pub fn adapt(&mut self) -> Option<u32> {
+        // A run of starved reads still going on may turn out to be silence, so
+        // it is not judged until it ends or proves to be one.
+        let undecided = if self.starved_streak < SILENT_AFTER_STARVED_READS {
+            u64::from(self.starved_streak)
+        } else {
+            0
+        };
+        let left_out = self.silent_reads + undecided;
         let seen =
-            self.stats.frames_played + self.stats.frames_concealed + self.stats.frames_starved;
+            (self.stats.frames_played + self.stats.frames_concealed + self.stats.frames_starved)
+                .saturating_sub(left_out);
         let window = seen.saturating_sub(self.adapt_seen);
         if window < MIN_ADAPT_WINDOW_FRAMES {
             return None;
         }
-        let missed_total = self.stats.frames_concealed + self.stats.frames_starved;
+        let missed_total =
+            (self.stats.frames_concealed + self.stats.frames_starved).saturating_sub(left_out);
         let missed = missed_total.saturating_sub(self.adapt_missed);
         self.adapt_seen = seen;
         self.adapt_missed = missed_total;
@@ -563,6 +611,8 @@ impl PlayoutBuffer {
         self.pending_shift = 0;
         self.adapt_seen = 0;
         self.adapt_missed = 0;
+        self.starved_streak = 0;
+        self.silent_reads = 0;
         self.clean_windows = 0;
         self.shrink_after_windows = CLEAN_WINDOWS_BEFORE_SHRINK;
         self.windows_since_shrink = None;
@@ -587,6 +637,7 @@ impl PlayoutBuffer {
         self.play_sequence = Some(sequence);
         self.playing = false;
         self.pending_shift = 0;
+        self.starved_streak = 0;
         self.restart_depth_window();
         self.plc.reset();
     }
@@ -1006,6 +1057,96 @@ mod tests {
         assert_eq!(buffer.stats().frames_concealed, 0, "nothing was concealed");
         assert_eq!(buffer.stats().frames_starved, starved);
         assert_eq!(buffer.adapt(), Some(2), "starved reads buy a frame");
+    }
+
+    /// Reads of an empty buffer while the peer sends nothing, calling `adapt`
+    /// once a second (750 reads) as the app does. Returns the delays it moved to.
+    fn listen_to_silence(buffer: &mut PlayoutBuffer, reads: u32) -> Vec<u32> {
+        let mut out = frame(0.0);
+        let mut moved = Vec::new();
+        for read in 1..=reads {
+            buffer.read_into(&mut out);
+            if read % 750 == 0 {
+                moved.extend(buffer.adapt());
+            }
+        }
+        moved
+    }
+
+    /// A muted peer sends nothing, so every read finds the buffer empty. That
+    /// says nothing about the link, and no delay would cure it: the delay must
+    /// not move however long the peer is quiet, or it sits at its ceiling long
+    /// after the peer is back.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn a_peer_that_sends_nothing_for_twenty_seconds_does_not_move_the_delay() {
+        for lead_in in [0, 100, 374, 400, 700] {
+            let mut buffer = adaptive(3, 1, 8);
+            let mut next = 0;
+            drive(&mut buffer, &mut next, 1_000, false);
+            let before = buffer.target_delay_frames();
+            // The adaptation timer is not in step with the moment the peer
+            // went quiet.
+            let mut out = frame(0.0);
+            for _ in 0..lead_in {
+                buffer.read_into(&mut out);
+            }
+            let moved = listen_to_silence(&mut buffer, 20 * 750);
+            assert!(moved.is_empty(), "lead-in {lead_in}: moved to {moved:?}");
+            assert_eq!(buffer.target_delay_frames(), before);
+        }
+    }
+
+    /// The delay is what it was before the peer went quiet, and what is held
+    /// is that delay again - not the nothing a drained buffer holds.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn a_peer_that_sends_again_is_heard_at_the_delay_it_had_before() {
+        let mut buffer = adaptive(3, 1, 8);
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 1_000, false);
+        let held_before = buffer.ready_frames();
+        let target_before = buffer.target_delay_frames();
+
+        listen_to_silence(&mut buffer, 20 * 750);
+        // The sender's numbering carries on from where it stopped.
+        let mut out = frame(0.0);
+        let mut first_played = None;
+        for n in 0..1_000 {
+            buffer.write(next, &frame(next as f32));
+            next += 1;
+            let read = buffer.read_into(&mut out);
+            if first_played.is_none() && matches!(read.result, PlayoutResult::Played { .. }) {
+                first_played = Some(n);
+            }
+        }
+
+        assert_eq!(buffer.target_delay_frames(), target_before);
+        assert_eq!(buffer.ready_frames(), held_before);
+        assert_eq!(
+            first_played,
+            Some(target_before),
+            "plays on the frame that builds the delay up again"
+        );
+        assert_eq!(buffer.adapt(), None);
+    }
+
+    /// A stall short of the silence threshold is a late frame, not a muted
+    /// peer: it keeps buying delay.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn a_stall_that_ends_soon_still_grows_the_delay() {
+        let mut buffer = adaptive(3, 1, 8);
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 1_000, false);
+
+        listen_to_silence(&mut buffer, SILENT_AFTER_STARVED_READS - 50);
+        drive(&mut buffer, &mut next, 400, false);
+
+        assert_eq!(buffer.adapt(), Some(4));
     }
 
     /// One read in a hundred finding its frame missing is a gap every second
