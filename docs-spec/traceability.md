@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 264 |
-| うち must | 256 |
+| 要求 総数 | 265 |
+| うち must | 257 |
 | うち should | 8 |
-| 検証済み | 235 |
+| 検証済み | 236 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -267,7 +267,7 @@
 | REQ-UPD-001 | must | 設定 `auto_update` の既定はオンである。リリースのビルドは、起動の 20 秒後と、その後 6 時間おきに新しい版を確かめ、あれば利用者の操作なしに入れて再起動する | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_setting_is_on_in_a_release_build_the_app_updates_itself<br/>`src/config.rs`::when_the_setting_is_absent_the_app_updates_itself |
 | REQ-UPD-002 | must | `auto_update` をオフにすると、確認も適用もしない。設定は確認のたびに読み直すので、再起動は要らない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_setting_is_off_the_app_does_not_update_itself<br/>`src/config.rs`::when_the_setting_is_off_in_the_file_the_app_does_not_update_itself |
 | REQ-UPD-003 | must | 開発ビルドと E2E 用のビルドは自分を更新しない。更新の設定（公開鍵・取得先）は `tauri.conf.json` に無く、リリースのビルドにだけ渡す。設定が無いビルド（自前のビルド）は更新の部品も登録しない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_it_is_a_development_build_the_app_does_not_update_itself<br/>`tests/distribution_config_test.rs`::a_build_from_source_is_given_no_updater |
-| REQ-UPD-004 | must | 自分で置き換えられない配布形態（Linux の deb、Windows の MSI）は、更新を試みない。MSI は全ユーザー向けで昇格なしには入れ替えられず、失敗してもアプリは先に終了して戻らない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_it_is_a_linux_deb_the_package_cannot_replace_itself<br/>`src-tauri/src/updater.rs`::when_it_is_a_windows_msi_the_package_cannot_replace_itself<br/>`src-tauri/src/updater.rs`::when_it_is_a_windows_nsis_installer_the_package_replaces_itself<br/>`src-tauri/src/updater.rs`::when_the_package_cannot_replace_itself_the_app_does_not_try |
+| REQ-UPD-004 | must | 自分で置き換えられない配布形態（Linux の deb、Windows の MSI）は、更新を試みない（新しい版の知らせだけは REQ-UPD-021）。MSI は全ユーザー向けで昇格なしには入れ替えられず、失敗してもアプリは先に終了して戻らない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_it_is_a_linux_deb_the_package_cannot_replace_itself<br/>`src-tauri/src/updater.rs`::when_it_is_a_windows_msi_the_package_cannot_replace_itself<br/>`src-tauri/src/updater.rs`::when_it_is_a_windows_nsis_installer_the_package_replaces_itself<br/>`src-tauri/src/updater.rs`::when_the_package_cannot_replace_itself_the_app_only_looks_for_a_newer_release |
 | REQ-UPD-005 | must | セッション中は入れない。ダウンロードを済ませて待ち、セッションを抜けたら入れる | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_user_is_in_a_session_the_install_waits_until_it_ends<br/>`src-tauri/src/updater.rs`::when_the_user_is_not_in_a_session_the_install_does_not_wait |
 | REQ-UPD-006 | must | 入れるのは、アプリに埋め込んだ公開鍵で署名が合い、署名が指す版が案内された版と同じものだけである。取得先は `https` に限る。公開鍵は空でない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::updates_are_checked_against_a_public_key_and_fetched_over_https |
 | REQ-UPD-007 | must | 正式版のビルドの更新情報の取得先は最新の正式版のもの（GitHub の `releases/latest`）で、ベータ版（pre-release）は配らない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::updates_come_from_the_latest_release_only |
@@ -284,6 +284,7 @@
 | REQ-UPD-018 | must | アプリの終了時に最後の利用状況を送る処理は、送信が（yield せずブロックする呼び出しのために）返らなくても、主スレッドを一定時間より長く止めない。同じ経路を通る再起動・自動更新・`debug.update_apply` を、この送信の詰まりが遅らせない | `docs-spec/requirements.md` | `src-tauri/src/usage.rs`::when_the_flush_never_yields_app_exiting_still_returns_within_the_timeout |
 | REQ-UPD-019 | must | ベータ用の置き場は、悪い版が出たとき過去の版へ意図的に戻せる。戻す先の版は既存の release から latest.json を読み直し、より新しい版のときだけ置き換える通常の制約を、この操作でだけ迂回する。戻す先に latest.json が無い（release が存在しない、または更新情報を持たない）ときは何もせず失敗する | `docs-spec/requirements.md` | `tests/beta_channel_rollback_test.rs`::when_rolling_back_to_a_past_release_the_channel_gets_that_releases_manifest<br/>`tests/beta_channel_rollback_test.rs`::when_the_release_does_not_exist_the_rollback_fails<br/>`tests/beta_channel_rollback_test.rs`::when_the_release_has_no_update_manifest_the_rollback_fails<br/>`tests/beta_channel_rollback_test.rs`::when_there_is_no_channel_yet_the_rollback_creates_it<br/>`tests/beta_channel_test.rs`::when_force_rollback_is_set_an_older_version_replaces_the_manifest |
 | REQ-UPD-020 | must | ベータ版のタグを公開すると、それより古いベータ版の release から dmg（macOS）・msi（Windows）・deb（Linux）を消す。自動更新とロールバック（REQ-UPD-004・REQ-UPD-019）が使う成果物（app.tar.gz・AppImage・nsis の setup.exe・それぞれの署名・latest.json）と、正式版の release は対象にしない | `docs-spec/requirements.md` | `tests/prune_beta_packages_test.rs`::when_a_beta_is_the_one_just_published_its_own_packages_are_kept<br/>`tests/prune_beta_packages_test.rs`::when_a_full_release_exists_its_packages_are_kept<br/>`tests/prune_beta_packages_test.rs`::when_a_newer_beta_is_published_the_older_betas_lose_their_install_only_packages<br/>`tests/prune_beta_packages_test.rs`::when_a_release_is_not_a_beta_nothing_is_pruned<br/>`tests/prune_beta_packages_test.rs`::when_there_are_no_older_betas_nothing_happens |
+| REQ-UPD-021 | must | 自分で置き換えられない配布形態（Linux の deb、Windows の MSI）は、新しい版が出ていないかだけを同じ頻度で確かめ（`auto_update` が切れていれば確かめない）、あれば、その版を入れ直すよう画面に出す。ダウンロードも入れ替えもしない。接続の画面にも、接続したあとの画面にも出る。手伝いの画面には出さない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_a_newer_release_was_found_the_open_screens_are_told_its_version<br/>`src-tauri/src/updater.rs`::when_a_newer_release_was_found_the_screen_can_read_its_version<br/>`ui/src/screens/MainScreen.test.tsx`::手伝っている画面のとき、新しい版を尋ねないこと<br/>`ui/src/screens/MainScreen.test.tsx`::新しい版が見つかっていないとき、知らせは出さないこと<br/>`ui/src/screens/MainScreen.test.tsx`::自分で入れ替えられない配布形態が新しい版を見つけているとき、その版を入れ直すよう知らせること<br/>`ui/src/screens/MainScreen.test.tsx`::起動のあとで新しい版が見つかったとき、知らせが出ること |
 
 ## 未検証の要求（ギャップ）
 

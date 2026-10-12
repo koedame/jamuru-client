@@ -75,6 +75,8 @@ let mixerNow: MixerSnapshot;
 let statusDeviceProblems: DeviceProblem[];
 /** Whether the backend says the audio to the peer is encrypted, for `streaming_status`; `null` while no session runs. */
 let statusEncryption: AudioEncryption | null;
+/** The newer release the backend says it found, for `update_notice_get`. */
+let newerRelease: string | null;
 /** Commands the screen sent to the backend, in order, with their arguments. */
 let calls: Array<{ cmd: string; args: Record<string, unknown> | undefined }>;
 
@@ -104,6 +106,7 @@ beforeEach(() => {
   calls = [];
   statusDeviceProblems = [];
   statusEncryption = null;
+  newerRelease = null;
   current = snapshot();
   mixerNow = faders();
   openUrl.handler = null;
@@ -116,6 +119,8 @@ beforeEach(() => {
         return current;
       case 'mixer_get':
         return mixerNow;
+      case 'update_notice_get':
+        return newerRelease;
       case 'streaming_status':
         if (statusEncryption) {
           return {
@@ -330,6 +335,46 @@ describe('MainScreen の暗号化の表示', () => {
 
     await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThan(0));
     expect(screen.queryByText(/not encrypted/)).not.toBeInTheDocument();
+  });
+});
+
+describe('MainScreen の新しい版の知らせ', () => {
+  /** Verifies: REQ-UPD-021 */
+  it('自分で入れ替えられない配布形態が新しい版を見つけているとき、その版を入れ直すよう知らせること', async () => {
+    newerRelease = '1.2.3';
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText(/A new version, 1\.2\.3, is out/)).toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-UPD-021 */
+  it('起動のあとで新しい版が見つかったとき、知らせが出ること', async () => {
+    render(<MainScreen />);
+    await waitFor(() => expect(callsTo('update_notice_get')).toHaveLength(1));
+
+    act(() => listeners.get('update:available')!({ payload: '1.2.3' }));
+
+    expect(await screen.findByText(/A new version, 1\.2\.3, is out/)).toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-UPD-021 */
+  it('新しい版が見つかっていないとき、知らせは出さないこと', async () => {
+    render(<MainScreen />);
+
+    await waitFor(() => expect(callsTo('update_notice_get')).toHaveLength(1));
+    expect(screen.queryByText(/is out/)).not.toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-UPD-021 */
+  it('手伝っている画面のとき、新しい版を尋ねないこと', async () => {
+    newerRelease = '1.2.3';
+
+    render(<MainScreen helper={{ name: 'Aki' }} />);
+
+    await waitFor(() => expect(callsTo('session_get').length).toBeGreaterThan(0));
+    expect(callsTo('update_notice_get')).toHaveLength(0);
+    expect(screen.queryByText(/is out/)).not.toBeInTheDocument();
   });
 });
 
