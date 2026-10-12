@@ -303,20 +303,31 @@ fn capabilities(
 /// CoreAudio is asked for the device's transport type; the device's name is
 /// the last resort for a device whose transport cannot be read.
 pub(crate) fn is_bluetooth(device: &cpal::Device, name: &str) -> bool {
-    #[cfg(target_os = "macos")]
-    if let Ok(id) = device.id() {
-        match super::transport::is_bluetooth(id.id()) {
-            Some(bluetooth) => return bluetooth,
-            None => tracing::warn!(
-                "CoreAudio did not report the transport type of {id}; going by the device name"
-            ),
-        }
-    }
     let interface = device
         .description()
         .map(|description| description.interface_type())
         .unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    if let Ok(id) = device.id() {
+        match super::transport::is_bluetooth(id.id()) {
+            Some(bluetooth) => return bluetooth,
+            None => tracing::warn!("{}", transport_unknown_warning(interface)),
+        }
+    }
     looks_bluetooth(interface, name)
+}
+
+/// The log line for a device whose transport type CoreAudio would not give.
+///
+/// It names neither the device's ID (a Bluetooth device's UID looks like its
+/// address) nor its name (it may hold its owner's): the line is written while
+/// the devices are being listed, before the log's redaction knows them, so
+/// whatever it held would reach the file, and the report, as it is.
+#[cfg(any(target_os = "macos", test))]
+fn transport_unknown_warning(interface: cpal::InterfaceType) -> String {
+    format!(
+        "CoreAudio did not report the transport type of a device (cpal: {interface:?}); going by the device name"
+    )
 }
 
 /// Whether a CoreAudio transport type (`kAudioDevicePropertyTransportType`,
@@ -509,6 +520,15 @@ mod tests {
         assert!(!is_bluetooth_transport(0x626c_746e)); // 'bltn'
         assert!(!is_bluetooth_transport(0x7669_7274)); // 'virt'
         assert!(!is_bluetooth_transport(0));
+    }
+
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn when_coreaudio_does_not_report_the_transport_the_log_line_names_no_device() {
+        let line = transport_unknown_warning(cpal::InterfaceType::Unknown);
+
+        assert!(line.contains("Unknown"), "{line}");
+        assert!(!line.contains("coreaudio:"), "{line}");
     }
 
     /// Verifies: REQ-GUI-026
