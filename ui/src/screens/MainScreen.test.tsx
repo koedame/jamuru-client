@@ -370,6 +370,29 @@ describe('MainScreen のデバイスの問題の表示', () => {
     );
   });
 
+  /** Verifies: REQ-AUD-128 */
+  it('入力の音が止まって開き直しても戻らないとき、デバイスの名前を添えて、入り直すよう知らせること', async () => {
+    current = inRoom();
+    statusDeviceProblems = [{ side: 'input', trouble: 'stalled', device: 'null sink', sample_rate: 48000 }];
+
+    render(<MainScreen />);
+
+    const message = await screen.findByText(/stopped delivering audio/);
+    expect(message).toHaveTextContent(
+      "The input device (null sink) stopped delivering audio, and opening it again didn't help. Leave the room and join again"
+    );
+  });
+
+  /** Verifies: REQ-AUD-128 */
+  it('出力の音が止まって開き直しても戻らないとき、出力の問題として知らせること', async () => {
+    current = inRoom();
+    statusDeviceProblems = [{ side: 'output', trouble: 'stalled', device: null, sample_rate: 48000 }];
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText(/The output device stopped playing audio/)).toBeInTheDocument();
+  });
+
   /** Verifies: REQ-AUD-123 */
   it('デバイスの問題が解けたとき、知らせが消えること', async () => {
     current = inRoom();

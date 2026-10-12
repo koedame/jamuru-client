@@ -133,6 +133,12 @@ pub const METHODS: &[Method] = &[
         kind: Kind::Native,
         summary: "音声ドライバへの呼び出し（list_inputs・list_outputs・open_input・open_output）を、以後 seconds 秒のあいだ返らなくする。0 で解く。ドライバが固まったときの挙動を確かめるため",
     },
+    Method {
+        name: "debug.stall_streams",
+        access: Access::TOOLS,
+        kind: Kind::Native,
+        summary: "開いている音声の入出力を、エラーを出さずにコールバックが呼ばれなくなった状態にする。mode は open（いま開いているものだけ。開き直せば戻る）・all（開き直しても戻らない）・off（解く）。止まったことに気づいて開き直すかを確かめるため",
+    },
 ];
 
 /// Runs the `debug.*` method `name`.
@@ -153,6 +159,7 @@ pub async fn call<R: Runtime>(
         "debug.audio_tone" => audio_tone(params(&call)?),
         "debug.audio_roundtrip" => audio_roundtrip(params(&call)?).await,
         "debug.device_hang" => device_hang(params(&call)?),
+        "debug.stall_streams" => stall_streams(params(&call)?),
         "debug.audio_timing" => audio_timing(app),
         other => Err(RpcError::new(
             Code::UnknownMethod,
@@ -761,6 +768,21 @@ fn device_hang(params: DeviceHangParams) -> Result<Value, RpcError> {
     Ok(json!({ "call": params.call, "seconds": params.seconds }))
 }
 
+#[derive(Debug, Deserialize)]
+struct StallStreamsParams {
+    /// `open`, `all` or `off`.
+    mode: String,
+}
+
+/// Makes the streams stop calling back without an error, as one the audio
+/// host has left behind does.
+fn stall_streams(params: StallStreamsParams) -> Result<Value, RpcError> {
+    let mode = jamjam::audio::fault::StreamStall::parse(&params.mode)
+        .ok_or_else(|| RpcError::invalid_params("mode is one of \"open\", \"all\" and \"off\""))?;
+    jamjam::audio::fault::stall_streams(mode);
+    Ok(json!({ "mode": params.mode }))
+}
+
 /// What went wrong with the received audio in this session, or the last one:
 /// the count of each kind, and when the latest of them happened, in
 /// microseconds since the session's audio started. Compare the times of
@@ -842,6 +864,21 @@ mod tests {
         );
         assert!(hang("open_input", -1.0).is_err());
         assert!(hang("open_input", MAX_HANG_SECONDS + 1.0).is_err());
+    }
+
+    /// Verifies: REQ-AUD-128
+    #[test]
+    fn the_streams_are_stalled_by_mode_and_an_unknown_mode_is_refused() {
+        let stall = |mode: &str| {
+            stall_streams(StallStreamsParams {
+                mode: mode.to_string(),
+            })
+        };
+
+        assert!(stall("open").is_ok());
+        assert!(stall("all").is_ok());
+        assert!(stall("off").is_ok());
+        assert!(stall("sometimes").is_err());
     }
 
     /// Verifies: REQ-RMT-027

@@ -7,13 +7,22 @@
 //! while one is still being opened gives up on that open: the engine it holds
 //! is left behind, and a new one is made at once, so the switch is never
 //! queued behind a driver that does not answer.
+//!
+//! The slot also watches the stream it holds: one that stops calling back
+//! without an error (see `jamjam::audio::StallGuard`) is said so by
+//! [`watch`](DeviceSlot::watch), and the session thread opens it again with
+//! the same [`switch`](DeviceSlot::switch) it uses for a new device.
 
 use std::sync::mpsc;
 use std::thread;
+use std::time::Instant;
 
 #[cfg(target_os = "windows")]
 use jamjam::audio::AsioDuplex;
-use jamjam::audio::{AudioConfig, AudioEngine, AudioError, DeviceId};
+use jamjam::audio::{
+    AudioConfig, AudioEngine, AudioError, DeviceId, Heartbeat, StallGuard, Verdict, MAX_REOPENS,
+    STALL_AFTER,
+};
 
 /// What an open leaves behind: the engine, back from the thread that used it,
 /// and how the open went
@@ -29,10 +38,19 @@ pub(crate) struct DeviceSlot<T> {
     opening: Option<mpsc::Receiver<Opened<T>>>,
     /// The device last asked for; `None` is the system default
     device: Option<DeviceId>,
+    /// Counts the passes of the callback of the stream the engine has open,
+    /// and of every stream opened after it
+    heartbeat: Heartbeat,
+    guard: StallGuard,
+    /// Whether a stream is open for the guard to watch
+    streaming: bool,
+    /// An open has just finished: the next [`watch`](Self::watch) starts the
+    /// wait over from its own clock
+    just_opened: bool,
 }
 
 impl<T: Send + 'static> DeviceSlot<T> {
-    /// A slot around `engine`, which has `device` open (or has just failed to)
+    /// A slot around `engine`, which has `device` open
     pub(crate) fn new(
         what: &'static str,
         config: AudioConfig,
@@ -41,11 +59,45 @@ impl<T: Send + 'static> DeviceSlot<T> {
     ) -> Self {
         Self {
             what,
+            heartbeat: engine.heartbeat(),
             engine: Some(engine),
             config,
             opening: None,
             device,
+            guard: StallGuard::new(STALL_AFTER, MAX_REOPENS, Instant::now()),
+            streaming: true,
+            just_opened: false,
         }
+    }
+
+    /// For a slot whose engine has just failed to open its device: nothing is
+    /// running, so nothing is watched until a switch opens a stream.
+    pub(crate) fn without_stream(mut self) -> Self {
+        self.streaming = false;
+        self
+    }
+
+    /// An engine to open the next stream on, counting on this slot's heartbeat
+    fn fresh_engine(&self) -> AudioEngine {
+        let mut engine = AudioEngine::new(self.config.clone());
+        engine.set_heartbeat(self.heartbeat.clone());
+        engine
+    }
+
+    /// What the session thread does about the stream this turn: nothing,
+    /// unless its callback has been silent for too long (a [`Verdict`]).
+    ///
+    /// While a stream is being opened it is not watched, and the wait starts
+    /// again once the open is done.
+    pub(crate) fn watch(&mut self, now: Instant) -> Verdict {
+        if self.opening.is_some() || std::mem::take(&mut self.just_opened) {
+            self.guard.hold(now);
+            return Verdict::Flowing;
+        }
+        if !self.streaming {
+            return Verdict::Flowing;
+        }
+        self.guard.check(self.heartbeat.count(), now)
     }
 
     /// The device last asked for; `None` is the system default
@@ -64,6 +116,7 @@ impl<T: Send + 'static> DeviceSlot<T> {
         self.opening = None;
         self.engine = None;
         self.device = device;
+        self.streaming = false;
     }
 
     /// Starts opening `device`: `open` runs on a thread of its own, on the
@@ -83,11 +136,11 @@ impl<T: Send + 'static> DeviceSlot<T> {
                     "Switching the {} device again before the last switch finished",
                     self.what
                 );
-                AudioEngine::new(self.config.clone())
+                self.fresh_engine()
             }
             // Parked (ASIO took over this direction) rather than mid-open:
             // nothing to warn about, just build the engine `park` dropped.
-            None => AudioEngine::new(self.config.clone()),
+            None => self.fresh_engine(),
         };
         self.opening = None;
         let (tx, rx) = mpsc::channel();
@@ -104,7 +157,7 @@ impl<T: Send + 'static> DeviceSlot<T> {
             Ok(_) => self.opening = Some(rx),
             Err(e) => {
                 tracing::error!("Could not start the {} device switch: {}", self.what, e);
-                self.engine = Some(AudioEngine::new(self.config.clone()));
+                self.engine = Some(self.fresh_engine());
             }
         }
     }
@@ -116,12 +169,15 @@ impl<T: Send + 'static> DeviceSlot<T> {
             Ok((engine, result)) => {
                 self.engine = Some(engine);
                 self.opening = None;
+                self.streaming = result.is_ok();
+                self.just_opened = true;
                 Some(result)
             }
             Err(mpsc::TryRecvError::Empty) => None,
             Err(mpsc::TryRecvError::Disconnected) => {
-                self.engine = Some(AudioEngine::new(self.config.clone()));
+                self.engine = Some(self.fresh_engine());
                 self.opening = None;
+                self.streaming = false;
                 Some(Err(AudioError::StreamError(format!(
                     "the {} switch stopped",
                     self.what
@@ -297,5 +353,168 @@ mod tests {
 
         slot.switch(None, |_| Ok("opened"));
         assert_eq!(wait_for(&mut slot).unwrap(), "opened");
+    }
+
+    fn watched() -> (DeviceSlot<&'static str>, Heartbeat) {
+        let engine = AudioEngine::new(AudioConfig::default());
+        let heartbeat = engine.heartbeat();
+        let slot = DeviceSlot::new("input", AudioConfig::default(), engine, None);
+        (slot, heartbeat)
+    }
+
+    fn after(from: Instant, millis: u64) -> Instant {
+        from + Duration::from_millis(millis)
+    }
+
+    /// Verifies: REQ-AUD-128
+    #[test]
+    fn a_stream_whose_callback_keeps_being_called_is_never_reopened() {
+        let (mut slot, heartbeat) = watched();
+        let t0 = Instant::now();
+
+        for turn in 1..=50u64 {
+            heartbeat.beat();
+            assert_eq!(slot.watch(after(t0, turn * 100)), Verdict::Flowing);
+        }
+    }
+
+    /// The failure of the ticket: PipeWire left the stream open and quit
+    /// calling it, and nothing said so.
+    ///
+    /// Verifies: REQ-AUD-128
+    #[test]
+    fn a_stream_that_stops_calling_back_is_opened_again_and_goes_on_when_the_new_one_calls() {
+        let (mut slot, heartbeat) = watched();
+        let t0 = Instant::now();
+        heartbeat.beat();
+        assert_eq!(slot.watch(after(t0, 100)), Verdict::Flowing);
+
+        assert_eq!(slot.watch(after(t0, 1100)), Verdict::Reopen);
+        let beats = heartbeat.clone();
+        slot.switch(None, move |engine| {
+            // The open takes a while, and the new stream counts on the same heartbeat
+            thread::sleep(Duration::from_millis(100));
+            engine.heartbeat().beat();
+            Ok("opened again")
+        });
+        // The opening engine counts on the heartbeat the slot watches
+        assert_eq!(wait_for(&mut slot).unwrap(), "opened again");
+        assert_eq!(beats.count(), 2);
+        assert_eq!(slot.watch(after(t0, 1200)), Verdict::Flowing);
+        assert_eq!(slot.watch(after(t0, 5000)), Verdict::Flowing);
+    }
+
+    /// Verifies: REQ-AUD-128
+    #[test]
+    fn while_the_stream_is_being_opened_again_it_is_not_judged() {
+        let (mut slot, heartbeat) = watched();
+        let t0 = Instant::now();
+        heartbeat.beat();
+        slot.watch(after(t0, 0));
+        assert_eq!(slot.watch(after(t0, 1000)), Verdict::Reopen);
+        slot.switch(None, |_| {
+            thread::sleep(Duration::from_millis(400));
+            Ok("late")
+        });
+
+        // The open takes ten seconds by the clock the watch is given
+        for turn in 1..=100u64 {
+            assert_eq!(slot.watch(after(t0, 1000 + turn * 100)), Verdict::Flowing);
+        }
+    }
+
+    /// Verifies: REQ-AUD-128
+    #[test]
+    fn a_stream_that_stays_silent_after_every_reopen_is_given_up_on() {
+        let (mut slot, heartbeat) = watched();
+        let t0 = Instant::now();
+        heartbeat.beat();
+        slot.watch(after(t0, 0));
+        let mut verdicts = Vec::new();
+
+        for second in 1..=6u64 {
+            let verdict = slot.watch(after(t0, second * 1000));
+            verdicts.push(verdict);
+            if verdict == Verdict::Reopen {
+                slot.switch(None, |_| Ok("opened, but silent"));
+                assert_eq!(wait_for(&mut slot).unwrap(), "opened, but silent");
+                // The turn after an open starts the wait over
+                assert_eq!(slot.watch(after(t0, second * 1000)), Verdict::Flowing);
+            }
+        }
+
+        assert_eq!(
+            verdicts,
+            vec![
+                Verdict::Reopen,
+                Verdict::Reopen,
+                Verdict::Reopen,
+                Verdict::GiveUp,
+                Verdict::Flowing,
+                Verdict::Flowing,
+            ]
+        );
+    }
+
+    /// Verifies: REQ-AUD-128
+    #[test]
+    fn a_reopen_that_fails_is_reported_by_the_open_and_the_stream_is_watched_no_more() {
+        let (mut slot, heartbeat) = watched();
+        let t0 = Instant::now();
+        heartbeat.beat();
+        slot.watch(after(t0, 0));
+        assert_eq!(slot.watch(after(t0, 1000)), Verdict::Reopen);
+
+        slot.switch(None, |_| {
+            Err(AudioError::DeviceUnresponsive("input".into()))
+        });
+
+        assert!(matches!(
+            wait_for(&mut slot),
+            Err(AudioError::DeviceUnresponsive(_))
+        ));
+        for second in 2..=10u64 {
+            assert_eq!(slot.watch(after(t0, second * 1000)), Verdict::Flowing);
+        }
+    }
+
+    /// Verifies: REQ-AUD-128
+    #[test]
+    fn a_slot_whose_device_never_opened_has_no_stream_to_reopen() {
+        let engine = AudioEngine::new(AudioConfig::default());
+        let mut slot: DeviceSlot<&'static str> =
+            DeviceSlot::new("input", AudioConfig::default(), engine, None).without_stream();
+        let t0 = Instant::now();
+
+        for second in 1..=10u64 {
+            assert_eq!(slot.watch(after(t0, second * 1000)), Verdict::Flowing);
+        }
+
+        slot.switch(None, |_| Ok("opened"));
+        wait_for(&mut slot).unwrap();
+        slot.watch(after(t0, 11_000));
+        assert_eq!(
+            slot.watch(after(t0, 12_000)),
+            Verdict::Reopen,
+            "once a switch has opened a stream, it is watched"
+        );
+    }
+
+    /// Verifies: REQ-AUD-128
+    #[test]
+    fn an_engine_made_while_another_open_is_out_counts_on_the_same_heartbeat() {
+        let (mut slot, heartbeat) = watched();
+        slot.switch(None, |_| {
+            thread::sleep(Duration::from_millis(300));
+            Ok("late")
+        });
+
+        slot.switch(None, |engine| {
+            engine.heartbeat().beat();
+            Ok("current")
+        });
+
+        assert_eq!(wait_for(&mut slot).unwrap(), "current");
+        assert_eq!(heartbeat.count(), 1);
     }
 }
