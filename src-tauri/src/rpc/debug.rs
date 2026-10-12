@@ -777,9 +777,8 @@ struct StallStreamsParams {
 /// Makes the streams stop calling back without an error, as one the audio
 /// host has left behind does.
 fn stall_streams(params: StallStreamsParams) -> Result<Value, RpcError> {
-    let mode = jamjam::audio::fault::StreamStall::parse(&params.mode).ok_or_else(|| {
-        RpcError::invalid_params("mode is one of \"open\", \"all\" and \"off\"")
-    })?;
+    let mode = jamjam::audio::fault::StreamStall::parse(&params.mode)
+        .ok_or_else(|| RpcError::invalid_params("mode is one of \"open\", \"all\" and \"off\""))?;
     jamjam::audio::fault::stall_streams(mode);
     Ok(json!({ "mode": params.mode }))
 }
