@@ -6,8 +6,6 @@ Low-latency peer-to-peer audio communication application for macOS, Windows, and
 
 ## Documentation
 
-- [Storybook](https://koedame.github.io/jamuru-client/) - UI component library and design system
-
 ### In-Repository Development Docs
 
 - [docs/](./docs/README.md) - Installation, quick start, troubleshooting, privacy, and development guides
