@@ -127,11 +127,11 @@ fn set_current_thread_realtime_priority() {
         );
 
         if result == 0 {
-            println!("Audio thread: macOS real-time priority enabled (TIME_CONSTRAINT)");
+            tracing::info!("Audio thread: macOS real-time priority enabled (TIME_CONSTRAINT)");
         } else {
             // Fall back to nice value
             libc::setpriority(libc::PRIO_PROCESS, 0, -20);
-            println!(
+            tracing::info!(
                 "Audio thread: using nice -20 (TIME_CONSTRAINT failed: {})",
                 result
             );
@@ -149,9 +149,9 @@ fn set_current_thread_realtime_priority() {
         if result != 0 {
             // Fall back to nice value if SCHED_FIFO fails (requires rtprio limit)
             libc::setpriority(libc::PRIO_PROCESS, 0, -20);
-            println!("Audio thread: using nice -20 (SCHED_FIFO requires rtprio config)");
+            tracing::info!("Audio thread: using nice -20 (SCHED_FIFO requires rtprio config)");
         } else {
-            println!(
+            tracing::info!(
                 "Audio thread: real-time priority enabled (SCHED_FIFO {})",
                 REALTIME_PRIORITY
             );
@@ -173,16 +173,16 @@ fn set_current_thread_realtime_priority() {
         // Then set thread to TIME_CRITICAL (highest within the priority class)
         let result = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
         if result.is_ok() {
-            println!("Audio thread: real-time priority enabled (HIGH + TIME_CRITICAL)");
+            tracing::info!("Audio thread: real-time priority enabled (HIGH + TIME_CRITICAL)");
         } else {
-            println!("Audio thread: failed to set thread priority");
+            tracing::warn!("Audio thread: failed to set thread priority");
         }
     }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn set_current_thread_realtime_priority() {
-    println!("Audio thread: real-time priority not supported on this platform");
+    tracing::info!("Audio thread: real-time priority not supported on this platform");
 }
 
 /// Streaming state managed by Tauri
@@ -2262,8 +2262,7 @@ async fn run_audio_streaming(
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
 
-    let remote_addr = connection.remote_addr();
-    println!("Connected to {}. Streaming active.", remote_addr);
+    tracing::info!("Streaming active");
 
     // Send our latency info to the peer (ADR-013: sample rate communication)
     let mut local_latency_info = LatencyInfoMessage {
@@ -2278,7 +2277,7 @@ async fn run_audio_streaming(
         channel_count: capture_channels as u8,
     };
     if let Err(e) = connection.send_latency_info(&local_latency_info).await {
-        eprintln!("Failed to send initial latency info: {}", e);
+        tracing::warn!("Failed to send initial latency info: {}", e);
     }
     let mut announced_channel_count = local_latency_info.channel_count;
 
@@ -2396,7 +2395,7 @@ async fn run_audio_streaming(
                         if conn.is_connected() {
                             // Send stereo audio data
                             if let Err(e) = conn.send_audio(&stereo_send_buffer, timestamp).await {
-                                eprintln!("Failed to send audio: {}", e);
+                                tracing::warn!("Failed to send audio: {}", e);
                             }
                         }
                     });
@@ -2454,79 +2453,79 @@ async fn run_audio_streaming(
         // Check for commands (non-blocking)
         match cmd_rx.try_recv() {
             Ok(StreamingCommand::Stop) => {
-                println!("Stopping streaming...");
+                tracing::info!("Stopping streaming...");
                 break;
             }
             Ok(StreamingCommand::SetInputDevice(device_id)) => {
-                println!("Switching input device to: {:?}", device_id);
+                tracing::info!("Switching input device to: {:?}", device_id);
                 reopen_capture = Some(device_id.map(DeviceId));
             }
             Ok(StreamingCommand::SetTransmitChannels(count)) => {
-                println!("Setting transmit channels to: {}", count);
+                tracing::info!("Setting transmit channels to: {}", count);
                 wanted_channels = count.clamp(1, WIRE_CHANNELS as u32) as u16;
                 reopen_capture = Some(capture.device().cloned());
             }
             Ok(StreamingCommand::SetOutputDevice(device_id)) => {
-                println!("Switching output device to: {:?}", device_id);
+                tracing::info!("Switching output device to: {:?}", device_id);
                 reopen_playback = Some(device_id.map(DeviceId));
             }
             Ok(StreamingCommand::SetOutputChannels(left, right)) => {
-                println!("Setting output channels to: {} / {:?}", left, right);
+                tracing::info!("Setting output channels to: {} / {:?}", left, right);
                 output_channels = (left, right);
                 reopen_playback = Some(playback.device().cloned());
             }
             Ok(StreamingCommand::SetInputChannels(left, right)) => {
-                println!("Setting input channels to: {} / {:?}", left, right);
+                tracing::info!("Setting input channels to: {} / {:?}", left, right);
                 input_channels = (left, right);
                 reopen_capture = Some(capture.device().cloned());
             }
             Ok(StreamingCommand::SetMute(muted)) => {
-                println!("Setting mute state to: {}", muted);
+                tracing::info!("Setting mute state to: {}", muted);
                 is_muted_for_send.store(muted, Ordering::SeqCst);
             }
             Ok(StreamingCommand::SetMonitoring(enabled)) => {
                 monitor.set_enabled(enabled);
             }
             Ok(StreamingCommand::SetPeerVolume(vol)) => {
-                println!("Setting peer volume to: {}", vol);
+                tracing::debug!("Setting peer volume to: {}", vol);
                 peer_volume.store((vol * 100.0) as u32, Ordering::SeqCst);
             }
             Ok(StreamingCommand::SetMasterVolume(vol)) => {
-                println!("Setting master volume to: {}", vol);
+                tracing::debug!("Setting master volume to: {}", vol);
                 master_volume.store((vol * 100.0) as u32, Ordering::SeqCst);
             }
             Ok(StreamingCommand::SetPeerPan(pan)) => {
-                println!("Setting peer pan to: {}", pan);
+                tracing::debug!("Setting peer pan to: {}", pan);
                 peer_pan.store(pan, Ordering::SeqCst);
             }
             Ok(StreamingCommand::SetLocalVolume(vol)) => {
-                println!("Setting local volume to: {}", vol);
+                tracing::debug!("Setting local volume to: {}", vol);
                 let volume_u32 = (vol * 100.0) as u32;
                 local_volume.store(volume_u32, Ordering::SeqCst);
                 // Also update the send thread's copy
                 local_volume_for_send.store(volume_u32, Ordering::SeqCst);
             }
             Ok(StreamingCommand::SetLocalPan(pan)) => {
-                println!("Setting local pan to: {}", pan);
+                tracing::debug!("Setting local pan to: {}", pan);
                 local_pan.store(pan, Ordering::SeqCst);
                 // Also update the send thread's copy
                 local_pan_for_send.store(pan, Ordering::SeqCst);
             }
             Ok(StreamingCommand::Reconnect) => {
-                println!("User requested reconnection");
+                tracing::info!("User requested reconnection");
                 let mut conn = connection_arc.lock().await;
                 if let Err(e) = conn.reconnect() {
-                    eprintln!("Reconnect refused: {}", e);
+                    tracing::warn!("Reconnect refused: {}", e);
                 }
             }
             Ok(StreamingCommand::SetJitterBufferFrames(frames)) => {
-                println!("Setting the play-out delay to {} frame(s)", frames);
+                tracing::info!("Setting the play-out delay to {} frame(s)", frames);
                 // What is held moves to the new delay (ADR-031). The display
                 // and the peer hear about it from the stats tick below.
                 receive.set_delay_frames(frames);
             }
             Err(std_mpsc::TryRecvError::Disconnected) => {
-                println!("Command channel disconnected");
+                tracing::info!("Command channel disconnected");
                 break;
             }
             Err(std_mpsc::TryRecvError::Empty) => {
@@ -2636,7 +2635,7 @@ async fn run_audio_streaming(
                     clear_device_problem(device_problems, DeviceSide::Input);
                 }
                 Err(e) => {
-                    eprintln!("Failed to restart capture: {}", e);
+                    tracing::warn!("Failed to restart capture: {}", e);
                     note_device_problem(
                         device_problems,
                         DeviceSide::Input,
@@ -2651,7 +2650,7 @@ async fn run_audio_streaming(
             match opened {
                 Ok(()) => clear_device_problem(device_problems, DeviceSide::Output),
                 Err(e) => {
-                    eprintln!("Failed to switch output device: {}", e);
+                    tracing::warn!("Failed to switch output device: {}", e);
                     note_device_problem(
                         device_problems,
                         DeviceSide::Output,
@@ -2678,7 +2677,7 @@ async fn run_audio_streaming(
                     clear_device_problem(device_problems, DeviceSide::Output);
                 }
                 Err(e) => {
-                    eprintln!("Failed to switch the ASIO driver: {}", e);
+                    tracing::warn!("Failed to switch the ASIO driver: {}", e);
                     note_device_problem(
                         device_problems,
                         DeviceSide::Input,
@@ -2786,7 +2785,7 @@ async fn run_audio_streaming(
                     ..local_latency_info.clone()
                 };
                 if let Err(e) = conn.send_latency_info(&updated).await {
-                    eprintln!("Failed to send updated latency info: {}", e);
+                    tracing::warn!("Failed to send updated latency info: {}", e);
                 }
                 announced_channel_count = channel_count;
             }
@@ -2803,7 +2802,7 @@ async fn run_audio_streaming(
                     ..local_latency_info.clone()
                 };
                 if let Err(e) = conn.send_latency_info(&updated).await {
-                    eprintln!("Failed to send updated latency info: {}", e);
+                    tracing::warn!("Failed to send updated latency info: {}", e);
                 }
                 announced_delay_frames = delay_frames;
             }
@@ -2905,16 +2904,18 @@ async fn run_audio_streaming(
                             from,
                             to,
                             latency_ms,
-                        } => println!(
+                        } => tracing::info!(
                             "Resampler created: {} Hz -> {} Hz (latency: {:.2} ms)",
-                            from, to, latency_ms
+                            from,
+                            to,
+                            latency_ms
                         ),
-                        PeerRateChange::Passthrough => println!(
+                        PeerRateChange::Passthrough => tracing::info!(
                             "Resampler disabled: peer rate matches local rate ({} Hz)",
                             sample_rate
                         ),
                         PeerRateChange::Failed(e) => {
-                            eprintln!("Failed to create resampler: {}", e)
+                            tracing::warn!("Failed to create resampler: {}", e)
                         }
                     }
                     receive.follow_peer_channels(peer_info.channel_count);
@@ -2953,7 +2954,7 @@ async fn run_audio_streaming(
         session.stop();
     }
 
-    println!("Streaming stopped.");
+    tracing::info!("Streaming stopped.");
 
     Ok(())
 }
