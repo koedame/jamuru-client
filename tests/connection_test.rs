@@ -336,7 +336,7 @@ async fn test_short_outage_recovers_without_asking_the_user() {
 /// Given the user is in a session
 /// When the network drops for 10 seconds
 /// Then automatic recovery gives up so the user can be asked, and choosing to
-/// retry resumes probing
+/// retry starts a full attempt again
 ///
 /// Verifies: REQ-CON-110
 #[tokio::test]
@@ -374,7 +374,7 @@ async fn test_long_outage_hands_the_decision_to_the_user() {
     assert_eq!(
         conn.state(),
         ConnectionState::Failed,
-        "a long outage must stop retrying so the user can decide"
+        "a long outage must be reported as failed so the user can decide"
     );
 
     let observed = states.lock().unwrap().clone();
@@ -400,6 +400,200 @@ async fn test_long_outage_hands_the_decision_to_the_user() {
     // A connection that was closed deliberately cannot be retried.
     conn.disconnect();
     assert!(conn.reconnect().is_err());
+}
+
+/// A relay between two connections that can be cut and restored, like a link that goes down
+/// for a while without either end being told. Connect both ends to the address it returns.
+async fn cuttable_relay() -> (
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    std::net::SocketAddr,
+) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let cut = Arc::new(AtomicBool::new(false));
+    let relay = tokio::net::UdpSocket::bind("127.0.0.1:0")
+        .await
+        .expect("relay socket");
+    let relay_addr = relay.local_addr().expect("relay address");
+    let cut_for_relay = cut.clone();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 4096];
+        let mut ends: Vec<std::net::SocketAddr> = Vec::new();
+        while let Ok((len, from)) = relay.recv_from(&mut buf).await {
+            if !ends.contains(&from) {
+                ends.push(from);
+            }
+            if cut_for_relay.load(Ordering::SeqCst) {
+                continue;
+            }
+            if let Some(&to) = ends.iter().find(|&&end| end != from) {
+                let _ = relay.send_to(&buf[..len], to).await;
+            }
+        }
+    });
+    (cut, relay_addr)
+}
+
+/// Two connected, encrypted connections with a relay between them that can be cut, scaled
+/// down so an outage that outlasts giving up takes a second. Returns the sender, the listener,
+/// the switch that cuts the relay, and the sequences of the audio frames the listener heard.
+async fn two_connections_over_a_cuttable_relay() -> (
+    Connection,
+    Connection,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
+) {
+    use jamjam::audio::CodecType;
+    use jamjam::network::{AudioEncodingConfig, ReconnectConfig};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    let encoding = || AudioEncodingConfig {
+        codec_type: CodecType::Pcm,
+        sample_rate: 48000,
+        channels: 1,
+        frame_size: 8,
+        bitrate: 0,
+        fec_group_size: None,
+    };
+    let config = ReconnectConfig {
+        keep_alive_interval: Duration::from_millis(50),
+        detect_after: Duration::from_millis(150),
+        give_up_after: Duration::from_millis(600),
+        check_interval: Duration::from_millis(20),
+    };
+
+    let (cut, relay_addr) = cuttable_relay().await;
+
+    let heard: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut listener = Connection::new("127.0.0.1:0").await.expect("listener");
+    listener.set_audio_encoding(encoding()).expect("encoding");
+    listener.set_reconnect_config(config);
+    let heard_for_callback = heard.clone();
+    listener.set_audio_callback(move |sequence, _payload, _timestamp| {
+        heard_for_callback.lock().unwrap().push(sequence);
+    });
+    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender");
+    sender.set_audio_encoding(encoding()).expect("encoding");
+    sender.set_reconnect_config(config);
+
+    listener.connect(relay_addr).await.expect("listener");
+    sender.connect(relay_addr).await.expect("sender");
+    common::wait_until_encrypted(&[&sender, &listener]).await;
+    (sender, listener, cut, heard)
+}
+
+/// Sends frames from `sender` until `heard` has one, or `within` has passed
+async fn audio_flows(
+    sender: &Connection,
+    heard: &std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
+    within: std::time::Duration,
+) -> bool {
+    let before = heard.lock().unwrap().len();
+    let deadline = std::time::Instant::now() + within;
+    while std::time::Instant::now() < deadline {
+        let _ = sender.send_audio(&[0.25; 8], 0).await;
+        if heard.lock().unwrap().len() > before {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    false
+}
+
+/// Given the user is in a session
+/// When the link goes down for longer than automatic recovery waits, and comes back
+/// Then the audio flows again without the user doing anything
+///
+/// Verifies: REQ-CON-110
+#[tokio::test]
+async fn when_the_link_returns_after_recovery_gave_up_audio_flows_again_by_itself() {
+    use jamjam::network::ConnectionState;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    let (mut sender, mut listener, cut, heard) = two_connections_over_a_cuttable_relay().await;
+    assert!(
+        audio_flows(&sender, &heard, Duration::from_secs(2)).await,
+        "the audio flows before the outage"
+    );
+
+    cut.store(true, Ordering::SeqCst);
+    assert!(wait_for_state(&sender, ConnectionState::Failed, Duration::from_secs(3)).await);
+    assert!(wait_for_state(&listener, ConnectionState::Failed, Duration::from_secs(3)).await);
+
+    cut.store(false, Ordering::SeqCst);
+    assert!(
+        wait_for_state(&sender, ConnectionState::Connected, Duration::from_secs(3)).await,
+        "the sender is still {:?} after the link came back",
+        sender.state()
+    );
+    assert!(
+        wait_for_state(
+            &listener,
+            ConnectionState::Connected,
+            Duration::from_secs(3)
+        )
+        .await,
+        "the listener is still {:?} after the link came back",
+        listener.state()
+    );
+    assert!(
+        audio_flows(&sender, &heard, Duration::from_secs(2)).await,
+        "the audio does not flow after the link came back"
+    );
+    assert!(
+        sender.last_error().is_none(),
+        "a recovered link has no error to show"
+    );
+
+    sender.disconnect();
+    listener.disconnect();
+}
+
+/// Given the link was down for longer than automatic recovery waits, and the user is asked
+/// When the user chooses to reconnect
+/// Then the connection is tried again: it gives up only after a full attempt that fails, and
+/// the audio flows once the link is back
+///
+/// Verifies: REQ-CON-110
+#[tokio::test]
+async fn when_the_user_reconnects_after_recovery_gave_up_audio_flows_once_the_link_is_back() {
+    use jamjam::network::ConnectionState;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    let (mut sender, mut listener, cut, heard) = two_connections_over_a_cuttable_relay().await;
+
+    cut.store(true, Ordering::SeqCst);
+    assert!(wait_for_state(&sender, ConnectionState::Failed, Duration::from_secs(3)).await);
+    assert!(wait_for_state(&listener, ConnectionState::Failed, Duration::from_secs(3)).await);
+
+    sender.reconnect().expect("user-initiated retry");
+    listener.reconnect().expect("user-initiated retry");
+    assert_eq!(sender.state(), ConnectionState::Reconnecting);
+
+    // The link is still down: nothing has been heard, so the retry does not report it up
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(sender.state(), ConnectionState::Reconnecting);
+
+    // and it is a whole attempt, not an instant verdict
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(sender.state(), ConnectionState::Reconnecting);
+    assert!(wait_for_state(&sender, ConnectionState::Failed, Duration::from_secs(3)).await);
+
+    // And a retry made while it is down does not stop the connection recovering later
+    sender.reconnect().expect("user-initiated retry");
+    cut.store(false, Ordering::SeqCst);
+    assert!(wait_for_state(&sender, ConnectionState::Connected, Duration::from_secs(3)).await);
+    assert!(
+        audio_flows(&sender, &heard, Duration::from_secs(2)).await,
+        "the audio does not flow after the retry"
+    );
+
+    sender.disconnect();
+    listener.disconnect();
 }
 
 /// `ConnectionStats::packet_loss_rate` must come from the gaps in the received

@@ -26,6 +26,10 @@ use screens::{ConnectionScreen, ConsentScreen, HelperScreen, SessionScreen, Sett
 /// because it covers process start plus webview creation on a cold cache.
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Where the app's standard output and standard error are captured, inside
+/// the throwaway `$HOME`.
+const CONSOLE_FILE: &str = "console.txt";
+
 /// Default for waits on UI transitions.
 pub const UI_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -143,7 +147,17 @@ impl App {
             seed_identity(home.path(), secret)?;
         }
 
+        // Stdout and stderr go to one file in the throwaway $HOME so a
+        // scenario can read what the app printed, in the order it printed it.
+        let console = std::fs::File::create(home.path().join(CONSOLE_FILE))
+            .map_err(|e| format!("could not create the console file: {}", e))?;
+        let console_err = console
+            .try_clone()
+            .map_err(|e| format!("could not share the console file: {}", e))?;
+
         let process = Command::new(binary)
+            .stdout(console)
+            .stderr(console_err)
             .args(args)
             .env("JAMJAM_E2E_CONTROL_PORT", port.to_string())
             .env("HOME", home.path())
@@ -290,6 +304,13 @@ impl App {
         } else {
             home.join(".local/share/jamuru/usage")
         }
+    }
+
+    /// What the app has printed to its standard output and standard error so
+    /// far, interleaved as written. This is the console a `journalctl` or a
+    /// terminal would show; empty if it printed nothing.
+    pub fn console_text(&self) -> String {
+        std::fs::read_to_string(self._home.path().join(CONSOLE_FILE)).unwrap_or_default()
     }
 
     /// What the app has written to its log file so far; empty if there is none yet.
