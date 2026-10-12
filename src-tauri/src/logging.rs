@@ -1461,4 +1461,71 @@ mod tests {
         assert!(summary.contains(r#"input="AG06/AG03""#), "{}", summary);
         assert!(!summary.contains("20221310"), "{}", summary);
     }
+
+    fn rust_files_under(dir: &Path, found: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("source directory") {
+            let path = entry.expect("directory entry").path();
+            if path.is_dir() {
+                rust_files_under(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                found.push(path);
+            }
+        }
+    }
+
+    /// What reaches the console of an installed app ends up in the system
+    /// journal on Linux, and nothing masks it on the way. Everything the app
+    /// has to say goes through `tracing`, whose lines pass the redaction above.
+    /// This file is the exception: it reports that the logger itself could not
+    /// start, before there is one, and says nothing about a peer.
+    ///
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn the_app_writes_to_the_console_only_from_the_logger_that_cannot_start() {
+        const CONSOLE_MACROS: [&str; 5] = ["println!", "eprintln!", "print!", "eprint!", "dbg!"];
+        let mut files = Vec::new();
+        rust_files_under(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        assert!(files.len() > 10, "found only {:?}", files);
+
+        let mut offenders = Vec::new();
+        for file in files {
+            if file.file_name().is_some_and(|name| name == "logging.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&file).expect("source file");
+            for (number, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for name in CONSOLE_MACROS {
+                    let mut from = 0;
+                    while let Some(at) = line[from..].find(name) {
+                        let start = from + at;
+                        let part_of_longer_name = line[..start]
+                            .chars()
+                            .next_back()
+                            .is_some_and(|c| c.is_alphanumeric() || c == '_');
+                        if !part_of_longer_name {
+                            offenders.push(format!(
+                                "{}:{}: {}",
+                                file.display(),
+                                number + 1,
+                                line.trim()
+                            ));
+                        }
+                        from = start + name.len();
+                    }
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "these write to the console, unmasked; use tracing instead:\n{}",
+            offenders.join("\n")
+        );
+    }
 }
