@@ -17,6 +17,7 @@ use super::device::{
 use super::driver::{StreamHost, OPEN_TIMEOUT};
 use super::error::AudioError;
 use super::fault::{self, Call};
+use super::heartbeat::Heartbeat;
 use super::resampler::{CaptureResampler, ResamplerError};
 
 /// Events that can occur during audio streaming
@@ -189,6 +190,8 @@ pub struct AudioEngine {
     playback_route: OutputRoute,
     // Event sender for device change notifications
     event_tx: Option<Sender<AudioEvent>>,
+    // Counts the passes of the device callbacks of the streams this engine opens
+    heartbeat: Heartbeat,
 }
 
 impl AudioEngine {
@@ -205,7 +208,22 @@ impl AudioEngine {
             current_input_device: None,
             current_output_device: None,
             event_tx: None,
+            heartbeat: Heartbeat::default(),
         }
+    }
+
+    /// The count of device callback passes, for telling a stream that has
+    /// stopped calling back (see [`StallGuard`](super::heartbeat::StallGuard)).
+    /// Every stream the engine opens counts on it, so one that is opened again
+    /// goes on counting where the last one stopped.
+    pub fn heartbeat(&self) -> Heartbeat {
+        self.heartbeat.clone()
+    }
+
+    /// Makes the streams opened from now on count on `heartbeat`, so an engine
+    /// made to replace another keeps the count the watcher is reading.
+    pub fn set_heartbeat(&mut self, heartbeat: Heartbeat) {
+        self.heartbeat = heartbeat;
     }
 
     /// Sets how long opening a stream is waited for before the device is
@@ -268,6 +286,8 @@ impl AudioEngine {
         let sample_rate = self.config.sample_rate;
         let frame_size = self.config.frame_size;
         let wanted = device_id.cloned();
+        let heartbeat = self.heartbeat.clone();
+        let serial = fault::stream_serial();
 
         // Error callback with device disconnection detection
         let event_tx = self.event_tx.clone();
@@ -332,6 +352,10 @@ impl AudioEngine {
                 .build_input_stream(
                     stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if fault::stream_stalled(serial) {
+                            return;
+                        }
+                        heartbeat.beat();
                         let started = crate::perf::start();
                         super::device_loop::on_input(data, device_channels);
                         if whole_frame {
@@ -441,6 +465,8 @@ impl AudioEngine {
         }
         let wanted = device_id.cloned();
         let err_fn = self.stream_error_handler();
+        let heartbeat = self.heartbeat.clone();
+        let serial = fault::stream_serial();
 
         // Opened on a thread of its own, like capture
         let host = StreamHost::open("output stream", self.open_timeout, move || {
@@ -485,6 +511,11 @@ impl AudioEngine {
                 .build_output_stream(
                     stream_config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        if fault::stream_stalled(serial) {
+                            data.fill(0.0);
+                            return;
+                        }
+                        heartbeat.beat();
                         let started = crate::perf::start();
                         puller.fill(data);
                         crate::perf::OUTPUT_CALLBACK.stop(started);
