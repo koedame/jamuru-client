@@ -561,6 +561,8 @@ impl From<LatencyInfoMessage> for PeerLatencyInfo {
 /// Connected --> Reconnecting: connection lost
 /// Reconnecting --> Connected: reconnect success
 /// Reconnecting --> Failed: timeout
+/// Failed --> Connected: packets arrive again
+/// Failed --> Reconnecting: reconnect()
 /// Connected --> Disconnected: disconnect()
 /// Failed --> Disconnected: reset()
 /// ```
@@ -655,10 +657,11 @@ impl Default for AudioEncodingConfig {
 /// When a silent link counts as lost, and when it counts as gone
 ///
 /// UDP has no connection to re-establish, so recovery means continuing to probe
-/// until packets flow again - the keep-alive loop already does that. What this
-/// configures is when to tell the user, which `connection.feature` specifies:
-/// a 3-second outage recovers on its own, a 10-second one asks the user
-/// (REQ-CON-109, REQ-CON-110).
+/// until packets flow again - the keep-alive loop already does that, also after
+/// the user was asked. What this configures is when to tell the user, which
+/// `connection.feature` specifies: a 3-second outage recovers on its own, a
+/// 10-second one asks the user, and a link that comes back is taken up again
+/// either way (REQ-CON-109, REQ-CON-110).
 #[derive(Debug, Clone, Copy)]
 pub struct ReconnectConfig {
     /// How often keep-alives are sent
@@ -1321,16 +1324,17 @@ impl Connection {
         self.state_change_callback = Some(Arc::new(Box::new(callback)));
     }
 
-    /// Resume probing after automatic recovery gave up
+    /// Start a full attempt again after automatic recovery gave up
     ///
     /// `connection.feature` has the user choose whether to retry after a long
-    /// outage (REQ-CON-110); this is what that choice calls. Returns an error if
+    /// outage (REQ-CON-110); this is what that choice calls. The receive, keep-alive
+    /// and liveness loops run from the moment the link is up until it is closed, so
+    /// they are still there to be given the full give-up time again. Returns an error if
     /// the connection was deliberately closed rather than lost.
     pub fn reconnect(&mut self) -> Result<(), NetworkError> {
         match self.state() {
             ConnectionState::Disconnected => Err(NetworkError::NotConnected),
-            ConnectionState::Connected => Ok(()),
-            _ => {
+            ConnectionState::Reconnecting | ConnectionState::Failed => {
                 // Treat the link as alive again for the purposes of the
                 // give-up deadline, so the user gets a full attempt.
                 if let Ok(mut last) = self.last_received.lock() {
@@ -1338,10 +1342,10 @@ impl Connection {
                 }
                 self.reset_receive_state();
                 self.set_state(ConnectionState::Reconnecting);
-                self.start_liveness_monitor();
-                self.start_keepalive_loop();
                 Ok(())
             }
+            // Up, or not up yet: there is no loss to recover from
+            _ => Ok(()),
         }
     }
 
@@ -1657,8 +1661,10 @@ impl Connection {
             let (mut rx, _recv_handle) = transport.clone().start_receive_loop();
 
             while let Some((packet, addr)) = rx.recv().await {
-                let current_state = ConnectionState::from_u8(state.load(Ordering::SeqCst));
-                if !current_state.can_transmit() {
+                // Packets heard after the link gave up are what bring it back
+                if ConnectionState::from_u8(state.load(Ordering::SeqCst))
+                    == ConnectionState::Disconnected
+                {
                     break;
                 }
 
@@ -1887,10 +1893,7 @@ impl Connection {
                 ticker.tick().await;
 
                 let current = ConnectionState::from_u8(state.load(Ordering::SeqCst));
-                if matches!(
-                    current,
-                    ConnectionState::Disconnected | ConnectionState::Failed
-                ) {
+                if current == ConnectionState::Disconnected {
                     break;
                 }
 
@@ -1901,22 +1904,31 @@ impl Connection {
                 let remote_addr = route.lock().current;
 
                 let next = if silence >= config.give_up_after {
-                    // Automatic recovery has had long enough. Hand the decision
-                    // to the user (REQ-CON-110).
-                    if let Ok(mut err) = last_error.lock() {
-                        *err = Some(format!(
-                            "No packets from {} for {:.0}s",
-                            remote_addr,
-                            silence.as_secs_f32()
-                        ));
+                    // Automatic recovery has had long enough. Ask the user
+                    // (REQ-CON-110); the keep-alives go on, so the link is
+                    // taken up again if the peer is heard.
+                    if current == ConnectionState::Failed {
+                        None
+                    } else {
+                        if let Ok(mut err) = last_error.lock() {
+                            *err = Some(format!(
+                                "No packets from {} for {:.0}s",
+                                remote_addr,
+                                silence.as_secs_f32()
+                            ));
+                        }
+                        Some(ConnectionState::Failed)
                     }
-                    Some(ConnectionState::Failed)
                 } else if silence >= config.detect_after {
                     (current == ConnectionState::Connected).then_some(ConnectionState::Reconnecting)
                 } else {
-                    // Packets are flowing. If we had given up on the link,
-                    // it is usable again.
-                    (current == ConnectionState::Reconnecting).then_some(ConnectionState::Connected)
+                    // Packets are flowing. If we had lost the link or given up
+                    // on it, it is usable again.
+                    matches!(
+                        current,
+                        ConnectionState::Reconnecting | ConnectionState::Failed
+                    )
+                    .then_some(ConnectionState::Connected)
                 };
 
                 let Some(next) = next else { continue };
@@ -1931,6 +1943,9 @@ impl Connection {
                     }
                     if let Ok(mut tracker) = sequence_tracker_for_monitor.lock() {
                         tracker.reset();
+                    }
+                    if let Ok(mut err) = last_error.lock() {
+                        *err = None;
                     }
                     info!("Reconnected to {}", remote_addr);
                 } else if next == ConnectionState::Reconnecting {
@@ -1954,10 +1969,6 @@ impl Connection {
                         callback(next);
                     }
                 }
-
-                if next == ConnectionState::Failed {
-                    break;
-                }
             }
         });
 
@@ -1980,8 +1991,9 @@ impl Connection {
             loop {
                 interval.tick().await;
 
+                // Keeps probing after the link gave up, so the peer hears us as soon as it is back
                 let current_state = ConnectionState::from_u8(state.load(Ordering::SeqCst));
-                if !current_state.can_transmit() {
+                if current_state == ConnectionState::Disconnected {
                     break;
                 }
 
@@ -2055,7 +2067,7 @@ impl Connection {
                 ticker.tick().await;
 
                 let current_state = ConnectionState::from_u8(state.load(Ordering::SeqCst));
-                if !current_state.can_transmit() {
+                if current_state == ConnectionState::Disconnected {
                     break;
                 }
                 let remote_addr = route.lock().current;
