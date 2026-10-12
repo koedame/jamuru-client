@@ -1329,6 +1329,17 @@ mod tests {
         assert!(line.contains("QW***"), "{line}");
     }
 
+    /// Verifies: REQ-GUI-022
+    #[test]
+    fn a_device_is_logged_before_it_is_registered_the_line_in_the_file_holds_its_id() {
+        let line = redact_personal_identifiers(
+            "CoreAudio did not report the transport type of coreaudio:AA-BB-CC-DD-EE-FF:output",
+            true,
+        );
+
+        assert!(line.contains("AA-BB-CC-DD-EE-FF"), "{line}");
+    }
+
     #[test]
     fn a_held_back_notice_names_a_ci_build_path_only_the_file_name_survives() {
         let written = std::sync::Arc::new(Mutex::new(Vec::new()));
