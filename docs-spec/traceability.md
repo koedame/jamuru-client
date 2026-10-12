@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 262 |
-| うち must | 254 |
+| 要求 総数 | 263 |
+| うち must | 255 |
 | うち should | 8 |
-| 検証済み | 233 |
+| 検証済み | 234 |
 | サーバーを立てた接続テストでのみ検証 | 26 |
 | 未検証（should のみ許容） | 3 |
 
@@ -262,6 +262,7 @@
 | REQ-TRM-003 | must | 同意するまで、アプリは自分からネットワークに何も出さない。サーバーへの接続、更新の確認、利用状況の送信（設定がオンでも）、ベータ版の遠隔デバッグの問い合わせは、同意の記録を待って始める。接続・入室・参加・繋ぎ直しのコマンドも、同意が無いうちは断る。診断（サーバーに繋ぐもの）・問題の報告・前回終了できなかった記録の送信も、同意が無いうちは断る | `docs-spec/requirements.md` | `src-tauri/src/diagnostics.rs`::the_terms_are_agreed_to_and_a_diagnostic_asks_for_the_server_client_gets_it<br/>`src-tauri/src/diagnostics.rs`::the_terms_are_not_agreed_to_and_a_diagnostic_asks_for_the_server_client_refuses<br/>`src-tauri/src/report_problem.rs`::the_terms_are_not_agreed_to_and_a_report_is_sent_refuses_before_reading_the_log<br/>`src-tauri/src/session/mod.rs`::the_app_starts_before_the_terms_are_agreed_to_does_not_reach_the_server_until_they_are<br/>`src-tauri/src/session/mod.rs`::the_terms_are_not_agreed_to_and_a_command_that_connects_is_called_refuses_and_stays_off_the_network<br/>`src-tauri/src/terms.rs`::when_the_terms_are_agreed_to_while_waiting_the_wait_ends<br/>`src-tauri/src/terms.rs`::when_the_terms_are_not_agreed_to_waiting_does_not_finish<br/>`src-tauri/src/usage.rs`::the_terms_are_not_agreed_to_and_the_previous_hang_is_sent_refuses_and_keeps_it_pending<br/>`tests/e2e/tests/gui.rs`::a_first_launch_shows_the_terms_and_reaches_no_server_until_they_are_agreed_to |
 | REQ-TRM-004 | must | 設定画面の一般タブに、「利用規約」「ライセンス」「プライバシーとセキュリティ」「お知らせ」を開く行がある。規約とライセンスはアプリに同梱した本文をその場の画面で読める（オフラインでも読める）。プライバシーの説明とお知らせはブラウザで開く。開けるのはこの 2 つのページだけで、画面が任意のアドレスを開かせることはできない | `docs-spec/requirements.md` | `src-tauri/src/terms.rs`::when_a_page_is_named_it_is_one_of_the_two_pages_the_app_opens<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.legal.test.tsx`::the general tab is shown, rows for the terms, the license, the privacy page and the announcements are there<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.legal.test.tsx`::the license row is pressed, the license is shown as it is written<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.legal.test.tsx`::the privacy and announcements rows are pressed, the app is asked to open each named page and nothing else<br/>`ui/src/components/SettingsPanel/SettingsPanelAdapter.legal.test.tsx`::the terms row is pressed, the bundled text is read from the app and shown in a dialog that closes |
 | REQ-TRM-005 | must | 同梱の規約の本文は `docs/terms.md` と同じで、末尾の「版」がアプリの期待する版（`TERMS_VERSION`）と一致する。差し替え前の語（`{{…}}`）や運営側のメモが残っていない。リンクは本文の語だけを見せ、アプリの窓を別のページへ移さない | `docs-spec/requirements.md` | `src-tauri/src/terms.rs`::when_the_terms_are_bundled_no_placeholder_is_left_in_the_text<br/>`src-tauri/src/terms.rs`::when_the_terms_are_bundled_the_version_they_state_is_the_one_the_app_asks_for<br/>`ui/src/components/Terms/TermsText.test.tsx`::the published terms are drawn, all 15 articles are there and no link can be followed |
+| REQ-TRM-006 | must | 画面の言語が日本語でないとき、同意画面に「規約は日本語のみで、本サービスは日本国内の利用者を対象にしている」という 1 行を、利用者の言語で規約の本文の上に出す。規約の英語版は用意しない（海外に広げるときに決め直す）。画面の言語が日本語のときは出さない | `docs-spec/requirements.md` | `ui/src/components/Terms/ConsentScreen.test.tsx`::the screen is shown in English, a line says the terms are in Japanese only and for users in Japan<br/>`ui/src/components/Terms/ConsentScreen.test.tsx`::the screen is shown in Japanese, the line about Japanese-only terms is not shown |
 | REQ-UPD-001 | must | 設定 `auto_update` の既定はオンである。リリースのビルドは、起動の 20 秒後と、その後 6 時間おきに新しい版を確かめ、あれば利用者の操作なしに入れて再起動する | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_setting_is_on_in_a_release_build_the_app_updates_itself<br/>`src/config.rs`::when_the_setting_is_absent_the_app_updates_itself |
 | REQ-UPD-002 | must | `auto_update` をオフにすると、確認も適用もしない。設定は確認のたびに読み直すので、再起動は要らない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_the_setting_is_off_the_app_does_not_update_itself<br/>`src/config.rs`::when_the_setting_is_off_in_the_file_the_app_does_not_update_itself |
 | REQ-UPD-003 | must | 開発ビルドと E2E 用のビルドは自分を更新しない。更新の設定（公開鍵・取得先）は `tauri.conf.json` に無く、リリースのビルドにだけ渡す。設定が無いビルド（自前のビルド）は更新の部品も登録しない | `docs-spec/requirements.md` | `src-tauri/src/updater.rs`::when_it_is_a_development_build_the_app_does_not_update_itself<br/>`tests/distribution_config_test.rs`::a_build_from_source_is_given_no_updater |

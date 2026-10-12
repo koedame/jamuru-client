@@ -781,6 +781,7 @@
     "consent": {
       "title": "Before you start",
       "ipNotice": "When you join a room, the other people in the room can see your IP address.",
+      "japaneseOnlyNotice": "The Terms of Use are available in Japanese only. This service is intended for users in Japan.",
       "textLabel": "Terms of Use",
       "agree": "I have read the Terms of Use and agree to them.",
       "adult": "I am 18 or older. If I am under 18, I have my parent or guardian’s consent.",
