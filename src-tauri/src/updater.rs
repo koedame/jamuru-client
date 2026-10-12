@@ -5,7 +5,7 @@
 //! installed without the user doing anything. Nothing here can install or
 //! change anything from the webview: no command, no event, no permission for
 //! that. The one thing that reaches it is a version number, for a package that
-//! cannot replace itself (ADR-075): the screen is told that a newer release
+//! cannot replace itself (ADR-076): the screen is told that a newer release
 //! exists, and the user installs it by hand.
 //!
 //! Two rules keep it out of the way of the app's purpose. It never installs

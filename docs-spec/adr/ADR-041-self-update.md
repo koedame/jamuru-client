@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted。4 節の「配るのは正式版だけ」は [ADR-045](./ADR-045-beta-self-update.md) が置き換えた（ベータ版も自動更新する）。7 節の「deb と MSI は更新を試みない」は、新しい版の知らせだけ [ADR-075](./ADR-075-notify-newer-release-to-packages-that-cannot-self-update.md) が足した（入れ替えはしない決めは有効）。ほかは有効。
+Accepted。4 節の「配るのは正式版だけ」は [ADR-045](./ADR-045-beta-self-update.md) が置き換えた（ベータ版も自動更新する）。7 節の「deb と MSI は更新を試みない」は、新しい版の知らせだけ [ADR-076](./ADR-076-notify-newer-release-to-packages-that-cannot-self-update.md) が足した（入れ替えはしない決めは有効）。ほかは有効。
 
 ## Context
 
