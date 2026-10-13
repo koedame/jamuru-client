@@ -1028,6 +1028,7 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
             Audio::Stop => stop_audio(app).await,
             Audio::Advertise => advertise(app, conn).await,
             Audio::KeepAddress => keep_address(app, conn).await,
+            Audio::Rejoin => get_connection_back(app, conn),
             Audio::Start {
                 peer,
                 candidates,
