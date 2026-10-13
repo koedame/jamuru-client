@@ -260,35 +260,60 @@ impl<'a> SessionScreen<'a> {
 
     // --- helping with settings (ADR-044 §5) ---
 
-    /// The button that offers the other participant help with their audio
-    /// settings. Shown only for a participant whose app can take part.
-    pub fn settings_help_offer_button(&self) -> Element<'a> {
-        self.element("[data-testid='settings-help-offer']", "offer help button")
+    /// The button, in the room's sidebar, that starts asking for help with
+    /// one's own audio settings.
+    pub fn settings_help_ask_open_button(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-ask-open']",
+            "ask for help button",
+        )
     }
 
-    /// The question the helped side answers: whether to allow an offer of help.
+    /// The first step of the ask: what it means, with the button to go on.
+    pub fn settings_help_ask_next_button(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-ask-next']",
+            "choose who button",
+        )
+    }
+
+    /// The first participant among those who can be asked (the only one, with
+    /// two apps in the room, who is already chosen).
+    pub fn settings_help_ask_first_choice(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-ask-choice']", "who to ask")
+    }
+
+    /// Sends the ask to the chosen participant.
+    pub fn settings_help_ask_send_button(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-ask-send']",
+            "send the ask button",
+        )
+    }
+
+    /// The question the helper answers: whether to help the one who asked.
     pub fn settings_help_question(&self) -> Element<'a> {
         self.element("[data-testid='settings-help-question']", "help question")
     }
 
     pub fn settings_help_allow_button(&self) -> Element<'a> {
-        self.element("[data-testid='settings-help-allow']", "allow button")
+        self.element("[data-testid='settings-help-allow']", "help button")
     }
 
-    /// Allows the offer the question asks about. A question that has just appeared
-    /// holds Allow back for a moment (a click then does nothing), so this
-    /// waits until it takes clicks.
+    /// Says yes to the ask the question shows. A question that has just
+    /// appeared holds the button back for a moment (a click then does
+    /// nothing), so this waits until it takes clicks.
     pub fn settings_help_allow(&self, timeout: std::time::Duration) -> DriverResult<()> {
         let allow = self.settings_help_allow_button();
         crate::pom::wait_until(timeout, || {
             allow.attribute("aria-disabled").ok().flatten().as_deref() == Some("false")
         })
-        .map_err(|_| format!("Allow was still held back after {:?}", timeout))?;
+        .map_err(|_| format!("The help button was still held back after {:?}", timeout))?;
         allow.click()
     }
 
     pub fn settings_help_decline_button(&self) -> Element<'a> {
-        self.element("[data-testid='settings-help-decline']", "decline button")
+        self.element("[data-testid='settings-help-decline']", "not now button")
     }
 
     /// The bar that shows help is going on (either side).

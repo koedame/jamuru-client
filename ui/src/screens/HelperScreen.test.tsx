@@ -129,7 +129,7 @@ describe('HelperScreen', () => {
     render(<HelperScreen />);
 
     expect(await screen.findByTestId('settings-help-window-banner')).toHaveTextContent(
-      "You are working in Bo's app."
+      "You are looking at Bo's jamuru settings together."
     );
     expect(await screen.findByTestId('room-code')).toHaveTextContent('ABC234XYZ');
     expect(await screen.findByTestId('participant-list')).toHaveTextContent('Aki');
@@ -152,7 +152,7 @@ describe('HelperScreen', () => {
     await screen.findByTestId('room-code');
 
     expect(screen.queryByTestId('leave-room')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('settings-help-offer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('settings-help-ask-open')).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: /message/i })).not.toBeInTheDocument();
     const methods = asked.map((c) => c.method);
     for (const forbidden of [

@@ -747,25 +747,39 @@
     "bytesReceived": "Bytes received"
   },
   "settingsHelp": {
-    "offer": "Help with settings",
-    "offerLabel": "Help {{name}} with audio settings",
+    "ask": {
+      "button": "Ask for settings help",
+      "title": "Ask for help with settings?",
+      "what": "Someone you choose will look at jamuru's settings with you and can change them.",
+      "limits": "They can't see the rest of your computer.",
+      "control": "You can stop it at any time.",
+      "choose": "Choose who",
+      "never": "Never mind",
+      "chooseTitle": "Who do you want to ask?",
+      "none": "No one in this room can help with settings right now.",
+      "send": "Ask",
+      "waiting": "Waiting for {{name}} to answer",
+      "cancel": "Cancel",
+      "declined": "{{name}} can't help right now",
+      "busy": "{{name}} is helping someone else right now",
+      "noAnswer": "No answer from {{name}}. You can ask someone else.",
+      "withdrawn": "{{name}} cancelled the request",
+      "couldNotStart": "The help with {{name}} couldn't start"
+    },
     "request": {
-      "message": "{{name}} wants to help with your audio settings",
-      "allow": "Allow",
-      "decline": "Decline"
+      "message": "{{name}} has asked for help with settings",
+      "detail": "You'll look at {{name}}'s jamuru settings together.",
+      "allow": "Help",
+      "decline": "Not now"
     },
     "helped": {
       "bar": "{{name}} is helping with your audio settings",
       "stop": "Stop"
     },
     "helper": {
-      "asking": "Waiting for {{name}} to answer",
-      "cancel": "Cancel",
       "title": "{{name}}'s audio settings",
       "bar": "Helping {{name}} with audio settings",
       "stop": "Stop helping",
-      "declined": "{{name}} declined",
-      "busy": "{{name}} is already getting help from someone else",
       "refused": {
         "device_gone": "{{name}}'s app could not switch: that device is no longer connected",
         "invalid_value": "{{name}}'s app could not use that value",
@@ -781,7 +795,7 @@
       "unknown": "audio"
     },
     "window": {
-      "banner": "You are working in {{name}}'s app. What you change here changes theirs.",
+      "banner": "You are looking at {{name}}'s jamuru settings together. What you change here changes theirs.",
       "waiting": "Waiting for {{name}}'s app to be in the room"
     }
   },
