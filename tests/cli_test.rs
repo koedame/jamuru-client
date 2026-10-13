@@ -17,6 +17,16 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
+/// Held by a test while its CLIs run audio against the clock. Their stand-ins for the sound
+/// card play and send at the pace of the frame, so a test that shares the machine with the
+/// others' CLIs - three in a room, six at once - sees frames late and lost for no fault of
+/// the CLI.
+static AUDIO_SESSIONS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn one_audio_session_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    AUDIO_SESSIONS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// The binary cargo just built for this test.
 const JAMURU: &str = env!("CARGO_BIN_EXE_jamuru");
 
@@ -90,6 +100,17 @@ impl Running {
             }
         }
         None
+    }
+}
+
+impl Running {
+    /// Waits until `count` lines containing `needle` have come, the last of which is returned.
+    fn wait_for_count(&self, needle: &str, count: usize) -> Option<String> {
+        let mut last = None;
+        for _ in 0..count {
+            last = Some(self.wait_for(needle)?);
+        }
+        last
     }
 }
 
@@ -239,6 +260,7 @@ fn tone_frequency(samples: &[f32], sample_rate: u32) -> f32 {
 /// Verifies: REQ-CLI-005
 #[test]
 fn two_clis_in_a_room_hear_each_other() {
+    let _alone = one_audio_session_at_a_time();
     const SAMPLE_RATE: u32 = 48000;
     let server = FakeSignaling::start();
     let creator_home = tempfile::tempdir().expect("temp HOME");
@@ -351,12 +373,231 @@ fn two_clis_in_a_room_hear_each_other() {
     }
 }
 
+/// Size of the component of `samples` at `hz`, as the amplitude of a sine that has it.
+fn tone_amplitude(samples: &[f32], hz: f64, sample_rate: u32) -> f32 {
+    let step = std::f64::consts::TAU * hz / f64::from(sample_rate);
+    let (mut re, mut im) = (0.0f64, 0.0f64);
+    for (i, sample) in samples.iter().enumerate() {
+        let angle = step * i as f64;
+        re += f64::from(*sample) * angle.cos();
+        im -= f64::from(*sample) * angle.sin();
+    }
+    (2.0 * (re * re + im * im).sqrt() / samples.len() as f64) as f32
+}
+
+/// The preset the CLIs of a room run
+const ROOM_PRESET: &str = "balanced";
+
+/// The play-out frame of [`ROOM_PRESET`], in samples per channel. What a CLI plays is written
+/// to its file a frame at a time, so a frame of one frame is what was played in one beat.
+fn frame_samples() -> usize {
+    jamjam::AudioPreset::from_name(ROOM_PRESET)
+        .expect("a preset")
+        .frame_size() as usize
+}
+
+/// The tones the CLIs of a room send: 2, 4 and 8 whole cycles to a frame, so that each is
+/// measured in one frame without leaking into the others
+fn tones() -> [u32; 3] {
+    [2, 4, 8].map(|cycles| cycles * 48_000 / frame_samples() as u32)
+}
+
+/// What a CLI of a room played, a frame at a time: how loud each of [`tones`] was in each. A
+/// frame the machine was too busy to play is silent in every tone, and a frame of one of the
+/// others may be missing while another's is there, so what is asked of the frames is
+/// "somewhere" and "nowhere", not "throughout".
+struct Heard(Vec<[f32; 3]>);
+
+impl Heard {
+    /// The frames after the first `count`
+    fn after(&self, count: usize) -> &[[f32; 3]] {
+        &self.0[count.min(self.0.len())..]
+    }
+}
+
+/// The loudest `tone` is in any of `frames`
+fn loudest(frames: &[[f32; 3]], tone: usize) -> f32 {
+    frames.iter().fold(0.0f32, |top, f| top.max(f[tone]))
+}
+
+/// The loudest the quieter of two tones is in one frame: the most that both were played at the
+/// same time
+fn loudest_together(frames: &[[f32; 3]], a: usize, b: usize) -> f32 {
+    frames.iter().fold(0.0f32, |top, f| top.max(f[a].min(f[b])))
+}
+
+/// One CLI of a room of several, with the file its played audio goes to
+struct Member {
+    _home: tempfile::TempDir,
+    played: PathBuf,
+    cli: Running,
+}
+
+impl Member {
+    /// Creates a room, or joins `invite_code`, sending the tone of number `who` of [`tones`]
+    fn enter(server: &FakeSignaling, who: usize, invite_code: Option<&str>) -> Self {
+        let home = tempfile::tempdir().expect("temp HOME");
+        let played = home.path().join("played.f32");
+        let mut args: Vec<String> = match invite_code {
+            None => vec!["create-room".to_string()],
+            Some(code) => vec![
+                "join-room".to_string(),
+                "--room".to_string(),
+                code.to_string(),
+            ],
+        };
+        args.extend(
+            [
+                "--server",
+                server.url(),
+                "--name",
+                &format!("cli-{who}"),
+                "--preset",
+                ROOM_PRESET,
+                "--sample-rate",
+                "48000",
+                "--input-tone",
+                &tones()[who].to_string(),
+                "--output-file",
+                played.to_str().expect("utf-8 path"),
+            ]
+            .map(String::from),
+        );
+        let cli = Running::start(
+            home.path(),
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        Self {
+            _home: home,
+            played,
+            cli,
+        }
+    }
+
+    /// The invite code a CLI that created a room printed
+    fn invite_code(&self) -> String {
+        self.cli
+            .wait_for("Invite code:")
+            .expect("the room should be created")
+            .split_whitespace()
+            .last()
+            .expect("the invite code follows its label")
+            .to_string()
+    }
+
+    /// What it has played so far
+    fn heard(&self) -> Heard {
+        let (left, _) = read_played(&self.played);
+        Heard(
+            left.chunks_exact(frame_samples())
+                .map(|frame| tones().map(|tone| tone_amplitude(frame, f64::from(tone), 48_000)))
+                .collect(),
+        )
+    }
+}
+
+/// Three CLIs enter a room one after the other; each is linked to both of the others when
+/// "Audio is flowing" has been printed twice.
+fn room_of_three(server: &FakeSignaling) -> [Member; 3] {
+    let first = Member::enter(server, 0, None);
+    let code = first.invite_code();
+    let second = Member::enter(server, 1, Some(&code));
+    let third = Member::enter(server, 2, Some(&code));
+    for member in [&first, &second, &third] {
+        member
+            .cli
+            .wait_for_count("Audio is flowing", 2)
+            .expect("each CLI should be linked to both of the others");
+    }
+    [first, second, third]
+}
+
+/// Sent centred at half scale, a tone is 0.5 * cos(pi/4) in each channel
+const HEARD_AT: std::ops::RangeInclusive<f32> = 0.28..=0.42;
+
+/// What a tone that is not played still measures. A tone that is played is above [`HEARD_AT`]'s start.
+const NOT_HEARD: f32 = 0.1;
+
+/// Three CLIs in a room each hear both of the others, at the same time, and not themselves:
+/// the third to enter a room was linked to one of the others only, who was linked to the other,
+/// so the third heard nobody and nobody heard the third.
+///
+/// Verifies: REQ-CLI-011
+#[test]
+fn three_clis_in_a_room_each_hear_both_of_the_others() {
+    let _alone = one_audio_session_at_a_time();
+    let server = FakeSignaling::start();
+    let room = room_of_three(&server);
+    std::thread::sleep(Duration::from_millis(4000));
+    let heard: Vec<Heard> = room.iter().map(Member::heard).collect();
+    drop(room);
+
+    for (me, heard) in heard.iter().enumerate() {
+        let (a, b) = match me {
+            0 => (1, 2),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        let together = loudest_together(&heard.0, a, b);
+        assert!(
+            HEARD_AT.contains(&together),
+            "CLI {me} should hear the tones of CLI {a} and CLI {b} at once at about 0.35 each, \
+             the quieter was {together} at best"
+        );
+        let itself = loudest(&heard.0, me);
+        assert!(
+            itself < NOT_HEARD,
+            "CLI {me} should not hear its own tone, it was {itself} at most"
+        );
+    }
+}
+
+/// When one of three leaves, the two who stay go on hearing each other and stop hearing the one
+/// who left.
+///
+/// Verifies: REQ-CLI-011
+#[test]
+fn a_cli_leaves_a_room_of_three_the_other_two_go_on_hearing_each_other() {
+    let _alone = one_audio_session_at_a_time();
+    let server = FakeSignaling::start();
+    let [first, second, third] = room_of_three(&server);
+    std::thread::sleep(Duration::from_millis(1500));
+
+    drop(third);
+    first
+        .cli
+        .wait_for("left the room")
+        .expect("the room should tell that the third left");
+    // What the third sent is still in the play-out buffers for a moment
+    std::thread::sleep(Duration::from_millis(2500));
+    let after_leaving = first.heard().0.len();
+    std::thread::sleep(Duration::from_millis(3000));
+    let (heard_by_first, heard_by_second) = (first.heard(), second.heard());
+    drop((first, second));
+
+    for (me, heard) in [(0, &heard_by_first), (1, &heard_by_second)] {
+        let later = heard.after(after_leaving);
+        let stays = 1 - me;
+        let still = loudest(later, stays);
+        assert!(
+            HEARD_AT.contains(&still),
+            "CLI {me} should still hear the tone of CLI {stays} at about 0.35, it was {still} at best"
+        );
+        let gone = loudest(later, 2);
+        assert!(
+            gone < NOT_HEARD,
+            "CLI {me} should no longer hear the tone of the one who left, it was {gone} at most"
+        );
+    }
+}
+
 /// Runs a CLI alone in a room, capturing a 440 Hz tone and writing what it
 /// plays to a file, and returns the left channel.
 ///
 /// With no peer the only thing the output can carry is the monitored input, so
 /// what comes out is what monitoring does.
 fn cli_alone_playing(extra_args: &[&str]) -> Vec<f32> {
+    let _alone = one_audio_session_at_a_time();
     let server = FakeSignaling::start();
     let home = tempfile::tempdir().expect("temp HOME");
     let out = home.path().join("played.f32");
@@ -501,6 +742,7 @@ impl Drop for EchoPeer {
 /// Verifies: REQ-CLI-007
 #[test]
 fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
+    let _alone = one_audio_session_at_a_time();
     const HOLD_MS: u64 = 200;
     let echo_peer = common::Peer::bind();
     let address = echo_peer.local_addr().to_string();

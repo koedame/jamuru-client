@@ -27,6 +27,7 @@ network/
 ├── encryption.rs       # 暗号化レイヤー（SecureLink: X25519, AES-256-GCM。ADR-064）
 ├── transport.rs        # UDPトランスポート
 ├── udp_mux.rs          # 1 つの音声ソケットを相手ごとの接続で共有する（ADR-077）
+├── roster.rs           # 誰と音声を繋ぐかの判断（入出力なし。アプリと CLI で共有。ADR-077 §9）
 ├── session.rs          # セッション管理
 ├── signaling.rs        # シグナリング
 ├── stun.rs             # STUNクライアント

@@ -69,6 +69,7 @@ src/
 │   ├── device.rs       # デバイス列挙
 │   ├── engine.rs       # オーディオエンジン
 │   ├── error.rs        # エラー型
+│   ├── peer_mix.rs     # ほかの参加者全員の音を、出力コールバックで足し合わせる（参加者ごとの音量・パン・メーター。CLI と GUI で共有。ADR-077）
 │   ├── playout.rs      # 受信音声の再生バッファ（ジッタバッファ兼用、ADR-028）
 │   ├── plc.rs          # Packet Loss Concealment
 │   ├── preset.rs       # プリセット定義と遅延バジェット（ADR-019の正）
@@ -80,6 +81,7 @@ src/
 │   ├── encryption.rs   # 暗号化レイヤー（AES-GCM, X25519）
 │   ├── error.rs        # ネットワークエラー
 │   ├── fec.rs          # 前方誤り訂正
+│   ├── roster.rs       # 参加者のうち誰と音声を繋ぐか・相手が抜けたり途切れたりしたときの判断（入出力なし。CLI と GUI で共有。ADR-077）
 │   ├── sequence_tracker.rs # シーケンス追跡
 │   ├── session.rs      # セッション管理
 │   ├── signaling.rs    # シグナリング
@@ -106,8 +108,7 @@ src/
 src-tauri/              # Tauri デスクトップアプリ
   src/e2e_control.rs    # GUI E2E 制御チャネル（feature = "e2e-control"、既定で無効。ADR-025）
   src/rpc/              # 口ごとの許可の表（spec.rs）と、口から呼ぶ層（ADR-044）。E2E の制御チャネルはこの層の口の 1 つ。help.rs は手伝いの口で手伝う人に渡さないもの（デバイス ID・エラーの文面）を守る
-  src/session/          # 接続・入室の状態機械（接続の段階・ルーム・参加者・音声を繋いでいる参加者・繋ぎ直し）。画面は `session_get` と `session:changed` で描く。参加者と音声の判断は入出力の無い roster.rs（ADR-044 §6）
-  src/peer_mix.rs       # ほかの参加者全員の音を、出力コールバックで足し合わせる（参加者ごとの音量・パン・メーター。ADR-077）
+  src/session/          # 接続・入室の状態機械（接続の段階・ルーム・参加者・音声を繋いでいる参加者・繋ぎ直し）。画面は `session_get` と `session:changed` で描く。参加者と音声の判断は、入出力の無いコアの `network/roster.rs`（ADR-044 §6・ADR-077 §9）
   src/settings.rs       # 音声の設定の変更を 1 か所で適用する（設定ウィンドウ・E2E・遠隔設定が共有。ADR-043）
   src/settings_help.rs  # 参加者の設定の手伝い: 依頼・答え・終わりの状態遷移（通信なし。signaling.rs が送る。ADR-044 §5）
   src/help_link.rs      # 手伝いの中継の両端: 手伝われる側は手伝いの口として受ける、手伝う側は窓を開いて相手のアプリの呼びを運ぶ（ADR-044 §5）
@@ -431,7 +432,7 @@ P2P接続確立のためのシグナリングサーバーを提供する。
 
 10人のフルメッシュでは各クライアントが9本の接続を維持する。音声アドレス（ソケット）は参加者ごとに 1 つで、9 本の接続がそれを共有する。
 送受信の帯域は相手の数に比例する（48 kHz のとき 1 本あたり 3.5〜4.1 Mbps、10 人で 1 人あたり上り・下りとも 31〜37 Mbps）。
-判断は [ADR-077](./adr/ADR-077-every-participant-is-linked.md)。CLI（`jamuru`）は 1 対 1 のまま。
+判断は [ADR-077](./adr/ADR-077-every-participant-is-linked.md)。アプリも CLI（`jamuru`）も同じ形で全員と繋ぐ。
 
 ---
 
@@ -544,7 +545,9 @@ jamuru join-room --server <URL> --room <CODE>       # ルーム参加
 
 **受信経路は GUI と同じ**: 受信した音声はコアライブラリの `ReceivePath`（`audio/stream.rs`）を通る。デコード・サンプルレート変換・プレイアウトバッファ・PLC・FEC は GUI と同一のコードであり、ジッタや損失に関わる問題は CLI でも GUI と同じ音で再現する。送信も GUI と同じくステレオ（センター）・プリセットのコーデックと FEC で行い、プレイアウト遅延の自動調整も GUI と同じ周期で行う（[ADR-031](./adr/ADR-031-live-playout-delay.md)）。`/stats` と終了時の統計には、プレイアウトバッファで再生・補間・破棄されたフレーム数が出る。
 
-**GUI と異なる点**（[ADR-027](./adr/ADR-027-cli-scope.md) に記録）: 音量・パン・診断・リアクションは CLI に無い。
+**全員と繋ぐ点も GUI と同じ**: ルームで音声アドレスを公開した参加者の全員に、音声を 1 本ずつ繋ぐ。誰と繋ぐか・相手が抜けたとき・途切れたときの判断は GUI と同じコアの `Roster`（`network/roster.rs`）、全員の音を足し合わせる再生は同じ `PeerMix`（`audio/peer_mix.rs`）、音声ソケットを相手ごとの接続で共有する `UdpMux` も同じで、CLI は判断の結果を実行するだけである（[ADR-077](./adr/ADR-077-every-participant-is-linked.md) §9）。`/stats` と終了時の統計は相手ごとに出し、`--report-json` の `peer`・`network`・`playout` は最初に繋いだ相手のもの、`peers` は全員のものである。
+
+**GUI と異なる点**（[ADR-027](./adr/ADR-027-cli-scope.md) に記録）: 音量・パン・診断・リアクションは CLI に無い（参加者ごとの音量・パンを持つ `PeerMix` は共通なので、足すのはコマンドだけで済む）。全員の音声が途切れて入り直す判断（`Audio::Rejoin`）は、CLI は入り直さず警告を出す。
 
 ### 8.3 プリセット
 
