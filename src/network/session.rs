@@ -231,6 +231,10 @@ impl Session {
     }
 
     /// Send audio to all peers
+    ///
+    /// One frame goes as one packet, so `data` must fit one. The app does not
+    /// use `Session`; it sends through `Connection::send_audio`, which splits
+    /// a larger frame.
     pub async fn broadcast_audio(&self, data: &[f32], timestamp: u32) -> Result<(), NetworkError> {
         if !self.running.load(Ordering::SeqCst) {
             return Err(NetworkError::NotConnected);
