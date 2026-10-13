@@ -59,7 +59,11 @@ impl Lane {
     }
 
     /// The next datagram for this lane, or `None` once the lane takes nothing
+    ///
+    /// Counts against the budget of the task as a read of a socket does, so that a link
+    /// with a backlog does not keep the other links on its thread from theirs.
     pub(super) async fn recv(&self) -> Option<Datagram> {
+        tokio::task::coop::consume_budget().await;
         loop {
             {
                 let mut state = self.shared.state.lock();
@@ -317,6 +321,36 @@ mod tests {
         let held = waiting(&lanes[0]);
         assert_eq!(held.len(), LANE_CAPACITY);
         assert_eq!(held[0], vec![0]);
+    }
+
+    /// Verifies: REQ-CON-033
+    #[tokio::test]
+    async fn a_lane_with_a_backlog_lets_the_other_links_on_its_thread_run() {
+        let backlog = 1000;
+        let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
+        let transport = mux.transport();
+        transport.expect_peer_at(&[addr("192.0.2.2:5000")]);
+        for _ in 0..backlog {
+            deliver(&mux.lanes.lock(), vec![7], addr("192.0.2.2:5000"));
+        }
+
+        let taken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counting = taken.clone();
+        let reading = tokio::spawn(async move {
+            for _ in 0..backlog {
+                transport.recv_raw().await.unwrap();
+                counting.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        let seeing = taken.clone();
+        let other = tokio::spawn(async move { seeing.load(std::sync::atomic::Ordering::SeqCst) });
+
+        let taken_when_the_other_ran = other.await.unwrap();
+        reading.await.unwrap();
+        assert!(
+            taken_when_the_other_ran < backlog,
+            "the whole backlog was read before any other task ran"
+        );
     }
 
     #[tokio::test]
