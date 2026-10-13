@@ -2,9 +2,9 @@
 //! the room and the audio (ADR-044 §6).
 //!
 //! The backend owns this, not the screen. It connects to the signaling server,
-//! lists the rooms, creates, joins and leaves them, starts the audio with
-//! whoever publishes an address, and connects again when the connection is
-//! lost. The screen reads [`Snapshot`] with `session_get`, hears `session:changed`
+//! lists the rooms, creates, joins and leaves them, opens an audio link to
+//! everyone who publishes an address, and connects again when the connection
+//! is lost. The screen reads [`Snapshot`] with `session_get`, hears `session:changed`
 //! when it changes, and acts with one command per operation - so the screen,
 //! the E2E channel and the remote portals all see and drive the same state.
 //!
@@ -142,7 +142,12 @@ pub struct Snapshot {
     pub room: Option<RoomView>,
     pub signaling_reconnect: Reconnect,
     pub signaling_reconnect_error: Option<String>,
-    /// The participant the audio goes to, if it does.
+    /// The participants there is an audio link to, in the order the links
+    /// were opened.
+    pub streaming_peer_ids: Vec<String>,
+    /// The first of `streaming_peer_ids`: in a room of two, the participant
+    /// the audio goes to, which is what a reader written for such a room
+    /// expects.
     pub streaming_peer_id: Option<String>,
 }
 
@@ -176,6 +181,7 @@ struct Inner {
 
 impl Inner {
     fn view(&self) -> Snapshot {
+        let linked = self.roster.linked();
         Snapshot {
             revision: self.revision,
             phase: self.phase,
@@ -201,7 +207,8 @@ impl Inner {
             }),
             signaling_reconnect: self.reconnect,
             signaling_reconnect_error: self.reconnect_error.clone(),
-            streaming_peer_id: self.roster.streaming_with().map(|id| id.to_string()),
+            streaming_peer_ids: linked.iter().map(ToString::to_string).collect(),
+            streaming_peer_id: linked.first().map(ToString::to_string),
         }
     }
 }
@@ -902,38 +909,37 @@ fn spawn_pump<R: Runtime>(app: AppHandle<R>, conn: u32) {
             if !events.is_empty() && !handle_events(&app, conn, events).await {
                 return;
             }
-            follow_the_audio_link(&app, conn).await;
+            follow_the_audio_links(&app, conn).await;
         }
     });
 }
 
-/// Tells the roster how the audio link is doing, and carries out where it
-/// then sends the audio. The server tells of a peer that left, not of one whose
-/// connection it has not yet found dead, so a link gone silent is the only
-/// sign that the peer the audio is with is no longer there to hear it.
-async fn follow_the_audio_link<R: Runtime>(app: &AppHandle<R>, conn: u32) {
+/// Tells the roster how each audio link is doing, and carries out what it
+/// then does about the audio. The server tells of a peer that left, not of one
+/// whose connection it has not yet found dead, so a link gone silent is the
+/// only sign that its peer is no longer there to hear it.
+async fn follow_the_audio_links<R: Runtime>(app: &AppHandle<R>, conn: u32) {
     let state = app.state::<SessionState>();
-    let link = app.state::<streaming::StreamingState>().link_state();
-    if !matches!(
-        link.as_deref(),
-        Some("reconnecting" | "failed" | "connected")
-    ) {
-        return;
-    }
     let _flow = state.flow.lock().await;
+    // Read once it is this step's turn: a step that was opening links while
+    // this one waited has opened them by now.
+    let audio = app.state::<streaming::StreamingState>();
+    let (running, healths) = (audio.is_active(), audio.link_healths());
     let audio = state.change(app, |session| {
         if session.connection_id != Some(conn) || session.room.is_none() {
             return Vec::new();
         }
-        match link.as_deref() {
-            Some("reconnecting") => session.roster.audio_silent(),
-            Some("failed") => session.roster.audio_failed(),
-            Some("connected") => {
-                session.roster.audio_recovered();
-                Vec::new()
-            }
-            _ => Vec::new(),
+        if !running {
+            // The session ended on its own (a device that would not open):
+            // there are no links to follow, and the next thing that happens
+            // in the room opens them again.
+            session.roster.audio_ended();
+            return Vec::new();
         }
+        healths
+            .into_iter()
+            .flat_map(|(peer, health)| session.roster.link_is(peer, health))
+            .collect()
     });
     run_audio(app, conn, audio).await;
 }
@@ -1027,16 +1033,32 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
         match step {
             Audio::Stop => stop_audio(app).await,
             Audio::Advertise => advertise(app, conn).await,
-            Audio::KeepAddress => keep_address(app, conn).await,
+            Audio::Rejoin => {
+                tracing::warn!(
+                    "An audio link gave up and nobody is heard: entering the room again"
+                );
+                get_connection_back(app, conn);
+                // The rest is for a room this app is on its way out of
+                return;
+            }
+            Audio::End { peer } => {
+                if let Err(e) = streaming::streaming_unlink(peer, app.state()).await {
+                    tracing::error!("Failed to close an audio link: {}", e);
+                }
+            }
             Audio::Start {
                 peer,
                 candidates,
                 link_key,
             } => {
-                let candidates: Vec<String> = candidates.iter().map(ToString::to_string).collect();
-                let Some(addr) = candidates.first().cloned() else {
-                    continue;
-                };
+                // A session that starts takes the socket the room was told the
+                // address of. One that ended on its own took it with it, so
+                // the next has to tell the room a new one first: nobody could
+                // send to a socket bound without telling.
+                let audio = app.state::<streaming::StreamingState>();
+                if !audio.is_active() && !audio.has_prepared_socket().await {
+                    advertise(app, conn).await;
+                }
                 mixer::set_on_audio(app, &peer.to_string()).await;
                 // The devices, buffer size and sample rate are the saved
                 // settings.
@@ -1044,10 +1066,13 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
                     .state::<SignalingState>()
                     .link_identity()
                     .map(|ours| (ours, link_key));
-                let started = streaming::streaming_start(
-                    addr,
-                    Some(candidates.clone()),
-                    link,
+                let candidate_count = candidates.len();
+                let started = streaming::streaming_link(
+                    streaming::LinkTarget {
+                        peer,
+                        candidates,
+                        link,
+                    },
                     app.state(),
                     app.state(),
                     app.state(),
@@ -1056,30 +1081,19 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
                 .await;
                 match started {
                     Ok(()) => tracing::info!(
-                        "Streaming started ({} address candidate(s))",
-                        candidates.len()
+                        "Audio link started ({} address candidate(s))",
+                        candidate_count
                     ),
                     Err(e) => {
                         // Allow a later update to retry rather than leaving
-                        // the session permanently silent.
+                        // the participant permanently unheard.
                         app.state::<SessionState>()
                             .change(app, |session| session.roster.start_failed(peer));
-                        tracing::error!("Failed to start streaming: {}", e);
+                        tracing::error!("Failed to start an audio link: {}", e);
                     }
                 }
             }
         }
-    }
-}
-
-/// Binds the audio socket on the port the last audio session used, so the
-/// address the room already has stays good. Advertises a new one only when
-/// that port could not be had again.
-async fn keep_address<R: Runtime>(app: &AppHandle<R>, conn: u32) {
-    match streaming::streaming_prepare_again(app.state()).await {
-        Ok(true) => {}
-        Ok(false) => advertise(app, conn).await,
-        Err(e) => tracing::error!("Failed to bind the audio socket again: {}", e),
     }
 }
 
@@ -1396,6 +1410,7 @@ mod tests {
             ),
         ));
         app.manage(SessionState::new());
+        app.manage(MixerState::new());
         app.manage(crate::terms::TermsState::new(terms_accepted));
         app
     }
@@ -1742,6 +1757,190 @@ mod tests {
 
         assert_eq!(joined.room.unwrap().participants[1].name, "Bo");
         assert_eq!(left.room.unwrap().participants[0].name, "Bo");
+    }
+
+    /// `PeerUpdated` for participant `id`, who now has an audio address
+    fn published(id: u128, name: &str, addr: &str) -> String {
+        let peer = jamjam::network::PeerInfo {
+            id: Uuid::from_u128(id),
+            name: name.to_string(),
+            candidates: vec![jamjam::network::AddressCandidate::host(
+                addr.parse().unwrap(),
+            )],
+            public_addr: None,
+            local_addr: None,
+            joined_at: 0,
+            features: vec![],
+            link_key: None,
+        };
+        format!(
+            r#"{{"type":"PeerUpdated","data":{{"peer":{}}}}}"#,
+            serde_json::to_string(&peer).unwrap()
+        )
+    }
+
+    /// The next thing the audio session is told to do with a link, skipping
+    /// what it is told about the faders
+    async fn next_link_command(
+        commands: &std::sync::mpsc::Receiver<crate::streaming::StreamingCommand>,
+    ) -> crate::streaming::StreamingCommand {
+        use crate::streaming::StreamingCommand;
+        for _ in 0..1200 {
+            match commands.try_recv() {
+                Ok(command @ (StreamingCommand::Link(_) | StreamingCommand::Unlink(_))) => {
+                    return command
+                }
+                Ok(_) => {}
+                Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+            }
+        }
+        panic!("the audio session was told nothing about a link");
+    }
+
+    /// A room with Aki (`OTHER`) and Bo (3) in it, both with an audio address,
+    /// and an audio session that is stood in for: what it is told arrives on
+    /// the receiver.
+    async fn in_a_room_of_three(
+        server: &FakeServer,
+        dir: &tempfile::TempDir,
+    ) -> (
+        tauri::App<MockRuntime>,
+        std::sync::mpsc::Receiver<crate::streaming::StreamingCommand>,
+    ) {
+        use crate::streaming::StreamingCommand;
+
+        let app = in_a_room(server, dir).await;
+        let commands = app
+            .state::<StreamingState>()
+            .attach_session_for_test()
+            .await;
+        server.say(
+            0,
+            format!(
+                r#"{{"type":"PeerJoined","data":{{"peer":{}}}}}"#,
+                peer_json(3, "Bo")
+            ),
+        );
+        server.say(0, published(OTHER, "Aki", "192.0.2.2:5000"));
+        server.say(0, published(3, "Bo", "192.0.2.3:6000"));
+        for expected in [OTHER, 3] {
+            match next_link_command(&commands).await {
+                StreamingCommand::Link(target) => {
+                    assert_eq!(target.peer, Uuid::from_u128(expected))
+                }
+                other => panic!("expected a link to be opened, got {other:?}"),
+            }
+        }
+        (app, commands)
+    }
+
+    /// The bug this guards: the session opened audio to the first participant
+    /// who published an address and to no one after, so the third in a room
+    /// was heard by no one.
+    ///
+    /// Verifies: REQ-CON-133
+    /// Verifies: REQ-RMT-028
+    #[tokio::test]
+    async fn two_participants_publish_an_address_opens_an_audio_link_to_each_and_says_so() {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+
+        let (app, _commands) = in_a_room_of_three(&server, &dir).await;
+
+        let snapshot = app.state::<SessionState>().snapshot();
+        assert_eq!(
+            snapshot.streaming_peer_ids,
+            vec![
+                Uuid::from_u128(OTHER).to_string(),
+                Uuid::from_u128(3).to_string()
+            ]
+        );
+        assert_eq!(
+            snapshot.streaming_peer_id,
+            Some(Uuid::from_u128(OTHER).to_string())
+        );
+    }
+
+    /// Verifies: REQ-CON-133
+    #[tokio::test]
+    async fn one_of_two_linked_participants_leaves_closes_the_link_to_them_and_keeps_the_other() {
+        use crate::streaming::StreamingCommand;
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (app, commands) = in_a_room_of_three(&server, &dir).await;
+
+        server.say(
+            0,
+            format!(
+                r#"{{"type":"PeerLeft","data":{{"peer_id":"{}"}}}}"#,
+                Uuid::from_u128(OTHER)
+            ),
+        );
+
+        assert_eq!(
+            next_link_command(&commands).await,
+            StreamingCommand::Unlink(Uuid::from_u128(OTHER))
+        );
+        let snapshot = until(&app, |s| s.streaming_peer_ids.len() == 1).await;
+        assert_eq!(
+            snapshot.streaming_peer_ids,
+            vec![Uuid::from_u128(3).to_string()]
+        );
+        assert!(
+            app.state::<StreamingState>().is_active(),
+            "the audio session goes on for the one who stayed"
+        );
+    }
+
+    /// Verifies: REQ-CON-134
+    #[tokio::test]
+    async fn a_link_gives_up_while_the_other_participant_is_heard_stays_in_the_room() {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (app, _commands) = in_a_room_of_three(&server, &dir).await;
+        let audio = app.state::<StreamingState>();
+
+        audio.set_link_for_test(Uuid::from_u128(3), "connected", Some((100, 8.0)));
+        audio.set_link_for_test(Uuid::from_u128(OTHER), "failed", Some((100, 8.0)));
+        // Several rounds of the loop that reads the links
+        tokio::time::sleep(POLL_INTERVAL * 4).await;
+
+        assert_eq!(server.count("JoinRoom"), 1);
+        assert_eq!(
+            app.state::<SessionState>()
+                .snapshot()
+                .streaming_peer_ids
+                .len(),
+            2
+        );
+    }
+
+    /// Verifies: REQ-CON-134
+    #[tokio::test]
+    async fn every_link_gives_up_and_nobody_is_heard_enters_the_room_again() {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (app, _commands) = in_a_room_of_three(&server, &dir).await;
+        let audio = app.state::<StreamingState>();
+
+        audio.set_link_for_test(Uuid::from_u128(3), "failed", Some((100, 8.0)));
+        audio.set_link_for_test(Uuid::from_u128(OTHER), "failed", Some((100, 8.0)));
+
+        for _ in 0..1200 {
+            if server.count("JoinRoom") == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(
+            server.count("JoinRoom"),
+            2,
+            "the room is entered again, once"
+        );
+        until(&app, |s| {
+            s.phase == Phase::Connected && s.signaling_reconnect == Reconnect::Idle
+        })
+        .await;
     }
 
     /// Verifies: REQ-RMT-028
