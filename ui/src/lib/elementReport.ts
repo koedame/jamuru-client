@@ -10,6 +10,7 @@
  */
 
 import { HELP_HASH } from "./helperBackend";
+import type { AppEnvironment, AudioSettings, SessionSnapshot } from "./tauri";
 
 const MAX_TEXT = 200;
 const MAX_HTML = 1500;
@@ -32,9 +33,16 @@ const STATE_ATTRIBUTES = [
   "data-state",
 ];
 
+/**
+ * What the report says besides the element. Each part is null when it could
+ * not be read (a window that cannot call that command), and the report says so.
+ */
 export interface ReportContext {
   /** The Tauri window's label, when known */
   windowLabel?: string;
+  app?: AppEnvironment | null;
+  audio?: AudioSettings | null;
+  session?: SessionSnapshot | null;
 }
 
 function squash(text: string, max: number): string {
@@ -213,6 +221,50 @@ function screenName(): string {
   return "main";
 }
 
+function deviceName(devices: AudioSettings["input_devices"], id: string | null): string {
+  if (id === null) return "system default";
+  const device = devices.find((d) => d.id === id);
+  return device ? `${device.name}${device.is_bluetooth ? " (bluetooth)" : ""}` : "not found";
+}
+
+function appLines(app: AppEnvironment | null | undefined): string[] {
+  if (!app) return ["unavailable in this window"];
+  return [
+    `app version: ${app.app_version}`,
+    `build: ${app.build}`,
+    `os: ${[app.os, app.os_version].filter(Boolean).join(" ")} (${app.arch})`,
+    ...(app.ram_gb !== null ? [`ram: ${app.ram_gb} GB`] : []),
+    `audio host: ${app.audio_host}`,
+  ];
+}
+
+function audioLines(audio: AudioSettings | null | undefined): string[] {
+  if (!audio) return ["unavailable"];
+  const pair = (p: AudioSettings["input_channels"]) =>
+    p.right === null ? `${p.left} (mono)` : `${p.left}/${p.right}`;
+  return [
+    `input device: ${deviceName(audio.input_devices, audio.input_device_id)}`,
+    `input channels: ${pair(audio.input_channels)} of ${audio.input_channel_count ?? "?"}`,
+    `output device: ${deviceName(audio.output_devices, audio.output_device_id)}`,
+    `output channels: ${pair(audio.output_channels)} of ${audio.output_channel_count ?? "?"}`,
+    `transmit channels: ${audio.transmit_channels}`,
+    `buffer size: ${audio.buffer_size} frames`,
+    `sample rate: ${audio.sample_rate} Hz`,
+  ];
+}
+
+function sessionLines(session: SessionSnapshot | null | undefined): string[] {
+  if (!session) return ["unavailable"];
+  return [
+    `phase: ${session.phase}`,
+    ...(session.error ? [`error: ${squash(session.error, MAX_TEXT)}`] : []),
+    `in a room: ${session.room !== null}`,
+    ...(session.room ? [`participants: ${session.room.participants.length}`] : []),
+    `audio links: ${session.streaming_peer_ids.length}`,
+    `signaling reconnect: ${session.signaling_reconnect}`,
+  ];
+}
+
 function list(title: string, lines: string[]): string[] {
   return lines.length ? [`${title}:`, ...lines.map((l) => `  ${l}`)] : [];
 }
@@ -244,6 +296,16 @@ export function buildElementReport(el: Element, context: ReportContext = {}): st
     `viewport: ${window.innerWidth}x${window.innerHeight}`,
     `time: ${new Date().toISOString()}`,
     ...list("inside (nearest first)", ancestorLines(el)),
+    "",
+    "## App",
+    ...appLines(context.app),
+    "",
+    // In the window that helps someone, the backend is the helped person's app.
+    `## Audio settings${window.location.hash === HELP_HASH ? " (of the helped participant's app)" : ""}`,
+    ...audioLines(context.audio),
+    "",
+    "## Session",
+    ...sessionLines(context.session),
     "",
     "## Source hints",
     ...list("react components (nearest first)", componentLines(el)),

@@ -11,6 +11,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import i18n from "../i18n";
 import { buildElementReport } from "./elementReport";
+import { appEnvironment, sessionGet, settingsGet } from "./tauri";
 
 const OVERLAY_ID = "jamuru-element-grab-overlay";
 const TOAST_ID = "jamuru-element-grab-toast";
@@ -60,6 +61,15 @@ function windowLabel(): string | undefined {
     return getCurrentWindow().label;
   } catch {
     return undefined;
+  }
+}
+
+/** The result, or null when it cannot be read: one missing part must not cost the copy. */
+async function readOrNull<T>(read: () => Promise<T>): Promise<T | null> {
+  try {
+    return await read();
+  } catch {
+    return null;
   }
 }
 
@@ -151,7 +161,12 @@ export function installElementGrab(): () => void {
     swallow(e);
     const el = hovered;
     if (!el) return;
-    const ok = await copy(buildElementReport(el, { windowLabel: windowLabel() }));
+    const [app, audio, session] = await Promise.all([
+      readOrNull(appEnvironment),
+      readOrNull(settingsGet),
+      readOrNull(sessionGet),
+    ]);
+    const ok = await copy(buildElementReport(el, { windowLabel: windowLabel(), app, audio, session }));
     showToast(i18n.t(ok ? "devtools.elementGrab.copied" : "devtools.elementGrab.failed"));
   }
 
