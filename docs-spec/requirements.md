@@ -391,6 +391,9 @@ CLI にあって GUI に無い機能（`--input-tone` などのデバイスの�
 | REQ-CLI-005 | 同じルームに入った CLI 同士（`create-room` / `join-room`）で音声が双方向に届く。受信した音声は GUI と同じ再生経路（プレイアウトバッファ・PLC・FEC、[ADR-028](./adr/ADR-028-single-stage-playout.md)）を通り、送られた音高・音量のまま再生される | must |
 | REQ-CLI-006 | ローカルモニタリングを CLI から操作できる。`--monitor` で開始時から ON、セッション中の `/monitor` `/unmonitor` で切り替わる。ミュートとは独立である（[ADR-033](./adr/ADR-033-local-monitoring.md)） | must |
 | REQ-CLI-007 | `create-room` / `join-room` は相手につながってから `--duration` の秒数で自分で終わり、`--input-bursts` で送ったバーストが再生されるまでの往復時間（相手が音を保持して返すなら `--echo-delay-ms` を引いたもの）を測り、`--report-json` で往復・ネットワーク・プレイアウトの値を JSON に書く（[ADR-039](./adr/ADR-039-cli-round-trip-measurement.md)） | must |
+| REQ-CLI-008 | `devices list` と `devices set` のデバイス一覧の取得は、ドライバが返ってこなくても時間の上限で諦め、コマンドが固まらない（REQ-AUD-123 と同じ上限） | must |
+| REQ-CLI-009 | 接続が済むまでに取り込まれた音は、接続が済んだ時点で捨てる。相手に古い音がまとまって届かない（GUI と同じ） | must |
+| REQ-CLI-010 | 相手に知らせる受信バッファの遅れは、パケット 1 つの長さで数える。1 フレームが 2 パケットに分かれる設定（256 フレーム）でも実際の遅れと一致する（GUI と同じ） | must |
 
 REQ-CLI-001 の検証はチャットのみで行う（`--chat-only`）。オーディオデバイスの無い環境でも `cargo test` が通る必要があるためである。REQ-CLI-005 は同じ理由で、デバイスの代わりに `--input-tone`（正弦波を送る）と `--output-file`（再生するはずの音をファイルに書く）を使って検証する。REQ-CLI-007 も同じで、音を保持して返す UDP の相手がいるルームを立てて検証する。実デバイスでの CLI 同士の接続は手動で確認する。
 
