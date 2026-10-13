@@ -1,13 +1,12 @@
 /**
- * SettingsHelpQuestion - asks the helped participant to allow someone to help
- * with their audio settings (ADR-044 §5). The only time they are asked: what
- * the helper may do afterwards is not asked again. Nothing happens until they
- * answer; Escape declines, and clicking outside does nothing, so a stray click
- * cannot answer for them.
+ * SettingsHelpQuestion - tells the participant someone asked them for help
+ * with their audio settings and lets them say yes or not now (ADR-044 §5).
+ * Nothing happens until they answer; Escape says not now, and clicking outside
+ * does nothing, so a stray click cannot answer for them.
  *
- * Allowing takes effect only once a question has been up for a moment: a
- * double click on Allow, or a click meant for the question before, cannot
- * approve a question that has just appeared. A different question must be a
+ * Yes takes effect only once a question has been up for a moment: a double
+ * click on it, or a click meant for the question before, cannot answer a
+ * question that has just appeared. A different question must be a
  * new mount (give each its own `key`); the hold then starts from its first frame.
  */
 import { useEffect, useRef, useState } from "react";
@@ -22,6 +21,8 @@ export interface SettingsHelpQuestionProps {
   open: boolean;
   /** What is being asked, in the user's words */
   message: string;
+  /** A line more, when one helps */
+  detail?: string;
   allowLabel: string;
   declineLabel: string;
   onAllow: () => void;
@@ -31,6 +32,7 @@ export interface SettingsHelpQuestionProps {
 export function SettingsHelpQuestion({
   open,
   message,
+  detail,
   allowLabel,
   declineLabel,
   onAllow,
@@ -90,7 +92,8 @@ export function SettingsHelpQuestion({
         data-testid="settings-help-question"
         onKeyDown={handleKeyDown}
       >
-        <p className="settings-help-question__text">{message}</p>
+        <h2 className="settings-help-question__title">{message}</h2>
+        {detail && <p className="settings-help-question__text">{detail}</p>}
         <div className="settings-help-question__actions">
           <button
             type="button"

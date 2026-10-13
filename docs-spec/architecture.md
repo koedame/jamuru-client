@@ -109,7 +109,7 @@ src-tauri/              # Tauri デスクトップアプリ
   src/session/          # 接続・入室の状態機械（接続の段階・ルーム・参加者・音声を繋いでいる参加者・繋ぎ直し）。画面は `session_get` と `session:changed` で描く。参加者と音声の判断は入出力の無い roster.rs（ADR-044 §6）
   src/peer_mix.rs       # ほかの参加者全員の音を、出力コールバックで足し合わせる（参加者ごとの音量・パン・メーター。ADR-077）
   src/settings.rs       # 音声の設定の変更を 1 か所で適用する（設定ウィンドウ・E2E・遠隔設定が共有。ADR-043）
-  src/settings_help.rs  # 参加者の設定の手伝い: 申し出・許可・終わりの状態遷移（通信なし。signaling.rs が送る。ADR-044 §5）
+  src/settings_help.rs  # 参加者の設定の手伝い: 依頼・答え・終わりの状態遷移（通信なし。signaling.rs が送る。ADR-044 §5）
   src/help_link.rs      # 手伝いの中継の両端: 手伝われる側は手伝いの口として受ける、手伝う側は窓を開いて相手のアプリの呼びを運ぶ（ADR-044 §5）
 ui/
 ├── src/                # TypeScript ソース

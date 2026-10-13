@@ -745,25 +745,39 @@
     "bytesReceived": "受信バイト数"
   },
   "settingsHelp": {
-    "offer": "設定を手伝う",
-    "offerLabel": "{{name}}さんの音声の設定を手伝う",
+    "ask": {
+      "button": "設定依頼をする",
+      "title": "設定依頼をしますか？",
+      "what": "選んだ人が、jamuru の設定を一緒に見て、変えてくれます。",
+      "limits": "パソコンの画面や jamuru 以外のものは見えません。",
+      "control": "いつでもあなたが止められます。",
+      "choose": "相手を選ぶ",
+      "never": "やめる",
+      "chooseTitle": "誰に頼みますか？",
+      "none": "いま、設定を手伝える人がルームにいません。",
+      "send": "依頼する",
+      "waiting": "{{name}}さんの返事を待っています",
+      "cancel": "取り消す",
+      "declined": "{{name}}さんは今回は手伝えませんでした",
+      "busy": "{{name}}さんはいま別の人を手伝っています",
+      "noAnswer": "{{name}}さんから返事がありませんでした。ほかの人にも頼めます。",
+      "withdrawn": "{{name}}さんが設定依頼を取り消しました",
+      "couldNotStart": "{{name}}さんとの手伝いを始められませんでした"
+    },
     "request": {
-      "message": "{{name}}さんが音声の設定を手伝いたいそうです",
-      "allow": "許可する",
-      "decline": "断る"
+      "message": "{{name}}さんから設定依頼が届きました",
+      "detail": "{{name}}さんの jamuru の設定を、一緒に見て手伝います。",
+      "allow": "手伝う",
+      "decline": "今はできない"
     },
     "helped": {
       "bar": "{{name}}さんが音声の設定を手伝っています",
       "stop": "停止"
     },
     "helper": {
-      "asking": "{{name}}さんの返事を待っています",
-      "cancel": "取り消す",
       "title": "{{name}}さんの音声の設定",
       "bar": "{{name}}さんの設定を手伝っています",
       "stop": "手伝いをやめる",
-      "declined": "{{name}}さんが断りました",
-      "busy": "{{name}}さんは今ほかの人に手伝ってもらっています",
       "refused": {
         "device_gone": "その機器は{{name}}さんのところで接続されていないため、変更できませんでした",
         "invalid_value": "{{name}}さんのところではその値を使えないため、変更できませんでした",
@@ -779,7 +793,7 @@
       "unknown": "音声の"
     },
     "window": {
-      "banner": "{{name}}さんのアプリを操作しています。ここで変えたことは、{{name}}さんのアプリに反映されます。",
+      "banner": "{{name}}さんの jamuru の設定を一緒に見ています。ここで変えたことは、{{name}}さんの jamuru に反映されます。",
       "waiting": "{{name}}さんのアプリがルームに入るのを待っています"
     }
   },
