@@ -127,6 +127,22 @@ export async function helpWindowInfo(): Promise<HelpWindowInfo> {
   return invoke("help_window_info");
 }
 
+/** What this build is and what it runs on (coarse facts only; no machine or user names) */
+export interface AppEnvironment {
+  app_version: string;
+  /** "release", "beta", "e2e" or "dev" (a debug build) */
+  build: string;
+  os: string;
+  arch: string;
+  os_version: string | null;
+  ram_gb: number | null;
+  audio_host: string;
+}
+
+export async function appEnvironment(): Promise<AppEnvironment> {
+  return invoke("app_environment");
+}
+
 // ============================================================================
 // The session: connecting, entering and leaving a room (ADR-044 §6)
 // ============================================================================
