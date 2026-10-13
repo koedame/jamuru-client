@@ -2,6 +2,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { installElementGrab } from "./elementGrab";
 
+vi.mock("./tauri", () => ({
+  appEnvironment: vi.fn(async () => ({
+    app_version: "0.1.0-107",
+    build: "beta",
+    os: "macos",
+    os_version: "15",
+    arch: "aarch64",
+    ram_gb: 32,
+    audio_host: "coreaudio",
+  })),
+  settingsGet: vi.fn(async () => {
+    throw new Error("no backend");
+  }),
+  sessionGet: vi.fn(async () => {
+    throw new Error("no backend");
+  }),
+}));
+
 const OVERLAY = "jamuru-element-grab-overlay";
 
 let stop: () => void;
@@ -53,6 +71,11 @@ describe("element grab", () => {
 
     await waitFor(() => expect(written).toHaveLength(1));
     expect(written[0]).toContain("data-testid: go");
+    expect(written[0]).toContain("app version: 0.1.0-107");
+    expect(written[0]).toContain("## Audio settings\nunavailable");
+    expect(document.getElementById("jamuru-element-grab-toast")?.textContent).toBe(
+      "Copied the debug info"
+    );
     expect(onClick).not.toHaveBeenCalled();
   });
 

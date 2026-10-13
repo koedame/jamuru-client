@@ -152,6 +152,8 @@ app_commands! {
     [Access::ALL] "全体の音量を変える" crate::streaming::streaming_set_master_volume;
     [Access::ALL] "全体の音量を読む" crate::streaming::streaming_get_master_volume;
 
+    [Access::NO_HELP] "アプリの版・ビルドの種類・OS・メモリ・音声ホストを読む" crate::app_info::app_environment;
+
     // The whole config includes the server address and the rooms visited.
     [Access::NO_HELP] "設定ファイルの全体を読む" crate::config::config_load;
     // Consent to send usage data is the person's own.
