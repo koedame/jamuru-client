@@ -3,6 +3,7 @@
 //! Provides IPC commands for signaling server, audio device, streaming management,
 //! and multi-window management.
 
+mod app_info;
 mod audio;
 mod audio_slot;
 #[cfg(feature = "debug-tools")]

@@ -1,6 +1,39 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { buildElementReport, cssPath } from "./elementReport";
+import type { AppEnvironment, AudioSettings, SessionSnapshot } from "./tauri";
+
+const app: AppEnvironment = {
+  app_version: "0.1.0-107",
+  build: "beta",
+  os: "windows",
+  os_version: "11",
+  arch: "x86_64",
+  ram_gb: 16,
+  audio_host: "wasapi",
+};
+
+const audio = {
+  input_devices: [{ id: "in-1", name: "USB Mic", is_bluetooth: false }],
+  output_devices: [{ id: "out-1", name: "Buds", is_bluetooth: true }],
+  input_device_id: "in-1",
+  output_device_id: "out-1",
+  input_channel_count: 2,
+  output_channel_count: 2,
+  input_channels: { left: 1, right: null },
+  output_channels: { left: 1, right: 2 },
+  transmit_channels: 1,
+  buffer_size: 64,
+  sample_rate: 48000,
+} as unknown as AudioSettings;
+
+const session = {
+  phase: "connected",
+  error: null,
+  room: { participants: [{ id: "a" }, { id: "b" }] },
+  streaming_peer_ids: ["b"],
+  signaling_reconnect: "idle",
+} as unknown as SessionSnapshot;
 
 function Panel({ muted, name }: { muted: boolean; name: string }) {
   return (
@@ -125,5 +158,67 @@ describe("buildElementReport of a part holding a password field", () => {
     const { getByTestId } = render(<Panel muted={false} name="Bob" />);
 
     expect(buildElementReport(getByTestId("mixer-panel"))).not.toContain("hunter2");
+  });
+});
+
+describe("buildElementReport of the app and its settings", () => {
+  // Given what the backend says about the app, its audio settings and the session
+  // When the report is built
+  // Then the version, platform, devices, buffer and room state are in it, and no device id is
+  //
+  // Verifies: REQ-RMT-033
+  it("names the version, platform, devices, audio settings and room state, when the backend answered", () => {
+    const { getByTestId } = render(<Panel muted={false} name="Bob" />);
+
+    const report = buildElementReport(getByTestId("mute-button"), { app, audio, session });
+
+    expect(report).toContain("app version: 0.1.0-107");
+    expect(report).toContain("build: beta");
+    expect(report).toContain("os: windows 11 (x86_64)");
+    expect(report).toContain("ram: 16 GB");
+    expect(report).toContain("audio host: wasapi");
+    expect(report).toContain("input device: USB Mic");
+    expect(report).toContain("input channels: 1 (mono) of 2");
+    expect(report).toContain("output device: Buds (bluetooth)");
+    expect(report).toContain("output channels: 1/2 of 2");
+    expect(report).toContain("buffer size: 64 frames");
+    expect(report).toContain("sample rate: 48000 Hz");
+    expect(report).toContain("phase: connected");
+    expect(report).toContain("participants: 2");
+    expect(report).toContain("audio links: 1");
+    expect(report).not.toContain("in-1");
+  });
+
+  // Given a window that could not read the backend
+  // When the report is built
+  // Then it says each part is unavailable instead of leaving it out silently
+  //
+  // Verifies: REQ-RMT-033
+  it("says the parts are unavailable, when the backend could not be read", () => {
+    const { getByTestId } = render(<Panel muted={false} name="Bob" />);
+
+    const report = buildElementReport(getByTestId("mute-button"), { app: null, audio: null, session: null });
+
+    expect(report).toContain("## App\nunavailable in this window");
+    expect(report).toContain("## Audio settings\nunavailable");
+    expect(report).toContain("## Session\nunavailable");
+  });
+
+  // Given the default devices and a session without a room
+  // When the report is built
+  // Then the default is named as the system default and no participants are counted
+  //
+  // Verifies: REQ-RMT-033
+  it("names the system default device and no room, when nothing is chosen and no room is joined", () => {
+    const { getByTestId } = render(<Panel muted={false} name="Bob" />);
+
+    const report = buildElementReport(getByTestId("mute-button"), {
+      audio: { ...audio, input_device_id: null } as AudioSettings,
+      session: { ...session, room: null, streaming_peer_ids: [] } as unknown as SessionSnapshot,
+    });
+
+    expect(report).toContain("input device: system default");
+    expect(report).toContain("in a room: false");
+    expect(report).not.toContain("participants:");
   });
 });
