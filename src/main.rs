@@ -1518,7 +1518,7 @@ impl AudioIo {
                 Some(path) => {
                     let mut file = std::fs::File::create(path)
                         .with_context(|| format!("cannot write {}", path.display()))?;
-                    let mut frame = vec![0.0f32; receive.frame_samples() * 3];
+                    let mut frame = vec![0.0f32; receive.widest_frame_samples()];
                     let mut bytes = Vec::with_capacity(frame.len() * 4);
                     let path = path.to_path_buf();
                     io.stand_ins

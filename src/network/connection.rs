@@ -23,6 +23,7 @@ use super::link_facts::{route_handicap, route_preference, LinkFacts, RouteOverri
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
 use super::transport::UdpTransport;
+use super::udp_mux::UdpMux;
 
 /// How long the connectivity check waits for the first answer after the last probe went out
 const PROBE_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -897,6 +898,17 @@ impl Connection {
         Self::from_transport(UdpTransport::from_std(std_socket)?)
     }
 
+    /// Create a connection to one peer over a socket shared with the
+    /// connections to the others in the room.
+    ///
+    /// Everyone in a room sends to the one address this app told it, so the
+    /// connections to them all go through that socket, and `mux` gives each
+    /// the packets of its own peer. Must be called from within the runtime
+    /// that drives `mux`.
+    pub fn on(mux: &UdpMux) -> Result<Self, NetworkError> {
+        Self::from_transport(mux.transport())
+    }
+
     fn from_transport(transport: UdpTransport) -> Result<Self, NetworkError> {
         Ok(Self {
             transport: Arc::new(transport),
@@ -991,6 +1003,7 @@ impl Connection {
         }
 
         let started = Instant::now();
+        self.transport.expect_peer_at(&[remote_addr]);
         *self.route.lock() = Route::new(remote_addr, Vec::new());
         self.set_state(ConnectionState::Connecting);
         info!("Connecting to {}", remote_addr);
@@ -1061,6 +1074,7 @@ impl Connection {
         }
 
         let started = Instant::now();
+        self.transport.expect_peer_at(candidates);
         self.set_state(ConnectionState::CheckingConnectivity);
         info!("Checking connectivity with {} candidates", candidates.len());
 
@@ -1222,6 +1236,7 @@ impl Connection {
     /// Disconnect from the remote peer
     pub fn disconnect(&mut self) {
         self.set_state(ConnectionState::Disconnected);
+        self.transport.release();
 
         if let Some(handle) = self.receive_handle.take() {
             handle.abort();

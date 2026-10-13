@@ -31,11 +31,12 @@
 
 ### REQ-LAT-102: 複数参加者の遅延を個別表示
 
-- [!] 複数マシン
-- [ ] メッシュ構成（`Session` の複数ピア対応を音声経路まで配線）
-- [ ] 参加者ごとの RTT / ジッター表示と、最も遅延の大きい参加者のハイライト
-- [ ] マルチノード E2E ハーネス（プロセスごとの仮想オーディオデバイス）
-- **補足**: シグナリング側の参加者通知は REQ-CON-111 で検証済み。残るのは音声経路のメッシュ化と表示
+- [x] メッシュ構成（参加者全員と音声を繋ぐ。相手ごとの `Connection` が 1 つの音声ソケットを共有する。ADR-077、REQ-CON-133）
+- [x] 参加者ごとの遅延の表示と、最も遅延の大きい参加者のハイライト（`streaming_status` の `peers`、参加者行）
+- [!] 複数マシン（3 台以上を実際に繋いだ画面の確認）
+- [ ] マルチノード E2E ハーネス（プロセスごとの仮想オーディオデバイス）。いまの検証は、実ソケットで 3 人・10 人を繋ぐ結合テスト（`tests/mesh_connection_test.rs`）と、実アプリを疑似の相手 2 人と同じルームに入れる GUI E2E
+- [ ] CLI（`jamuru`）は 1 対 1 のまま。3 人以上のルームに CLI を入れると、CLI は 1 人としか繋がない
+- **補足**: 参加者ごとのジッターの表示（REQ-LAT-103 の「各参加者」）は、値は `peers` にあるが画面には出していない
 
 ### REQ-LAT-123: ASIO 使用時の低遅延
 
@@ -175,8 +176,8 @@ ADR-022 で**対象外**と決定済み。
 
 - **Linux（実装済み）**: アプリ起動時に `pw-loopback` を子プロセスとして立て、シンク面（`jamuru-recording-output-in`。ここへアプリが書く）とソース面（`jamuru-recording-output-out`。DAW/OBS はこちらを選ぶ）の仮想デバイスペアを 1 プロセスで作る。書き込みは `pw-cat --playback` を子プロセスにして標準入力へ流す。プロセスを kill するだけで両方のノードが消えるので、`pw-cli create-node` のノード ID を控えて `destroy` する管理が要らない（`libpipewire` への直接リンクも不要 = `libpipewire-0.3-dev` をビルド環境に足さずに済む）。`src/audio/virtual_output.rs` の `VirtualOutputSink` として実装済み。手元の PipeWire + `pw-loopback` + `pw-cat` で実際にノード生成〜書き込みが動くことを確認済み（下記「検証」）
 - **macOS / Windows（未着手・別チケット）**: OS の制約上、仮想デバイスを実行時に動的生成する API が無い。macOS は署名・notarize 済みの Core Audio HAL plugin をインストーラでバンドルし `/Library/Audio/Plug-Ins/HAL/` に導入、Windows は署名済みの仮想オーディオドライバをインストーラでバンドルする方式になる（一度インストールすれば以降は常設デバイスとして、Linux 版と同じ書き込み口を使い回せる）。コード署名・notarize インフラと実機がこの環境に無く、調査・実装ができない
-- **B のチャンネル数（確定）**: 現状のセッションは 1 対 1 のみ（`Roster.streaming_with: Option<Uuid>`）で、3 人以上のフルメッシュ音声（REQ-LAT-102）はまだ無い。B は当面「参加者 1 人ぶん」の固定 2ch とし、メッシュ音声が実装されたときに広げる
-- **配線（実装済み・Linux）**: `src/audio/virtual_output.rs` に `RecordingFeed`（`A`/`B`/`C` それぞれのロックフリーなリングバッファタップと、それらを 6ch にまとめて `VirtualOutputSink` へ書く専用の書き込みスレッド）を追加。`streaming.rs` の `run_audio_streaming` がセッション開始時に起動し、`start_capture_ring`（A: マイクのドライな生データ、mono なら両ch に複製）・`mix_peers`（B: 受信直後・フェーダー/パン適用前）・`playout_source`（C: `LocalMonitor` 加算後、実際に再生される音そのもの）へタップを配線した。入力/出力デバイスの切り替え時（`reopen_capture` / `playout_job`）も `LocalMonitor` の tap と同じ要領でタップを取り直す。書き込みスレッドはリアルタイムのオーディオコールバックとは別スレッドなので、既存の禁則（アロケーション・ブロッキング I/O 禁止）はコールバック側にだけ及び、タップへの `push_stereo` / `push_mono` はロックフリーで満杯なら黙って捨てる。PipeWire 未検出・起動失敗時は `RecordingFeed::start` が `None` を返し、セッションはそのまま録音/配信出力なしで続行する
+- **B のチャンネル数（確定）**: B は固定 2ch で、ほかの参加者全員の音（フェーダー前）の和を流す（ADR-077）。参加者ごとに別のチャンネルへ分けるのは、チャンネル数を増やす別の作業
+- **配線（実装済み・Linux）**: `src/audio/virtual_output.rs` に `RecordingFeed`（`A`/`B`/`C` それぞれのロックフリーなリングバッファタップと、それらを 6ch にまとめて `VirtualOutputSink` へ書く専用の書き込みスレッド）を追加。`streaming.rs` の `run_audio_streaming` がセッション開始時に起動し、`start_capture_ring`（A: マイクのドライな生データ、mono なら両ch に複製）・`PeerMix::mix_into`（B: ほかの参加者全員の受信直後の音の和・フェーダー/パン適用前）・`playout_source`（C: `LocalMonitor` 加算後、実際に再生される音そのもの）へタップを配線した。入力/出力デバイスの切り替え時（`reopen_capture` / `playout_job`）も `LocalMonitor` の tap と同じ要領でタップを取り直す。書き込みスレッドはリアルタイムのオーディオコールバックとは別スレッドなので、既存の禁則（アロケーション・ブロッキング I/O 禁止）はコールバック側にだけ及び、タップへの `push_stereo` / `push_mono` はロックフリーで満杯なら黙って捨てる。PipeWire 未検出・起動失敗時は `RecordingFeed::start` が `None` を返し、セッションはそのまま録音/配信出力なしで続行する
 
 ---
 

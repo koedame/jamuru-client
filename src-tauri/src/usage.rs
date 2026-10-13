@@ -506,22 +506,24 @@ async fn send_previous_hang<R: Runtime>(app: &AppHandle<R>, send: bool) -> Resul
 }
 
 /// Reads the streaming totals into the open session: underruns and
-/// reconnects since the last reading, and one reading of the link.
+/// reconnects since the last reading, and one reading of each link. The
+/// packets FEC rebuilt are totalled over the links.
 ///
 /// `StreamingState` counts from zero each time streaming starts, so a total
 /// that went down means a new start and its whole value is new. (A new start
 /// that passes the old total before the next reading is counted short.)
 fn read_link(streaming: &StreamingState, reporter: &UsageReporter) {
-    let reading = streaming.link_reading();
+    let readings = streaming.link_readings();
     let (underruns, reconnects) = (streaming.underruns(), streaming.reconnects());
     let (link, giveups) = (streaming.link_snapshot(), streaming.silence_giveups());
     let mut new_giveups = 0;
     reporter.with_session(|tally| {
-        if let Some((rtt_ms, loss_rate, fec_recovered)) = reading {
-            tally.sample(rtt_ms, loss_rate);
-            if let Some(recovered) = fec_recovered {
-                tally.sample_fec_total(recovered);
-            }
+        for (rtt_ms, loss_rate, _) in &readings {
+            tally.sample(*rtt_ms, *loss_rate);
+        }
+        let fec_totals: Vec<u64> = readings.iter().filter_map(|reading| reading.2).collect();
+        if !fec_totals.is_empty() {
+            tally.sample_fec_total(fec_totals.iter().sum());
         }
         tally.add_xruns_total(underruns);
         tally.add_reconnects_total(reconnects);
