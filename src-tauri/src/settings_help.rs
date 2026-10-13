@@ -1,12 +1,14 @@
 //! Helping another participant with their audio settings (ADR-044 §5)
 //!
-//! One participant (the helper) asks to help another (the helped). The helped
-//! side answers once. On yes it opens a connection to the server's relay under
-//! a number only it chose and tells the helper the number; the helper opens the
-//! same number and from then on operates the helped app through the relay, as a
-//! portal whose range the permission table fixes (`rpc::spec`). Nothing more is
-//! asked of the person helped. Either side can stop at any time, and the help
-//! ends when either leaves the room or the connection to it is lost.
+//! The participant who wants help (the helped) asks another (the helper). The
+//! helper says yes or not now. On yes the helper's app says so, and the helped
+//! app - which asked, so is not asked again - opens a connection to the
+//! server's relay under a number only it chose and tells the helper the number;
+//! the helper opens the same number and from then on operates the helped app
+//! through the relay, as a portal whose range the permission table fixes
+//! (`rpc::spec`). Nothing more is asked of the person helped. Either side can
+//! stop at any time, and the help ends when either leaves the room or the
+//! connection to it is lost.
 //!
 //! [`Help`] is the offer and its end as a state machine with no I/O: it takes
 //! what happened (a local action, a message from a peer, a peer leaving, the
@@ -15,12 +17,13 @@
 //! The caller carries those out over the signaling relay and the app's own
 //! relay connection.
 //!
-//! The other app is not trusted to follow the protocol. What the helped side
-//! accepts is the request it showed itself, from the participant it named; a
-//! number from anyone the helper did not ask, or one the relay would refuse, is
-//! dropped. The only answer a peer can get without this app's user acting is
-//! "busy", at most once per participant in [`BUSY_REPLY_INTERVAL`], so peers
-//! cannot make this app exceed the server's message limit and lose the room.
+//! The other app is not trusted to follow the protocol. A helped app takes up
+//! only a request from the participant it asked, and a helper app only shows
+//! the ask of a participant who has asked; a number from anyone the helper did
+//! not agree to help, or one the relay would refuse, is dropped. The only
+//! answer a peer can get without this app's user acting is "busy", at most
+//! once per participant in [`BUSY_REPLY_INTERVAL`], so peers cannot make this
+//! app exceed the server's message limit and lose the room.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -29,8 +32,9 @@ use jamjam::network::is_help_session;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A participant asking while this app is already helped hears "busy" at
-/// most once in this time; asking again sooner gets no answer.
+/// A participant asking while this app is already helping someone (or has an
+/// ask to answer) hears "busy" at most once in this time; asking again sooner
+/// gets no answer.
 pub const BUSY_REPLY_INTERVAL: Duration = Duration::from_secs(10);
 
 /// What the two apps say to each other over the room's signaling. Travels as
@@ -38,12 +42,17 @@ pub const BUSY_REPLY_INTERVAL: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HelpMessage {
-    /// Helper to helped: may I help with your settings?
+    /// Helped to helper: will you help me with my settings?
+    Ask,
+    /// Helper to helped: yes - open the relay for it. Only taken up by an app
+    /// that asked this participant.
     Request,
     /// Helped to helper: yes. The helped app is waiting on the relay under
     /// `session`; open the same number there.
     Accepted { session: String },
-    /// Helped to helper: no. `busy` when someone else is already helping.
+    /// No. From the helper to the helped app that asked: not now (`busy` when
+    /// it is already helping someone). From the helped app to the helper who
+    /// said yes: the relay could not be opened.
     Declined { busy: bool },
     /// Either side to the other: the help is over. `role` is the sender's
     /// side of it, so help the two give each other the other way goes on.
@@ -111,17 +120,21 @@ pub enum EndReason {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HelpEvent {
-    /// `peer` asks to help this app; answer with [`Help::accept`] or
-    /// [`Help::decline`].
-    Requested { peer: Uuid, peer_name: String },
+    /// `peer` asks this app for help; answer with [`Help::take`] or
+    /// [`Help::refuse`].
+    Asked { peer: Uuid, peer_name: String },
+    /// `peer`, whom this app asked, will help: open the relay and
+    /// [`Help::accept`] (or [`Help::decline`] when it cannot be opened).
+    Taken { peer: Uuid, peer_name: String },
     /// Help with `peer` began.
     Started {
         role: Role,
         peer: Uuid,
         peer_name: String,
     },
-    /// `peer` declined this app's offer to help.
-    Declined { peer: Uuid, busy: bool },
+    /// `peer` declined: as the helped side, this app's ask was refused; as the
+    /// helper, the helped app could not start the help this app agreed to.
+    Declined { role: Role, peer: Uuid, busy: bool },
     /// Help with `peer` is over.
     Ended {
         role: Role,
@@ -165,8 +178,10 @@ pub enum Out {
 /// Why a local action could not be taken.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelpError {
-    /// This app is already helping someone (or asking to).
+    /// This app is already helping someone (or has an ask to answer).
     AlreadyHelping,
+    /// This app is already helped by someone (or has asked someone).
+    AlreadyHelped,
     /// There is no help going on in the role the action needs, or the
     /// request being answered is not the one waiting.
     NotActive,
@@ -176,6 +191,7 @@ impl std::fmt::Display for HelpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HelpError::AlreadyHelping => f.write_str("Already helping someone with their settings"),
+            HelpError::AlreadyHelped => f.write_str("Already getting help with settings"),
             HelpError::NotActive => f.write_str("Not helping with settings"),
         }
     }
@@ -186,7 +202,7 @@ impl std::error::Error for HelpError {}
 /// This app helping someone.
 #[derive(Debug, Clone, PartialEq)]
 enum Giving {
-    /// Asked `peer`, no answer yet.
+    /// Said yes to `peer`, who has not yet opened the relay.
     Asking { peer: Uuid },
     /// Helping `peer` through the relay connection numbered `session`.
     Active { peer: Uuid, session: String },
@@ -210,7 +226,8 @@ impl Giving {
 /// Someone helping this app.
 #[derive(Debug, Clone, PartialEq)]
 enum Receiving {
-    /// `peer` asked; this app has not answered.
+    /// `peer`, whom this app asked, said yes; the help begins once this app
+    /// has opened its end of the relay.
     Asked { peer: Uuid, name: String },
     /// `peer` is helping, through the relay connection numbered `session`.
     Active {
@@ -242,6 +259,11 @@ impl Receiving {
 pub struct Help {
     giving: Option<Giving>,
     receiving: Option<Receiving>,
+    /// The participant this app asked for help, who has not answered
+    asking_of: Option<Uuid>,
+    /// The participant who asked this app for help, whom the user has not
+    /// answered
+    asked_by: Option<(Uuid, String)>,
     /// When each participant was last told this app is busy
     busy_replies: HashMap<Uuid, Instant>,
 }
@@ -260,11 +282,34 @@ impl Help {
         }
     }
 
-    /// Asks `peer` to let this app help with their settings.
-    pub fn request(&mut self, peer: Uuid) -> Result<Vec<Out>, HelpError> {
+    /// Asks `peer` to help this app with its settings.
+    pub fn ask(&mut self, peer: Uuid) -> Result<Vec<Out>, HelpError> {
+        if self.receiving.is_some() || self.asking_of.is_some() {
+            return Err(HelpError::AlreadyHelped);
+        }
+        self.asking_of = Some(peer);
+        Ok(vec![Out::Send {
+            to: peer,
+            message: HelpMessage::Ask,
+        }])
+    }
+
+    /// Whether `peer` is the participant whose ask the user was shown, and
+    /// has not been answered.
+    pub fn is_asking_by(&self, peer: Uuid) -> bool {
+        matches!(&self.asked_by, Some((asking, _)) if *asking == peer)
+    }
+
+    /// Says yes to `peer`'s ask, the one the user was shown: `peer` is told to
+    /// open the relay, and the help begins when it has.
+    pub fn take(&mut self, peer: Uuid) -> Result<Vec<Out>, HelpError> {
+        if !self.is_asking_by(peer) {
+            return Err(HelpError::NotActive);
+        }
         if self.giving.is_some() {
             return Err(HelpError::AlreadyHelping);
         }
+        self.asked_by = None;
         self.giving = Some(Giving::Asking { peer });
         Ok(vec![Out::Send {
             to: peer,
@@ -272,13 +317,25 @@ impl Help {
         }])
     }
 
-    /// Whether `peer` is the participant whose request the user was shown, and
-    /// has not been answered.
+    /// Says not now to `peer`'s ask, the one the user was shown.
+    pub fn refuse(&mut self, peer: Uuid) -> Result<Vec<Out>, HelpError> {
+        if !self.is_asking_by(peer) {
+            return Err(HelpError::NotActive);
+        }
+        self.asked_by = None;
+        Ok(vec![Out::Send {
+            to: peer,
+            message: HelpMessage::Declined { busy: false },
+        }])
+    }
+
+    /// Whether `peer` said yes to this app's ask and the relay is yet to be
+    /// opened for it.
     pub fn is_asked_by(&self, peer: Uuid) -> bool {
         matches!(&self.receiving, Some(Receiving::Asked { peer: asking, .. }) if *asking == peer)
     }
 
-    /// Declines `peer`'s request, the one the user was shown.
+    /// The relay could not be opened for `peer`, who said yes: no help starts.
     pub fn decline(&mut self, peer: Uuid) -> Result<Vec<Out>, HelpError> {
         if !self.is_asked_by(peer) {
             return Err(HelpError::NotActive);
@@ -290,7 +347,7 @@ impl Help {
         }])
     }
 
-    /// Accepts `peer`'s request, the one the user was shown, now that this app
+    /// Starts the help with `peer`, who said yes, now that this app
     /// waits on the relay under `session`. The helper is told the number and the
     /// room hears that the help started.
     pub fn accept(&mut self, peer: Uuid, session: String) -> Result<Vec<Out>, HelpError> {
@@ -327,6 +384,17 @@ impl Help {
                 (giving.peer(), giving.session().map(String::from), false)
             }
             Role::Helped => {
+                // Withdrawing an ask nobody has taken up yet
+                if self.receiving.is_none() {
+                    let peer = self.asking_of.take().ok_or(HelpError::NotActive)?;
+                    return Ok(vec![Out::Send {
+                        to: peer,
+                        message: HelpMessage::Stop {
+                            role,
+                            session: None,
+                        },
+                    }]);
+                }
                 let receiving = self.receiving.take().ok_or(HelpError::NotActive)?;
                 let active = matches!(receiving, Receiving::Active { .. });
                 (
@@ -364,31 +432,48 @@ impl Help {
         now: Instant,
     ) -> Vec<Out> {
         match message {
-            HelpMessage::Request => match &self.receiving {
-                None => {
-                    self.receiving = Some(Receiving::Asked {
-                        peer: from,
-                        name: from_name.to_string(),
-                    });
-                    vec![Out::Event(HelpEvent::Requested {
-                        peer: from,
-                        peer_name: from_name.to_string(),
-                    })]
-                }
-                Some(current) if current.peer() == from => Vec::new(),
-                Some(_) => {
+            HelpMessage::Ask => {
+                if self.giving.is_some()
+                    || self
+                        .asked_by
+                        .as_ref()
+                        .is_some_and(|(asking, _)| *asking != from)
+                {
                     self.busy_replies
                         .retain(|_, at| now.duration_since(*at) < BUSY_REPLY_INTERVAL);
                     if self.busy_replies.contains_key(&from) {
                         return Vec::new();
                     }
                     self.busy_replies.insert(from, now);
-                    vec![Out::Send {
+                    return vec![Out::Send {
                         to: from,
                         message: HelpMessage::Declined { busy: true },
-                    }]
+                    }];
                 }
-            },
+                if self.asked_by.is_some() {
+                    return Vec::new();
+                }
+                self.asked_by = Some((from, from_name.to_string()));
+                vec![Out::Event(HelpEvent::Asked {
+                    peer: from,
+                    peer_name: from_name.to_string(),
+                })]
+            }
+            // Only from the participant this app asked, and only once.
+            HelpMessage::Request => {
+                if self.asking_of != Some(from) || self.receiving.is_some() {
+                    return Vec::new();
+                }
+                self.asking_of = None;
+                self.receiving = Some(Receiving::Asked {
+                    peer: from,
+                    name: from_name.to_string(),
+                });
+                vec![Out::Event(HelpEvent::Taken {
+                    peer: from,
+                    peer_name: from_name.to_string(),
+                })]
+            }
             HelpMessage::Accepted { session } => match &self.giving {
                 Some(Giving::Asking { peer }) if *peer == from && is_help_session(&session) => {
                     self.giving = Some(Giving::Active {
@@ -410,13 +495,27 @@ impl Help {
                 }
                 _ => Vec::new(),
             },
-            HelpMessage::Declined { busy } => match &self.giving {
-                Some(Giving::Asking { peer }) if *peer == from => {
-                    self.giving = None;
-                    vec![Out::Event(HelpEvent::Declined { peer: from, busy })]
+            HelpMessage::Declined { busy } => {
+                if self.asking_of == Some(from) {
+                    self.asking_of = None;
+                    return vec![Out::Event(HelpEvent::Declined {
+                        role: Role::Helped,
+                        peer: from,
+                        busy,
+                    })];
                 }
-                _ => Vec::new(),
-            },
+                match &self.giving {
+                    Some(Giving::Asking { peer }) if *peer == from => {
+                        self.giving = None;
+                        vec![Out::Event(HelpEvent::Declined {
+                            role: Role::Helper,
+                            peer: from,
+                            busy,
+                        })]
+                    }
+                    _ => Vec::new(),
+                }
+            }
             // The sender stopped helping this app...
             HelpMessage::Stop {
                 role: Role::Helper,
@@ -428,11 +527,19 @@ impl Help {
                 }
                 self.end_receiving_with(from, EndReason::PeerStopped, true)
             }
-            // ...or stopped being helped by it.
+            // ...or stopped being helped by it (or withdrew an ask not yet taken up).
             HelpMessage::Stop {
                 role: Role::Helped,
                 session,
             } => {
+                if session.is_none() && self.is_asking_by(from) {
+                    self.asked_by = None;
+                    return vec![Out::Event(HelpEvent::Ended {
+                        role: Role::Helper,
+                        peer: from,
+                        reason: EndReason::PeerStopped,
+                    })];
+                }
                 let held = self.giving.as_ref().and_then(Giving::session);
                 if !names_the_help(session.as_deref(), held) {
                     return Vec::new();
@@ -455,7 +562,24 @@ impl Help {
     /// `peer` left the room: any help with them is over. The room already
     /// hears that they left, so no notice goes out.
     pub fn peer_left(&mut self, peer: Uuid) -> Vec<Out> {
-        let mut out = self.end_giving_with(peer, EndReason::PeerLeft);
+        let mut out = Vec::new();
+        if self.is_asking_by(peer) {
+            self.asked_by = None;
+            out.push(Out::Event(HelpEvent::Ended {
+                role: Role::Helper,
+                peer,
+                reason: EndReason::PeerLeft,
+            }));
+        }
+        if self.asking_of == Some(peer) {
+            self.asking_of = None;
+            out.push(Out::Event(HelpEvent::Ended {
+                role: Role::Helped,
+                peer,
+                reason: EndReason::PeerLeft,
+            }));
+        }
+        out.extend(self.end_giving_with(peer, EndReason::PeerLeft));
         out.extend(self.end_receiving_with(peer, EndReason::PeerLeft, false));
         out
     }
@@ -503,6 +627,20 @@ impl Help {
     /// there is no one left to tell.
     pub fn reset(&mut self) -> Vec<Out> {
         let mut out = Vec::new();
+        if let Some((peer, _)) = self.asked_by.take() {
+            out.push(Out::Event(HelpEvent::Ended {
+                role: Role::Helper,
+                peer,
+                reason: EndReason::Stopped,
+            }));
+        }
+        if let Some(peer) = self.asking_of.take() {
+            out.push(Out::Event(HelpEvent::Ended {
+                role: Role::Helped,
+                peer,
+                reason: EndReason::Stopped,
+            }));
+        }
         if let Some(giving) = self.giving.take() {
             out.push(Out::Event(HelpEvent::Ended {
                 role: Role::Helper,
@@ -595,12 +733,20 @@ mod tests {
         let helped_id = Uuid::new_v4();
         let mut helper = Help::new();
         let mut helped = Help::new();
-        helper.request(helped_id).unwrap();
-        helped.receive(helper_id, HELPER_NAME, HelpMessage::Request);
+        asked_and_taken(&mut helper, &mut helped, helper_id, helped_id);
         let out = helped.accept(helper_id, SESSION.to_string()).unwrap();
         let [(_, accepted)] = sent(&out).try_into().unwrap();
         helper.receive(helped_id, HELPED_NAME, accepted);
         (helper, helped, helper_id, helped_id)
+    }
+
+    /// The helped app asks, the helper says yes, and the helped app hears it:
+    /// the helped app then has a yes to start the help on.
+    fn asked_and_taken(helper: &mut Help, helped: &mut Help, helper_id: Uuid, helped_id: Uuid) {
+        helped.ask(helper_id).unwrap();
+        helper.receive(helped_id, HELPED_NAME, HelpMessage::Ask);
+        let [(_, request)] = sent(&helper.take(helped_id).unwrap()).try_into().unwrap();
+        helped.receive(helper_id, HELPER_NAME, request);
     }
 
     fn sent(out: &[Out]) -> Vec<(Uuid, HelpMessage)> {
@@ -655,19 +801,31 @@ mod tests {
 
     /// Verifies: REQ-RMT-001
     #[test]
-    fn when_the_helped_side_accepts_the_helper_is_given_the_number_to_open_and_the_room_hears_it() {
+    fn when_the_helper_says_yes_the_helped_side_starts_and_the_helper_is_given_the_number_to_open()
+    {
         let helper_id = Uuid::new_v4();
         let helped_id = Uuid::new_v4();
         let mut helper = Help::new();
         let mut helped = Help::new();
 
         assert_eq!(
-            sent(&helper.request(helped_id).unwrap()),
+            sent(&helped.ask(helper_id).unwrap()),
+            vec![(helper_id, HelpMessage::Ask)]
+        );
+        assert_eq!(
+            events(&helper.receive(helped_id, HELPED_NAME, HelpMessage::Ask)),
+            vec![HelpEvent::Asked {
+                peer: helped_id,
+                peer_name: HELPED_NAME.into()
+            }]
+        );
+        assert_eq!(
+            sent(&helper.take(helped_id).unwrap()),
             vec![(helped_id, HelpMessage::Request)]
         );
         assert_eq!(
             events(&helped.receive(helper_id, HELPER_NAME, HelpMessage::Request)),
-            vec![HelpEvent::Requested {
+            vec![HelpEvent::Taken {
                 peer: helper_id,
                 peer_name: HELPER_NAME.into()
             }]
@@ -714,13 +872,12 @@ mod tests {
 
     /// Verifies: REQ-RMT-001
     #[test]
-    fn when_the_helped_side_declines_no_help_starts() {
+    fn when_the_helped_side_cannot_open_the_relay_no_help_starts() {
         let helper_id = Uuid::new_v4();
         let helped_id = Uuid::new_v4();
         let mut helper = Help::new();
         let mut helped = Help::new();
-        helper.request(helped_id).unwrap();
-        helped.receive(helper_id, HELPER_NAME, HelpMessage::Request);
+        asked_and_taken(&mut helper, &mut helped, helper_id, helped_id);
 
         let out = helped.decline(helper_id).unwrap();
         assert_eq!(
@@ -740,12 +897,101 @@ mod tests {
         assert_eq!(
             events(&declined),
             vec![HelpEvent::Declined {
+                role: Role::Helper,
                 peer: helped_id,
                 busy: false
             }]
         );
         assert!(links(&declined).is_empty());
         assert_eq!(helped.helper(), None);
+    }
+
+    /// Verifies: REQ-RMT-001
+    #[test]
+    fn when_the_helper_says_not_now_the_helped_side_hears_it_and_no_help_starts() {
+        let helper_id = Uuid::new_v4();
+        let helped_id = Uuid::new_v4();
+        let mut helper = Help::new();
+        let mut helped = Help::new();
+        helped.ask(helper_id).unwrap();
+        helper.receive(helped_id, HELPED_NAME, HelpMessage::Ask);
+
+        let out = helper.refuse(helped_id).unwrap();
+        assert_eq!(
+            sent(&out),
+            vec![(helped_id, HelpMessage::Declined { busy: false })]
+        );
+        assert!(broadcast(&out).is_empty());
+
+        let declined = helped.receive(
+            helper_id,
+            HELPER_NAME,
+            HelpMessage::Declined { busy: false },
+        );
+        assert_eq!(
+            events(&declined),
+            vec![HelpEvent::Declined {
+                role: Role::Helped,
+                peer: helper_id,
+                busy: false
+            }]
+        );
+        assert_eq!(helped.helper(), None);
+        assert!(
+            helped.ask(helper_id).is_ok(),
+            "the helped side can ask again, or someone else"
+        );
+        assert_eq!(helper.refuse(helped_id), Err(HelpError::NotActive));
+    }
+
+    /// An ask nobody has taken up can be withdrawn; the helper's question goes.
+    ///
+    /// Verifies: REQ-RMT-003
+    #[test]
+    fn the_helped_side_can_withdraw_an_ask_before_it_is_answered() {
+        let helper_id = Uuid::new_v4();
+        let helped_id = Uuid::new_v4();
+        let mut helper = Help::new();
+        let mut helped = Help::new();
+        helped.ask(helper_id).unwrap();
+        helper.receive(helped_id, HELPED_NAME, HelpMessage::Ask);
+
+        let out = helped.stop(Role::Helped).unwrap();
+        let [(to, stop)] = sent(&out).try_into().unwrap();
+        assert_eq!(to, helper_id);
+        assert_eq!(
+            events(&helper.receive(helped_id, HELPED_NAME, stop)),
+            vec![HelpEvent::Ended {
+                role: Role::Helper,
+                peer: helped_id,
+                reason: EndReason::PeerStopped
+            }]
+        );
+        assert_eq!(helper.take(helped_id), Err(HelpError::NotActive));
+        assert_eq!(helped.stop(Role::Helped), Err(HelpError::NotActive));
+    }
+
+    /// A request from a participant this app did not ask is not taken up: an
+    /// app that asks no one is never made to start a help.
+    ///
+    /// Verifies: REQ-RMT-001
+    #[test]
+    fn a_request_from_someone_the_helped_side_did_not_ask_is_dropped() {
+        let (asked, stranger) = (Uuid::new_v4(), Uuid::new_v4());
+        let mut helped = Help::new();
+        assert!(helped
+            .receive(stranger, "Cy", HelpMessage::Request)
+            .is_empty());
+        helped.ask(asked).unwrap();
+
+        assert!(helped
+            .receive(stranger, "Cy", HelpMessage::Request)
+            .is_empty());
+        assert!(!helped.is_asked_by(stranger));
+        assert_eq!(
+            helped.accept(stranger, SESSION.to_string()),
+            Err(HelpError::NotActive)
+        );
     }
 
     /// The user answers the request they were shown. If that one was
@@ -757,6 +1003,7 @@ mod tests {
     fn an_answer_to_one_participants_request_does_not_accept_someone_elses() {
         let (first, second) = (Uuid::new_v4(), Uuid::new_v4());
         let mut helped = Help::new();
+        helped.ask(first).unwrap();
         helped.receive(first, "First", HelpMessage::Request);
         helped.receive(
             first,
@@ -766,6 +1013,7 @@ mod tests {
                 session: None,
             },
         );
+        helped.ask(second).unwrap();
         helped.receive(second, "Second", HelpMessage::Request);
 
         assert_eq!(
@@ -793,7 +1041,8 @@ mod tests {
             .receive(helped_id, HELPED_NAME, accepted(SESSION))
             .is_empty());
 
-        helper.request(helped_id).unwrap();
+        helper.receive(helped_id, HELPED_NAME, HelpMessage::Ask);
+        helper.take(helped_id).unwrap();
         assert!(helper.receive(stranger, "Cy", accepted(SESSION)).is_empty());
         for bad in ["", "abc", "../../admin", &"A".repeat(32)] {
             assert!(
@@ -883,8 +1132,7 @@ mod tests {
     fn stopping_help_one_way_leaves_the_help_the_other_way() {
         let (mut aki, mut bo, aki_id, bo_id) = active();
         // Bo helps Aki as well.
-        let [(_, request)] = sent(&bo.request(aki_id).unwrap()).try_into().unwrap();
-        aki.receive(bo_id, HELPED_NAME, request);
+        asked_and_taken(&mut bo, &mut aki, bo_id, aki_id);
         let [(_, accepted)] = sent(&aki.accept(bo_id, "f".repeat(32)).unwrap())
             .try_into()
             .unwrap();
@@ -948,7 +1196,8 @@ mod tests {
             .try_into()
             .unwrap();
         helper.stop(Role::Helper).unwrap();
-        helper.request(helped_id).unwrap();
+        helper.receive(helped_id, HELPED_NAME, HelpMessage::Ask);
+        helper.take(helped_id).unwrap();
 
         assert!(helper.receive(helped_id, HELPED_NAME, late_stop).is_empty());
 
@@ -971,6 +1220,7 @@ mod tests {
             .try_into()
             .unwrap();
         helped.stop(Role::Helped).unwrap();
+        helped.ask(helper_id).unwrap();
         helped.receive(helper_id, HELPER_NAME, HelpMessage::Request);
         helped.accept(helper_id, "f".repeat(32)).unwrap();
 
@@ -1007,8 +1257,7 @@ mod tests {
         let helped_id = Uuid::new_v4();
         let mut helper = Help::new();
         let mut helped = Help::new();
-        helper.request(helped_id).unwrap();
-        helped.receive(helper_id, HELPER_NAME, HelpMessage::Request);
+        asked_and_taken(&mut helper, &mut helped, helper_id, helped_id);
 
         let [(_, stop)] = sent(&helper.stop(Role::Helper).unwrap())
             .try_into()
@@ -1109,10 +1358,7 @@ mod tests {
         helped.stop(Role::Helped).unwrap();
         helper.stop(Role::Helper).unwrap();
         let later = "b".repeat(32);
-        let [(_, request)] = sent(&helper.request(helped_id).unwrap())
-            .try_into()
-            .unwrap();
-        helped.receive(helper_id, HELPER_NAME, request);
+        asked_and_taken(&mut helper, &mut helped, helper_id, helped_id);
         let [(_, accepted)] = sent(&helped.accept(helper_id, later.clone()).unwrap())
             .try_into()
             .unwrap();
@@ -1127,36 +1373,57 @@ mod tests {
 
     /// Verifies: REQ-RMT-005
     #[test]
-    fn while_someone_is_helping_a_participant_asking_hears_busy_at_most_once_in_the_interval() {
-        let (_, mut helped, helper_id, _) = active();
+    fn while_helping_someone_a_participant_asking_hears_busy_at_most_once_in_the_interval() {
+        let (mut helper, _, _, helped_id) = active();
         let other = Uuid::new_v4();
         let start = Instant::now();
         let busy = vec![(other, HelpMessage::Declined { busy: true })];
 
-        let out = helped.receive_at(other, "Cy", HelpMessage::Request, start);
+        let out = helper.receive_at(other, "Cy", HelpMessage::Ask, start);
         assert_eq!(sent(&out), busy);
         assert!(events(&out).is_empty(), "the user is not asked about it");
-        assert_eq!(helped.helper(), Some(helper_id));
+        assert!(!helper.is_asking_by(other));
 
         for i in 1..50 {
             let at = start + BUSY_REPLY_INTERVAL * i / 50;
             assert!(
-                helped
-                    .receive_at(other, "Cy", HelpMessage::Request, at)
+                helper
+                    .receive_at(other, "Cy", HelpMessage::Ask, at)
                     .is_empty(),
                 "asking again sooner gets no answer"
             );
         }
         assert_eq!(
-            sent(&helped.receive_at(
-                other,
-                "Cy",
-                HelpMessage::Request,
-                start + BUSY_REPLY_INTERVAL
-            )),
+            sent(&helper.receive_at(other, "Cy", HelpMessage::Ask, start + BUSY_REPLY_INTERVAL)),
             busy,
             "after the interval, one more"
         );
+        assert!(
+            helper.stop(Role::Helper).is_ok(),
+            "the help in progress went on, with {helped_id}"
+        );
+    }
+
+    /// While one participant's ask waits for the user, another's gets "busy",
+    /// and the same participant asking again is not shown twice.
+    ///
+    /// Verifies: REQ-RMT-005
+    #[test]
+    fn while_one_ask_waits_another_hears_busy_and_the_same_one_is_not_shown_twice() {
+        let (x, y) = (Uuid::new_v4(), Uuid::new_v4());
+        let mut helper = Help::new();
+        let now = Instant::now();
+
+        assert_eq!(
+            events(&helper.receive_at(x, "X", HelpMessage::Ask, now)).len(),
+            1
+        );
+        assert!(helper.receive_at(x, "X", HelpMessage::Ask, now).is_empty());
+        assert_eq!(
+            sent(&helper.receive_at(y, "Y", HelpMessage::Ask, now)),
+            vec![(y, HelpMessage::Declined { busy: true })]
+        );
+        assert!(helper.is_asking_by(x));
     }
 
     /// Participants working together cannot earn more answers by one of them
@@ -1166,48 +1433,42 @@ mod tests {
     #[test]
     fn asking_and_withdrawing_again_and_again_earns_no_more_busy_answers() {
         let (x, y) = (Uuid::new_v4(), Uuid::new_v4());
-        let mut helped = Help::new();
+        let mut helper = Help::new();
         let now = Instant::now();
-        helped.receive_at(x, "X", HelpMessage::Request, now);
+        helper.receive_at(x, "X", HelpMessage::Ask, now);
         assert_eq!(
-            sent(&helped.receive_at(y, "Y", HelpMessage::Request, now)).len(),
+            sent(&helper.receive_at(y, "Y", HelpMessage::Ask, now)).len(),
             1
         );
 
         for _ in 0..20 {
-            helped.receive_at(
+            helper.receive_at(
                 x,
                 "X",
                 HelpMessage::Stop {
-                    role: Role::Helper,
+                    role: Role::Helped,
                     session: None,
                 },
                 now,
             );
-            helped.receive_at(x, "X", HelpMessage::Request, now);
-            assert!(helped
-                .receive_at(y, "Y", HelpMessage::Request, now)
-                .is_empty());
+            helper.receive_at(x, "X", HelpMessage::Ask, now);
+            assert!(helper.receive_at(y, "Y", HelpMessage::Ask, now).is_empty());
         }
     }
 
     /// Verifies: REQ-RMT-005
     #[test]
-    fn an_app_already_helping_someone_cannot_ask_to_help_another() {
-        let (mut helper, _, _, _) = active();
+    fn an_app_already_helped_cannot_ask_another_for_help() {
+        let (_, mut helped, _, _) = active();
 
-        assert_eq!(
-            helper.request(Uuid::new_v4()),
-            Err(HelpError::AlreadyHelping)
-        );
+        assert_eq!(helped.ask(Uuid::new_v4()), Err(HelpError::AlreadyHelped));
     }
 
     /// Verifies: REQ-RMT-003
     #[test]
     fn leaving_the_room_ends_every_help_without_sending_anything() {
         let (mut aki, mut bo, aki_id, bo_id) = active();
-        let [(_, request)] = sent(&bo.request(aki_id).unwrap()).try_into().unwrap();
-        aki.receive(bo_id, HELPED_NAME, request);
+        asked_and_taken(&mut bo, &mut aki, bo_id, aki_id);
         aki.accept(bo_id, "c".repeat(32)).unwrap();
 
         let out = aki.reset();
@@ -1267,6 +1528,10 @@ mod tests {
         assert_eq!(
             body,
             serde_json::json!({"settings_help": {"kind": "accepted", "session": SESSION}})
+        );
+        assert_eq!(
+            serde_json::to_value(PeerBody::SettingsHelp(HelpMessage::Ask)).unwrap(),
+            serde_json::json!({"settings_help": {"kind": "ask"}})
         );
         let parsed: PeerBody = serde_json::from_value(serde_json::json!(
             {"settings_help": {"kind": "stop", "role": "helped"}}

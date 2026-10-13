@@ -255,26 +255,6 @@
   text-overflow: ellipsis;
 }
 
-.participant__help {
-  /* On a line of its own below the name: beside it, the button leaves the
-     name no room in a sidebar this narrow. */
-  order: 1;
-  flex: 1 0 100%;
-  height: 24px;
-  padding: 0 var(--space-sm);
-  border-radius: var(--radius-control);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-caption);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.participant__help:hover {
-  border-color: var(--color-accent);
-}
-
 .participant__latency {
   display: flex;
   align-items: center;
@@ -314,6 +294,24 @@
 
 .participant__link--error {
   color: var(--color-danger);
+}
+
+.room-sidebar__ask-help {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 var(--space-md);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.room-sidebar__ask-help:hover {
+  border-color: var(--color-text-primary);
+  color: var(--color-text-primary);
 }
 
 .room-sidebar__leave {
