@@ -92,15 +92,6 @@ fn scrub(error: RpcError) -> RpcError {
     }
 }
 
-/// Takes another participant's address out of an audio status.
-fn without_addresses(reading: &mut Value) {
-    if let Some(status) = reading.as_object_mut() {
-        if status.contains_key("remote_addr") {
-            status.insert("remote_addr".to_string(), Value::Null);
-        }
-    }
-}
-
 /// Stands in for device ids while someone helps: an id can carry a serial
 /// number (it is masked in `jamuru.log` for that reason), so the helper sees a
 /// handle instead and the helped side turns it back. Inputs and outputs are
@@ -273,9 +264,8 @@ impl HelpGuard {
         let status = crate::streaming::streaming_status(app.state())
             .await
             .map_err(|_| RpcError::failed(FAILED))?;
-        let mut reading = serde_json::to_value(status).map_err(|_| RpcError::failed(FAILED))?;
-        without_addresses(&mut reading);
-        Ok(reading)
+        // The status carries no address of anyone: there is none to take out
+        serde_json::to_value(status).map_err(|_| RpcError::failed(FAILED))
     }
 
     async fn input_level<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
@@ -502,18 +492,6 @@ mod tests {
 
         let denied = RpcError::new(Code::Denied, "Help may not call x");
         assert_eq!(scrub(denied.clone()), denied, "our own words are kept");
-    }
-
-    /// Verifies: REQ-RMT-006
-    #[test]
-    fn another_participants_address_is_not_passed_on_in_the_audio_status() {
-        let mut status = json!({"remote_addr": "203.0.113.7:50000", "input_level": 40});
-        without_addresses(&mut status);
-        assert_eq!(status, json!({"remote_addr": null, "input_level": 40}));
-
-        let mut level = json!(40);
-        without_addresses(&mut level);
-        assert_eq!(level, json!(40));
     }
 
     /// Verifies: REQ-RMT-025

@@ -12,7 +12,7 @@ import { act, render, screen, waitFor, fireEvent, within } from '@testing-librar
 
 import i18n from '../i18n';
 import { MainScreen } from './MainScreen';
-import type { AudioEncryption, DeviceProblem, MixerSnapshot, SessionSnapshot } from '../lib/tauri';
+import type { AudioEncryption, DeviceProblem, MixerSnapshot, PeerLinkStatus, SessionSnapshot } from '../lib/tauri';
 
 const invoke = vi.hoisted(() => vi.fn());
 /** What the screen listens for, by event name. */
@@ -48,6 +48,7 @@ function snapshot(changes: Partial<SessionSnapshot> = {}): SessionSnapshot {
     room: null,
     signaling_reconnect: 'idle',
     signaling_reconnect_error: null,
+    streaming_peer_ids: [],
     streaming_peer_id: null,
     ...changes,
   };
@@ -75,6 +76,66 @@ let mixerNow: MixerSnapshot;
 let statusDeviceProblems: DeviceProblem[];
 /** Whether the backend says the audio to the peer is encrypted, for `streaming_status`; `null` while no session runs. */
 let statusEncryption: AudioEncryption | null;
+/** The audio links the backend says there are, for `streaming_status`; `null` while no session runs. */
+let statusLinks: PeerLinkStatus[] | null;
+
+/** The audio link to participant `peerId`, in `state`, as `streaming_status` lists it */
+function link(
+  peerId: string,
+  state: string,
+  measured?: { up: number; down: number; level?: number; encryption?: AudioEncryption }
+): PeerLinkStatus {
+  return {
+    peer_id: peerId,
+    connection_state: state,
+    connection_error: null,
+    network: measured
+      ? {
+          rtt_ms: measured.up + measured.down,
+          jitter_ms: 0,
+          packet_loss_percent: 0,
+          quality: 'good',
+          measured_bps: 0,
+          required_bps: 0,
+          bandwidth_status: 'sufficient',
+          uptime_seconds: 0,
+          packets_sent: 0,
+          packets_received: 10,
+          encryption: measured.encryption ?? 'encrypted',
+          peer_checked: true,
+          bytes_sent: 0,
+          bytes_received: 0,
+        }
+      : null,
+    latency: measured
+      ? {
+          upstream: [],
+          upstream_total_ms: measured.up,
+          downstream: [],
+          downstream_total_ms: measured.down,
+          roundtrip_total_ms: measured.up + measured.down,
+        }
+      : null,
+    peer_audio: null,
+    level: measured?.level ?? 0,
+  };
+}
+
+/** The room with Aki (b) and Ben (c) in it */
+function roomOfThree(): SessionSnapshot {
+  const room = inRoom().room!;
+  return inRoom({
+    room: {
+      ...room,
+      participants: [
+        { id: 'b', name: 'Aki', features: [] },
+        { id: 'c', name: 'Ben', features: [] },
+      ],
+    },
+  });
+}
+/** The newer release the backend says it found, for `update_notice_get`. */
+let newerRelease: string | null;
 /** Commands the screen sent to the backend, in order, with their arguments. */
 let calls: Array<{ cmd: string; args: Record<string, unknown> | undefined }>;
 
@@ -104,6 +165,8 @@ beforeEach(() => {
   calls = [];
   statusDeviceProblems = [];
   statusEncryption = null;
+  statusLinks = null;
+  newerRelease = null;
   current = snapshot();
   mixerNow = faders();
   openUrl.handler = null;
@@ -116,16 +179,24 @@ beforeEach(() => {
         return current;
       case 'mixer_get':
         return mixerNow;
-      case 'streaming_status':
-        if (statusEncryption) {
+      case 'update_notice_get':
+        return newerRelease;
+      case 'streaming_status': {
+        const peers =
+          statusLinks ??
+          (statusEncryption
+            ? [link('b', 'connected', { up: 5, down: 5, encryption: statusEncryption })]
+            : null);
+        if (peers) {
           return {
             is_active: true,
+            peers,
             device_problems: statusDeviceProblems,
-            network: { encryption: statusEncryption, bandwidth_status: 'sufficient', required_bps: 0 },
-            latency: null,
+            network: peers[0]?.network ?? null,
+            latency: peers[0]?.latency ?? null,
             audio_quality: null,
             peer_audio: null,
-            connection_state: 'connected',
+            connection_state: peers[0]?.connection_state ?? null,
             connection_error: null,
             is_muted: false,
             is_monitoring: false,
@@ -133,7 +204,8 @@ beforeEach(() => {
             output_level: 0,
           };
         }
-        return { is_active: false, device_problems: statusDeviceProblems };
+        return { is_active: false, peers: [], device_problems: statusDeviceProblems };
+      }
       case 'config_get_sample_rate':
         return 48000;
       case 'config_get_transmit_channels':
@@ -330,6 +402,175 @@ describe('MainScreen の暗号化の表示', () => {
 
     await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThan(0));
     expect(screen.queryByText(/not encrypted/)).not.toBeInTheDocument();
+  });
+});
+
+describe('MainScreen の参加者ごとの接続の表示', () => {
+  const row = (name: string) =>
+    screen.getByText(name, { selector: '.participant__name' }).closest('li')!;
+
+  // Verifies: REQ-LAT-102
+  it('3 人のルームで相手ごとに遅延が違うとき、それぞれの行にその人との遅延を出し、いちばん大きい人に印を付けること', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      link('b', 'connected', { up: 4, down: 6 }),
+      link('c', 'connected', { up: 21, down: 23 }),
+    ];
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
+    expect(row('Ben')).toHaveTextContent('↑21ms↓23ms');
+    const marked = screen
+      .getAllByTestId('participant-latency')
+      .filter((latency) => latency.className.includes('participant__latency--highest'));
+    expect(marked).toHaveLength(1);
+    expect(row('Ben')).toContainElement(marked[0]);
+    expect(marked[0]).toHaveAttribute('title', 'Highest latency');
+  });
+
+  // Verifies: REQ-LAT-102
+  it('相手が 1 人のとき、遅延に印を付けないこと', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 4, down: 6 })];
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
+    expect(screen.getByTestId('participant-latency').className).not.toContain('highest');
+  });
+
+  // Verifies: REQ-CON-134
+  it('3 人のルームで 1 人との接続が諦められたとき、その人の行に切断と出し、誰との接続かを添えて再接続を尋ねること', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      link('b', 'connected', { up: 4, down: 6 }),
+      link('c', 'failed', { up: 21, down: 23 }),
+    ];
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText('Connection to Ben lost. Reconnect?')).toBeInTheDocument();
+    expect(row('Ben')).toHaveAttribute('data-link', 'error');
+    expect(row('Ben')).toHaveTextContent('Disconnected');
+    expect(row('Aki')).toHaveAttribute('data-link', 'connected');
+    expect(row('Aki')).toHaveTextContent('↑4ms↓6ms');
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('session.reconnect.retry') }));
+    await waitFor(() => expect(callsTo('streaming_reconnect')).toHaveLength(1));
+  });
+
+  // Verifies: REQ-CON-110
+  it('相手が 1 人で接続が諦められたとき、名前を添えずに再接続を尋ねること', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'failed', { up: 4, down: 6 })];
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText('Connection lost. Reconnect?')).toBeInTheDocument();
+  });
+
+  // Verifies: REQ-CON-133
+  it('入ったばかりでまだ音声を繋いでいない参加者の行には、接続中と出すこと', async () => {
+    current = roomOfThree();
+    statusLinks = [link('b', 'connected', { up: 4, down: 6 }), link('c', 'checkingconnectivity')];
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(row('Aki')).toHaveAttribute('data-link', 'connected'));
+    expect(row('Ben')).toHaveAttribute('data-link', 'connecting');
+    expect(row('Ben')).toHaveTextContent('Connecting...');
+  });
+
+  it('1 人からの音が途切れているとき、その人の行に不安定と出し、ほかの人の行は遅延のままであること', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      link('b', 'reconnecting', { up: 4, down: 6 }),
+      link('c', 'connected', { up: 21, down: 23 }),
+    ];
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(row('Aki')).toHaveAttribute('data-link', 'unstable'));
+    expect(row('Aki')).toHaveTextContent('Unstable');
+    expect(row('Ben')).toHaveTextContent('↑21ms↓23ms');
+  });
+
+  // Verifies: REQ-GUI-009
+  it('3 人のルームのとき、参加者ごとのメーターがその人の音のレベルを示すこと', async () => {
+    current = roomOfThree();
+    mixerNow = faders({
+      peers: {
+        b: { volume: 80, pan: 0, muted: false },
+        c: { volume: 80, pan: 0, muted: false },
+      },
+    });
+    statusLinks = [
+      link('b', 'connected', { up: 4, down: 6, level: 30 }),
+      link('c', 'connected', { up: 4, down: 6, level: 70 }),
+    ];
+
+    render(<MainScreen />);
+
+    const peak = (id: string) =>
+      document
+        .querySelector(`[data-testid="channel-strip"][data-channel-id="${id}"] [data-testid="channel-peak"]`)!
+        .getAttribute('data-peak');
+    await waitFor(() => expect(peak('c')).toBe('70'));
+    expect(peak('b')).toBe('30');
+  });
+
+  /** Verifies: REQ-SEC-006 */
+  it('3 人のルームで 1 人のアプリが暗号化できないとき、誰との音声が暗号化されていないかを知らせること', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      link('b', 'connected', { up: 4, down: 6 }),
+      link('c', 'connected', { up: 4, down: 6, encryption: 'unencrypted' }),
+    ];
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText(/Audio with Ben is not encrypted/)).toBeInTheDocument();
+  });
+});
+
+describe('MainScreen の新しい版の知らせ', () => {
+  /** Verifies: REQ-UPD-021 */
+  it('自分で入れ替えられない配布形態が新しい版を見つけているとき、その版を入れ直すよう知らせること', async () => {
+    newerRelease = '1.2.3';
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText(/A new version, 1\.2\.3, is out/)).toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-UPD-021 */
+  it('起動のあとで新しい版が見つかったとき、知らせが出ること', async () => {
+    render(<MainScreen />);
+    await waitFor(() => expect(callsTo('update_notice_get')).toHaveLength(1));
+
+    act(() => listeners.get('update:available')!({ payload: '1.2.3' }));
+
+    expect(await screen.findByText(/A new version, 1\.2\.3, is out/)).toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-UPD-021 */
+  it('新しい版が見つかっていないとき、知らせは出さないこと', async () => {
+    render(<MainScreen />);
+
+    await waitFor(() => expect(callsTo('update_notice_get')).toHaveLength(1));
+    expect(screen.queryByText(/is out/)).not.toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-UPD-021 */
+  it('手伝っている画面のとき、新しい版を尋ねないこと', async () => {
+    newerRelease = '1.2.3';
+
+    render(<MainScreen helper={{ name: 'Aki' }} />);
+
+    await waitFor(() => expect(callsTo('session_get').length).toBeGreaterThan(0));
+    expect(callsTo('update_notice_get')).toHaveLength(0);
+    expect(screen.queryByText(/is out/)).not.toBeInTheDocument();
   });
 });
 
