@@ -162,7 +162,9 @@ export interface SessionSnapshot {
   /** Getting the signaling connection back after it dropped in a room */
   signaling_reconnect: "idle" | "reconnecting" | "failed";
   signaling_reconnect_error: string | null;
-  /** The participant the audio goes to, if it does */
+  /** The participants there is an audio link to, in the order the links were opened */
+  streaming_peer_ids: string[];
+  /** The first of `streaming_peer_ids`: in a room of two, the participant the audio goes to */
   streaming_peer_id: string | null;
 }
 
@@ -474,12 +476,39 @@ export interface PeerAudioInfo {
   channel_count: number;
 }
 
+/** The audio link to one participant */
+export interface PeerLinkStatus {
+  /** The participant's id in the room */
+  peer_id: string;
+  /**
+   * Connection state (ADR-022): "connecting" | "checkingconnectivity" |
+   * "connected" | "reconnecting" | "failed"
+   */
+  connection_state: string | null;
+  /** Why the link failed, when connection_state is "failed" and the reason is known */
+  connection_error: string | null;
+  /** Network statistics, once the link is up */
+  network: NetworkStats | null;
+  /** Detailed latency breakdown, once the link is up */
+  latency: DetailedLatency | null;
+  /** Their audio configuration (ADR-013) */
+  peer_audio: PeerAudioInfo | null;
+  /** Level of what is played of them, after their fader (0-100) */
+  level: number;
+}
+
 /**
  * Streaming status information
+ *
+ * `peers` has the audio link to each participant. The screen draws from it.
+ * `network`, `latency`, `peer_audio`, `connection_state` and
+ * `connection_error` are those of one link (the one doing best), which in a
+ * room of two is the link to the other participant.
  */
 export interface StreamingStatus {
   is_active: boolean;
-  remote_addr: string | null;
+  /** The audio link to each participant there is one to, in the order the links were opened */
+  peers: PeerLinkStatus[];
   /** Whether microphone is muted */
   is_muted: boolean;
   /** Whether the user hears their own input directly */
@@ -496,12 +525,7 @@ export interface StreamingStatus {
   audio_quality: AudioQuality | null;
   /** Peer's audio configuration (ADR-013) */
   peer_audio: PeerAudioInfo | null;
-  /**
-   * Connection state (ADR-022). "connected" | "reconnecting" | "failed" | ...
-   *
-   * The UI shows reconnection progress from this and asks whether to retry once
-   * it reads "failed".
-   */
+  /** Connection state (ADR-022). "connected" | "reconnecting" | "failed" | ... */
   connection_state: string | null;
   /** Why the connection failed, when connection_state is "failed" */
   connection_error: string | null;
@@ -530,9 +554,10 @@ export interface DeviceProblem {
 }
 
 /**
- * Retry the connection after automatic recovery gave up (REQ-CON-110)
+ * Retry every link automatic recovery gave up on (REQ-CON-110)
  *
- * Backs the "reconnect?" prompt shown when `connection_state` reads "failed".
+ * Backs the "reconnect?" prompt shown when a link's `connection_state` reads
+ * "failed".
  */
 export async function streamingReconnect(): Promise<void> {
   return invoke("streaming_reconnect");

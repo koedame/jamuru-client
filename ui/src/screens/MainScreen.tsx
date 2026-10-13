@@ -61,11 +61,16 @@ import {
   configGetEffectiveServerUrl,
   windowResizeMain,
   type HelpEvent,
-  type NetworkStats,
-  type DetailedLatency,
-  type PeerAudioInfo,
+  type PeerLinkStatus,
   type DeviceProblem,
 } from "../lib/tauri";
+import {
+  linkTrouble,
+  measuredLatency,
+  overallLink,
+  slowestPeerId,
+  worstBandwidthLink,
+} from "../lib/links";
 import { JOIN_WINDOW_SIZE, MIXER_WINDOW_SIZE, JOIN_MIN_SIZE, MIXER_MIN_SIZE } from "../lib/windowSizes";
 
 import "./MainScreen.css";
@@ -105,10 +110,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const [serverUrl, setServerUrl] = useState("");
   const previousPhase = useRef<SessionSnapshot["phase"] | null>(null);
   const [inviteCode, setInviteCode] = useState("");
-  const [detailedLatency, setDetailedLatency] = useState<DetailedLatency | null>(null);
-  const [networkStats, setNetworkStats] = useState<NetworkStats | null>(null);
-  const [connectionState, setConnectionState] = useState<string | null>(null);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  // The audio link to each participant there is one to. Everything the screen
+  // shows of a connection - its state, latency, quality - is one of these.
+  const [links, setLinks] = useState<PeerLinkStatus[]>([]);
   const [deviceProblems, setDeviceProblems] = useState<DeviceProblem[]>([]);
   // Last bandwidth band we warned about, so the toast appears on the edge rather
   // than on every 100ms poll.
@@ -119,7 +123,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const [delayNoticeVisible, setDelayNoticeVisible] = useState(false);
   const [inputLevel, setInputLevel] = useState(0);
   const [outputLevel, setOutputLevel] = useState(0);
-  const [peerAudio, setPeerAudio] = useState<PeerAudioInfo | null>(null);
   const [localSampleRate, setLocalSampleRate] = useState<number>(48000);
   const [localChannelCount, setLocalChannelCount] = useState<number>(2);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
@@ -387,25 +390,37 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   );
   useWindowEvent<HelpEvent>(SESSION_SETTINGS_HELP, handleSettingsHelpEvent);
 
-  // Footer indicator inputs. The quality band comes from the core library
-  // (REQ-LAT-121); nothing here re-derives it from RTT and loss.
+  // Footer indicator inputs: the room as one, which is doing as well as its
+  // worst link. The quality band comes from the core library (REQ-LAT-121);
+  // nothing here re-derives it from RTT and loss.
+  const overall = useMemo(() => overallLink(links), [links]);
   const indicatorStatus: ConnectionStatus = useMemo(() => {
-    if (connectionState === "failed") return "error";
-    if (connectionState === "reconnecting") return "unstable";
+    if (overall.trouble !== null) return overall.trouble;
     if (phase === "connected") return "connected";
     if (phase === "connecting_server") return "connecting";
     return "disconnected";
-  }, [connectionState, phase]);
+  }, [overall.trouble, phase]);
+
+  // The names of the participants `of` are the links to, for a message about them
+  const namesOf = useCallback(
+    (of: PeerLinkStatus[]) =>
+      of
+        .map((link) => participants.find((p) => p.id === link.peer_id)?.name)
+        .filter((name): name is string => name !== undefined)
+        .join(t("session.names.separator")),
+    [participants, t]
+  );
 
   // Device input/output latency, taken from the breakdown rather than recomputed
-  // (REQ-LAT-122).
+  // (REQ-LAT-122). They are this machine's, so any link's breakdown has them.
   const deviceLatency = useMemo(() => {
-    if (!detailedLatency) return null;
-    const capture = detailedLatency.upstream.find((c) => c.name.includes("Capture"));
-    const playback = detailedLatency.downstream.find((c) => c.name.includes("Playback"));
+    const breakdown = links.find((link) => link.latency !== null)?.latency;
+    if (!breakdown) return null;
+    const capture = breakdown.upstream.find((c) => c.name.includes("Capture"));
+    const playback = breakdown.downstream.find((c) => c.name.includes("Playback"));
     if (!capture || !playback) return null;
     return { input: capture.ms, output: playback.ms };
-  }, [detailedLatency]);
+  }, [links]);
 
   // Bandwidth warning. Bitrate adaptation is out of scope (ADR-022), so a narrow
   // link is reported rather than worked around.
@@ -413,34 +428,56 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // "no_signal" (zero bytes in the last interval) is reported separately from
   // "insufficient": no packets arriving at all is a dead connection, not a
   // narrow link, and must not be worded as a bandwidth problem (REQ-LAT-127).
+  //
+  // Each link has its own reading. The worst one is what is said; with several
+  // participants, whose packets are not arriving is said too.
+  const worstBandwidth = useMemo(() => worstBandwidthLink(links), [links]);
   const bandwidthWarning = useMemo(() => {
-    const status = networkStats?.bandwidth_status;
+    const status = worstBandwidth?.network?.bandwidth_status;
     if (!status || status === "sufficient") return null;
     if (status === "no_signal") {
-      return t("session.bandwidth.noSignal");
+      const silent = links.filter((link) => link.network?.bandwidth_status === "no_signal");
+      return participants.length > 1
+        ? t("session.bandwidth.noSignalFrom", { names: namesOf(silent) })
+        : t("session.bandwidth.noSignal");
     }
-    const requiredMbps = ((networkStats?.required_bps ?? 0) / 1_000_000).toFixed(1);
+    const requiredMbps = ((worstBandwidth?.network?.required_bps ?? 0) / 1_000_000).toFixed(1);
     if (status === "insufficient") {
       return t("session.bandwidth.insufficient", { required: requiredMbps });
     }
     return t("session.bandwidth.marginal");
-  }, [networkStats, t]);
+  }, [worstBandwidth, links, participants.length, namesOf, t]);
 
-  // The peer's app is older than the encryption, so what is said and played between the two is
+  // A peer's app is older than the encryption, so what is said and played between the two is
   // not encrypted. The user is told rather than left to assume it is (REQ-SEC-006).
-  const encryptionWarning =
-    networkStats?.encryption === "unencrypted" ? t("session.unencrypted") : null;
+  const encryptionWarning = useMemo(() => {
+    const unencrypted = links.filter((link) => link.network?.encryption === "unencrypted");
+    if (unencrypted.length === 0) return null;
+    return participants.length > 1
+      ? t("session.unencryptedWith", { names: namesOf(unencrypted) })
+      : t("session.unencrypted");
+  }, [links, participants.length, namesOf, t]);
+
+  // The links automatic recovery gave up on. The person is asked whether to
+  // try again (REQ-CON-110); with several participants, told with whom.
+  const reconnectPrompt = useMemo(() => {
+    const lost = links.filter((link) => link.connection_state === "failed");
+    if (lost.length === 0) return null;
+    return participants.length > 1
+      ? t("session.reconnect.promptWith", { names: namesOf(lost) })
+      : t("session.reconnect.prompt", { reason: lost[0].connection_error ?? "" });
+  }, [links, participants.length, namesOf, t]);
 
   // Warn once per band change rather than on every poll.
   useEffect(() => {
-    const status = networkStats?.bandwidth_status ?? null;
+    const status = worstBandwidth?.network?.bandwidth_status ?? null;
     if (status !== warnedBandwidth) {
       if (status && status !== "sufficient") {
         console.warn(`Bandwidth ${status}: ${bandwidthWarning}`);
       }
       setWarnedBandwidth(status);
     }
-  }, [networkStats, warnedBandwidth, bandwidthWarning]);
+  }, [worstBandwidth, warnedBandwidth, bandwidthWarning]);
 
   useEffect(() => {
     if (delayAdjustments === 0) {
@@ -455,16 +492,12 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // Poll streaming status for latency and audio level when connected
   useEffect(() => {
     if (phase !== "connected") {
-      setDetailedLatency(null);
-      setNetworkStats(null);
-      setConnectionState(null);
-      setConnectionError(null);
+      setLinks([]);
       setDeviceProblems([]);
       setWarnedBandwidth(null);
       setDelayAdjustments(0);
       setInputLevel(0);
       setOutputLevel(0);
-      setPeerAudio(null);
       setIsMonitoring(false);
       return;
     }
@@ -483,18 +516,14 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         // Whether or not a session is active: one that could not open its
         // device never became active
         setDeviceProblems(status.device_problems);
+        // With no session there are no links: the last ones must not stay up
+        setLinks(status.is_active ? status.peers : []);
         if (status.is_active) {
-          setDetailedLatency(status.latency);
-          setNetworkStats(status.network);
-          setConnectionState(status.connection_state);
-          setConnectionError(status.connection_error);
           setDelayAdjustments(status.audio_quality?.delay_adjustments ?? 0);
           setIsLocalMuted(status.is_muted);
           setIsMonitoring(status.is_monitoring);
           setInputLevel(status.input_level);
           setOutputLevel(status.output_level);
-          // Update peer audio info (ADR-013)
-          setPeerAudio(status.peer_audio);
         }
       } catch (e) {
         console.error("Failed to get streaming status:", e);
@@ -638,14 +667,18 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     if (phase === "connected") {
       participants.forEach((peer) => {
         const peerState = mixer?.peers[peer.id] ?? DEFAULT_PEER_STRIP;
+        // Their own audio settings and their own level (ADR-013), from the
+        // link to them
+        const link = links.find((l) => l.peer_id === peer.id);
+        const level = peerState.muted ? 0 : (link?.level ?? 0);
         channels.push({
           id: peer.id,
           name: peer.name,
           type: "remote",
-          sampleRate: peerAudio?.sample_rate ?? 48000,
-          channelCount: peerAudio?.channel_count ?? 2,
-          levelL: peerState.muted ? 0 : outputLevel,
-          levelR: peerState.muted ? 0 : outputLevel,
+          sampleRate: link?.peer_audio?.sample_rate ?? 48000,
+          channelCount: link?.peer_audio?.channel_count ?? 2,
+          levelL: level,
+          levelR: level,
           volume: peerState.volume,
           pan: peerState.pan,
           isMuted: peerState.muted,
@@ -654,7 +687,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     }
 
     return channels;
-  }, [local, isLocalMuted, isMonitoring, peerName, localSampleRate, localChannelCount, inputLevel, phase, participants, mixer, peerAudio, outputLevel]);
+  }, [local, isLocalMuted, isMonitoring, peerName, localSampleRate, localChannelCount, inputLevel, phase, participants, mixer, links]);
 
   // Map the session to ConnectionPanel state
   const getConnectionPanelState = (): ConnectionState => {
@@ -755,8 +788,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     // not invite anyone (ADR-026).
     const roomCode = room?.invite_code ?? "";
     const participantCount = participants.length + 1;
-    const upMs = detailedLatency ? Math.round(detailedLatency.upstream_total_ms) : null;
-    const downMs = detailedLatency ? Math.round(detailedLatency.downstream_total_ms) : null;
+    // Whose audio takes longest to go there and back is marked (REQ-LAT-102)
+    const slowest = slowestPeerId(links);
 
     return (
       <>
@@ -809,8 +842,21 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                     <span className="participant__name">{peerName}</span>
                   </span>
                 </li>
-                {participants.map((participant) => (
-                  <li key={participant.id} className="participant">
+                {participants.map((participant) => {
+                  // The link to them: its latency while it is up, and
+                  // otherwise how it is doing
+                  const link = links.find((l) => l.peer_id === participant.id);
+                  const trouble = linkTrouble(link);
+                  const latency = measuredLatency(link);
+                  const isSlowest = slowest === participant.id;
+                  return (
+                  <li
+                    key={participant.id}
+                    className="participant"
+                    data-testid="participant"
+                    data-peer-id={participant.id}
+                    data-link={trouble ?? "connected"}
+                  >
                     <span className="participant__info">
                       <span className="participant__icon">
                         <UserIcon />
@@ -830,20 +876,37 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                         {t("settingsHelp.offer")}
                       </button>
                     )}
-                    {upMs !== null && downMs !== null && (
-                      <span className="participant__latency">
+                    {trouble !== null && (
+                      <span
+                        className={`participant__link participant__link--${trouble}`}
+                        data-testid="participant-link"
+                      >
+                        {t(`status.${trouble}`)}
+                      </span>
+                    )}
+                    {latency && (
+                      <span
+                        className={
+                          isSlowest
+                            ? "participant__latency participant__latency--highest"
+                            : "participant__latency"
+                        }
+                        data-testid="participant-latency"
+                        title={isSlowest ? t("session.participant.highestLatency") : undefined}
+                      >
                         <span className="participant__latency-item">
                           <span className="participant__latency-arrow">↑</span>
-                          {upMs}ms
+                          {Math.round(latency.upstream_total_ms)}ms
                         </span>
                         <span className="participant__latency-item">
                           <span className="participant__latency-arrow">↓</span>
-                          {downMs}ms
+                          {Math.round(latency.downstream_total_ms)}ms
                         </span>
                       </span>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
 
@@ -889,8 +952,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
           <div className="main-footer__status">
             <ConnectionIndicator
               status={indicatorStatus}
-              quality={networkStats?.quality ?? undefined}
-              latencyMs={networkStats?.rtt_ms ?? undefined}
+              quality={overall.quality}
+              latencyMs={overall.rttMs}
               inputLatencyMs={deviceLatency?.input}
               outputLatencyMs={deviceLatency?.output}
             />
@@ -926,14 +989,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
               />
             </div>
           ))}
-          {connectionState === "failed" && (
+          {reconnectPrompt && (
             <div className="main-footer__warning">
-              <Toast
-                type="error"
-                message={t("session.reconnect.prompt", {
-                  reason: connectionError ?? "",
-                })}
-              />
+              <Toast type="error" message={reconnectPrompt} />
               <button
                 type="button"
                 className="main-footer__reconnect"
