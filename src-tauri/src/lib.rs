@@ -17,6 +17,7 @@ mod e2e_control;
 mod help_link;
 mod logging;
 mod mixer;
+mod peer_mix;
 mod report_problem;
 mod restart;
 mod rpc;
@@ -162,6 +163,7 @@ pub fn run() {
     app.manage(mixer::MixerState::new());
     app.manage(session::SessionState::new());
     app.manage(help_link::HelpLinks::default());
+    app.manage(updater::UpdateNotice::default());
     // What a portal over the relay hears (a helper, and the debug portal of a
     // beta build) comes through this.
     rpc::events::install(app.handle());

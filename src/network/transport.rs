@@ -11,17 +11,22 @@ use tracing::{debug, error, info, trace};
 use crate::protocol::Packet;
 
 use super::error::NetworkError;
+use super::udp_mux::Lane;
 
 /// Bytes a datagram is read into. A packet is the 12-byte header and its
 /// payload: a 256-frame stereo frame of 32-bit samples alone is 2048 bytes.
 /// A datagram that fills the buffer may have been cut short, so it is refused
 /// rather than played with its end missing.
-const RECV_BUFFER_SIZE: usize = 4096;
+pub(super) const RECV_BUFFER_SIZE: usize = 4096;
 
 /// UDP transport for sending and receiving packets
 pub struct UdpTransport {
     socket: Arc<UdpSocket>,
     local_addr: SocketAddr,
+    /// Present when the socket is shared with the transports to other peers
+    /// ([`super::UdpMux`]): what this transport's peer sends arrives here
+    /// instead of being read off the socket.
+    lane: Option<Lane>,
 }
 
 /// Binds a UDP socket with the options this transport needs, without
@@ -75,7 +80,34 @@ impl UdpTransport {
         Ok(Self {
             socket: Arc::new(socket),
             local_addr,
+            lane: None,
         })
+    }
+
+    /// A transport that sends through `socket` and receives through `lane`
+    pub(super) fn sharing(socket: Arc<UdpSocket>, local_addr: SocketAddr, lane: Lane) -> Self {
+        Self {
+            socket,
+            local_addr,
+            lane: Some(lane),
+        }
+    }
+
+    /// Says where the peer sends from, so that a shared socket's datagrams from
+    /// there come to this transport. A transport that has its socket to itself
+    /// receives everything anyway.
+    pub(super) fn expect_peer_at(&self, peer_addrs: &[SocketAddr]) {
+        if let Some(lane) = &self.lane {
+            lane.claim(peer_addrs);
+        }
+    }
+
+    /// Stops taking the peer's datagrams off a shared socket, which ends a
+    /// receive that is waiting for one
+    pub(super) fn release(&self) {
+        if let Some(lane) = &self.lane {
+            lane.release();
+        }
     }
 
     /// Get the local address
@@ -98,23 +130,35 @@ impl UdpTransport {
     }
 
     /// Receive a packet (returns packet and sender address)
+    ///
+    /// `NetworkError::NotConnected` from a transport that shares its socket
+    /// means it no longer takes its peer's datagrams: nothing more will come.
     pub async fn recv_from(&self) -> Result<(Packet, SocketAddr), NetworkError> {
-        let mut buf = vec![0u8; RECV_BUFFER_SIZE];
-        let (len, addr) = self.socket.recv_from(&mut buf).await?;
-        if len == RECV_BUFFER_SIZE {
-            debug!("Dropping a datagram from {addr} that fills the receive buffer");
-            return Err(NetworkError::InvalidPacket);
-        }
-        buf.truncate(len);
+        let (buf, addr) = match &self.lane {
+            Some(lane) => lane.recv().await.ok_or(NetworkError::NotConnected)?,
+            None => {
+                let mut buf = vec![0u8; RECV_BUFFER_SIZE];
+                let (len, addr) = self.socket.recv_from(&mut buf).await?;
+                if len == RECV_BUFFER_SIZE {
+                    debug!("Dropping a datagram from {addr} that fills the receive buffer");
+                    return Err(NetworkError::InvalidPacket);
+                }
+                buf.truncate(len);
+                (buf, addr)
+            }
+        };
 
         let packet = Packet::from_bytes(&buf).ok_or(NetworkError::InvalidPacket)?;
-        trace!("Received {} bytes from {}", len, addr);
+        trace!("Received {} bytes from {}", buf.len(), addr);
 
         Ok((packet, addr))
     }
 
     /// Receive raw bytes (for connectivity probing without packet parsing)
     pub async fn recv_raw(&self) -> Result<(Vec<u8>, SocketAddr), NetworkError> {
+        if let Some(lane) = &self.lane {
+            return lane.recv().await.ok_or(NetworkError::NotConnected);
+        }
         let mut buf = vec![0u8; RECV_BUFFER_SIZE];
         let (len, addr) = self.socket.recv_from(&mut buf).await?;
         buf.truncate(len);
@@ -124,6 +168,9 @@ impl UdpTransport {
 
     /// Receive raw bytes if a datagram is already waiting, without blocking
     pub fn try_recv_raw(&self) -> Option<(Vec<u8>, SocketAddr)> {
+        if let Some(lane) = &self.lane {
+            return lane.try_recv();
+        }
         let mut buf = vec![0u8; RECV_BUFFER_SIZE];
         let (len, addr) = self.socket.try_recv_from(&mut buf).ok()?;
         buf.truncate(len);
@@ -148,6 +195,10 @@ impl UdpTransport {
                             debug!("Receive channel closed, stopping receive loop");
                             break;
                         }
+                    }
+                    Err(NetworkError::NotConnected) => {
+                        debug!("The transport takes no more datagrams, stopping receive loop");
+                        break;
                     }
                     Err(e) => {
                         error!("Receive error: {}", e);
