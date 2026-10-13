@@ -863,19 +863,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                       </span>
                       <span className="participant__name">{participant.name}</span>
                     </span>
-                    {!helping && settingsHelp.canOffer(participant) && (
-                      <button
-                        type="button"
-                        className="participant__help"
-                        data-testid="settings-help-offer"
-                        data-peer-name={participant.name}
-                        onClick={() => settingsHelp.offer(participant.id)}
-                        aria-label={t("settingsHelp.offerLabel", { name: participant.name })}
-                        title={t("settingsHelp.offerLabel", { name: participant.name })}
-                      >
-                        {t("settingsHelp.offer")}
-                      </button>
-                    )}
                     {trouble !== null && (
                       <span
                         className={`participant__link participant__link--${trouble}`}
@@ -908,6 +895,16 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                   );
                 })}
               </ul>
+              {!helping && settingsHelp.canAsk && (
+                <button
+                  type="button"
+                  className="room-sidebar__ask-help"
+                  data-testid="settings-help-ask-open"
+                  onClick={settingsHelp.openAsk}
+                >
+                  {t("settingsHelp.ask.button")}
+                </button>
+              )}
             </div>
 
             <div className="room-sidebar__divider" />

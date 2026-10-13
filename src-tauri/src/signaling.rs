@@ -1160,39 +1160,54 @@ async fn deliver<R: Runtime>(app: &AppHandle<R>, outs: Vec<Out>) {
     }
 }
 
-/// Asks `peer_id` to let this app help with their audio settings.
+/// Asks `peer_id` to help with this app's audio settings.
 #[tauri::command]
-pub async fn settings_help_request(
+pub async fn settings_help_ask(
     conn_id: u32,
     peer_id: String,
     state: tauri::State<'_, SignalingState>,
 ) -> Result<(), String> {
     let peer = Uuid::parse_str(&peer_id).map_err(|e| format!("Invalid peer id: {}", e))?;
     act_on_help(&state, conn_id, |help| {
-        Ok(((), help.request(peer).map_err(|e| e.to_string())?))
+        Ok(((), help.ask(peer).map_err(|e| e.to_string())?))
     })
     .await
 }
 
-/// Answers `peer_id`'s request to help with this app's audio settings - the
-/// one the user was shown. On yes, this app opens its end of the relay under a
-/// number nobody else knows and gives the helper the number; from then on the
-/// helper operates this app through the help portal.
+/// Answers `peer_id`'s ask for help with their audio settings - the one the
+/// user was shown. On yes, `peer_id` is told to open its end of the relay; the
+/// help begins when it has and sends the number.
 #[tauri::command]
 pub async fn settings_help_answer(
     conn_id: u32,
     peer_id: String,
     accept: bool,
+    state: tauri::State<'_, SignalingState>,
+) -> Result<(), String> {
+    let peer = Uuid::parse_str(&peer_id).map_err(|e| format!("Invalid peer id: {}", e))?;
+    act_on_help(&state, conn_id, |help| {
+        let outs = if accept {
+            help.take(peer)
+        } else {
+            help.refuse(peer)
+        };
+        Ok(((), outs.map_err(|e| e.to_string())?))
+    })
+    .await
+}
+
+/// Starts the help with `peer_id`, who said yes to this app's ask: this app
+/// opens its end of the relay under a number nobody else knows and gives the
+/// helper the number; from then on the helper operates this app through the
+/// help portal.
+#[tauri::command]
+pub async fn settings_help_begin(
+    conn_id: u32,
+    peer_id: String,
     app: AppHandle,
     state: tauri::State<'_, SignalingState>,
 ) -> Result<(), String> {
     let peer = Uuid::parse_str(&peer_id).map_err(|e| format!("Invalid peer id: {}", e))?;
-    if !accept {
-        return act_on_help(&state, conn_id, |help| {
-            Ok(((), help.decline(peer).map_err(|e| e.to_string())?))
-        })
-        .await;
-    }
     if !lock_help(&state).is_asked_by(peer) {
         return Err(HelpError::NotActive.to_string());
     }
@@ -1554,11 +1569,7 @@ mod tests {
             .unwrap();
         let app = app_with_connection(conn);
         in_room(&app, me, &[]);
-        lock_help(&app.state::<SignalingState>()).receive(
-            Uuid::new_v4(),
-            "Aki",
-            HelpMessage::Request,
-        );
+        lock_help(&app.state::<SignalingState>()).receive(Uuid::new_v4(), "Aki", HelpMessage::Ask);
 
         let events = poll_until_events(&app).await;
 
@@ -1583,11 +1594,7 @@ mod tests {
             .unwrap();
         let app = app_with_connection(conn);
         in_room(&app, Uuid::new_v4(), &[]);
-        lock_help(&app.state::<SignalingState>()).receive(
-            Uuid::new_v4(),
-            "Aki",
-            HelpMessage::Request,
-        );
+        lock_help(&app.state::<SignalingState>()).receive(Uuid::new_v4(), "Aki", HelpMessage::Ask);
 
         signaling_leave_room(
             1,

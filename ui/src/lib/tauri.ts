@@ -85,25 +85,31 @@ export type HelpRefusal = "device_gone" | "invalid_value" | "unavailable";
  * participant ids.
  */
 export type HelpEvent =
-  | { type: "requested"; peer: string; peer_name: string }
+  | { type: "asked"; peer: string; peer_name: string }
+  | { type: "taken"; peer: string; peer_name: string }
   | { type: "started"; role: HelpRole; peer: string; peer_name: string }
-  | { type: "declined"; peer: string; busy: boolean }
+  | { type: "declined"; role: HelpRole; peer: string; busy: boolean }
   | { type: "ended"; role: HelpRole; peer: string; reason: HelpEndReason };
 
 /** The feature an app announces when it can take part in settings help */
 export const PEER_MESSAGE_FEATURE = "peer_message";
 
-/** Ask `peerId` to let this app help with their audio settings */
-export async function settingsHelpRequest(connId: number, peerId: string): Promise<void> {
-  return invoke("settings_help_request", { connId, peerId });
+/** Ask `peerId` to help with this app's audio settings */
+export async function settingsHelpAsk(connId: number, peerId: string): Promise<void> {
+  return invoke("settings_help_ask", { connId, peerId });
 }
 
 /**
- * Answer `peerId`'s request to help with this app's settings - the one the user
- * was shown. Yes lets them operate this app until either stops the help.
+ * Answer `peerId`'s ask for help with their settings - the one the user was
+ * shown. Yes tells them to start; no tells them it is not a good time.
  */
 export async function settingsHelpAnswer(connId: number, peerId: string, accept: boolean): Promise<void> {
   return invoke("settings_help_answer", { connId, peerId, accept });
+}
+
+/** Start the help with `peerId`, who said yes to this app's ask */
+export async function settingsHelpBegin(connId: number, peerId: string): Promise<void> {
+  return invoke("settings_help_begin", { connId, peerId });
 }
 
 /** Stop helping ("helper") or being helped ("helped") */

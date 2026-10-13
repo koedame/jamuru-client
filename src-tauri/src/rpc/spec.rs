@@ -124,8 +124,9 @@ app_commands! {
     [Access::NO_HELP] "チャットのリアクションを外す" crate::signaling::signaling_remove_reaction;
     [Access::NO_HELP] "チャットのリアクションを付け外しする" crate::signaling::signaling_toggle_reaction;
     // Starting and stopping a help is the person's own (ADR-044 §3).
-    [Access::NO_HELP] "設定の手伝いを申し出る" crate::signaling::settings_help_request;
-    [Access::NO_HELP] "設定の手伝いの申し出に答える" crate::signaling::settings_help_answer;
+    [Access::NO_HELP] "設定の手伝いを頼む" crate::signaling::settings_help_ask;
+    [Access::NO_HELP] "設定の手伝いの依頼に答える" crate::signaling::settings_help_answer;
+    [Access::NO_HELP] "設定の手伝いを始める" crate::signaling::settings_help_begin;
     [Access::NO_HELP] "設定の手伝いを止める" crate::signaling::settings_help_stop;
     // The window a helper works in reaches the helped app's methods through
     // this; a helped app's own help portal may not start a help of its own.
@@ -244,7 +245,7 @@ mod tests {
 
 設定の手伝い（[ADR-044](../adr/ADR-044-portals-and-permissions.md)）で、手伝う人が手伝われる人のアプリに対してできる操作の一覧。
 
-手伝いは、手伝われる人が申し出に**初めに 1 回**許可すると始まる。許可のあとは、手伝う人の手元に相手のアプリと同じ画面が
+手伝いは、手伝われる人が相手を選んで頼み、頼まれた人が「手伝う」と答えると始まる。始まったあとは、手伝う人の手元に相手のアプリと同じ画面が
 別のウィンドウで開き、そこでの操作が相手のアプリに届く。1 つ 1 つの操作は聞かれない。かわりに、届いた操作を相手のアプリが
 1 件ずつ、この表で判定する。表に無い操作は呼べない。手伝いは、手伝われる人がいつでも止められる。止める・どちらかが退室する・
 接続が切れるのどれかで終わり、アプリを起動し直しても続かない。
@@ -265,7 +266,7 @@ mod tests {
 ## できない操作
 
 チャットの送信・リアクション、退室とルームの移動、接続先と利用状況の送信の設定、
-ウィンドウの操作、ほかの人への手伝いの申し出は、手伝う人にはできない。診断ログや画面を読み書きする操作は、
+ウィンドウの操作、ほかの人への手伝いの依頼は、手伝う人にはできない。診断ログや画面を読み書きする操作は、
 この手伝いには無い。
 
 ";
@@ -386,8 +387,9 @@ mod tests {
             "session_reconnect",
             "config_set_server_url",
             "config_set_usage_reporting",
-            "settings_help_request",
+            "settings_help_ask",
             "settings_help_answer",
+            "settings_help_begin",
             "settings_help_stop",
             "help_call",
             "help_window_info",
