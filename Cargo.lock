@@ -223,11 +223,13 @@ dependencies = [
 
 [[package]]
 name = "azo"
-version = "0.2.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0bf714b0fd33874fe9f2252ffff0f95c21d4911c91ec5f868c585de8b6e50a4"
+checksum = "b531038841e83d5acb2a010560f08f36ecb36da691002700a711a314366b965c"
 dependencies = [
  "azo-sys",
+ "oneshot",
+ "tap",
  "windows-bindgen",
  "windows-core 0.100.0",
  "windows-registry",
@@ -235,9 +237,9 @@ dependencies = [
 
 [[package]]
 name = "azo-sys"
-version = "0.2.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4769a6c402537a7c7269cb7aad90be55a1a4161330c1ac2dde8ffa982b26241"
+checksum = "5cef68a43356bcd2d7e4e0295e9ed5c6bf35940833db67d76d66476b04cf9fc6"
 dependencies = [
  "bitflags",
  "windows-core 0.100.0",
@@ -1881,6 +1883,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "oneshot"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe21416a02c693fb9f980befcb230ecc70b0b3d1cc4abf88b9675c4c1457f0c"
+
+[[package]]
 name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2695,6 +2703,12 @@ dependencies = [
  "objc2-io-kit",
  "windows",
 ]
+
+[[package]]
+name = "tap"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tempfile"
