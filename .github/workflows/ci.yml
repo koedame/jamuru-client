@@ -64,6 +64,63 @@ jobs:
         working-directory: tests/e2e
         run: cargo check --all-targets
 
+  # Everything under cfg(windows) (the ASIO backend on azo, the windows crate in
+  # src-tauri) is skipped by the ubuntu jobs, so a dependency bump that breaks
+  # it stays green there. Cross-checking against the GNU target compiles it
+  # without a Windows runner; mingw provides the linker the build scripts need.
+  check-windows:
+    name: Check (Windows)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install mingw-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-gnu
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-
+
+      - name: Cache cargo git
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/git
+          key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-git-
+
+      - name: Cache cargo target
+        uses: actions/cache@v6
+        with:
+          path: target
+          key: cargo-target-windows-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-target-windows-
+
+      - name: Run cargo check (Windows)
+        run: cargo check --all-targets --target x86_64-pc-windows-gnu
+
+      # tauri::generate_context! needs frontendDist to exist; a placeholder is
+      # enough because only compilation is checked here.
+      - name: Run cargo check (src-tauri, Windows)
+        working-directory: src-tauri
+        run: |
+          mkdir -p ../ui/dist
+          cargo check --target x86_64-pc-windows-gnu
+
   test:
     name: Test
     runs-on: ubuntu-latest
