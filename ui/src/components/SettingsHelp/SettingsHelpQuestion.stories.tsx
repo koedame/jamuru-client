@@ -23,13 +23,14 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Someone asks to help with the settings: the one question the helped side answers */
+/** Someone asks for help with their settings: the question the helper answers */
 export const Default: Story = {
   args: {
     open: true,
-    message: "Aki wants to help with your audio settings",
-    allowLabel: "Allow",
-    declineLabel: "Decline",
+    message: "Aki has asked for help with settings",
+    detail: "You'll look at Aki's jamuru settings together.",
+    allowLabel: "Help",
+    declineLabel: "Not now",
     onAllow: () => {},
     onDecline: () => {},
   },
@@ -39,9 +40,10 @@ export const Default: Story = {
 export const Japanese: Story = {
   args: {
     open: true,
-    message: "Akiさんが音声の設定を手伝いたいそうです",
-    allowLabel: "許可する",
-    declineLabel: "断る",
+    message: "あきさんから設定依頼が届きました",
+    detail: "あきさんの jamuru の設定を、一緒に見て手伝います。",
+    allowLabel: "手伝う",
+    declineLabel: "今はできない",
     onAllow: () => {},
     onDecline: () => {},
   },
@@ -51,9 +53,9 @@ export const Japanese: Story = {
 export const LongName: Story = {
   args: {
     open: true,
-    message: "Aki Takahashi-Montgomery the Third of Osaka wants to help with your audio settings",
-    allowLabel: "Allow",
-    declineLabel: "Decline",
+    message: "Aki Takahashi-Montgomery the Third of Osaka has asked for help with settings",
+    allowLabel: "Help",
+    declineLabel: "Not now",
     onAllow: () => {},
     onDecline: () => {},
   },
