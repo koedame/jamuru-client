@@ -152,6 +152,9 @@ jobs:
           # source. A beta (a tag with a `-`) dials the staging server, so a
           # verification build never reaches production users or their data.
           JAMJAM_SERVER_URL: ${{ contains(needs.prepare.outputs.tag, '-') && secrets.JAMJAM_SERVER_URL_BETA || secrets.JAMJAM_SERVER_URL }}
+          # Puts the Alt+Shift element picker into the screen of a beta only
+          # (REQ-RMT-033). The screen is built by this step's beforeBuildCommand.
+          VITE_ELEMENT_GRAB: ${{ contains(needs.prepare.outputs.tag, '-') && 'true' || '' }}
           # Signs the update bundles (`createUpdaterArtifacts`); the apps
           # check them against the public key in `tauri.conf.json` (ADR-041).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -208,6 +211,10 @@ jobs:
       - name: Check remote debugging is in a beta and only in a beta
         shell: bash
         run: scripts/check-debug-remote.sh "src-tauri/target/${{ matrix.target }}/release/jamuru-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" ${{ contains(needs.prepare.outputs.tag, '-') && 'present' || 'absent' }}
+
+      - name: Check the element picker is in a beta and only in a beta
+        shell: bash
+        run: scripts/check-element-grab.sh ui/dist ${{ contains(needs.prepare.outputs.tag, '-') && 'present' || 'absent' }}
 
       # Both macOS jobs build `jamuru.app.tar.gz`. A release keeps one file per
       # name, so the architecture goes into it.

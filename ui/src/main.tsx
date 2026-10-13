@@ -25,6 +25,14 @@ import "./styles/tokens.css";
 // helped app's state, so it is connected to that app's backend before anything mounts.
 if (window.location.hash === HELP_HASH) setBackend(helperBackend);
 
+// Alt+Shift element picker for talking to an LLM about the screen. Only the
+// development server and a beta build (VITE_ELEMENT_GRAB, set when it is built)
+// have it: both conditions are fixed at build time, so a release build drops
+// the import and the module with it.
+if (import.meta.env.DEV || import.meta.env.VITE_ELEMENT_GRAB === "true") {
+  void import("./lib/elementGrab").then((m) => m.installElementGrab());
+}
+
 // Check if catalog mode is enabled via environment variable
 const isCatalogMode = import.meta.env.VITE_CATALOG_MODE === "true";
 

@@ -798,5 +798,11 @@
       "error": "Could not save your agreement: {{message}}",
       "decline": "If you do not agree, close this window. Nothing is sent to the server until you agree."
     }
+  },
+  "devtools": {
+    "elementGrab": {
+      "copied": "Copied the element for an LLM",
+      "failed": "Could not copy the element"
+    }
   }
 }
