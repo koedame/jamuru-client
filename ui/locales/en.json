@@ -801,8 +801,8 @@
   },
   "devtools": {
     "elementGrab": {
-      "copied": "Copied the element for an LLM",
-      "failed": "Could not copy the element"
+      "copied": "Copied the debug info",
+      "failed": "Could not copy the debug info"
     }
   }
 }
