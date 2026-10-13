@@ -13,17 +13,18 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
+use jamjam::audio::{
+    bounded, list_input_devices, list_output_devices, mono_to_wire, AudioConfig, AudioDevice,
+    AudioEngine, AudioError, AudioPreset, BurstProbe, BurstSignal, DeviceId, GainRamp,
+    LocalMonitor, PeerRateChange, PlayoutStats, ReceivePath, RoundTripReport, ADAPT_INTERVAL,
+    LIST_TIMEOUT, WIRE_CHANNELS,
+};
 #[cfg(target_os = "windows")]
 use jamjam::audio::{driver_name_of, is_asio_id, AsioDuplex, OutputRoute, OPEN_TIMEOUT};
-use jamjam::audio::{
-    list_input_devices, list_output_devices, mono_to_wire, AudioConfig, AudioEngine, AudioPreset,
-    BurstProbe, BurstSignal, DeviceId, GainRamp, LocalMonitor, PeerRateChange, PlayoutStats,
-    ReceivePath, RoundTripReport, ADAPT_INTERVAL, WIRE_CHANNELS,
-};
 use jamjam::network::{
-    candidates_to_addrs, gather_candidates, AudioEncodingConfig, Connection, ConnectionState,
-    ConnectionStats, LatencyBreakdown, LinkIdentity, LocalLatencyInfo, PeerInfo, PeerLatencyInfo,
-    SignalingClient, SignalingConnection, SignalingMessage,
+    audio_packet_duration_ms, candidates_to_addrs, gather_candidates, AudioEncodingConfig,
+    Connection, ConnectionState, ConnectionStats, LatencyBreakdown, LinkIdentity, LocalLatencyInfo,
+    PeerInfo, PeerLatencyInfo, SignalingClient, SignalingConnection, SignalingMessage,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
@@ -220,9 +221,27 @@ fn setup_logging(verbose: bool) {
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 }
 
+/// Lists devices on a thread of its own and gives up at `timeout`, so a driver
+/// that has hung does not hang the command with it (REQ-AUD-123).
+fn listed_within(
+    what: &str,
+    timeout: Duration,
+    list: fn() -> Result<Vec<AudioDevice>, AudioError>,
+) -> Result<Vec<AudioDevice>, AudioError> {
+    bounded(what, timeout, list)?
+}
+
+fn list_input_devices_bounded() -> Result<Vec<AudioDevice>, AudioError> {
+    listed_within("input device listing", LIST_TIMEOUT, list_input_devices)
+}
+
+fn list_output_devices_bounded() -> Result<Vec<AudioDevice>, AudioError> {
+    listed_within("output device listing", LIST_TIMEOUT, list_output_devices)
+}
+
 fn list_devices() {
     println!("Input devices:");
-    match list_input_devices() {
+    match list_input_devices_bounded() {
         Ok(devices) => {
             for device in devices {
                 let default_marker = if device.is_default { " (default)" } else { "" };
@@ -235,7 +254,7 @@ fn list_devices() {
     }
 
     println!("\nOutput devices:");
-    match list_output_devices() {
+    match list_output_devices_bounded() {
         Ok(devices) => {
             for device in devices {
                 let default_marker = if device.is_default { " (default)" } else { "" };
@@ -323,11 +342,11 @@ fn set_devices(input: Option<String>, output: Option<String>) -> Result<()> {
     let mut config = jamjam::config::load_config().unwrap_or_default();
 
     if let Some(name) = input {
-        let available = list_input_devices().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let available = list_input_devices_bounded().map_err(|e| anyhow::anyhow!("{}", e))?;
         config.input_device_id = resolve_device_choice(&name, &available, "input")?;
     }
     if let Some(name) = output {
-        let available = list_output_devices().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let available = list_output_devices_bounded().map_err(|e| anyhow::anyhow!("{}", e))?;
         config.output_device_id = resolve_device_choice(&name, &available, "output")?;
     }
 
@@ -1084,6 +1103,9 @@ struct AudioSession {
     connection: Arc<tokio::sync::Mutex<Connection>>,
     receive: ReceivePath,
     local_info: LocalLatencyInfo,
+    /// Set once a connect has finished: what the capture queued while it ran
+    /// is old by then.
+    connected_since_queued: Arc<AtomicBool>,
     send_task: tokio::task::JoinHandle<()>,
     /// Lets the play-out delay follow the link, as the app does (ADR-031).
     adapt_task: tokio::task::JoinHandle<()>,
@@ -1179,6 +1201,8 @@ impl AudioSession {
         let sample_rate = settings.sample_rate;
         let connection = Arc::new(tokio::sync::Mutex::new(connection));
         let connection_for_send = connection.clone();
+        let connected_since_queued = Arc::new(AtomicBool::new(false));
+        let connected_for_send = connected_since_queued.clone();
         let send_task = tokio::spawn(async move {
             let mut stereo = Vec::new();
             // Muting fades the microphone out (and unmuting in) rather than
@@ -1197,6 +1221,12 @@ impl AudioSession {
                 mono_to_wire(&samples, 1.0, 0, &mut stereo);
                 mute_ramp.apply(&mut stereo, WIRE_CHANNELS, mute_target);
                 let conn = connection_for_send.lock().await;
+                // Connecting holds the lock, so audio captured meanwhile
+                // waited in the channel. Sent now, it would reach the peer as
+                // a burst of old audio ahead of the live frames.
+                if drop_queued_after_connect(&connected_for_send, &mut rx_capture) {
+                    continue;
+                }
                 if conn.is_connected() {
                     if let Some(probe) = &probe {
                         probe.note_sent(&stereo);
@@ -1225,12 +1255,13 @@ impl AudioSession {
         let codec = format!("{:?}", codec_type).to_lowercase();
         let mut local_info =
             LocalLatencyInfo::from_audio_config(settings.frame_size, settings.sample_rate, &codec);
-        local_info.set_jitter_buffer_ms(preset.jitter_buffer_frames() as f32 * frame_ms(settings));
+        local_info.set_jitter_buffer_ms(jitter_buffer_ms(preset, settings));
 
         Ok(Self {
             connection,
             receive,
             local_info,
+            connected_since_queued,
             send_task,
             adapt_task,
             monitor,
@@ -1256,11 +1287,11 @@ impl AudioSession {
 
     /// Connects to the first of `addrs` that answers.
     async fn connect(&self, addrs: &[SocketAddr]) -> Result<()> {
-        self.connection
-            .lock()
-            .await
-            .connect_with_candidates(addrs)
-            .await?;
+        {
+            let mut connection = self.connection.lock().await;
+            connection.connect_with_candidates(addrs).await?;
+            self.connected_since_queued.store(true, Ordering::SeqCst);
+        }
         self.announce().await;
         Ok(())
     }
@@ -1338,6 +1369,21 @@ impl AudioSession {
     }
 }
 
+/// Throws away what the capture queued while a connect held the connection,
+/// once, after it has finished. Whether it did is `connected` (taken here).
+/// Yields whether the queue was dropped, in which case the frame in hand is
+/// old as well.
+fn drop_queued_after_connect<T>(
+    connected: &AtomicBool,
+    queue: &mut tokio::sync::mpsc::Receiver<T>,
+) -> bool {
+    if !connected.swap(false, Ordering::SeqCst) {
+        return false;
+    }
+    while queue.try_recv().is_ok() {}
+    true
+}
+
 /// What a session looked like when it ended.
 struct SessionOutcome {
     stats: ConnectionStats,
@@ -1346,8 +1392,12 @@ struct SessionOutcome {
     delay_frames: u32,
 }
 
-fn frame_ms(settings: &AudioSettings) -> f32 {
-    settings.frame_size as f32 / settings.sample_rate as f32 * 1000.0
+/// The play-out delay told to the peer, in ms. The buffer counts packets, and
+/// a frame too big for one packet goes as several, so its depth lasts packets
+/// long, not frames long (ADR-070).
+fn jitter_buffer_ms(preset: &AudioPreset, settings: &AudioSettings) -> f32 {
+    preset.jitter_buffer_frames() as f32
+        * audio_packet_duration_ms(settings.frame_size, WIRE_CHANNELS, settings.sample_rate)
 }
 
 /// Peak level of `--input-tone`, below full scale so the centred stereo mix
@@ -1399,6 +1449,8 @@ impl AudioIo {
     where
         F: FnMut(&[f32], u32) + Send + 'static,
     {
+        // The CLI has no input or output channel choice: the app's pickers
+        // (`set_capture_picks` / `set_playback_route`) are left out on purpose.
         let config = |channels: usize| AudioConfig {
             sample_rate: settings.sample_rate,
             channels: channels as u16,
@@ -1844,5 +1896,87 @@ mod tests {
             handle_input_line("/monitor", &muted, None),
             Input::Handled
         ));
+    }
+
+    /// Verifies: REQ-CLI-008
+    #[test]
+    fn listing_devices_with_a_hung_driver_gives_up_at_the_timeout() {
+        fn hung() -> Result<Vec<AudioDevice>, AudioError> {
+            std::thread::sleep(Duration::from_secs(3));
+            Ok(Vec::new())
+        }
+
+        let started = Instant::now();
+        let outcome = listed_within("test listing", Duration::from_millis(100), hung);
+
+        assert!(
+            matches!(outcome, Err(AudioError::DeviceUnresponsive(_))),
+            "a listing that does not return should end as unresponsive, got {outcome:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the caller should not have waited for the driver"
+        );
+    }
+
+    /// Verifies: REQ-CLI-009
+    #[test]
+    fn audio_queued_while_connecting_is_dropped_once_connected() {
+        let connected = AtomicBool::new(false);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<u32>(64);
+        for frame in 0..10 {
+            tx.try_send(frame).unwrap();
+        }
+
+        assert!(
+            !drop_queued_after_connect(&connected, &mut rx),
+            "nothing is dropped while no connect has finished"
+        );
+        assert_eq!(rx.len(), 10, "the queue should be untouched until then");
+
+        connected.store(true, Ordering::SeqCst);
+        assert!(
+            drop_queued_after_connect(&connected, &mut rx),
+            "the frame in hand is old too, so the caller must skip it"
+        );
+        assert_eq!(rx.len(), 0, "the audio queued meanwhile should be gone");
+
+        tx.try_send(99).unwrap();
+        assert!(
+            !drop_queued_after_connect(&connected, &mut rx),
+            "only the first frame after a connect drops what was queued"
+        );
+        assert_eq!(rx.try_recv().ok(), Some(99), "live audio should be kept");
+    }
+
+    /// Verifies: REQ-CLI-010
+    #[test]
+    fn jitter_buffer_told_to_the_peer_counts_packets_not_frames() {
+        let settings = |frame_size| AudioSettings {
+            sample_rate: 48_000,
+            frame_size,
+            input_device: None,
+            output_device: None,
+            preset: AudioPreset::HighQuality,
+            input_tone: None,
+            input_bursts: false,
+            output_file: None,
+            monitor: false,
+        };
+        let depth = AudioPreset::HighQuality.jitter_buffer_frames() as f32;
+
+        // 256 frames go as two packets of 128: a packet lasts 2.667 ms, not
+        // the frame's 5.333 ms.
+        let big = jitter_buffer_ms(&AudioPreset::HighQuality, &settings(256));
+        assert!(
+            (big - depth * 128.0 / 48.0).abs() < 0.01,
+            "256 frames: got {big} ms"
+        );
+
+        let small = jitter_buffer_ms(&AudioPreset::HighQuality, &settings(64));
+        assert!(
+            (small - depth * 64.0 / 48.0).abs() < 0.01,
+            "64 frames: got {small} ms"
+        );
     }
 }
