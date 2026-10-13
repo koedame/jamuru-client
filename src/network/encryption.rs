@@ -144,6 +144,10 @@ struct PeerCheck {
     /// Our key exchange payload, signed once: it is sent again every few hundred
     /// milliseconds until the peer has answered
     payload: Vec<u8>,
+    /// The last payload that passed [`PeerCheck::open`] and the key in it. The peer sends
+    /// its half again until we have shown we have it, byte for byte the same (the
+    /// signature is deterministic), so a repeat is known without checking it again.
+    verified: Mutex<Option<(Vec<u8>, [u8; 32])>>,
 }
 
 /// What a signature of a key exchange covers: who sent it, who it is for and the ephemeral
@@ -192,12 +196,18 @@ impl PeerCheck {
             theirs,
             ephemeral: *ephemeral,
             payload,
+            verified: Mutex::new(None),
         }
     }
 
     /// The peer's ephemeral key, if `payload` is a key exchange the peer signed for us: for
     /// our identity, or for our ephemeral key when the peer could not tell who we are
     fn open(&self, payload: &[u8]) -> Option<[u8; 32]> {
+        if let Some((known, ephemeral)) = &*self.verified.lock() {
+            if known == payload {
+                return Some(*ephemeral);
+            }
+        }
         if payload.len() != KEY_EXCHANGE_LEN + SIGNATURE_LEN
             || payload[0] != KEY_EXCHANGE
             || payload[1] != SIGNED_SUITE
@@ -212,9 +222,12 @@ impl PeerCheck {
             &ephemeral,
         );
         let for_our_key = answer_signed_text(self.theirs.as_bytes(), &self.ephemeral, &ephemeral);
-        (self.theirs.verify(&for_our_identity, &signature).is_ok()
-            || self.theirs.verify(&for_our_key, &signature).is_ok())
-        .then_some(ephemeral)
+        let signed = self.theirs.verify(&for_our_identity, &signature).is_ok()
+            || self.theirs.verify(&for_our_key, &signature).is_ok();
+        if signed {
+            *self.verified.lock() = Some((payload.to_vec(), ephemeral));
+        }
+        signed.then_some(ephemeral)
     }
 }
 
@@ -1205,6 +1218,25 @@ mod tests {
 
         assert!(matches!(a.open(packet), Opened::Dropped(_)));
         assert!(!a.has_keys());
+    }
+
+    /// Verifies: REQ-SEC-007
+    #[test]
+    fn when_a_signed_key_exchange_is_repeated_it_is_taken_again_and_one_altered_after_it_is_not() {
+        let (_, _, a, b) = verified_links();
+        assert!(matches!(
+            a.open(b.key_exchange_packet()),
+            Opened::KeyExchange { answer: true }
+        ));
+        assert!(matches!(
+            a.open(b.key_exchange_packet()),
+            Opened::KeyExchange { answer: false }
+        ));
+
+        let mut altered = b.key_exchange_packet();
+        let last = altered.payload.len() - 1;
+        altered.payload[last] ^= 1;
+        assert!(matches!(a.open(altered), Opened::Dropped(_)));
     }
 
     /// Verifies: REQ-SEC-007
