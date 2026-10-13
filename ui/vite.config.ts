@@ -32,4 +32,7 @@ export default defineConfig({
     // Produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
   },
+  // A beta keeps function names so the element picker's report can name the
+  // React components (a release build is minified as usual).
+  esbuild: { keepNames: process.env.VITE_ELEMENT_GRAB === "true" },
 });
