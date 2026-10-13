@@ -80,20 +80,24 @@
       "count_other": "{{count}} participants",
       "title": "Participants ({{count}})",
       "joined": "{{name}} joined",
-      "left": "{{name}} left"
+      "left": "{{name}} left",
+      "highestLatency": "Highest latency"
     },
     "testRoom": {
       "title": "Test Room",
       "description": "Connect to a standing room for testing"
     },
     "unencrypted": "Audio with this peer is not encrypted (their app is an older version)",
+    "unencryptedWith": "Audio with {{names}} is not encrypted (their app is an older version)",
     "bandwidth": {
       "insufficient": "Bandwidth is insufficient (about {{required}} Mbps needed)",
       "marginal": "Bandwidth headroom is running low",
-      "noSignal": "No packets are arriving from the peer"
+      "noSignal": "No packets are arriving from the peer",
+      "noSignalFrom": "No packets are arriving from {{names}}"
     },
     "reconnect": {
       "prompt": "Connection lost. Reconnect?",
+      "promptWith": "Connection to {{names}} lost. Reconnect?",
       "retry": "Reconnect"
     },
     "signalingReconnect": {
@@ -102,6 +106,9 @@
     },
     "notConnected": {
       "reason": "Not connected to the server yet"
+    },
+    "names": {
+      "separator": ", "
     }
   },
   "audio": {
@@ -607,6 +614,7 @@
     "disconnected": "Disconnected",
     "bandwidthRecovered": "Bandwidth recovered",
     "delayAdjusted": "Buffer size adjusted",
+    "newerRelease": "A new version, {{version}}, is out. Please reinstall to update",
     "deviceProblem": {
       "named": " ({{device}})",
       "unresponsive": {
@@ -781,6 +789,7 @@
     "consent": {
       "title": "Before you start",
       "ipNotice": "When you join a room, the other people in the room can see your IP address.",
+      "japaneseOnlyNotice": "The Terms of Use are available in Japanese only. This service is intended for users in Japan.",
       "textLabel": "Terms of Use",
       "agree": "I have read the Terms of Use and agree to them.",
       "adult": "I am 18 or older. If I am under 18, I have my parent or guardian’s consent.",

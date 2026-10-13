@@ -79,20 +79,24 @@
       "count": "{{count}}名参加中",
       "title": "参加者 ({{count}})",
       "joined": "{{name}}さんが参加しました",
-      "left": "{{name}}さんが退出しました"
+      "left": "{{name}}さんが退出しました",
+      "highestLatency": "遅延がいちばん大きい参加者"
     },
     "testRoom": {
       "title": "テストルーム",
       "description": "動作確認用のテストルームに接続します"
     },
     "unencrypted": "この相手との音声は暗号化されていません（相手のアプリが古い版です）",
+    "unencryptedWith": "{{names}}との音声は暗号化されていません（相手のアプリが古い版です）",
     "bandwidth": {
       "insufficient": "帯域が不足しています（必要: 約{{required}}Mbps）",
       "marginal": "帯域の余裕が少なくなっています",
-      "noSignal": "相手からパケットが届いていません"
+      "noSignal": "相手からパケットが届いていません",
+      "noSignalFrom": "{{names}}からパケットが届いていません"
     },
     "reconnect": {
       "prompt": "接続が切断されました。再接続しますか？",
+      "promptWith": "{{names}}との接続が切断されました。再接続しますか？",
       "retry": "再接続"
     },
     "signalingReconnect": {
@@ -101,6 +105,9 @@
     },
     "notConnected": {
       "reason": "まだサーバーに接続できていません"
+    },
+    "names": {
+      "separator": "・"
     }
   },
   "audio": {
@@ -605,6 +612,7 @@
     "disconnected": "切断しました",
     "bandwidthRecovered": "帯域が回復しました",
     "delayAdjusted": "バッファサイズを調整しました",
+    "newerRelease": "新しい版 {{version}} が出ています。入れ直してください",
     "deviceProblem": {
       "named": "（{{device}}）",
       "unresponsive": {
@@ -779,6 +787,7 @@
     "consent": {
       "title": "はじめに",
       "ipNotice": "ルームに入ると、同じルームの人にあなたの IP アドレスが見えます。",
+      "japaneseOnlyNotice": "利用規約は日本語のみです。本サービスは日本国内の利用者を対象としています。",
       "textLabel": "利用規約",
       "agree": "利用規約を読み、同意します。",
       "adult": "18 歳以上です。18 歳未満のときは、親権者の同意を得ています。",

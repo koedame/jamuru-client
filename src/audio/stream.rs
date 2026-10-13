@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use super::codec::{create_codec, AudioCodec, CodecConfig, CodecError, CodecType};
 use super::flight::{FlightRecorder, Kind};
 use super::playout::{
-    PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult, PlayoutStats, WriteOutcome,
+    widest_frame_samples, PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult, PlayoutStats,
+    WriteOutcome, WIDEST_PACKET_SAMPLES,
 };
 use super::preset::AudioPreset;
 use super::resampler::{create_resampler_with_channels, AudioResampler, ResamplerError};
@@ -276,7 +277,9 @@ impl ReceivePath {
             ))),
             decoder: Arc::new(Mutex::new(Decoder {
                 codec,
-                frame: vec![0.0; frame_samples],
+                // The peer's frame is as long as its own buffer size makes
+                // it, which can be more than ours
+                frame: vec![0.0; frame_samples.max(WIDEST_PACKET_SAMPLES)],
             })),
             resampler: Arc::new(Mutex::new(None)),
             peer_rate: Arc::new(AtomicU32::new(0)),
@@ -311,6 +314,14 @@ impl ReceivePath {
     /// be opened with.
     pub fn frame_samples(&self) -> usize {
         self.frame_size as usize * WIRE_CHANNELS
+    }
+
+    /// Interleaved samples in the longest frame [`ReceivePath::read_into`]
+    /// hands over: what a reader's buffer has to hold for no frame to be cut
+    /// short. Longer than [`ReceivePath::frame_samples`], because a peer's
+    /// buffer size and sample rate are its own.
+    pub fn widest_frame_samples(&self) -> usize {
+        widest_frame_samples(self.frame_samples())
     }
 
     /// Hands a received payload to the play-out buffer, reporting whether it
@@ -566,6 +577,66 @@ mod tests {
 
     fn stereo_frame(frame_size: u32, value: f32) -> Vec<f32> {
         vec![value; frame_size as usize * WIRE_CHANNELS]
+    }
+
+    /// The bug this guards: the frame the decoder wrote into was as long as
+    /// our own buffer size, so a peer running a larger one could not be
+    /// decoded. None of their audio was played, while they heard us.
+    ///
+    /// Verifies: REQ-AUD-038
+    #[test]
+    fn a_peer_runs_a_larger_buffer_than_ours_plays_their_frames_whole() {
+        for (ours, theirs) in [(64, 128), (32, 128), (32, 64)] {
+            let path =
+                ReceivePath::new(CodecType::Pcm, 48000, ours, 0).expect("PCM is always available");
+            let sent: Vec<f32> = (0..theirs * WIRE_CHANNELS as u32)
+                .map(|i| i as f32 / 1000.0)
+                .collect();
+
+            assert!(
+                path.receive(0, &pcm(&sent)),
+                "a frame of {theirs} is stored by a path of {ours}"
+            );
+            let mut out = vec![9.0; path.widest_frame_samples()];
+            let read = path.read_into(&mut out);
+
+            assert_eq!(read.result, PlayoutResult::Played { sequence: 0 });
+            assert_eq!(&out[..read.samples], &sent[..]);
+        }
+    }
+
+    /// The longest frame there is: a packet filled to the limit, from a peer
+    /// whose rate is converted by the widest ratio the app offers.
+    ///
+    /// Verifies: REQ-AUD-038
+    #[test]
+    fn the_longest_packet_from_a_peer_at_the_lowest_rate_is_stored_and_fits_the_widest_frame() {
+        let path = ReceivePath::new(CodecType::Pcm, 96000, 32, 0).expect("PCM is always available");
+        path.follow_peer_rate(44100);
+        let longest = WIDEST_PACKET_SAMPLES / WIRE_CHANNELS * WIRE_CHANNELS;
+        let sent = vec![0.25; longest];
+
+        for sequence in 0..8 {
+            assert!(path.receive(sequence, &pcm(&sent)));
+        }
+        let mut out = vec![0.0; path.widest_frame_samples()];
+        let mut played = 0;
+        for _ in 0..8 {
+            let read = path.read_into(&mut out);
+            assert!(
+                read.samples < out.len(),
+                "a frame filled the reader's buffer"
+            );
+            if matches!(read.result, PlayoutResult::Played { .. }) {
+                played += read.samples;
+            }
+        }
+
+        let converted = longest * 8 * 96000 / 44100;
+        assert!(
+            played > converted * 3 / 4,
+            "{played} samples played of about {converted}"
+        );
     }
 
     /// A payload handed to the receive path comes out of the output side

@@ -26,6 +26,7 @@ network/
 ├── connection.rs       # 接続管理
 ├── encryption.rs       # 暗号化レイヤー（SecureLink: X25519, AES-256-GCM。ADR-064）
 ├── transport.rs        # UDPトランスポート
+├── udp_mux.rs          # 1 つの音声ソケットを相手ごとの接続で共有する（ADR-077）
 ├── session.rs          # セッション管理
 ├── signaling.rs        # シグナリング
 ├── stun.rs             # STUNクライアント
@@ -116,6 +117,52 @@ fn checks_peer(&self) -> bool;
 
 複数の相手へ送る `Session` は `set_link_identity(LinkIdentity)` で自分の鍵を渡すと、そのあとに `add_peer` した相手ごとに、`PeerInfo::link_key` で同じことをする。
 
+### 3.2.1 ルームの全員と繋ぐ（1 つのソケットを共有する）
+
+ルームの参加者は、音声アドレスを 1 つだけ公開し、ほかの全員がそこへ送る。相手ごとの接続は、そのソケットを共有して作る
+（[ADR-077](../adr/ADR-077-every-participant-is-linked.md)、REQ-CON-033）。アプリは `Session` ではなくこの形を使う:
+接続の確認・鍵・FEC・ロスの計測・RTT・再接続を、相手ごとの `Connection` がそのまま持つ。
+
+```rust
+/// 複数の接続が送受信に使う UDP ソケット。受信を読むのはこれだけで、
+/// 届いたパケットを送り元のアドレスで相手ごとの接続に渡す
+///
+/// スレッド: 作るのも、その上の接続を使うのも、ソケットを駆動する Tokio ランタイムの上（ADR-026）
+impl UdpMux {
+    /// ソケットを bind する
+    async fn bind(addr: &str) -> Result<UdpMux, NetworkError>;
+    /// bind 済みのソケット（ルームに公開したポートのもの）を共有する
+    fn from_std(std_socket: std::net::UdpSocket) -> Result<UdpMux, NetworkError>;
+    /// 全員が送ってくるアドレス
+    fn local_addr(&self) -> SocketAddr;
+}
+
+impl Connection {
+    /// 共有ソケットの上に、相手 1 人への接続を作る（まだ接続していない）
+    fn on(mux: &UdpMux) -> Result<Connection, NetworkError>;
+}
+```
+
+```mermaid
+flowchart LR
+    S[音声ソケット<br/>公開した 1 つのアドレス] --> M[UdpMux<br/>送り元のアドレスで振り分け]
+    M -->|B のアドレスから| CB[Connection（B と）]
+    M -->|C のアドレスから| CC[Connection（C と）]
+    M -->|どの相手のアドレスでもない| ALL[全部の接続<br/>鍵で開けたものだけが使う]
+    CB -->|送信はソケットへ直接| S
+    CC -->|送信はソケットへ直接| S
+```
+
+| 送り元 | 渡す先 |
+|--------|--------|
+| ある相手の候補アドレス（`connect` / `connect_with_candidates` に渡したもの） | その相手の接続だけ |
+| 2 人の相手が公開している同じアドレス | 両方の接続（鍵が合う側だけが開ける） |
+| どの相手の候補でもないアドレス | 全部の接続（相手のアドレスが途中で変わっても、鍵で開ければ受け取る） |
+| （接続する前・`disconnect` した後の接続） | 何も渡さない |
+
+共有ソケットの上の接続は、ソケットを独占する接続（`Connection::new` / `from_std`）と同じ API・同じ振る舞いをする。
+受信の読み出しも、ソケットを読むときと同じく Tokio のタスクの持ち分（協調スケジューリング）に数える。パケットが溜まった接続が、同じスレッドのほかの接続を待たせ続けない。
+
 ### 3.3 接続設定
 
 ```rust
@@ -176,7 +223,7 @@ fn send_audio(&self, data: &[u8], timestamp: u64) -> Result<(), NetworkError>;
 
 ### 4.2 受信
 
-現行シグネチャ（1対1接続、ADR-020）:
+現行シグネチャ（接続は相手ごと。ADR-020）:
 
 ```rust
 /// 音声データ受信コールバックを設定
@@ -193,11 +240,11 @@ where
 
 ### 4.2.1 未実装の引数
 
-以下はメッシュ構成および FEC の受信経路配線が前提のため未実装。実装時に本節を更新する。
+以下は未実装。実装時に本節を更新する。送信元の参加者は引数では渡さない: 接続が相手ごとなので、コールバックを設定した接続が
+送信元を表す（[ADR-077](../adr/ADR-077-every-participant-is-linked.md)）。
 
 | 引数 | 内容 | 前提 |
 |------|------|------|
-| `participant_id` | 送信元参加者ID | メッシュ対応（REQ-LAT-102） |
 | `PacketStats.had_loss` | パケットロスの有無 | 再生バッファの `Concealed` を呼び出し側へ伝播させる設計判断 |
 | `PacketStats.recovered_by_fec` | FEC で復元されたか | FEC の受信経路への配線 |
 

@@ -19,6 +19,7 @@ mod session;
 mod signaling;
 mod stun;
 mod transport;
+mod udp_mux;
 
 pub use bandwidth::{
     audio_packet_duration_ms, required_bps, status_label, BandwidthEstimator, BandwidthStatus,
@@ -60,3 +61,4 @@ pub use signaling::{
 };
 pub use stun::{StunClient, StunResult, DEFAULT_STUN_SERVERS};
 pub use transport::{bind_std, UdpTransport};
+pub use udp_mux::UdpMux;

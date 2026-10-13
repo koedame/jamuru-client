@@ -2,8 +2,11 @@
 //!
 //! A release published after the running version is downloaded, checked
 //! against the public key in `tauri.conf.json` (`plugins.updater`), and
-//! installed without the user doing anything. Nothing here ever reaches the
-//! webview: no command, no event, no permission.
+//! installed without the user doing anything. Nothing here can install or
+//! change anything from the webview: no command, no event, no permission for
+//! that. The one thing that reaches it is a version number, for a package that
+//! cannot replace itself (ADR-076): the screen is told that a newer release
+//! exists, and the user installs it by hand.
 //!
 //! Two rules keep it out of the way of the app's purpose. It never installs
 //! while the user is in a session (an install ends with a restart, which would
@@ -17,9 +20,10 @@
 use std::fmt;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::config;
@@ -109,20 +113,29 @@ impl Drop for Turn<'_> {
     }
 }
 
-/// Why this run does not update itself, or `None` when it does.
-pub(crate) fn skip_reason(
+/// What a round of the background loop does.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Round {
+    /// Download and install a newer release.
+    Install,
+    /// Only look whether a newer release exists, and tell the screen.
+    Notify,
+}
+
+/// What this run does about a newer release, or why it does nothing.
+pub(crate) fn plan(
     auto_update: bool,
     development_build: bool,
     package_updates_itself: bool,
-) -> Option<&'static str> {
+) -> Result<Round, &'static str> {
     if development_build {
-        Some("development build")
-    } else if !package_updates_itself {
-        Some("this package cannot replace itself")
+        Err("development build")
     } else if !auto_update {
-        Some("turned off in config.toml")
+        Err("turned off in config.toml")
+    } else if !package_updates_itself {
+        Ok(Round::Notify)
     } else {
-        None
+        Ok(Round::Install)
     }
 }
 
@@ -138,7 +151,8 @@ fn is_development_build() -> bool {
 /// `.msi` is always per-machine: run without elevation, `msiexec` fails with
 /// Error 1730 after the app has already exited, and nothing starts it again.
 /// Neither is "without the user doing anything", so they stay with the package
-/// manager and with whoever installed them. The per-user `-setup.exe` (NSIS)
+/// manager and with whoever installed them; the app only tells them that a
+/// newer release exists ([`Round::Notify`]). The per-user `-setup.exe` (NSIS)
 /// updates itself.
 pub(crate) fn package_updates_itself() -> bool {
     bundle_updates_itself(std::env::consts::OS, tauri::utils::platform::bundle_type())
@@ -151,6 +165,21 @@ fn bundle_updates_itself(os: &str, bundle: Option<tauri::utils::config::BundleTy
         "windows" => !matches!(bundle, Some(BundleType::Msi)),
         _ => true,
     }
+}
+
+/// The newer release a package that cannot replace itself has found, if any.
+#[derive(Default)]
+pub struct UpdateNotice(Mutex<Option<String>>);
+
+/// Heard by the screen when [`UpdateNotice`] gets a version; the payload is the
+/// version.
+pub(crate) const NOTICE_EVENT: &str = "update:available";
+
+/// The version of a newer release this package cannot install by itself, or
+/// `None` when none was found (yet).
+#[tauri::command]
+pub fn update_notice_get(notice: State<'_, UpdateNotice>) -> Option<String> {
+    notice.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Starts the background loop: check shortly after launch, then every six
@@ -166,15 +195,20 @@ pub(crate) fn spawn(app: AppHandle) {
         tokio::time::sleep(FIRST_CHECK_DELAY).await;
         loop {
             let auto_update = config::load_config().unwrap_or_default().auto_update;
-            match skip_reason(auto_update, false, package_updates_itself()) {
-                Some(reason) => tracing::debug!("Not checking for an update: {}", reason),
-                None => match update_once(&app).await {
+            match plan(auto_update, false, package_updates_itself()) {
+                Err(reason) => tracing::debug!("Not checking for an update: {}", reason),
+                Ok(Round::Install) => match update_once(&app).await {
                     Ok(()) => {}
                     Err(e @ (UpdateError::Busy | UpdateError::Restarting)) => {
                         tracing::debug!("Not updating: {}", e)
                     }
                     Err(e) => tracing::warn!("Self-update did not finish: {}", e),
                 },
+                Ok(Round::Notify) => {
+                    if let Err(e) = notify_once(&app).await {
+                        tracing::warn!("Checking for a newer release did not finish: {}", e)
+                    }
+                }
             }
             tokio::time::sleep(CHECK_INTERVAL).await;
         }
@@ -189,6 +223,47 @@ async fn update_once(app: &AppHandle) -> Result<(), UpdateError> {
         crate::restart::restart(app).await;
     }
     Ok(())
+}
+
+/// The platform the update information is read for when the package has none
+/// of its own: the information carries one version for every platform, and
+/// only the AppImage has an entry on Linux (`scripts/make-update-manifest.sh`).
+/// Release builds exist for x86_64 only.
+fn notice_target() -> Option<&'static str> {
+    (std::env::consts::OS == "linux").then_some("linux-x86_64-appimage")
+}
+
+/// Looks whether a release newer than the running one exists, and tells the
+/// screen. Nothing is downloaded or installed.
+async fn notify_once<R: Runtime>(app: &AppHandle<R>) -> Result<(), UpdateError> {
+    let mut builder = app.updater_builder();
+    if let Some(target) = notice_target() {
+        builder = builder.target(target);
+    }
+    let updater = builder.build()?;
+    let Some(update) = within("checking for a release", CHECK_LIMIT, updater.check()).await? else {
+        tracing::debug!("No newer release");
+        return Ok(());
+    };
+    tracing::info!(
+        "Release {} is out (running {}); this package cannot install it by itself",
+        update.version,
+        update.current_version
+    );
+    announce(app, update.version);
+    Ok(())
+}
+
+/// Keeps the version for a screen that opens later, and tells the screens
+/// that are open.
+fn announce<R: Runtime>(app: &AppHandle<R>, version: String) {
+    if let Err(e) = app.emit(NOTICE_EVENT, &version) {
+        tracing::warn!("Could not announce the newer release to the screen: {}", e);
+    }
+    *app.state::<UpdateNotice>()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(version);
 }
 
 /// Installs a newer release now, without waiting for the user to leave a
@@ -321,25 +396,27 @@ mod tests {
     /// Verifies: REQ-UPD-001
     #[test]
     fn when_the_setting_is_on_in_a_release_build_the_app_updates_itself() {
-        assert_eq!(skip_reason(true, false, true), None);
+        assert_eq!(plan(true, false, true), Ok(Round::Install));
     }
 
     /// Verifies: REQ-UPD-002
     #[test]
     fn when_the_setting_is_off_the_app_does_not_update_itself() {
-        assert!(skip_reason(false, false, true).is_some());
+        assert!(plan(false, false, true).is_err());
+        assert!(plan(false, false, false).is_err());
     }
 
     /// Verifies: REQ-UPD-003
     #[test]
     fn when_it_is_a_development_build_the_app_does_not_update_itself() {
-        assert!(skip_reason(true, true, true).is_some());
+        assert!(plan(true, true, true).is_err());
+        assert!(plan(true, true, false).is_err());
     }
 
     /// Verifies: REQ-UPD-004
     #[test]
-    fn when_the_package_cannot_replace_itself_the_app_does_not_try() {
-        assert!(skip_reason(true, false, false).is_some());
+    fn when_the_package_cannot_replace_itself_the_app_only_looks_for_a_newer_release() {
+        assert_eq!(plan(true, false, false), Ok(Round::Notify));
     }
 
     /// Verifies: REQ-UPD-004
@@ -362,6 +439,35 @@ mod tests {
         use tauri::utils::config::BundleType;
         assert!(!bundle_updates_itself("linux", Some(BundleType::Deb)));
         assert!(bundle_updates_itself("linux", Some(BundleType::AppImage)));
+    }
+
+    /// Verifies: REQ-UPD-021
+    #[test]
+    fn when_a_newer_release_was_found_the_screen_can_read_its_version() {
+        let app = tauri::test::mock_app();
+        app.manage(UpdateNotice::default());
+        assert_eq!(update_notice_get(app.state()), None);
+
+        announce(app.handle(), "1.2.3".to_string());
+
+        assert_eq!(update_notice_get(app.state()), Some("1.2.3".to_string()));
+    }
+
+    /// Verifies: REQ-UPD-021
+    #[test]
+    fn when_a_newer_release_was_found_the_open_screens_are_told_its_version() {
+        use tauri::Listener;
+        let app = tauri::test::mock_app();
+        app.manage(UpdateNotice::default());
+        let heard = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = heard.clone();
+        app.listen(NOTICE_EVENT, move |event| {
+            sink.lock().unwrap().push(event.payload().to_string())
+        });
+
+        announce(app.handle(), "1.2.3".to_string());
+
+        assert_eq!(*heard.lock().unwrap(), vec!["\"1.2.3\"".to_string()]);
     }
 
     /// Verifies: REQ-UPD-005
