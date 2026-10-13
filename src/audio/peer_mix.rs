@@ -1,6 +1,6 @@
 //! Everyone else in the room, mixed for the output callback.
 //!
-//! Each participant the app has an audio link to has a voice here: their
+//! Each participant there is an audio link to has a voice here: their
 //! play-out buffer, and where their fader and pan stand. The output callback
 //! asks for one frame and gets the sum of them all.
 //!
@@ -11,9 +11,7 @@
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use jamjam::audio::{pan_received, GainRamp, PlayoutResult, ReceivePath, WIRE_CHANNELS};
-
-use crate::streaming::rms_level;
+use super::{pan_received, rms_level, GainRamp, PlayoutResult, ReceivePath, WIRE_CHANNELS};
 
 /// Where one participant's fader and pan stand. Shared with whoever moves
 /// them, so a change is heard on the next frame.
@@ -86,7 +84,7 @@ struct Inner {
     underruns: Arc<AtomicU64>,
 }
 
-/// The mix of everyone the app has an audio link to.
+/// The mix of everyone there is an audio link to.
 ///
 /// Cheap to clone: every clone is the same mix, so one goes to the output
 /// callback and another to whoever adds and removes participants.
@@ -251,7 +249,7 @@ impl PeerMix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jamjam::audio::AudioPreset;
+    use crate::audio::AudioPreset;
 
     const RATE: u32 = 48_000;
 
@@ -520,7 +518,7 @@ mod tests {
     #[test]
     fn a_full_room_has_a_place_for_each_of_the_nine_others_and_no_more() {
         const FRAME: u32 = 4;
-        let others = jamjam::network::MAX_PEERS_PER_ROOM - 1;
+        let others = crate::network::MAX_PEERS_PER_ROOM - 1;
         let mix = mix(others, FRAME);
         let everyone: Vec<ReceivePath> = (0..others).map(|_| participant(FRAME)).collect();
         let _heard: Vec<Heard> = everyone.iter().map(|p| add(&mix, p)).collect();
