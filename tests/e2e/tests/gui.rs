@@ -824,6 +824,149 @@ fn in_a_room_with_two_peers_the_app_hears_both_and_sends_its_audio_to_both() {
         });
 }
 
+/// Reads how many peers the app takes in a room before it falls behind, on
+/// the build and the machine the test runs on. It measures; it asserts
+/// nothing, so it is ignored by default and run by hand:
+///
+/// ```text
+/// JAMJAM_CAPACITY_PEERS=2,3,4,5,6,7,8,9 cargo test --features gui --test gui \
+///     -- --ignored --nocapture --test-threads=1 how_many_peers_the_app_takes
+/// ```
+///
+/// Each count is a fresh app with that many peers, each sending 750 packets a
+/// second. After a warm-up, 10 seconds are read: the packets each link received
+/// against those sent, the reads of an empty buffer (`starved`), the round trip
+/// and the app's CPU time. A count is held when every link received all it was
+/// sent and nothing was starved.
+#[test]
+#[ignore = "a measurement, run by hand"]
+fn how_many_peers_the_app_takes() {
+    let _guard = exclusive();
+    let counts: Vec<usize> = std::env::var("JAMJAM_CAPACITY_PEERS")
+        .unwrap_or_else(|_| "2,9".to_string())
+        .split(',')
+        .map(|n| n.trim().parse().expect("a peer count"))
+        .collect();
+    let warm_up: u64 = std::env::var("JAMJAM_CAPACITY_WARMUP_S")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(45);
+    let read_cpu_ticks = |pid: u32| -> u64 {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        // utime and stime are the 14th and 15th fields, counted after the `)` that closes the name
+        let after_name = stat.rsplit_once(')').map(|(_, rest)| rest).unwrap_or("");
+        let fields: Vec<&str> = after_name.split_whitespace().collect();
+        let field = |i: usize| -> u64 { fields.get(i).and_then(|f| f.parse().ok()).unwrap_or(0) };
+        field(11) + field(12)
+    };
+    let cpus = std::thread::available_parallelism().map_or(0, |n| n.get());
+    eprintln!(
+        "CAPACITY machine: {cpus} threads, build: {}",
+        if cfg!(debug_assertions) {
+            "debug test harness"
+        } else {
+            "release test harness"
+        }
+    );
+    eprintln!("CAPACITY peers | received per link (min..max) of sent | starved | concealed | round trip ms (max) | app cpu % of one thread | load1");
+    for count in counts {
+        let names: Vec<String> = (1..=count).map(|i| format!("p{i}")).collect();
+        let sockets: Vec<common::Peer> = names.iter().map(|_| common::Peer::bind()).collect();
+        let residents: Vec<(&str, std::net::SocketAddr)> = names
+            .iter()
+            .zip(&sockets)
+            .map(|(name, peer)| (name.as_str(), peer.local_addr()))
+            .collect();
+        let server = FakeSignaling::start_with_residents_at(&residents);
+        let _peers: Vec<PlayingPeer> = sockets
+            .into_iter()
+            .enumerate()
+            .map(|(i, peer)| PlayingPeer::start(peer, 750.0 * (1 + i % 4) as f32, 0.1))
+            .collect();
+        let app = App::launch_with_server_url(server.url()).expect("the app should launch");
+        app.connection_screen()
+            .wait_until_interactive(UI_TIMEOUT)
+            .unwrap_or_else(|e| panic!("{}\nThe log holds:\n{}", e, app.log_text()));
+        app.invoke("session_join", serde_json::json!({ "code": "echo" }))
+            .expect("the control channel should answer")
+            .expect("joining the room should succeed");
+        std::thread::sleep(Duration::from_secs(warm_up));
+
+        let read = || {
+            let status = app
+                .invoke("streaming_status", serde_json::json!({}))
+                .expect("the control channel should answer")
+                .expect("the status should be read");
+            let timing = app
+                .invoke("debug.audio_timing", serde_json::json!({}))
+                .expect("the control channel should answer")
+                .expect("the timing should be read");
+            (
+                status,
+                timing,
+                read_cpu_ticks(app.process_id()),
+                std::time::Instant::now(),
+            )
+        };
+        let (status_a, timing_a, cpu_a, at_a) = read();
+        std::thread::sleep(Duration::from_secs(10));
+        let (status_b, timing_b, cpu_b, at_b) = read();
+
+        let received = |status: &serde_json::Value| -> Vec<u64> {
+            status["peers"]
+                .as_array()
+                .map(|peers| {
+                    peers
+                        .iter()
+                        .map(|p| p["network"]["packets_received"].as_u64().unwrap_or(0))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let counted = |timing: &serde_json::Value, kind: &str| -> u64 {
+            timing["peers"]
+                .as_array()
+                .map(|peers| {
+                    peers
+                        .iter()
+                        .map(|p| p["counts"][kind].as_u64().unwrap_or(0))
+                        .sum()
+                })
+                .unwrap_or(0)
+        };
+        let (before, after) = (received(&status_a), received(&status_b));
+        let gained: Vec<u64> = after
+            .iter()
+            .zip(&before)
+            .map(|(b, a)| b.saturating_sub(*a))
+            .collect();
+        let seconds = at_b.duration_since(at_a).as_secs_f64();
+        let sent = (750.0 * seconds) as u64;
+        let round_trip = status_b["peers"]
+            .as_array()
+            .map(|peers| {
+                peers
+                    .iter()
+                    .filter_map(|p| p["latency"]["roundtrip_total_ms"].as_f64())
+                    .fold(0.0, f64::max)
+            })
+            .unwrap_or(0.0);
+        let load1 = std::fs::read_to_string("/proc/loadavg")
+            .ok()
+            .and_then(|s| s.split_whitespace().next().map(str::to_string))
+            .unwrap_or_default();
+        eprintln!(
+            "CAPACITY {count} | {}..{} of {sent} ({} links) | {} | {} | {round_trip:.1} | {:.0} | {load1}",
+            gained.iter().min().copied().unwrap_or(0),
+            gained.iter().max().copied().unwrap_or(0),
+            gained.len(),
+            counted(&timing_b, "starved") - counted(&timing_a, "starved"),
+            counted(&timing_b, "concealed") - counted(&timing_a, "concealed"),
+            (cpu_b - cpu_a) as f64 / 100.0 / seconds * 100.0,
+        );
+    }
+}
+
 /// Every run of `a.b.c.d` digits in `text`.
 fn ipv4_addresses(text: &str) -> Vec<String> {
     let bytes = text.as_bytes();
