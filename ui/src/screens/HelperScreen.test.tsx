@@ -55,6 +55,7 @@ function inRoom(): SessionSnapshot {
     },
     signaling_reconnect: 'idle',
     signaling_reconnect_error: null,
+    streaming_peer_ids: [],
     streaming_peer_id: null,
   };
 }

@@ -290,6 +290,27 @@
   color: var(--color-text-tertiary);
 }
 
+/* The participant whose audio takes longest to go there and back */
+.participant__latency--highest .participant__latency-item {
+  color: var(--color-warning);
+}
+
+/* How the link to a participant is doing, where their latency would be */
+.participant__link {
+  flex-shrink: 0;
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.participant__link--unstable {
+  color: var(--color-warning);
+}
+
+.participant__link--error {
+  color: var(--color-danger);
+}
+
 .room-sidebar__leave {
   flex-shrink: 0;
   display: flex;
