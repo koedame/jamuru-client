@@ -14,6 +14,7 @@ mod latency;
 mod link_facts;
 mod quality;
 mod remote;
+pub mod roster;
 mod sequence_tracker;
 mod session;
 mod signaling;
@@ -49,10 +50,11 @@ pub use remote::{
     connect_remote, discover_remote_enrollment, help_relay_url, is_help_session, new_help_session,
     HelpEnd, RemoteEnrollment, RemoteReader, RemoteWriter, REMOTE_ENROLLMENT_PATH,
 };
+pub use roster::{LinkHealth, Roster};
 pub use sequence_tracker::SequenceTracker;
 pub use session::{Session, SessionConfig};
 pub use signaling::{
-    candidates_to_addrs, ensure_crypto_provider_installed, gather_candidates,
+    candidates_to_addrs, ensure_crypto_provider_installed, gather_candidates, gather_candidates_on,
     gather_candidates_using, gather_host_candidates, invite_url, parse_invite_url,
     AddressCandidate, CandidateType, ClientInfo, InvalidInviteCode, InviteCode, PeerInfo, RoomInfo,
     SignalingClient, SignalingConnection, SignalingMessage, DEVICE_ID_HEADER, DEVICE_PUBKEY_HEADER,
