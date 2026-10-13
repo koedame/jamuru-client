@@ -9,6 +9,7 @@
 //! - Zero allocation in audio callbacks
 //! - Pre-allocated stereo conversion buffer
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
@@ -18,12 +19,12 @@ use std::thread;
 use rtrb::{Consumer, RingBuffer};
 use serde::Serialize;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 use jamjam::audio::{
-    capture_attempts, capture_to_wire, pan_received, AudioConfig, AudioEngine, AudioError,
-    AudioPreset, DeviceId, FlightKind, FlightRecorder, GainRamp, LocalMonitor, MonitorTap,
-    OutputRoute, PeerRateChange, PlayoutResult, ReceivePath, RecordingFeed, RecordingTap, Verdict,
-    ADAPT_INTERVAL, WIRE_CHANNELS,
+    capture_attempts, capture_to_wire, AudioConfig, AudioEngine, AudioError, AudioPreset, DeviceId,
+    FlightKind, FlightRecorder, GainRamp, LocalMonitor, MonitorTap, OutputRoute, PeerRateChange,
+    ReceivePath, RecordingFeed, RecordingTap, Verdict, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
 use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
@@ -31,14 +32,27 @@ use jamjam::network::{
     audio_packet_duration_ms, required_bps, status_label, AudioEncodingConfig, BandwidthEstimator,
     BandwidthStatus, BandwidthVerdict, Connection, ConnectionState, ConnectionStats,
     LatencyBreakdown, LinkFacts, LinkIdentity, LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo,
-    QualityMonitor,
+    QualityMonitor, UdpMux, MAX_PEERS_PER_ROOM,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
 #[cfg(target_os = "windows")]
 use crate::audio_slot::AsioSwitch;
 use crate::audio_slot::DeviceSlot;
+use crate::peer_mix::{PeerGain, PeerMeter, PeerMix, VoiceHandle};
 use crate::settings::{pair_in_use, Devices};
+
+/// How many audio links a session holds at most: one to each of the others in
+/// a full room.
+const MAX_LINKS: usize = MAX_PEERS_PER_ROOM - 1;
+
+/// What the audio thread publishes about each link, by the participant the
+/// link is to, in the order the links were opened
+type LinkReports = RwLock<Vec<(Uuid, Arc<LinkReport>)>>;
+
+/// What went wrong with the audio received on each link and when, by the
+/// participant the link is to
+type Flights = RwLock<Vec<(Uuid, Arc<FlightRecorder>)>>;
 
 /// How long the receive loop waits when it has nothing to hand to playback.
 ///
@@ -199,54 +213,43 @@ pub struct StreamingState {
     input_level: Arc<AtomicU32>,
     /// Current output audio level (0-100, for master meter)
     output_level: Arc<AtomicU32>,
-    /// Remote address currently connected to
-    remote_addr: Mutex<Option<String>>,
-    /// Connection statistics (updated by audio thread)
-    stats: Arc<RwLock<Option<ConnectionStats>>>,
-    /// Measured bandwidth against what the preset needs (updated by audio thread)
-    bandwidth: Arc<RwLock<Option<BandwidthSnapshot>>>,
-    /// Connection state as reported by the audio thread (ADR-022)
-    connection_state: Arc<RwLock<ConnectionStateSnapshot>>,
+    /// The audio links of the running session, in the order they were opened,
+    /// with what the audio thread publishes about each
+    links: Arc<LinkReports>,
+    /// Where the fader and pan of each participant stand, whether or not
+    /// there is a link to them yet. The output callback reads them as it mixes.
+    peer_gains: Arc<RwLock<HashMap<Uuid, Arc<PeerGain>>>>,
     /// Devices the audio thread could not open, one per direction at most
     device_problems: Arc<RwLock<Vec<DeviceProblem>>>,
-    /// Jitter buffer delay in microseconds (updated by audio thread)
-    ///
-    /// Integer microseconds rather than a float, so it fits an atomic without
-    /// bit-casting. Feeds the latency breakdown shown to the user.
-    jitter_buffer_delay_us: Arc<AtomicU32>,
     /// Current buffer size (frame_size) for latency calculations
     buffer_size: Mutex<u32>,
     /// Buffer underrun count (audio glitches due to CPU/scheduling)
     underrun_count: Arc<AtomicU64>,
     /// How many times adaptation has moved the play-out delay this session
     delay_adjustments: Arc<AtomicU64>,
-    /// How many times the connection dropped and began to reconnect
+    /// How many times a link dropped and began to reconnect, over every link
     reconnect_count: Arc<AtomicU64>,
-    /// How many times an established link was given up for silence
+    /// How many times an established link was given up for silence, over
+    /// every link
     silence_giveups: Arc<AtomicU64>,
-    /// How the current link came up, once the audio thread has a connection
+    /// How the session's first link came up, once the audio thread has one
     link_facts: Arc<RwLock<Option<Arc<LinkFacts>>>>,
-    /// What went wrong with the received audio and when. The last session's
-    /// stays until the next one starts, so a debug call can still read it.
-    flight: Arc<RwLock<Option<Arc<FlightRecorder>>>>,
-    /// Peer (received) audio volume (0-200, 100 = unity gain)
-    peer_volume: Arc<AtomicU32>,
+    /// What went wrong with the audio received on each link and when, by the
+    /// participant the link is to. The last session's stay until the next one
+    /// starts, so a debug call can still read them.
+    flights: Arc<Flights>,
     /// Master output volume (0-200, 100 = unity gain)
     master_volume: Arc<AtomicU32>,
-    /// Peer (received) audio pan (-100 = full left, 0 = center, 100 = full right)
-    peer_pan: Arc<std::sync::atomic::AtomicI32>,
     /// Local (microphone) input volume (0-200, 100 = unity gain)
     local_volume: Arc<AtomicU32>,
     /// Local (microphone) input pan (-100 = full left, 0 = center, 100 = full right)
     local_pan: Arc<std::sync::atomic::AtomicI32>,
     /// Current sample rate in Hz (ADR-013: user-selectable)
     sample_rate: Arc<AtomicU32>,
-    /// Peer's latency info (received from remote peer via LatencyInfoMessage)
-    peer_latency_info: Arc<RwLock<Option<PeerLatencyInfo>>>,
     /// UDP socket bound ahead of streaming so its port can be advertised to
     /// peers before any audio flows (ADR-026).
     ///
-    /// Held as `std::net::UdpSocket`, not a `Connection`: the audio thread
+    /// Held as `std::net::UdpSocket`, not a `UdpMux`: the audio thread
     /// runs its own Tokio runtime, and a Tokio socket only receives wakeups on
     /// the runtime that registered it. The descriptor moves; the registration
     /// happens in `run_audio_streaming`.
@@ -254,9 +257,6 @@ pub struct StreamingState {
     /// Address `prepared_socket` is bound to, kept so repeated prepares report
     /// the same one.
     prepared_addr: Mutex<Option<SocketAddr>>,
-    /// The port of the socket the last audio session took, so the next one can
-    /// be bound there when the room already knows it.
-    last_port: Mutex<Option<u16>>,
 }
 
 impl StreamingState {
@@ -268,46 +268,52 @@ impl StreamingState {
             is_monitoring: Arc::new(AtomicBool::new(false)),
             input_level: Arc::new(AtomicU32::new(0)),
             output_level: Arc::new(AtomicU32::new(0)),
-            remote_addr: Mutex::new(None),
-            stats: Arc::new(RwLock::new(None)),
-            bandwidth: Arc::new(RwLock::new(None)),
-            connection_state: Arc::new(RwLock::new(None)),
+            links: Arc::new(RwLock::new(Vec::new())),
+            peer_gains: Arc::new(RwLock::new(HashMap::new())),
             device_problems: Arc::new(RwLock::new(Vec::new())),
-            jitter_buffer_delay_us: Arc::new(AtomicU32::new(0)),
             buffer_size: Mutex::new(64), // Default: 64 samples
             underrun_count: Arc::new(AtomicU64::new(0)),
             delay_adjustments: Arc::new(AtomicU64::new(0)),
             reconnect_count: Arc::new(AtomicU64::new(0)),
             silence_giveups: Arc::new(AtomicU64::new(0)),
             link_facts: Arc::new(RwLock::new(None)),
-            flight: Arc::new(RwLock::new(None)),
-            peer_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
+            flights: Arc::new(RwLock::new(Vec::new())),
             master_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
-            peer_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
-            local_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
+            local_volume: Arc::new(AtomicU32::new(100)),  // 100 = unity gain
             local_pan: Arc::new(std::sync::atomic::AtomicI32::new(0)), // 0 = center
             // Until a session starts from the saved settings (ADR-013)
             sample_rate: Arc::new(AtomicU32::new(jamjam::config::DEFAULT_SAMPLE_RATE)),
-            peer_latency_info: Arc::new(RwLock::new(None)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
-            last_port: Mutex::new(None),
         }
     }
 
-    /// Sets the volume of the peer's audio, in percent of unity gain (0-200).
-    pub async fn set_peer_volume(&self, percent: u32) {
-        let clamped = percent.min(200);
-        self.peer_volume.store(clamped, Ordering::SeqCst);
-        self.send(StreamingCommand::SetPeerVolume(clamped as f32 / 100.0))
-            .await;
+    /// The fader and pan of `peer`, made at unity gain and centre the first
+    /// time they are asked for.
+    fn gain_of(&self, peer: Uuid) -> Arc<PeerGain> {
+        let mut gains = self.peer_gains.write().unwrap_or_else(|e| e.into_inner());
+        gains.entry(peer).or_default().clone()
     }
 
-    /// Sets where the peer's audio sits, from -100 (left) to 100 (right).
-    pub async fn set_peer_pan(&self, pan: i32) {
-        let clamped = pan.clamp(-100, 100);
-        self.peer_pan.store(clamped, Ordering::SeqCst);
-        self.send(StreamingCommand::SetPeerPan(clamped)).await;
+    /// Sets the volume `peer` is played at, in percent of unity gain (0-200).
+    /// Heard on the next frame when there is a link to them, and kept for when
+    /// there is.
+    pub fn set_peer_volume(&self, peer: Uuid, percent: u32) {
+        self.gain_of(peer).set_volume(percent);
+    }
+
+    /// Sets where `peer` sits, from -100 (left) to 100 (right).
+    pub fn set_peer_pan(&self, peer: Uuid, pan: i32) {
+        self.gain_of(peer).set_pan(pan);
+    }
+
+    /// Forgets the fader and pan of everyone but `peers`, so one who left
+    /// leaves nothing behind.
+    pub fn keep_peer_gains(&self, peers: &[Uuid]) {
+        self.peer_gains
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|peer, _| peers.contains(peer));
     }
 
     /// Sets the volume of the microphone, in percent of unity gain (0-200).
@@ -325,13 +331,12 @@ impl StreamingState {
         self.send(StreamingCommand::SetLocalPan(clamped)).await;
     }
 
-    /// The peer's volume (percent of unity gain) and pan, as stored.
+    /// The volume (percent of unity gain) and pan `peer` is played at, or
+    /// `None` when nothing is kept for them.
     #[cfg(test)]
-    pub(crate) fn peer_gain(&self) -> (u32, i32) {
-        (
-            self.peer_volume.load(Ordering::SeqCst),
-            self.peer_pan.load(Ordering::SeqCst),
-        )
+    pub(crate) fn peer_gain(&self, peer: Uuid) -> Option<(u32, i32)> {
+        let gains = self.peer_gains.read().unwrap();
+        gains.get(&peer).map(|gain| (gain.volume(), gain.pan()))
     }
 
     /// The microphone's volume (percent of unity gain) and pan, as stored.
@@ -364,30 +369,6 @@ impl StreamingState {
         self.bind_prepared(&mut addr_lock, "0.0.0.0:0").await
     }
 
-    /// Bind the audio socket on the port the last audio session used, so the
-    /// address the room has stays good for a peer on its way to it. Binds a
-    /// fresh port when that one cannot be had again, or when a socket is
-    /// already bound; true only when the port is the last one.
-    async fn prepare_socket_again(&self) -> Result<bool, String> {
-        let mut addr_lock = self.prepared_addr.lock().await;
-        if addr_lock.is_some() {
-            return Ok(false);
-        }
-        let last = *self.last_port.lock().await;
-        if let Some(port) = last {
-            match self
-                .bind_prepared(&mut addr_lock, &format!("0.0.0.0:{port}"))
-                .await
-            {
-                Ok(_) => return Ok(true),
-                Err(e) => tracing::warn!("Could not bind port {} again: {}", port, e),
-            }
-        }
-        self.bind_prepared(&mut addr_lock, "0.0.0.0:0")
-            .await
-            .map(|_| false)
-    }
-
     async fn bind_prepared(
         &self,
         addr_lock: &mut Option<SocketAddr>,
@@ -409,45 +390,56 @@ impl StreamingState {
     /// Hand the prepared socket to the audio thread.
     ///
     /// The address is forgotten with it: the socket now belongs to the audio
-    /// session, so the next prepare (a new peer after this session ended) has
-    /// to bind a fresh one rather than report a port nothing listens on.
+    /// session, so the next prepare (after this session ended) has to bind a
+    /// fresh one rather than report a port nothing listens on.
     async fn take_prepared_socket(&self) -> Option<std::net::UdpSocket> {
         let mut addr_lock = self.prepared_addr.lock().await;
         let socket = self.prepared_socket.lock().await.take();
         *addr_lock = None;
-        if let Some(port) = socket
-            .as_ref()
-            .and_then(|s| s.local_addr().ok())
-            .map(|addr| addr.port())
-        {
-            *self.last_port.lock().await = Some(port);
-        }
         socket
     }
 
-    /// How the audio connection is doing, as the status reports it
-    /// ("connected", "reconnecting", "failed", ...), if there is one.
-    pub fn link_state(&self) -> Option<String> {
-        self.connection_state
+    /// Whether an audio session is running
+    pub fn is_active(&self) -> bool {
+        self.is_active.load(Ordering::SeqCst)
+    }
+
+    /// Whether a socket is bound and waiting for the next audio session: the
+    /// one whose address the room was told.
+    pub async fn has_prepared_socket(&self) -> bool {
+        self.prepared_addr.lock().await.is_some()
+    }
+
+    fn link_reports(&self) -> Vec<(Uuid, Arc<LinkReport>)> {
+        self.links
             .read()
-            .ok()
-            .and_then(|c| c.as_ref().map(|(state, _)| state.clone()))
+            .map(|links| links.clone())
+            .unwrap_or_default()
+    }
+
+    /// How the audio link to each participant is doing, in the order the
+    /// links were opened.
+    pub fn link_healths(&self) -> Vec<(Uuid, LinkHealth)> {
+        self.link_reports()
+            .into_iter()
+            .map(|(peer, report)| (peer, report.health()))
+            .collect()
     }
 
     /// Address candidates for the prepared audio socket, with the public
     /// address STUN reports for that socket itself.
     ///
     /// Returns `None` if there is no prepared socket to ask through - none was
-    /// prepared, or `streaming_start` already took it.
+    /// prepared, or the audio session already took it.
     ///
-    /// The socket stays locked while STUN runs, so `streaming_start` waits for
-    /// the answer instead of moving the socket into the receive loop, which
-    /// would swallow the reply.
+    /// The socket stays locked while STUN runs, so starting the session waits
+    /// for the answer instead of moving the socket into the receive loop,
+    /// which would swallow the reply.
     pub async fn gather_candidates(&self) -> Option<Vec<jamjam::network::AddressCandidate>> {
         let prepared = self.prepared_socket.lock().await;
         let socket = prepared.as_ref()?;
         // A duplicate descriptor shares the socket - the same port, the same NAT
-        // mapping - while leaving the original untouched for `streaming_start`.
+        // mapping - while leaving the original untouched for the audio session.
         let asking = match socket.try_clone().and_then(tokio::net::UdpSocket::from_std) {
             Ok(socket) => Arc::new(socket),
             Err(e) => {
@@ -458,8 +450,9 @@ impl StreamingState {
         Some(jamjam::network::gather_candidates(&asking).await)
     }
 
-    /// Get local latency info based on audio config
-    fn local_latency_info(&self) -> LocalLatencyInfo {
+    /// Local latency info based on the audio config, for the link whose
+    /// play-out buffer holds `jitter_buffer_delay_us`
+    fn local_latency_info(&self, jitter_buffer_delay_us: u32) -> LocalLatencyInfo {
         let frame_size = self.buffer_size.try_lock().map(|s| *s).unwrap_or(64);
         let sample_rate = self.sample_rate.load(Ordering::SeqCst);
         let mut info = LocalLatencyInfo::from_audio_config(frame_size, sample_rate, "pcm");
@@ -467,8 +460,7 @@ impl StreamingState {
         // `from_audio_config` leaves the jitter buffer at 0 because it only knows
         // the audio configuration. Without this the breakdown shown to the user
         // omits the buffer entirely - up to 21.33ms on high-quality (ADR-019, ADR-070).
-        let delay_us = self.jitter_buffer_delay_us.load(Ordering::SeqCst);
-        info.set_jitter_buffer_ms(delay_us as f32 / 1000.0);
+        info.set_jitter_buffer_ms(jitter_buffer_delay_us as f32 / 1000.0);
         info
     }
 }
@@ -509,27 +501,30 @@ pub(crate) enum StreamingCommand {
     SetOutputDevice(Option<String>),
     SetMute(bool),
     SetMonitoring(bool),
-    SetPeerVolume(f32),
     SetMasterVolume(f32),
-    SetPeerPan(i32),
     SetLocalVolume(f32),
     SetLocalPan(i32),
     /// Rebuild the receive jitter buffer at a new depth (ADR-020)
     SetJitterBufferFrames(u32),
-    /// Resume probing after automatic recovery gave up (REQ-CON-110)
+    /// Resume probing on every link automatic recovery gave up on (REQ-CON-110)
     Reconnect,
+    /// Open an audio link to a participant
+    Link(Box<LinkTarget>),
+    /// Close the audio link to a participant. The others go on.
+    Unlink(Uuid),
 }
 
 impl StreamingState {
-    /// The link's latest reading for the usage totals: the round-trip time
-    /// (`None` before the first sample), the packet loss rate (0.0 to 1.0)
-    /// and the packets FEC has rebuilt so far (`None` when the link sends no
-    /// FEC). `None` while there is no connection.
-    pub(crate) fn link_reading(&self) -> Option<(Option<f32>, f32, Option<u64>)> {
-        let stats = self.stats.read().ok()?;
-        stats
-            .as_ref()
+    /// The latest reading of every link that is up, for the usage totals:
+    /// the round-trip time (`None` before the first sample), the packet loss
+    /// rate (0.0 to 1.0) and the packets FEC has rebuilt so far (`None` when
+    /// the link sends no FEC).
+    pub(crate) fn link_readings(&self) -> Vec<(Option<f32>, f32, Option<u64>)> {
+        self.link_reports()
+            .iter()
+            .filter_map(|(_, report)| report.stats.read().ok()?.clone())
             .map(|s| (s.rtt_ms, s.packet_loss_rate, s.fec_recovered))
+            .collect()
     }
 
     /// Buffer underruns since streaming last started.
@@ -537,7 +532,7 @@ impl StreamingState {
         self.underrun_count.load(Ordering::Relaxed)
     }
 
-    /// Times the connection began to reconnect since streaming last started.
+    /// Times a link began to reconnect since streaming last started.
     pub(crate) fn reconnects(&self) -> u64 {
         self.reconnect_count.load(Ordering::Relaxed)
     }
@@ -548,7 +543,7 @@ impl StreamingState {
         self.silence_giveups.load(Ordering::Relaxed)
     }
 
-    /// How the current link came up. Empty before there is a connection.
+    /// How the session's first link came up. Empty before there is one.
     pub(crate) fn link_snapshot(&self) -> LinkSnapshot {
         self.link_facts
             .read()
@@ -557,14 +552,40 @@ impl StreamingState {
             .unwrap_or_default()
     }
 
-    /// What went wrong with the received audio in this session, or the last
-    /// one, and when. `None` before any session has run.
+    /// What went wrong with the audio received from each participant in this
+    /// session, or the last one, and when, in the order the links were
+    /// opened. Empty before any session has opened a link.
     #[cfg(feature = "debug-tools")]
-    pub(crate) fn flight_report(&self) -> Option<jamjam::audio::FlightReport> {
-        self.flight
+    pub(crate) fn flight_reports(&self) -> Vec<(Uuid, jamjam::audio::FlightReport)> {
+        self.flights
             .read()
-            .ok()
-            .and_then(|flight| flight.as_ref().map(|flight| flight.report()))
+            .map(|flights| {
+                flights
+                    .iter()
+                    .map(|(peer, flight)| (*peer, flight.report()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Stands in for the audio thread: a link to `peer` in `state`
+    /// ("connected", "reconnecting", ...) that has received `packets_received`
+    /// packets and measured a round trip of `rtt_ms`. With `None`, a link
+    /// that is not up yet and has no statistics.
+    #[cfg(test)]
+    pub(crate) fn set_link_for_test(&self, peer: Uuid, state: &str, up: Option<(u64, f32)>) {
+        let report = Arc::new(LinkReport::default());
+        report.set_state(state, None);
+        if let Some((packets_received, rtt_ms)) = up {
+            *report.stats.write().unwrap() = Some(ConnectionStats {
+                packets_received,
+                rtt_ms: Some(rtt_ms),
+                ..Default::default()
+            });
+        }
+        let mut links = self.links.write().unwrap();
+        links.retain(|(linked, _)| *linked != peer);
+        links.push((peer, report));
     }
 
     /// Stands in for the audio thread: a link that came up as `facts` says.
@@ -633,6 +654,95 @@ impl StreamingState {
 ///
 /// Published by the audio thread and read by the IPC layer.
 type ConnectionStateSnapshot = Option<(String, Option<String>)>;
+
+/// A participant to open an audio link to
+#[derive(Debug, Clone)]
+pub struct LinkTarget {
+    pub peer: Uuid,
+    /// Their addresses, best first. All are raced, so one on the same network
+    /// is reached directly instead of only through its public address
+    /// (REQ-CON-113).
+    pub candidates: Vec<SocketAddr>,
+    /// Our key in the room and the key the server gave for them: with them
+    /// the link is checked to be theirs (`Connection::verify_peer`). `None`
+    /// for a peer reached without a room.
+    pub link: Option<(LinkIdentity, Option<String>)>,
+}
+
+impl PartialEq for LinkTarget {
+    fn eq(&self, other: &Self) -> bool {
+        let keys = |target: &Self| {
+            target
+                .link
+                .as_ref()
+                .map(|(ours, theirs)| (ours.public_key(), theirs.clone()))
+        };
+        self.peer == other.peer && self.candidates == other.candidates && keys(self) == keys(other)
+    }
+}
+
+/// How the audio link to one participant is doing, as far as deciding what to
+/// do about it goes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkHealth {
+    /// Nothing has been heard from them yet: the link is being set up, or it
+    /// is up on an address that has not answered
+    Starting,
+    /// Their packets arrive
+    Heard,
+    /// Their packets stopped arriving; the link is still trying
+    Silent,
+    /// The link gave up on them. It is taken up again if they are heard.
+    Failed,
+}
+
+/// What the audio thread publishes about the link to one participant, for
+/// the IPC layer to read
+#[derive(Default)]
+struct LinkReport {
+    /// Connection statistics, once the link is up
+    stats: RwLock<Option<ConnectionStats>>,
+    /// Measured bandwidth against what the preset needs
+    bandwidth: RwLock<Option<BandwidthSnapshot>>,
+    /// Connection state (ADR-022)
+    connection_state: RwLock<ConnectionStateSnapshot>,
+    /// Delay their play-out buffer holds, in microseconds
+    ///
+    /// Integer microseconds rather than a float, so it fits an atomic without
+    /// bit-casting. Feeds the latency breakdown shown to the user.
+    jitter_buffer_delay_us: AtomicU32,
+    /// What their app told about its audio (`LatencyInfoMessage`)
+    latency_info: RwLock<Option<PeerLatencyInfo>>,
+    /// What the mix measured of them
+    meter: Arc<PeerMeter>,
+}
+
+impl LinkReport {
+    fn state(&self) -> ConnectionStateSnapshot {
+        self.connection_state.read().ok().and_then(|c| c.clone())
+    }
+
+    fn set_state(&self, state: &str, error: Option<String>) {
+        if let Ok(mut published) = self.connection_state.write() {
+            *published = Some((state.to_string(), error));
+        }
+    }
+
+    fn health(&self) -> LinkHealth {
+        let heard = self
+            .stats
+            .read()
+            .ok()
+            .and_then(|stats| stats.as_ref().map(|s| s.packets_received > 0))
+            .unwrap_or(false);
+        match self.state().as_ref().map(|(state, _)| state.as_str()) {
+            Some("failed") => LinkHealth::Failed,
+            Some("reconnecting") => LinkHealth::Silent,
+            Some("connected") if heard => LinkHealth::Heard,
+            _ => LinkHealth::Starting,
+        }
+    }
+}
 
 /// What the link carries versus what the preset needs
 ///
@@ -840,11 +950,40 @@ fn clear_device_problem(problems: &RwLock<Vec<DeviceProblem>>, side: DeviceSide)
     }
 }
 
+/// The audio link to one participant, for IPC
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerLinkStatus {
+    /// The participant's id in the room
+    pub peer_id: String,
+    /// Connection state: "connecting" | "checkingconnectivity" | "connected" |
+    /// "reconnecting" | "failed" (ADR-022)
+    pub connection_state: Option<String>,
+    /// Why the link failed, when `connection_state` is "failed" and the
+    /// reason is known
+    pub connection_error: Option<String>,
+    /// Network statistics, once the link is up
+    pub network: Option<NetworkStats>,
+    /// Detailed latency breakdown, once the link is up
+    pub latency: Option<DetailedLatency>,
+    /// Their audio configuration (if received via LatencyInfoMessage)
+    pub peer_audio: Option<PeerAudioInfo>,
+    /// Level of what is played of them, after their fader (0-100)
+    pub level: u32,
+}
+
 /// Streaming status for IPC
+///
+/// `network`, `latency`, `peer_audio`, `connection_state` and
+/// `connection_error` are those of one link: the one doing best (connected
+/// before reconnecting before failed), the earliest opened among equals. In a
+/// room of two that is the link to the other participant, which is what a
+/// reader written for such a room expects. `peers` has every link.
 #[derive(Debug, Clone, Serialize)]
 pub struct StreamingStatus {
     pub is_active: bool,
-    pub remote_addr: Option<String>,
+    /// The audio link to each participant there is one to, in the order the
+    /// links were opened
+    pub peers: Vec<PeerLinkStatus>,
     /// Whether microphone is muted
     pub is_muted: bool,
     /// Whether the user hears their own input directly (ADR-033)
@@ -862,9 +1001,6 @@ pub struct StreamingStatus {
     /// Peer's audio configuration (if received via LatencyInfoMessage)
     pub peer_audio: Option<PeerAudioInfo>,
     /// Connection state: "connected" | "reconnecting" | "failed" | ... (ADR-022)
-    ///
-    /// The UI shows reconnection progress from this, and asks whether to retry
-    /// once it reads "failed" (REQ-CON-110).
     pub connection_state: Option<String>,
     /// Why the connection failed, when `connection_state` is "failed"
     pub connection_error: Option<String>,
@@ -886,71 +1022,81 @@ pub async fn streaming_prepare(state: tauri::State<'_, StreamingState>) -> Resul
     state.prepare_socket().await.map(|addr| addr.to_string())
 }
 
-/// Binds the audio socket on the port the last audio session used and reports
-/// whether it got that port (see [`StreamingState::prepare_socket_again`]).
-pub async fn streaming_prepare_again(
-    state: tauri::State<'_, StreamingState>,
-) -> Result<bool, String> {
-    state.prepare_socket_again().await
-}
-
-/// Address candidates to race for `addr` (REQ-CON-113): `others`, in the
-/// order the caller ranked them (LAN before public), deduplicated, with
-/// `addr` appended if it was not already among them. `addr` is always kept
-/// as a fallback so a caller that could not name any other candidate (or an
-/// older peer) still connects.
-fn merge_candidate_addrs(addr: SocketAddr, others: &[SocketAddr]) -> Vec<SocketAddr> {
-    let mut merged: Vec<SocketAddr> = Vec::new();
-    for &candidate in others {
-        if !merged.contains(&candidate) {
-            merged.push(candidate);
-        }
-    }
-    if !merged.contains(&addr) {
-        merged.push(addr);
-    }
-    merged
-}
-
-/// Start audio streaming to a remote peer
-#[allow(clippy::too_many_arguments)]
-pub async fn streaming_start(
-    remote_addr: String,
-    // The peer's other address candidates (public and LAN), tried alongside
-    // `remote_addr` so a peer on the same network is reached directly
-    // instead of only through its public address (REQ-CON-113).
-    remote_candidates: Option<Vec<String>>,
-    // Our key in the room and the key the server gave for the peer: with them the link to
-    // the peer is checked to be that peer's (`Connection::verify_peer`). `None` for a peer
-    // reached without a room.
-    link: Option<(LinkIdentity, Option<String>)>,
+/// Opens an audio link to `target`, starting the audio session - the devices
+/// and the socket the room was told - if none is running.
+///
+/// The link is set up on the audio thread: this returns once it has been
+/// asked for, and [`StreamingState::link_healths`] says how it went.
+pub async fn streaming_link(
+    target: LinkTarget,
     state: tauri::State<'_, StreamingState>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
     settings_state: tauri::State<'_, crate::settings::SettingsState>,
     usage: tauri::State<'_, crate::usage::UsageState>,
 ) -> Result<(), String> {
-    // Check if already streaming
-    if state.is_active.load(Ordering::SeqCst) {
-        return Err("Streaming already active".to_string());
+    // An address published twice is checked once
+    let mut target = target;
+    let mut candidates: Vec<SocketAddr> = Vec::new();
+    for candidate in target.candidates {
+        if !candidates.contains(&candidate) {
+            candidates.push(candidate);
+        }
     }
-
-    // Parse remote address
-    let addr: SocketAddr = remote_addr
-        .parse()
-        .map_err(|e| format!("Invalid address: {}", e))?;
-
-    // Build the candidate list to race (REQ-CON-113): the peer's other
-    // candidates, in the order the caller ranked them (LAN before public),
-    // plus `addr` itself as a fallback.
-    let mut parsed_candidates: Vec<SocketAddr> = Vec::new();
-    for candidate in remote_candidates.into_iter().flatten() {
-        parsed_candidates.push(
-            candidate
-                .parse()
-                .map_err(|e| format!("Invalid candidate address: {}", e))?,
-        );
+    target.candidates = candidates;
+    if target.candidates.is_empty() {
+        return Err("The participant has published no address".to_string());
     }
-    let candidate_addrs = merge_candidate_addrs(addr, &parsed_candidates);
+    if !state.is_active() {
+        start_session(&state, &config_state, &settings_state, &usage).await?;
+    }
+    tracing::info!(
+        "Audio link to {} asked for ({} address candidate(s))",
+        target.peer,
+        target.candidates.len()
+    );
+    let tx = state.cmd_tx.lock().await;
+    match tx.as_ref() {
+        Some(sender) => sender
+            .send(StreamingCommand::Link(Box::new(target)))
+            .map_err(|_| "The audio session has ended".to_string()),
+        None => Err("No audio session is running".to_string()),
+    }
+}
+
+/// Closes the audio link to `peer`. The session and its other links go on.
+pub async fn streaming_unlink(
+    peer: Uuid,
+    state: tauri::State<'_, StreamingState>,
+) -> Result<(), String> {
+    if !state.is_active() {
+        return Ok(());
+    }
+    tracing::info!("Audio link to {} to be closed", peer);
+    if let Some(sender) = state.cmd_tx.lock().await.as_ref() {
+        let _ = sender.send(StreamingCommand::Unlink(peer));
+    }
+    Ok(())
+}
+
+/// Starts the audio session: opens the devices from the saved settings and
+/// takes the prepared socket. It has no links yet.
+async fn start_session(
+    state: &StreamingState,
+    config_state: &crate::config::ConfigState,
+    settings_state: &crate::settings::SettingsState,
+    usage: &crate::usage::UsageState,
+) -> Result<(), String> {
+    // Hand the pre-bound socket to the audio thread, which registers it with
+    // its own runtime. Taking it means a later prepare rebinds rather than
+    // handing out a socket already in use.
+    //
+    // Everyone in the room sends to the address of this socket. A session
+    // with a socket nobody was told of would send and hear no one, so there
+    // is none without it.
+    let prepared_socket = state
+        .take_prepared_socket()
+        .await
+        .ok_or("No audio socket was prepared: the room has no address to send to")?;
 
     // Create channel for commands to audio thread
     let (cmd_tx, cmd_rx) = std_mpsc::channel::<StreamingCommand>();
@@ -961,39 +1107,24 @@ pub async fn streaming_start(
         *tx = Some(cmd_tx);
     }
 
-    // Store remote address
-    {
-        let mut addr_lock = state.remote_addr.lock().await;
-        *addr_lock = Some(remote_addr.clone());
-    }
-
     let is_active = state.is_active.clone();
     let is_muted = state.is_muted.clone();
     let is_monitoring = state.is_monitoring.clone();
     let input_level = state.input_level.clone();
     let output_level = state.output_level.clone();
-    let shared_stats = state.stats.clone();
-    let shared_bandwidth = state.bandwidth.clone();
-    let shared_jitter_delay_us = state.jitter_buffer_delay_us.clone();
-    let shared_connection_state = state.connection_state.clone();
+    let shared_links = state.links.clone();
+    let peer_gains = state.peer_gains.clone();
     let shared_device_problems = state.device_problems.clone();
     let underrun_count = state.underrun_count.clone();
     let delay_adjustments = state.delay_adjustments.clone();
     let reconnect_count = state.reconnect_count.clone();
     let silence_giveups = state.silence_giveups.clone();
     let shared_link_facts = state.link_facts.clone();
-    let shared_flight = state.flight.clone();
-    let peer_volume = state.peer_volume.clone();
+    let shared_flights = state.flights.clone();
     let master_volume = state.master_volume.clone();
-    let peer_pan = state.peer_pan.clone();
     let local_volume = state.local_volume.clone();
     let local_pan = state.local_pan.clone();
-    let shared_peer_latency_info = state.peer_latency_info.clone();
     let usage_reporter = usage.reporter().clone();
-    // Hand the pre-bound socket (if any) to the audio thread, which registers
-    // it with its own runtime. Taking it means a later prepare rebinds rather
-    // than handing out a socket already in use.
-    let prepared_socket = state.take_prepared_socket().await;
 
     // Reset state on new connection
     state.is_muted.store(false, Ordering::SeqCst);
@@ -1009,16 +1140,15 @@ pub async fn streaming_start(
     if let Ok(mut facts) = state.link_facts.write() {
         *facts = None;
     }
-    if let Ok(mut flight) = state.flight.write() {
-        *flight = None;
+    if let Ok(mut flights) = state.flights.write() {
+        flights.clear();
+    }
+    if let Ok(mut links) = state.links.write() {
+        links.clear();
     }
     // The master volume goes back to unity gain. The faders' own values are
-    // the mixer's, which sets them before a session starts (`mixer`).
+    // the mixer's, which sets them as they change (`mixer`).
     state.master_volume.store(100, Ordering::SeqCst);
-    // Clear peer latency info
-    if let Ok(mut info) = state.peer_latency_info.write() {
-        *info = None;
-    }
     if let Ok(mut problems) = state.device_problems.write() {
         problems.clear();
     }
@@ -1043,8 +1173,8 @@ pub async fn streaming_start(
     // The frame *duration* comes from the buffer_size actually in use, so the
     // resulting delay is correct even if the two were configured separately.
     let preset = config.preset.clone();
-    // Transmit channel count, told to the peer so its mixer can show whether
-    // we're sending mono or stereo.
+    // Transmit channel count, told to the peers so their mixers can show
+    // whether we're sending mono or stereo.
     let transmit_channels = config.transmit_channels;
     // Which channels of a multi-channel interface are read and played on
     let input_channels = (config.input_channel_l, config.input_channel_r);
@@ -1052,11 +1182,15 @@ pub async fn streaming_start(
 
     let redact = crate::logging::redaction_enabled();
     tracing::info!(
-        "Streaming start: remote={} candidates={:?} input={:?} output={:?} buffer={} sample_rate={} preset={:?}",
-        addr,
-        candidate_addrs,
-        crate::logging::redact_device_id(input_device_id.as_deref().unwrap_or("system default"), redact),
-        crate::logging::redact_device_id(output_device_id.as_deref().unwrap_or("system default"), redact),
+        "Streaming start: input={:?} output={:?} buffer={} sample_rate={} preset={:?}",
+        crate::logging::redact_device_id(
+            input_device_id.as_deref().unwrap_or("system default"),
+            redact
+        ),
+        crate::logging::redact_device_id(
+            output_device_id.as_deref().unwrap_or("system default"),
+            redact
+        ),
         buffer_size,
         sample_rate,
         preset
@@ -1090,8 +1224,6 @@ pub async fn streaming_start(
 
         rt.block_on(async move {
             if let Err(e) = run_audio_streaming(
-                candidate_addrs,
-                link,
                 prepared_socket,
                 input_device_id,
                 output_device_id,
@@ -1107,23 +1239,18 @@ pub async fn streaming_start(
                 &is_monitoring,
                 &input_level,
                 &output_level,
-                &shared_stats,
-                &shared_bandwidth,
-                &shared_jitter_delay_us,
-                &shared_connection_state,
+                &shared_links,
+                &peer_gains,
                 &shared_device_problems,
                 &underrun_count,
                 &delay_adjustments,
                 &reconnect_count,
                 &silence_giveups,
                 &shared_link_facts,
-                &shared_flight,
-                &peer_volume,
+                &shared_flights,
                 &master_volume,
-                &peer_pan,
                 &local_volume,
                 &local_pan,
-                &shared_peer_latency_info,
             )
             .await
             {
@@ -1132,11 +1259,11 @@ pub async fn streaming_start(
             } else {
                 tracing::info!("Audio streaming ended");
             }
-            is_active.store(false, Ordering::SeqCst);
-            // Clear stats on disconnect
-            if let Ok(mut stats) = shared_stats.write() {
-                *stats = None;
+            // The links ended with the session
+            if let Ok(mut links) = shared_links.write() {
+                links.clear();
             }
+            is_active.store(false, Ordering::SeqCst);
         });
     });
 
@@ -1167,20 +1294,6 @@ pub async fn streaming_stop(state: tauri::State<'_, StreamingState>) -> Result<(
         let mut tx = state.cmd_tx.lock().await;
         *tx = None;
     }
-    {
-        let mut addr = state.remote_addr.lock().await;
-        *addr = None;
-    }
-    {
-        if let Ok(mut stats) = state.stats.write() {
-            *stats = None;
-        }
-    }
-    {
-        if let Ok(mut info) = state.peer_latency_info.write() {
-            *info = None;
-        }
-    }
 
     // The audio thread clears `is_active` as the last thing it does. Waiting
     // for that, not for a fixed time, is what keeps the end of this session
@@ -1202,6 +1315,18 @@ pub async fn streaming_stop(state: tauri::State<'_, StreamingState>) -> Result<(
 /// How long [`streaming_stop`] waits for the audio thread to end.
 const STOP_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How a link in `state` compares with others when one has to stand for the
+/// session: lower is better.
+fn state_rank(state: Option<&str>) -> u8 {
+    match state {
+        Some("connected") => 0,
+        Some("reconnecting") => 1,
+        Some("failed") => 3,
+        // Not up yet
+        _ => 2,
+    }
+}
+
 /// Get streaming status
 #[tauri::command]
 pub async fn streaming_status(
@@ -1212,91 +1337,53 @@ pub async fn streaming_status(
     let is_monitoring = state.is_monitoring.load(Ordering::SeqCst);
     let input_level = state.input_level.load(Ordering::SeqCst);
     let output_level = state.output_level.load(Ordering::SeqCst);
-    let remote_addr = state.remote_addr.lock().await.clone();
-    let stats = state.stats.read().ok().and_then(|s| s.clone());
-    let bandwidth = state.bandwidth.read().ok().and_then(|b| *b);
-    let connection_state = state.connection_state.read().ok().and_then(|c| c.clone());
+    let frame_size = *state.buffer_size.lock().await;
+    let local_sample_rate = state.sample_rate.load(Ordering::SeqCst);
 
-    let (network, latency) = if let Some(ref s) = stats {
-        let local_info = state.local_latency_info();
-        let breakdown =
-            LatencyBreakdown::calculate(&local_info, None, s.rtt_ms.unwrap_or(0.0), s.jitter_ms);
-        let frame_size = state.buffer_size.lock().await;
-
-        let network = NetworkStats {
-            rtt_ms: s.rtt_ms,
-            jitter_ms: s.jitter_ms,
-            packet_loss_percent: s.packet_loss_rate * 100.0,
-            quality: s.quality().map(|q| q.as_str().to_string()),
-            measured_bps: bandwidth.map(|b| b.measured_bps).unwrap_or(0.0),
-            required_bps: bandwidth.map(|b| b.required_bps).unwrap_or(0.0),
-            bandwidth_status: bandwidth.map(|b| status_label(b.status).to_string()),
-            uptime_seconds: s.uptime_seconds,
-            packets_sent: s.packets_sent,
-            packets_received: s.packets_received,
-            encryption: s.security.as_str().to_string(),
-            peer_checked: s.peer_checked,
-            bytes_sent: s.bytes_sent,
-            bytes_received: s.bytes_received,
-        };
-
-        let upstream = vec![
-            LatencyComponent {
-                name: "Capture buffer".to_string(),
-                ms: breakdown.upstream.capture_buffer_ms,
-                info: Some(format!(
-                    "{} samples @ {} Hz",
-                    *frame_size,
-                    state.sample_rate.load(Ordering::SeqCst)
-                )),
-            },
-            LatencyComponent {
-                name: "Encode (pcm)".to_string(),
-                ms: breakdown.upstream.encode_ms,
-                info: None,
-            },
-            LatencyComponent {
-                name: "Network".to_string(),
-                ms: breakdown.upstream.network_ms,
-                info: Some("RTT/2".to_string()),
-            },
-        ];
-
-        let downstream = vec![
-            LatencyComponent {
-                name: "Network".to_string(),
-                ms: breakdown.downstream.network_ms,
-                info: Some("RTT/2".to_string()),
-            },
-            LatencyComponent {
-                name: "Jitter buffer".to_string(),
-                ms: breakdown.downstream.jitter_buffer_ms,
-                info: None,
-            },
-            LatencyComponent {
-                name: "Decode (pcm)".to_string(),
-                ms: breakdown.downstream.decode_ms,
-                info: None,
-            },
-            LatencyComponent {
-                name: "Playback buffer".to_string(),
-                ms: breakdown.downstream.playback_buffer_ms,
-                info: Some(format!("{} samples", *frame_size)),
-            },
-        ];
-
-        let latency = DetailedLatency {
-            upstream,
-            upstream_total_ms: breakdown.upstream_total_ms,
-            downstream,
-            downstream_total_ms: breakdown.downstream_total_ms,
-            roundtrip_total_ms: breakdown.roundtrip_total_ms,
-        };
-
-        (Some(network), Some(latency))
-    } else {
-        (None, None)
-    };
+    let peers: Vec<PeerLinkStatus> = state
+        .link_reports()
+        .iter()
+        .map(|(peer, report)| {
+            let stats = report.stats.read().ok().and_then(|s| s.clone());
+            let bandwidth = report.bandwidth.read().ok().and_then(|b| *b);
+            let connection_state = report.state();
+            let (network, latency) = match &stats {
+                Some(s) => {
+                    let local_info = state
+                        .local_latency_info(report.jitter_buffer_delay_us.load(Ordering::SeqCst));
+                    (
+                        Some(network_stats(s, bandwidth)),
+                        Some(detailed_latency(
+                            s,
+                            &local_info,
+                            frame_size,
+                            local_sample_rate,
+                        )),
+                    )
+                }
+                None => (None, None),
+            };
+            // Peer audio info (ADR-013: sample rate communication)
+            let peer_audio = report.latency_info.read().ok().and_then(|info| {
+                info.as_ref().map(|p| PeerAudioInfo {
+                    sample_rate: p.sample_rate,
+                    frame_size: p.frame_size,
+                    codec: p.codec.clone(),
+                    needs_resampling: p.sample_rate != local_sample_rate,
+                    channel_count: p.channel_count as u32,
+                })
+            });
+            PeerLinkStatus {
+                peer_id: peer.to_string(),
+                connection_state: connection_state.as_ref().map(|(state, _)| state.clone()),
+                connection_error: connection_state.and_then(|(_, error)| error),
+                network,
+                latency,
+                peer_audio,
+                level: report.meter.level(),
+            }
+        })
+        .collect();
 
     // Audio quality metrics
     let audio_quality = if is_active {
@@ -1308,33 +1395,25 @@ pub async fn streaming_status(
         None
     };
 
-    // Peer audio info (ADR-013: sample rate communication)
-    let peer_audio = state.peer_latency_info.read().ok().and_then(|info| {
-        info.as_ref().map(|p| {
-            let local_sample_rate = state.sample_rate.load(Ordering::SeqCst);
-            PeerAudioInfo {
-                sample_rate: p.sample_rate,
-                frame_size: p.frame_size,
-                codec: p.codec.clone(),
-                needs_resampling: p.sample_rate != local_sample_rate,
-                channel_count: p.channel_count as u32,
-            }
-        })
-    });
+    // `min_by_key` keeps the first of equals: the earliest opened
+    let best = peers
+        .iter()
+        .min_by_key(|peer| state_rank(peer.connection_state.as_deref()))
+        .cloned();
 
     Ok(StreamingStatus {
         is_active,
-        remote_addr,
         is_muted,
         is_monitoring,
         input_level,
         output_level,
-        network,
-        latency,
+        network: best.as_ref().and_then(|peer| peer.network.clone()),
+        latency: best.as_ref().and_then(|peer| peer.latency.clone()),
         audio_quality,
-        peer_audio,
-        connection_state: connection_state.as_ref().map(|(state, _)| state.clone()),
-        connection_error: connection_state.and_then(|(_, error)| error),
+        peer_audio: best.as_ref().and_then(|peer| peer.peer_audio.clone()),
+        connection_state: best.as_ref().and_then(|peer| peer.connection_state.clone()),
+        connection_error: best.and_then(|peer| peer.connection_error),
+        peers,
         device_problems: state
             .device_problems
             .read()
@@ -1343,10 +1422,89 @@ pub async fn streaming_status(
     })
 }
 
-/// Retry the connection after automatic recovery gave up
+fn network_stats(s: &ConnectionStats, bandwidth: Option<BandwidthSnapshot>) -> NetworkStats {
+    NetworkStats {
+        rtt_ms: s.rtt_ms,
+        jitter_ms: s.jitter_ms,
+        packet_loss_percent: s.packet_loss_rate * 100.0,
+        quality: s.quality().map(|q| q.as_str().to_string()),
+        measured_bps: bandwidth.map(|b| b.measured_bps).unwrap_or(0.0),
+        required_bps: bandwidth.map(|b| b.required_bps).unwrap_or(0.0),
+        bandwidth_status: bandwidth.map(|b| status_label(b.status).to_string()),
+        uptime_seconds: s.uptime_seconds,
+        packets_sent: s.packets_sent,
+        packets_received: s.packets_received,
+        encryption: s.security.as_str().to_string(),
+        peer_checked: s.peer_checked,
+        bytes_sent: s.bytes_sent,
+        bytes_received: s.bytes_received,
+    }
+}
+
+fn detailed_latency(
+    s: &ConnectionStats,
+    local_info: &LocalLatencyInfo,
+    frame_size: u32,
+    sample_rate: u32,
+) -> DetailedLatency {
+    let breakdown =
+        LatencyBreakdown::calculate(local_info, None, s.rtt_ms.unwrap_or(0.0), s.jitter_ms);
+
+    let upstream = vec![
+        LatencyComponent {
+            name: "Capture buffer".to_string(),
+            ms: breakdown.upstream.capture_buffer_ms,
+            info: Some(format!("{} samples @ {} Hz", frame_size, sample_rate)),
+        },
+        LatencyComponent {
+            name: "Encode (pcm)".to_string(),
+            ms: breakdown.upstream.encode_ms,
+            info: None,
+        },
+        LatencyComponent {
+            name: "Network".to_string(),
+            ms: breakdown.upstream.network_ms,
+            info: Some("RTT/2".to_string()),
+        },
+    ];
+
+    let downstream = vec![
+        LatencyComponent {
+            name: "Network".to_string(),
+            ms: breakdown.downstream.network_ms,
+            info: Some("RTT/2".to_string()),
+        },
+        LatencyComponent {
+            name: "Jitter buffer".to_string(),
+            ms: breakdown.downstream.jitter_buffer_ms,
+            info: None,
+        },
+        LatencyComponent {
+            name: "Decode (pcm)".to_string(),
+            ms: breakdown.downstream.decode_ms,
+            info: None,
+        },
+        LatencyComponent {
+            name: "Playback buffer".to_string(),
+            ms: breakdown.downstream.playback_buffer_ms,
+            info: Some(format!("{} samples", frame_size)),
+        },
+    ];
+
+    DetailedLatency {
+        upstream,
+        upstream_total_ms: breakdown.upstream_total_ms,
+        downstream,
+        downstream_total_ms: breakdown.downstream_total_ms,
+        roundtrip_total_ms: breakdown.roundtrip_total_ms,
+    }
+}
+
+/// Retry every link automatic recovery gave up on
 ///
-/// Backs the "reconnect?" prompt the UI shows when `connection_state` reads
-/// "failed" (REQ-CON-110). A no-op when no session is active.
+/// Backs the "reconnect?" prompt the UI shows when a link's
+/// `connection_state` reads "failed" (REQ-CON-110). A no-op when no session
+/// is active.
 #[tauri::command]
 pub async fn streaming_reconnect(state: tauri::State<'_, StreamingState>) -> Result<(), String> {
     if !state.is_active.load(Ordering::SeqCst) {
@@ -1449,35 +1607,31 @@ pub async fn streaming_get_master_volume(
 /// contended buffer costs one concealed frame rather than a stalled device.
 /// The mixer gains are applied here rather than on the way in, so a volume or
 /// pan change is heard on the very next frame.
-#[allow(clippy::too_many_arguments)]
 fn playout_source(
-    receive: ReceivePath,
-    peer_volume: Arc<AtomicU32>,
+    mix: PeerMix,
     master_volume: Arc<AtomicU32>,
-    peer_pan: Arc<std::sync::atomic::AtomicI32>,
     output_level: Arc<AtomicU32>,
-    underrun_count: Arc<AtomicU64>,
     monitor: LocalMonitor,
     recording: Option<(RecordingTap, RecordingTap)>,
 ) -> impl FnMut(&mut [f32]) -> usize + Send + 'static {
     let mut recording = recording;
-    let mut peer_gain = GainRamp::new(receive.sample_rate());
+    // Everyone else as they sent it, before the listener's faders and pans:
+    // what recording/streaming output `B` carries
+    let mut dry = vec![0.0f32; mix.frame_samples()];
     move |out: &mut [f32]| {
         let (b_tap, c_tap) = match recording.as_mut() {
             Some((b, c)) => (Some(b), Some(c)),
             None => (None, None),
         };
-        let samples = mix_peers(
-            &receive,
-            &peer_volume,
-            &master_volume,
-            &peer_pan,
-            &output_level,
-            &underrun_count,
-            &mut peer_gain,
+        let samples = mix.mix_into(
             out,
-            b_tap,
+            master_volume.load(Ordering::Relaxed),
+            b_tap.is_some().then_some(&mut dry[..]),
         );
+        if let Some(tap) = b_tap {
+            tap.push_stereo(&dry[..samples]);
+        }
+        output_level.store(rms_level(&out[..samples]), Ordering::Relaxed);
         // Added after the peers, whatever they did this frame: hearing yourself
         // must not wait for, or depend on, anyone being connected (ADR-033).
         monitor.mix_into(&mut out[..samples]);
@@ -1529,59 +1683,6 @@ where
         }
         result => result,
     }
-}
-
-/// Fills `out` from the play-out buffer with the mixer gains applied, and
-/// returns how many samples it wrote.
-///
-/// `dry_tap`, when given, gets the peer's stereo frame exactly as decoded:
-/// before `pan_received` applies the listener's fader and pan (recording/
-/// streaming output `B`, rm:1068).
-#[allow(clippy::too_many_arguments)]
-fn mix_peers(
-    receive: &ReceivePath,
-    peer_volume: &AtomicU32,
-    master_volume: &AtomicU32,
-    peer_pan: &std::sync::atomic::AtomicI32,
-    output_level: &AtomicU32,
-    underrun_count: &AtomicU64,
-    peer_gain: &mut GainRamp,
-    out: &mut [f32],
-    dry_tap: Option<&mut RecordingTap>,
-) -> usize {
-    let read = receive.read_into(out);
-
-    match read.result {
-        PlayoutResult::Priming | PlayoutResult::Starved => {
-            underrun_count.fetch_add(1, Ordering::Relaxed);
-            output_level.store(0, Ordering::Relaxed);
-            return read.samples;
-        }
-        // Silence that makes room for a deeper delay is a decision, not an
-        // underrun (ADR-031).
-        PlayoutResult::Padded => {
-            output_level.store(0, Ordering::Relaxed);
-            return read.samples;
-        }
-        PlayoutResult::Played { .. } | PlayoutResult::Concealed { .. } => {}
-    }
-
-    if let Some(tap) = dry_tap {
-        tap.push_stereo(&out[..read.samples]);
-    }
-
-    let combined_vol = (peer_volume.load(Ordering::Relaxed) as f32 / 100.0)
-        * (master_volume.load(Ordering::Relaxed) as f32 / 100.0);
-
-    let pan = peer_pan.load(Ordering::Relaxed);
-    let samples = &mut out[..read.samples];
-    pan_received(samples, receive.peer_channels(), 1.0, pan);
-    // The fader and mute move to their new gain over a few milliseconds, so
-    // muting a participant does not click.
-    peer_gain.apply(samples, WIRE_CHANNELS, combined_vol);
-
-    output_level.store(rms_level(samples), Ordering::Relaxed);
-    read.samples
 }
 
 /// Captured audio waiting to be sent, and how many interleaved channels each
@@ -1766,7 +1867,7 @@ fn capture_or_silence(
 /// CoreAudio/WASAPI/ALSA delivers samples to the callback is the OS's
 /// business, but whether a delivered frame turns into the right number is
 /// ours.
-fn rms_level(samples: &[f32]) -> u32 {
+pub(crate) fn rms_level(samples: &[f32]) -> u32 {
     if samples.is_empty() {
         return 0;
     }
@@ -1820,12 +1921,9 @@ fn open_asio(
     output_channels: (u32, Option<u32>),
     input_level: Arc<AtomicU32>,
     monitor: LocalMonitor,
-    receive: ReceivePath,
-    peer_volume: Arc<AtomicU32>,
+    mix: PeerMix,
     master_volume: Arc<AtomicU32>,
-    peer_pan: Arc<std::sync::atomic::AtomicI32>,
     output_level: Arc<AtomicU32>,
-    underrun_count: Arc<AtomicU64>,
     recording: Option<&RecordingFeed>,
 ) -> Result<(AsioDuplex, CaptureRing), AudioError> {
     let chosen_in = input_id.map(|id| id.0.clone());
@@ -1864,12 +1962,9 @@ fn open_asio(
             );
         },
         playout_source(
-            receive,
-            peer_volume,
+            mix,
             master_volume,
-            peer_pan,
             output_level,
-            underrun_count,
             monitor,
             recording.map(|feed| (feed.tap_b(), feed.tap_c())),
         ),
@@ -1878,12 +1973,363 @@ fn open_asio(
     Ok((session, CaptureRing { consumer, channels }))
 }
 
+/// The connections the send thread sends each captured frame to: those of the
+/// links that are up. Replaced whole when a link comes up or goes, so the
+/// send thread takes it without waiting for whoever changes it.
+type Senders = Arc<RwLock<Arc<[Arc<tokio::sync::Mutex<Connection>>]>>>;
+
+/// Where setting up the link to a participant has got
+enum LinkStage {
+    /// The connectivity check is running. It hands the connection over when
+    /// it ends.
+    Checking(tokio::task::JoinHandle<Result<Connection, String>>),
+    Up(Arc<tokio::sync::Mutex<Connection>>),
+    /// The link could not be set up
+    Down,
+}
+
+/// The audio link to one participant, as the audio thread holds it
+struct Link {
+    peer: Uuid,
+    report: Arc<LinkReport>,
+    /// Their audio, from payload to the mix
+    receive: ReceivePath,
+    /// Their place in the mix: they are heard for as long as the link is held
+    _voice: VoiceHandle,
+    stage: LinkStage,
+    /// Reports quality changes on the edge rather than on every stats poll
+    quality_monitor: QualityMonitor,
+    /// Measures what the link actually carries, so one too narrow for PCM can
+    /// be reported instead of silently dropping audio (REQ-LAT-120's manual mode)
+    bandwidth_estimator: BandwidthEstimator,
+    bandwidth_verdict: BandwidthVerdict,
+    last_bandwidth_status: Option<BandwidthStatus>,
+    /// The play-out delay the display and the peer have been told about. The
+    /// loop compares it with the buffer's own and reports the difference, so
+    /// a preset switch, an adaptation and a reconnect all reach the display
+    /// the same way (ADR-031).
+    announced_delay_frames: u32,
+    /// The channel count the peer has been told we send
+    announced_channel_count: u8,
+}
+
+/// What every link of a session is set up with
+struct LinkSetup<'a> {
+    mux: &'a UdpMux,
+    mix: &'a PeerMix,
+    encoding: &'a AudioEncodingConfig,
+    sample_rate: u32,
+    buffer_size: u32,
+    packet_duration_ms: f32,
+    peer_gains: &'a RwLock<HashMap<Uuid, Arc<PeerGain>>>,
+    reconnect_count: &'a Arc<AtomicU64>,
+    silence_giveups: &'a Arc<AtomicU64>,
+    shared_link_facts: &'a RwLock<Option<Arc<LinkFacts>>>,
+    shared_flights: &'a Flights,
+}
+
+impl LinkSetup<'_> {
+    /// Starts an audio link to `target`: their place in the mix, and the
+    /// connectivity check, which runs on its own so that the others' audio
+    /// and the session's commands do not wait for it.
+    fn open(&self, target: LinkTarget, jitter_buffer_frames: u32) -> Result<Link, String> {
+        let peer = target.peer;
+        let mut connection = Connection::on(self.mux)
+            .map_err(|e| format!("Failed to create the connection: {}", e))?;
+        if let Some((ours, peer_key)) = &target.link {
+            connection
+                .verify_peer(ours, peer_key.as_deref())
+                .map_err(|e| format!("Failed to set up the link to the peer: {}", e))?;
+        }
+        // The codec and FEC come from the preset (ADR-021)
+        connection
+            .set_audio_encoding(self.encoding.clone())
+            .map_err(|e| format!("Failed to configure audio encoding: {}", e))?;
+
+        // Receive path: jitter buffer keyed by sequence number (ADR-020).
+        // Received audio waits in the play-out buffer, and only there, until
+        // the output callback takes it (ADR-028). The CLI uses the same path.
+        let receive = ReceivePath::new(
+            self.encoding.codec_type,
+            self.sample_rate,
+            self.buffer_size,
+            jitter_buffer_frames,
+        )
+        .map_err(|e| format!("Failed to create audio decoder: {}", e))?;
+        if let Ok(mut flights) = self.shared_flights.write() {
+            flights.push((peer, receive.flight().clone()));
+        }
+
+        let report = Arc::new(LinkReport::default());
+        report.jitter_buffer_delay_us.store(
+            (jitter_buffer_frames as f32 * self.packet_duration_ms * 1000.0) as u32,
+            Ordering::SeqCst,
+        );
+        report.set_state("connecting", None);
+
+        let gain = {
+            let mut gains = self.peer_gains.write().unwrap_or_else(|e| e.into_inner());
+            gains.entry(peer).or_default().clone()
+        };
+        let voice = self
+            .mix
+            .add(receive.clone(), gain, report.meter.clone())
+            .ok_or_else(|| "The session has no room for another link".to_string())?;
+
+        // Rebuild the jitter buffer when the link recovers: sequence numbers
+        // carry on from before the outage, so stale packets would play out of
+        // order (ADR-022).
+        let receive_for_state = receive.clone();
+        let report_for_state = report.clone();
+        let reconnect_count = self.reconnect_count.clone();
+        let silence_giveups = self.silence_giveups.clone();
+        let link_facts = connection.link_facts();
+        if let Ok(mut shared) = self.shared_link_facts.write() {
+            shared.get_or_insert_with(|| link_facts.clone());
+        }
+        connection.set_state_change_callback(move |state| {
+            tracing::info!("Audio connection to {} state: {:?}", peer, state);
+            if state == ConnectionState::Connected {
+                receive_for_state.reset();
+            }
+            if state == ConnectionState::Reconnecting {
+                reconnect_count.fetch_add(1, Ordering::Relaxed);
+            }
+            // Failing to connect at all is reported by the connect call itself;
+            // a failure after the link came up is the peer going silent.
+            if state == ConnectionState::Failed && link_facts.snapshot().route.is_some() {
+                silence_giveups.fetch_add(1, Ordering::Relaxed);
+            }
+
+            // Publish the transition so the UI can show reconnection progress
+            // and prompt once recovery gives up (REQ-CON-110).
+            report_for_state.set_state(&format!("{:?}", state).to_lowercase(), None);
+        });
+
+        // Runs on the network task, not the realtime audio callback, so
+        // locking and taking ownership of the payload are both acceptable here.
+        let receive_for_callback = receive.clone();
+        connection.set_audio_callback(move |sequence, payload, _timestamp| {
+            if !receive_for_callback.receive(sequence, &payload) {
+                tracing::trace!("Play-out buffer refused frame {}", sequence);
+            }
+        });
+
+        // Race all their candidates, so a peer on the same network is reached
+        // directly rather than only through its public address (REQ-CON-113).
+        let candidates = target.candidates;
+        let checking = tokio::spawn(async move {
+            connection
+                .connect_with_candidates(&candidates)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(connection)
+        });
+
+        Ok(Link {
+            peer,
+            report,
+            receive,
+            _voice: voice,
+            stage: LinkStage::Checking(checking),
+            quality_monitor: QualityMonitor::new(),
+            bandwidth_estimator: BandwidthEstimator::default(),
+            bandwidth_verdict: BandwidthVerdict::default(),
+            last_bandwidth_status: None,
+            announced_delay_frames: jitter_buffer_frames,
+            // Told when the link comes up
+            announced_channel_count: 0,
+        })
+    }
+}
+
+/// How long one audio packet of a peer lasts, in ms: what the peer `told` of
+/// its frame size and sample rate says, and until it has, as long as ours.
+/// The play-out buffer counts its delay in the peer's packets.
+fn peer_packet_ms(told: Option<&PeerLatencyInfo>, ours: f32) -> f32 {
+    match told {
+        Some(info) if info.frame_size > 0 && info.sample_rate > 0 => {
+            audio_packet_duration_ms(info.frame_size, WIRE_CHANNELS, info.sample_rate)
+        }
+        _ => ours,
+    }
+}
+
+impl Link {
+    fn connection(&self) -> Option<&Arc<tokio::sync::Mutex<Connection>>> {
+        match &self.stage {
+            LinkStage::Up(connection) => Some(connection),
+            _ => None,
+        }
+    }
+
+    /// The delay their play-out buffer holds, in microseconds, where a packet
+    /// of ours lasts `our_packet_ms`.
+    fn delay_us(&self, our_packet_ms: f32) -> u32 {
+        let told = self.report.latency_info.read().ok();
+        let packet_ms = peer_packet_ms(told.as_ref().and_then(|info| info.as_ref()), our_packet_ms);
+        (self.receive.delay_frames() as f32 * packet_ms * 1000.0) as u32
+    }
+
+    /// Ends the link: the check if it is still running, the connection if it
+    /// is up.
+    async fn close(self) {
+        match self.stage {
+            LinkStage::Checking(checking) => checking.abort(),
+            LinkStage::Up(connection) => connection.lock().await.disconnect(),
+            LinkStage::Down => {}
+        }
+    }
+}
+
+impl Link {
+    /// Publishes the link's statistics and what the peer told about its
+    /// audio, and follows the peer's sample rate and channels. Does nothing
+    /// while the link is not up, or while its connection is busy sending.
+    fn refresh(&mut self, preset: &AudioPreset, required_bps: f64, sample_rate: u32) {
+        let Some(connection) = self.connection().cloned() else {
+            return;
+        };
+        let Ok(conn) = connection.try_lock() else {
+            return;
+        };
+        // The log keeps the start of an id, which tells the links apart
+        let peer = self.peer;
+        let conn_stats = conn.stats();
+
+        // Log quality transitions once, on the edge (REQ-LAT-107). Held
+        // back until the first RTT sample arrives, so a link nobody has
+        // measured yet is never logged as "good" (REQ-LAT-130).
+        if let Some(rtt_ms) = conn_stats.rtt_ms {
+            if let Some(change) = self
+                .quality_monitor
+                .update(rtt_ms, conn_stats.packet_loss_rate)
+            {
+                if change.is_degradation() {
+                    tracing::warn!(
+                        "Connection quality to {} degraded to {} (RTT {:.1}ms, loss {:.2}%)",
+                        peer,
+                        change.to.as_str(),
+                        rtt_ms,
+                        conn_stats.packet_loss_rate * 100.0
+                    );
+                } else {
+                    tracing::info!(
+                        "Connection quality to {} is now {} (RTT {:.1}ms, loss {:.2}%)",
+                        peer,
+                        change.to.as_str(),
+                        rtt_ms,
+                        conn_stats.packet_loss_rate * 100.0
+                    );
+                }
+            }
+        }
+
+        // Warn once when the link stops carrying what the preset needs, and once
+        // when the peer stops sending anything at all (REQ-LAT-127). The snapshot
+        // is published on every completed interval, not only when a status is
+        // classified, so a zero-byte interval overwrites (rather than leaves in
+        // place) whatever verdict was measured before the peer went quiet.
+        //
+        // The raw per-interval classification goes through `bandwidth_verdict`
+        // before it reaches the snapshot or the log: PCM's requirement has no
+        // headroom built in, so a single interval can read insufficient on a
+        // perfectly healthy link, and a peer that has only just connected (a
+        // test peer that replies after a deliberate delay, or plain connection
+        // setup) reads as insufficient rather than idle for its first few
+        // seconds (REQ-LAT-128, REQ-LAT-129).
+        self.bandwidth_estimator.note_audio(
+            conn_stats.audio_packets_received,
+            conn_stats.audio_packets_lost,
+        );
+        if self
+            .bandwidth_estimator
+            .sample(conn_stats.wire_bytes_received())
+            .is_some()
+        {
+            let raw_status = self.bandwidth_estimator.status();
+            let status = self.bandwidth_verdict.confirm(raw_status);
+            let measured_bps = self.bandwidth_estimator.current_bps();
+            if let Ok(mut snapshot) = self.report.bandwidth.write() {
+                *snapshot = Some(BandwidthSnapshot {
+                    measured_bps,
+                    required_bps,
+                    status,
+                });
+            }
+
+            if status != self.last_bandwidth_status {
+                match status {
+                    Some(BandwidthStatus::Insufficient) => tracing::warn!(
+                        "Link drops the audio of {}: {:.0} kbps arrive where {} needs {:.0} kbps",
+                        peer,
+                        measured_bps / 1000.0,
+                        preset.name(),
+                        required_bps / 1000.0
+                    ),
+                    Some(BandwidthStatus::Marginal) => tracing::warn!(
+                        "Link loses some of the audio packets of {} ({:.0} kbps arrive)",
+                        peer,
+                        measured_bps / 1000.0
+                    ),
+                    Some(BandwidthStatus::Sufficient) => tracing::info!(
+                        "Link bandwidth to {} is sufficient for {}",
+                        peer,
+                        preset.name()
+                    ),
+                    None => tracing::warn!("No bytes received from {} in the last interval", peer),
+                }
+                self.last_bandwidth_status = status;
+            }
+        }
+
+        if let Ok(mut stats) = self.report.stats.write() {
+            *stats = Some(conn_stats);
+        }
+        // Update peer latency info (ADR-013: sample rate from remote peer)
+        if let Some(peer_info) = conn.peer_latency_info() {
+            match self.receive.follow_peer_rate(peer_info.sample_rate) {
+                PeerRateChange::Unchanged => {}
+                PeerRateChange::Resampling {
+                    from,
+                    to,
+                    latency_ms,
+                } => tracing::info!(
+                    "Resampler created for {}: {} Hz -> {} Hz (latency: {:.2} ms)",
+                    peer,
+                    from,
+                    to,
+                    latency_ms
+                ),
+                PeerRateChange::Passthrough => tracing::info!(
+                    "Resampler disabled for {}: peer rate matches local rate ({} Hz)",
+                    peer,
+                    sample_rate
+                ),
+                PeerRateChange::Failed(e) => {
+                    tracing::warn!("Failed to create resampler: {}", e)
+                }
+            }
+            self.receive.follow_peer_channels(peer_info.channel_count);
+            if let Ok(mut info) = self.report.latency_info.write() {
+                *info = Some(peer_info);
+            }
+        }
+    }
+}
+
+/// The connections of the links that are up, for the send thread
+fn senders_of(links: &[Link]) -> Arc<[Arc<tokio::sync::Mutex<Connection>>]> {
+    links
+        .iter()
+        .filter_map(|link| link.connection().cloned())
+        .collect()
+}
+
 /// Run audio streaming in the audio thread
 #[allow(clippy::too_many_arguments)]
 async fn run_audio_streaming(
-    remote_candidates: Vec<SocketAddr>,
-    link: Option<(LinkIdentity, Option<String>)>,
-    prepared_socket: Option<std::net::UdpSocket>,
+    prepared_socket: std::net::UdpSocket,
     input_device_id: Option<String>,
     output_device_id: Option<String>,
     buffer_size: u32,
@@ -1898,23 +2344,18 @@ async fn run_audio_streaming(
     is_monitoring: &AtomicBool,
     input_level: &AtomicU32,
     output_level: &Arc<AtomicU32>,
-    shared_stats: &RwLock<Option<ConnectionStats>>,
-    shared_bandwidth: &RwLock<Option<BandwidthSnapshot>>,
-    shared_jitter_delay_us: &AtomicU32,
-    shared_connection_state: &Arc<RwLock<ConnectionStateSnapshot>>,
+    shared_links: &LinkReports,
+    peer_gains: &RwLock<HashMap<Uuid, Arc<PeerGain>>>,
     device_problems: &RwLock<Vec<DeviceProblem>>,
     underrun_count: &Arc<AtomicU64>,
     delay_adjustments: &AtomicU64,
     reconnect_count: &Arc<AtomicU64>,
     silence_giveups: &Arc<AtomicU64>,
     shared_link_facts: &RwLock<Option<Arc<LinkFacts>>>,
-    shared_flight: &RwLock<Option<Arc<FlightRecorder>>>,
-    peer_volume: &Arc<AtomicU32>,
+    shared_flights: &Flights,
     master_volume: &Arc<AtomicU32>,
-    peer_pan: &Arc<std::sync::atomic::AtomicI32>,
     local_volume: &AtomicU32,
     local_pan: &std::sync::atomic::AtomicI32,
-    shared_peer_latency_info: &RwLock<Option<PeerLatencyInfo>>,
 ) -> Result<(), String> {
     // Capture config: mono (for network transmission)
     // Sample rate from config (ADR-013: user-selectable)
@@ -1931,23 +2372,10 @@ async fn run_audio_streaming(
         frame_size: buffer_size,
     };
 
-    // Create connection
-    // Adopt the socket bound by `streaming_prepare` so audio arrives on the
-    // port already advertised to peers. Falling back to a fresh bind keeps
-    // callers that advertise their own port (the CLI) working.
-    let mut connection = match prepared_socket {
-        Some(socket) => Connection::from_std(socket)
-            .map_err(|e| format!("Failed to adopt the prepared audio socket: {}", e))?,
-        None => Connection::new("0.0.0.0:0")
-            .await
-            .map_err(|e| format!("Failed to create connection: {}", e))?,
-    };
-
-    if let Some((ours, peer_key)) = &link {
-        connection
-            .verify_peer(ours, peer_key.as_deref())
-            .map_err(|e| format!("Failed to set up the link to the peer: {}", e))?;
-    }
+    // Everyone in the room sends to the one address this app told it, so every
+    // link goes through that socket (the one `streaming_prepare` bound).
+    let mux = UdpMux::from_std(prepared_socket)
+        .map_err(|e| format!("Failed to adopt the prepared audio socket: {}", e))?;
 
     // Create separate audio engines for capture (mono) and playback (stereo)
     let mut capture_engine = AudioEngine::new(capture_config.clone());
@@ -1961,53 +2389,27 @@ async fn run_audio_streaming(
     // - Playback: rtrb ring buffer (wait-free network callback)
     // - Send thread: dedicated std::thread (no tokio overhead)
 
-    // Receive path: jitter buffer keyed by sequence number (ADR-020).
-    //
-    // This replaces a plain ring buffer, which played packets in arrival order
-    // and could not tell a lost packet from a reordered one. Depth comes from
-    // the preset; frame duration from the buffer size actually in use.
     // Configure the codec and FEC from the preset (ADR-021).
-    let codec_type = preset.codec_type();
-    connection
-        .set_audio_encoding(AudioEncodingConfig {
-            codec_type,
-            sample_rate,
-            channels: 2, // stereo on the wire, with local_pan already applied
-            frame_size: buffer_size,
-            bitrate: 0, // unused for PCM
-            fec_group_size: preset.fec_group_size(),
-        })
-        .map_err(|e| format!("Failed to configure audio encoding: {}", e))?;
+    let encoding = AudioEncodingConfig {
+        codec_type: preset.codec_type(),
+        sample_rate,
+        channels: 2, // stereo on the wire, with local_pan already applied
+        frame_size: buffer_size,
+        bitrate: 0, // unused for PCM
+        fec_group_size: preset.fec_group_size(),
+    };
 
-    let jitter_buffer_frames = preset.jitter_buffer_frames();
+    // The play-out delay a link starts with. A preset switch moves it for the
+    // links there are and for those opened later.
+    let mut jitter_buffer_frames = preset.jitter_buffer_frames();
     // The buffer counts packets, and a frame too big for one packet goes as
     // several (ADR-070), so its depth lasts packets long, not frames long.
     let packet_duration_ms = audio_packet_duration_ms(buffer_size, WIRE_CHANNELS, sample_rate);
-    // Received audio waits in the play-out buffer, and only there, until the
-    // output callback takes it (ADR-028). The CLI uses the same path.
-    let receive = ReceivePath::new(codec_type, sample_rate, buffer_size, jitter_buffer_frames)
-        .map_err(|e| format!("Failed to create audio decoder: {}", e))?;
-    let stereo_frame_size = receive.frame_samples();
-    if let Ok(mut shared) = shared_flight.write() {
-        *shared = Some(receive.flight().clone());
-    }
-    // The delay the display and the peer have been told about. The loop below
-    // compares it with the buffer's own and reports the difference, so a preset
-    // switch, an adaptation and a reconnect all reach the display the same way
-    // (ADR-031).
-    let mut announced_delay_frames = jitter_buffer_frames;
-    let jitter_buffer_delay_ms = jitter_buffer_frames as f32 * packet_duration_ms;
-    shared_jitter_delay_us.store((jitter_buffer_delay_ms * 1000.0) as u32, Ordering::SeqCst);
+    // Everyone the session has a link to is mixed here for the output callback
+    let mix = PeerMix::new(MAX_LINKS, sample_rate, buffer_size, underrun_count.clone());
+    let stereo_frame_size = mix.frame_samples();
 
-    // Reports quality changes on the edge rather than on every stats poll.
-    let mut quality_monitor = QualityMonitor::new();
-
-    // Measures what the link actually carries, so a link too narrow for PCM can
-    // be reported instead of silently dropping audio (REQ-LAT-120's manual mode).
-    let mut bandwidth_estimator = BandwidthEstimator::default();
     let bandwidth_required_bps = required_bps(&preset, sample_rate, 2);
-    let mut bandwidth_verdict = BandwidthVerdict::default();
-    let mut last_bandwidth_status: Option<BandwidthStatus> = None;
 
     let input_level_for_capture = Arc::new(AtomicU32::new(0));
 
@@ -2053,12 +2455,9 @@ async fn run_audio_streaming(
             output_channels,
             input_level_for_capture.clone(),
             monitor.clone(),
-            receive.clone(),
-            peer_volume.clone(),
+            mix.clone(),
             master_volume.clone(),
-            peer_pan.clone(),
             output_level.clone(),
-            underrun_count.clone(),
             recording_feed.as_deref(),
         ) {
             Ok((session, ring)) => {
@@ -2119,12 +2518,9 @@ async fn run_audio_streaming(
                 stereo_frame_size,
                 || {
                     playout_source(
-                        receive.clone(),
-                        peer_volume.clone(),
+                        mix.clone(),
                         master_volume.clone(),
-                        peer_pan.clone(),
                         output_level.clone(),
-                        underrun_count.clone(),
                         monitor.clone(),
                         recording_feed
                             .as_deref()
@@ -2184,24 +2580,18 @@ async fn run_audio_streaming(
     // rebuilt around the same play-out buffer, so the audio already waiting
     // in it survives the switch.
     let playout_job = |device: Option<DeviceId>, channels: (u32, Option<u32>)| {
-        let receive = receive.clone();
-        let peer_volume = peer_volume.clone();
+        let mix = mix.clone();
         let master_volume = master_volume.clone();
-        let peer_pan = peer_pan.clone();
         let output_level = output_level.clone();
-        let underrun_count = underrun_count.clone();
         let monitor = monitor.clone();
         let recording_feed = recording_feed.clone();
         move |engine: &mut AudioEngine| {
             engine.stop_playback();
             start_playout(engine, device.as_ref(), channels, stereo_frame_size, || {
                 playout_source(
-                    receive.clone(),
-                    peer_volume.clone(),
+                    mix.clone(),
                     master_volume.clone(),
-                    peer_pan.clone(),
                     output_level.clone(),
-                    underrun_count.clone(),
                     monitor.clone(),
                     recording_feed
                         .as_deref()
@@ -2211,79 +2601,39 @@ async fn run_audio_streaming(
         }
     };
 
-    // Rebuild the jitter buffer when the link recovers: sequence numbers carry
-    // on from before the outage, so stale packets would play out of order
-    // (ADR-022).
-    let receive_for_state = receive.clone();
-    let shared_connection_state_for_cb = shared_connection_state.clone();
-    let reconnect_count_for_cb = reconnect_count.clone();
-    let silence_giveups_for_cb = silence_giveups.clone();
-    let link_facts = connection.link_facts();
-    if let Ok(mut shared) = shared_link_facts.write() {
-        *shared = Some(link_facts.clone());
-    }
-    connection.set_state_change_callback(move |state| {
-        tracing::info!("Audio connection state: {:?}", state);
-        if state == ConnectionState::Connected {
-            receive_for_state.reset();
-        }
-        if state == ConnectionState::Reconnecting {
-            reconnect_count_for_cb.fetch_add(1, Ordering::Relaxed);
-        }
-        // Failing to connect at all is reported by the connect call itself;
-        // a failure after the link came up is the peer going silent.
-        if state == ConnectionState::Failed && link_facts.snapshot().route.is_some() {
-            silence_giveups_for_cb.fetch_add(1, Ordering::Relaxed);
-        }
-
-        // Publish the transition so the UI can show reconnection progress and
-        // prompt once recovery gives up (REQ-CON-110).
-        if let Ok(mut published) = shared_connection_state_for_cb.write() {
-            *published = Some((format!("{:?}", state).to_lowercase(), None));
-        }
-    });
-
-    // Set up audio receive callback BEFORE connect
-    //
-    // Runs on the network task, not the realtime audio callback, so locking and
-    // taking ownership of the payload are both acceptable here.
-    let receive_for_callback = receive.clone();
-    connection.set_audio_callback(move |sequence, payload, _timestamp| {
-        if !receive_for_callback.receive(sequence, &payload) {
-            tracing::trace!("Play-out buffer refused frame {}", sequence);
-        }
-    });
-
-    // Connect to remote peer, racing all its candidates so a peer on the
-    // same network is reached directly rather than only through its public
-    // address (REQ-CON-113).
-    connection
-        .connect_with_candidates(&remote_candidates)
-        .await
-        .map_err(|e| format!("Failed to connect: {}", e))?;
-
     tracing::info!("Streaming active");
 
-    // Send our latency info to the peer (ADR-013: sample rate communication)
+    // What every peer is told about our audio when its link comes up (ADR-013:
+    // sample rate communication). The delay is that of the peer's own
+    // play-out buffer, filled in as it is sent.
     let mut local_latency_info = LatencyInfoMessage {
         capture_buffer_ms: (buffer_size as f32 / sample_rate as f32) * 1000.0,
         playback_buffer_ms: (buffer_size as f32 / sample_rate as f32) * 1000.0,
         encode_ms: 0.0, // PCM, no encoding delay
         decode_ms: 0.0, // PCM, no decoding delay
-        jitter_buffer_ms: jitter_buffer_delay_ms,
+        jitter_buffer_ms: jitter_buffer_frames as f32 * packet_duration_ms,
         frame_size: buffer_size,
         sample_rate,
         codec: "pcm".to_string(),
         channel_count: capture_channels as u8,
     };
-    if let Err(e) = connection.send_latency_info(&local_latency_info).await {
-        tracing::warn!("Failed to send initial latency info: {}", e);
-    }
-    let mut announced_channel_count = local_latency_info.channel_count;
 
-    // Wrap connection for shared access
-    let connection_arc = Arc::new(tokio::sync::Mutex::new(connection));
-    let connection_for_send = connection_arc.clone();
+    let mut links: Vec<Link> = Vec::new();
+    let link_setup = LinkSetup {
+        mux: &mux,
+        mix: &mix,
+        encoding: &encoding,
+        sample_rate,
+        buffer_size,
+        packet_duration_ms,
+        peer_gains,
+        reconnect_count,
+        silence_giveups,
+        shared_link_facts,
+        shared_flights,
+    };
+    let senders: Senders = Arc::new(RwLock::new(Arc::from(Vec::new())));
+    let senders_for_send = senders.clone();
 
     // Create muted state flag for send thread
     let is_muted_for_send = Arc::new(AtomicBool::new(is_muted.load(Ordering::SeqCst)));
@@ -2326,11 +2676,11 @@ async fn run_audio_streaming(
         // it, so the other side does not hear a click.
         let mut mute_ramp = GainRamp::new(sample_rate);
 
-        // Capture opens before the connection does, so the ring has been
-        // filling for as long as the connecting took (the room's first member
-        // waits for the second). Sent now, that would be a burst of old audio
+        // Capture opened before this thread started, so the ring holds what
+        // was captured meanwhile. Sent, that would be a burst of old audio
         // ahead of the live frames, and the other side's play-out buffer
-        // overflows on it.
+        // overflows on it. From here on the ring is read as it fills whether
+        // or not a link is up, so nothing old waits for the next link either.
         if let Ok(mut ring) = capture_ring_for_send.lock() {
             discard_queued(&mut ring.consumer);
         }
@@ -2390,12 +2740,20 @@ async fn run_audio_streaming(
                         observe(Point::Sent, &stereo_send_buffer, WIRE_CHANNELS);
                     }
 
+                    // Everyone gets the same frame, each through their own link
+                    let targets = senders_for_send
+                        .read()
+                        .map(|senders| senders.clone())
+                        .unwrap_or_else(|e| e.into_inner().clone());
                     rt.block_on(async {
-                        let conn = connection_for_send.lock().await;
-                        if conn.is_connected() {
-                            // Send stereo audio data
-                            if let Err(e) = conn.send_audio(&stereo_send_buffer, timestamp).await {
-                                tracing::warn!("Failed to send audio: {}", e);
+                        for connection in targets.iter() {
+                            let conn = connection.lock().await;
+                            if conn.is_connected() {
+                                if let Err(e) =
+                                    conn.send_audio(&stereo_send_buffer, timestamp).await
+                                {
+                                    tracing::warn!("Failed to send audio: {}", e);
+                                }
                             }
                         }
                     });
@@ -2419,7 +2777,7 @@ async fn run_audio_streaming(
     // the loop that comes late is a stretch in which no packet was taken off
     // the socket either.
     let mut last_turn = std::time::Instant::now();
-    let stall_after = std::time::Duration::from_micros(2 * receive.frame_us());
+    let stall_after = std::time::Duration::from_micros(2 * mix.frame_us());
 
     // The ASIO driver currently in use, if any - what the reconciliation
     // below compares a device or channel change against to decide whether
@@ -2434,9 +2792,11 @@ async fn run_audio_streaming(
         let turn_started = std::time::Instant::now();
         let away = turn_started.duration_since(last_turn);
         if away > stall_after {
-            receive
-                .flight()
-                .note(FlightKind::ThreadStall, away.as_micros() as u64);
+            for link in &links {
+                link.receive
+                    .flight()
+                    .note(FlightKind::ThreadStall, away.as_micros() as u64);
+            }
         }
         last_turn = turn_started;
 
@@ -2486,17 +2846,9 @@ async fn run_audio_streaming(
             Ok(StreamingCommand::SetMonitoring(enabled)) => {
                 monitor.set_enabled(enabled);
             }
-            Ok(StreamingCommand::SetPeerVolume(vol)) => {
-                tracing::debug!("Setting peer volume to: {}", vol);
-                peer_volume.store((vol * 100.0) as u32, Ordering::SeqCst);
-            }
             Ok(StreamingCommand::SetMasterVolume(vol)) => {
                 tracing::debug!("Setting master volume to: {}", vol);
                 master_volume.store((vol * 100.0) as u32, Ordering::SeqCst);
-            }
-            Ok(StreamingCommand::SetPeerPan(pan)) => {
-                tracing::debug!("Setting peer pan to: {}", pan);
-                peer_pan.store(pan, Ordering::SeqCst);
             }
             Ok(StreamingCommand::SetLocalVolume(vol)) => {
                 tracing::debug!("Setting local volume to: {}", vol);
@@ -2513,16 +2865,70 @@ async fn run_audio_streaming(
             }
             Ok(StreamingCommand::Reconnect) => {
                 tracing::info!("User requested reconnection");
-                let mut conn = connection_arc.lock().await;
-                if let Err(e) = conn.reconnect() {
-                    tracing::warn!("Reconnect refused: {}", e);
+                // A link that is up, or not up yet, has no loss to recover from
+                for link in &links {
+                    if let Some(connection) = link.connection() {
+                        if let Err(e) = connection.lock().await.reconnect() {
+                            tracing::warn!("Reconnect refused: {}", e);
+                        }
+                    }
                 }
             }
             Ok(StreamingCommand::SetJitterBufferFrames(frames)) => {
                 tracing::info!("Setting the play-out delay to {} frame(s)", frames);
+                jitter_buffer_frames = frames;
                 // What is held moves to the new delay (ADR-031). The display
-                // and the peer hear about it from the stats tick below.
-                receive.set_delay_frames(frames);
+                // and the peers hear about it from the stats tick below.
+                for link in &links {
+                    link.receive.set_delay_frames(frames);
+                }
+            }
+            Ok(StreamingCommand::Link(target)) => {
+                let peer = target.peer;
+                // Asked for twice: the link there is is the one to keep
+                if links.iter().any(|link| link.peer == peer) {
+                    tracing::debug!("There is a link to {} already", peer);
+                } else {
+                    // What is left of an attempt that could not be started
+                    if let Ok(mut shared) = shared_links.write() {
+                        shared.retain(|(linked, _)| *linked != peer);
+                    }
+                    match link_setup.open(*target, jitter_buffer_frames) {
+                        Ok(link) => {
+                            if let Ok(mut shared) = shared_links.write() {
+                                shared.push((peer, link.report.clone()));
+                            }
+                            links.push(link);
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "The audio link to {} could not be started: {}",
+                                peer,
+                                e
+                            );
+                            // Told like a link that gave up, so whoever
+                            // decides about the links hears of it
+                            let report = Arc::new(LinkReport::default());
+                            report.set_state("failed", None);
+                            if let Ok(mut shared) = shared_links.write() {
+                                shared.push((peer, report));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(StreamingCommand::Unlink(peer)) => {
+                if let Ok(mut shared) = shared_links.write() {
+                    shared.retain(|(linked, _)| *linked != peer);
+                }
+                if let Some(at) = links.iter().position(|link| link.peer == peer) {
+                    let link = links.remove(at);
+                    if let Ok(mut senders) = senders.write() {
+                        *senders = senders_of(&links);
+                    }
+                    link.close().await;
+                    tracing::info!("Audio link to {} closed", peer);
+                }
             }
             Err(std_mpsc::TryRecvError::Disconnected) => {
                 tracing::info!("Command channel disconnected");
@@ -2557,14 +2963,11 @@ async fn run_audio_streaming(
                 let previous = asio_session.take();
                 let input_level = input_level_for_capture.clone();
                 let monitor = monitor.clone();
-                let receive = receive.clone();
-                let peer_volume = peer_volume.clone();
+                let mix = mix.clone();
                 let master_volume = master_volume.clone();
-                let peer_pan = peer_pan.clone();
                 let output_level = output_level.clone();
-                let underrun_count = underrun_count.clone();
                 let recording_feed = recording_feed.clone();
-                let frame_samples = receive.frame_samples();
+                let frame_samples = mix.frame_samples();
                 let wanted = wanted_channels;
                 let input_ch = input_channels;
                 let output_ch = output_channels;
@@ -2584,12 +2987,9 @@ async fn run_audio_streaming(
                         output_ch,
                         input_level,
                         monitor,
-                        receive,
-                        peer_volume,
+                        mix,
                         master_volume,
-                        peer_pan,
                         output_level,
-                        underrun_count,
                         recording_feed.as_deref(),
                     )
                 });
@@ -2760,169 +3160,116 @@ async fn run_audio_streaming(
             break;
         }
 
+        // A link whose connectivity check has ended is up: its peer is told
+        // about our audio, and the send thread starts sending to it.
+        let mut came_up = false;
+        for link in &mut links {
+            let LinkStage::Checking(checking) = &mut link.stage else {
+                continue;
+            };
+            if !checking.is_finished() {
+                continue;
+            }
+            link.stage = match checking.await {
+                Ok(Ok(connection)) => {
+                    let info = LatencyInfoMessage {
+                        jitter_buffer_ms: link.delay_us(packet_duration_ms) as f32 / 1000.0,
+                        ..local_latency_info.clone()
+                    };
+                    if let Err(e) = connection.send_latency_info(&info).await {
+                        tracing::warn!("Failed to send initial latency info: {}", e);
+                    }
+                    link.announced_channel_count = info.channel_count;
+                    came_up = true;
+                    LinkStage::Up(Arc::new(tokio::sync::Mutex::new(connection)))
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("The audio link to {} could not be set up: {}", link.peer, e);
+                    link.report.set_state("failed", None);
+                    LinkStage::Down
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "The check of the audio link to {} ended early: {}",
+                        link.peer,
+                        e
+                    );
+                    link.report.set_state("failed", None);
+                    LinkStage::Down
+                }
+            };
+        }
+        if came_up {
+            if let Ok(mut senders) = senders.write() {
+                *senders = senders_of(&links);
+            }
+        }
+
         // Refresh stats and the meters on a wall-clock interval. Counting loop
         // iterations would tie the cadence to how fast this loop happens to
         // spin, which is a property of the audio clock, not of anything the UI
         // cares about.
         if std::time::Instant::now() >= next_adapt_at {
             next_adapt_at = std::time::Instant::now() + ADAPT_INTERVAL;
-            if let Some(frames) = receive.adapt() {
-                tracing::info!("Play-out delay adjusted to {} frame(s)", frames);
-                delay_adjustments.fetch_add(1, Ordering::Relaxed);
+            for link in &links {
+                if let Some(frames) = link.receive.adapt() {
+                    tracing::info!(
+                        "Play-out delay of {} adjusted to {} frame(s)",
+                        link.peer,
+                        frames
+                    );
+                    delay_adjustments.fetch_add(1, Ordering::Relaxed);
+                }
             }
         }
 
-        // Whatever moved the delay, the display and the peer follow. The peer
-        // shows a total latency that includes our buffer, so it has to hear
-        // about the change - otherwise its display keeps the value from
-        // connect time. If the connection is busy the peer is told on the next
-        // tick.
+        // Whatever moved a delay, or the channels we send, the display and the
+        // peer follow. The peer shows a total latency that includes our
+        // buffer, so it has to hear about the change - otherwise its display
+        // keeps the value from connect time. If the connection is busy the
+        // peer is told on the next tick.
         let channel_count = local_latency_info.channel_count;
-        if channel_count != announced_channel_count {
-            if let Ok(conn) = connection_arc.try_lock() {
-                let updated = LatencyInfoMessage {
-                    jitter_buffer_ms: announced_delay_frames as f32 * packet_duration_ms,
-                    ..local_latency_info.clone()
-                };
-                if let Err(e) = conn.send_latency_info(&updated).await {
-                    tracing::warn!("Failed to send updated latency info: {}", e);
-                }
-                announced_channel_count = channel_count;
+        for link in &mut links {
+            let delay_frames = link.receive.delay_frames();
+            if delay_frames == link.announced_delay_frames
+                && channel_count == link.announced_channel_count
+            {
+                continue;
             }
-        }
-
-        let delay_frames = receive.delay_frames();
-        if delay_frames != announced_delay_frames {
-            let delay_ms = delay_frames as f32 * packet_duration_ms;
-            shared_jitter_delay_us.store((delay_ms * 1000.0) as u32, Ordering::SeqCst);
-
-            if let Ok(conn) = connection_arc.try_lock() {
-                let updated = LatencyInfoMessage {
-                    jitter_buffer_ms: delay_ms,
-                    ..local_latency_info.clone()
-                };
-                if let Err(e) = conn.send_latency_info(&updated).await {
-                    tracing::warn!("Failed to send updated latency info: {}", e);
+            let Some(connection) = link.connection().cloned() else {
+                // Told when the link comes up
+                link.announced_delay_frames = delay_frames;
+                continue;
+            };
+            let told = match connection.try_lock() {
+                Ok(conn) => {
+                    let updated = LatencyInfoMessage {
+                        jitter_buffer_ms: link.delay_us(packet_duration_ms) as f32 / 1000.0,
+                        ..local_latency_info.clone()
+                    };
+                    if let Err(e) = conn.send_latency_info(&updated).await {
+                        tracing::warn!("Failed to send updated latency info: {}", e);
+                    }
+                    true
                 }
-                announced_delay_frames = delay_frames;
+                Err(_) => false,
+            };
+            if told {
+                link.announced_delay_frames = delay_frames;
+                link.announced_channel_count = channel_count;
             }
         }
 
         if std::time::Instant::now() >= next_stats_at {
             next_stats_at = std::time::Instant::now() + STATS_INTERVAL;
-            // Update connection stats and peer latency info
-            if let Ok(conn) = connection_arc.try_lock() {
-                let conn_stats = conn.stats();
-
-                // Log quality transitions once, on the edge (REQ-LAT-107). Held
-                // back until the first RTT sample arrives, so a link nobody has
-                // measured yet is never logged as "good" (REQ-LAT-130).
-                if let Some(rtt_ms) = conn_stats.rtt_ms {
-                    if let Some(change) =
-                        quality_monitor.update(rtt_ms, conn_stats.packet_loss_rate)
-                    {
-                        if change.is_degradation() {
-                            tracing::warn!(
-                                "Connection quality degraded to {} (RTT {:.1}ms, loss {:.2}%)",
-                                change.to.as_str(),
-                                rtt_ms,
-                                conn_stats.packet_loss_rate * 100.0
-                            );
-                        } else {
-                            tracing::info!(
-                                "Connection quality is now {} (RTT {:.1}ms, loss {:.2}%)",
-                                change.to.as_str(),
-                                rtt_ms,
-                                conn_stats.packet_loss_rate * 100.0
-                            );
-                        }
-                    }
-                }
-
-                // Warn once when the link stops carrying what the preset needs, and once
-                // when the peer stops sending anything at all (REQ-LAT-127). The snapshot
-                // is published on every completed interval, not only when a status is
-                // classified, so a zero-byte interval overwrites (rather than leaves in
-                // place) whatever verdict was measured before the peer went quiet.
-                //
-                // The raw per-interval classification goes through `bandwidth_verdict`
-                // before it reaches the snapshot or the log: PCM's requirement has no
-                // headroom built in, so a single interval can read insufficient on a
-                // perfectly healthy link, and a peer that has only just connected (a
-                // test peer that replies after a deliberate delay, or plain connection
-                // setup) reads as insufficient rather than idle for its first few
-                // seconds (REQ-LAT-128, REQ-LAT-129).
-                bandwidth_estimator.note_audio(
-                    conn_stats.audio_packets_received,
-                    conn_stats.audio_packets_lost,
-                );
-                if bandwidth_estimator
-                    .sample(conn_stats.wire_bytes_received())
-                    .is_some()
-                {
-                    let raw_status = bandwidth_estimator.status();
-                    let status = bandwidth_verdict.confirm(raw_status);
-                    if let Ok(mut snapshot) = shared_bandwidth.write() {
-                        *snapshot = Some(BandwidthSnapshot {
-                            measured_bps: bandwidth_estimator.current_bps(),
-                            required_bps: bandwidth_required_bps,
-                            status,
-                        });
-                    }
-
-                    if status != last_bandwidth_status {
-                        match status {
-                            Some(BandwidthStatus::Insufficient) => tracing::warn!(
-                                "Link drops the peer's audio: {:.0} kbps arrive where {} needs {:.0} kbps",
-                                bandwidth_estimator.current_bps() / 1000.0,
-                                preset.name(),
-                                bandwidth_required_bps / 1000.0
-                            ),
-                            Some(BandwidthStatus::Marginal) => tracing::warn!(
-                                "Link loses some of the peer's audio packets ({:.0} kbps arrive)",
-                                bandwidth_estimator.current_bps() / 1000.0
-                            ),
-                            Some(BandwidthStatus::Sufficient) => {
-                                tracing::info!("Link bandwidth is sufficient for {}", preset.name())
-                            }
-                            None => tracing::warn!(
-                                "No bytes received from the peer in the last interval"
-                            ),
-                        }
-                        last_bandwidth_status = status;
-                    }
-                }
-
-                if let Ok(mut stats) = shared_stats.write() {
-                    *stats = Some(conn_stats);
-                }
-                // Update peer latency info (ADR-013: sample rate from remote peer)
-                if let Some(peer_info) = conn.peer_latency_info() {
-                    match receive.follow_peer_rate(peer_info.sample_rate) {
-                        PeerRateChange::Unchanged => {}
-                        PeerRateChange::Resampling {
-                            from,
-                            to,
-                            latency_ms,
-                        } => tracing::info!(
-                            "Resampler created: {} Hz -> {} Hz (latency: {:.2} ms)",
-                            from,
-                            to,
-                            latency_ms
-                        ),
-                        PeerRateChange::Passthrough => tracing::info!(
-                            "Resampler disabled: peer rate matches local rate ({} Hz)",
-                            sample_rate
-                        ),
-                        PeerRateChange::Failed(e) => {
-                            tracing::warn!("Failed to create resampler: {}", e)
-                        }
-                    }
-                    receive.follow_peer_channels(peer_info.channel_count);
-                    if let Ok(mut info) = shared_peer_latency_info.write() {
-                        *info = Some(peer_info);
-                    }
-                }
+            for link in &mut links {
+                link.refresh(&preset, bandwidth_required_bps, sample_rate);
+                // Whatever moved the delay - a preset switch, an adaptation,
+                // a reconnect, the peer saying how long its packets are - the
+                // display follows (ADR-031)
+                link.report
+                    .jitter_buffer_delay_us
+                    .store(link.delay_us(packet_duration_ms), Ordering::SeqCst);
             }
             // Update shared input level from capture callback
             input_level.store(
@@ -2942,9 +3289,11 @@ async fn run_audio_streaming(
     send_thread_running.store(false, Ordering::SeqCst);
     let _ = send_thread.join();
 
-    {
-        let mut conn = connection_arc.lock().await;
-        conn.disconnect();
+    if let Ok(mut senders) = senders.write() {
+        *senders = Arc::from(Vec::new());
+    }
+    for link in links {
+        link.close().await;
     }
 
     drop(capture);
@@ -3009,7 +3358,7 @@ mod tests {
     /// took longer to end cleared `is_active` after the next session had set
     /// it, which ended that session as soon as it connected.
     ///
-    /// Verifies: REQ-CON-131
+    /// Verifies: REQ-CON-134
     #[tokio::test]
     async fn stopping_waits_until_the_audio_thread_has_ended() {
         let app = tauri::test::mock_app();
@@ -3027,6 +3376,290 @@ mod tests {
 
         assert!(started.elapsed() >= std::time::Duration::from_millis(400));
         assert!(!state.is_active.load(Ordering::SeqCst));
+    }
+
+    fn peer(n: u128) -> Uuid {
+        Uuid::from_u128(n)
+    }
+
+    /// The delay shown for a peer is its play-out buffer's depth in packets
+    /// times how long a packet of *theirs* lasts. Counted in ours, a peer at
+    /// twice our buffer size showed half the delay it had.
+    ///
+    /// Verifies: REQ-AUD-038
+    #[test]
+    fn a_peers_packet_lasts_as_long_as_its_own_buffer_size_says_and_as_ours_until_it_has_told() {
+        let ours = audio_packet_duration_ms(64, WIRE_CHANNELS, 48_000);
+        let told = |frame_size, sample_rate| PeerLatencyInfo {
+            capture_buffer_ms: 0.0,
+            playback_buffer_ms: 0.0,
+            encode_ms: 0.0,
+            decode_ms: 0.0,
+            jitter_buffer_ms: 0.0,
+            frame_size,
+            sample_rate,
+            codec: "pcm".to_string(),
+            channel_count: 2,
+        };
+
+        assert_eq!(peer_packet_ms(None, ours), ours);
+        assert_eq!(peer_packet_ms(Some(&told(64, 48_000)), ours), ours);
+        assert_eq!(peer_packet_ms(Some(&told(128, 48_000)), ours), ours * 2.0);
+        // 256 frames go as two packets of 128 (ADR-070)
+        assert_eq!(peer_packet_ms(Some(&told(256, 48_000)), ours), ours * 2.0);
+        assert_eq!(peer_packet_ms(Some(&told(0, 0)), ours), ours);
+    }
+
+    /// A link that came up on an address that never answered reports itself
+    /// connected. Only packets from the peer make it one that hears them.
+    ///
+    /// Verifies: REQ-CON-134
+    #[test]
+    fn a_link_is_heard_only_once_packets_of_its_peer_have_arrived() {
+        let state = StreamingState::new();
+        state.set_link_for_test(peer(2), "checkingconnectivity", None);
+        state.set_link_for_test(peer(3), "connected", Some((0, 0.0)));
+        state.set_link_for_test(peer(4), "connected", Some((12, 5.0)));
+        state.set_link_for_test(peer(5), "reconnecting", Some((12, 5.0)));
+        state.set_link_for_test(peer(6), "failed", Some((12, 5.0)));
+
+        assert_eq!(
+            state.link_healths(),
+            vec![
+                (peer(2), LinkHealth::Starting),
+                (peer(3), LinkHealth::Starting),
+                (peer(4), LinkHealth::Heard),
+                (peer(5), LinkHealth::Silent),
+                (peer(6), LinkHealth::Failed),
+            ]
+        );
+    }
+
+    /// The bug this guards: the status had the state and statistics of one
+    /// link, so the screen showed every participant the same latency and
+    /// could not say whom the app was not connected to.
+    ///
+    /// Verifies: REQ-LAT-102
+    #[tokio::test]
+    async fn the_status_has_the_state_and_the_latency_of_the_link_to_each_participant() {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+        let state = app.state::<StreamingState>();
+        state.set_link_for_test(peer(2), "connected", Some((100, 8.0)));
+        state.set_link_for_test(peer(3), "reconnecting", Some((100, 40.0)));
+        state.set_link_for_test(peer(4), "checkingconnectivity", None);
+
+        let status = streaming_status(app.state()).await.unwrap();
+
+        let of = |n: u128| {
+            status
+                .peers
+                .iter()
+                .find(|p| p.peer_id == peer(n).to_string())
+                .expect("the link is listed")
+        };
+        assert_eq!(status.peers.len(), 3);
+        assert_eq!(of(2).connection_state.as_deref(), Some("connected"));
+        assert_eq!(of(2).network.as_ref().unwrap().rtt_ms, Some(8.0));
+        assert_eq!(of(3).connection_state.as_deref(), Some("reconnecting"));
+        assert_eq!(of(3).network.as_ref().unwrap().rtt_ms, Some(40.0));
+        assert!(of(3).latency.as_ref().unwrap().roundtrip_total_ms > 40.0);
+        assert_eq!(
+            of(4).connection_state.as_deref(),
+            Some("checkingconnectivity")
+        );
+        assert!(of(4).network.is_none() && of(4).latency.is_none());
+    }
+
+    /// What a reader written for a room of two reads beside `peers`.
+    #[tokio::test]
+    async fn the_status_fields_of_one_link_are_those_of_the_link_doing_best_the_earliest_among_equals(
+    ) {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+        let state = app.state::<StreamingState>();
+        state.set_link_for_test(peer(2), "failed", Some((100, 90.0)));
+        state.set_link_for_test(peer(3), "connected", Some((100, 8.0)));
+        state.set_link_for_test(peer(4), "connected", Some((100, 3.0)));
+
+        let status = streaming_status(app.state()).await.unwrap();
+
+        assert_eq!(status.connection_state.as_deref(), Some("connected"));
+        assert_eq!(status.network.unwrap().rtt_ms, Some(8.0));
+    }
+
+    #[tokio::test]
+    async fn the_status_of_a_session_with_no_link_has_no_peers_and_no_connection_state() {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+
+        let status = streaming_status(app.state()).await.unwrap();
+
+        assert!(status.peers.is_empty());
+        assert_eq!(status.connection_state, None);
+        assert!(status.network.is_none());
+    }
+
+    /// The status goes to the screen of someone who helps, too. Nothing in
+    /// it may be the address of a participant; a field added to it has to be
+    /// added here, which is the moment to ask whether it is one.
+    ///
+    /// Verifies: REQ-RMT-006
+    #[tokio::test]
+    async fn the_status_names_the_fields_it_always_has_and_none_of_them_is_an_address() {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+        app.state::<StreamingState>()
+            .set_link_for_test(peer(2), "connected", Some((100, 8.0)));
+
+        let status = streaming_status(app.state()).await.unwrap();
+        let status = serde_json::to_value(status).unwrap();
+
+        let keys = |value: &serde_json::Value| -> Vec<String> {
+            let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(
+            keys(&status),
+            [
+                "audio_quality",
+                "connection_error",
+                "connection_state",
+                "device_problems",
+                "input_level",
+                "is_active",
+                "is_monitoring",
+                "is_muted",
+                "latency",
+                "network",
+                "output_level",
+                "peer_audio",
+                "peers",
+            ]
+        );
+        assert_eq!(
+            keys(&status["peers"][0]),
+            [
+                "connection_error",
+                "connection_state",
+                "latency",
+                "level",
+                "network",
+                "peer_audio",
+                "peer_id",
+            ]
+        );
+        assert_eq!(
+            keys(&status["peers"][0]["network"]),
+            [
+                "bandwidth_status",
+                "bytes_received",
+                "bytes_sent",
+                "encryption",
+                "jitter_ms",
+                "measured_bps",
+                "packet_loss_percent",
+                "packets_received",
+                "packets_sent",
+                "peer_checked",
+                "quality",
+                "required_bps",
+                "rtt_ms",
+                "uptime_seconds",
+            ]
+        );
+    }
+
+    /// Verifies: REQ-RMT-031
+    #[test]
+    fn the_fader_of_a_participant_is_kept_until_they_are_no_longer_in_the_room() {
+        let state = StreamingState::new();
+        state.set_peer_volume(peer(2), 50);
+        state.set_peer_pan(peer(2), -30);
+        state.set_peer_volume(peer(3), 150);
+
+        state.keep_peer_gains(&[peer(3)]);
+
+        assert_eq!(state.peer_gain(peer(2)), None);
+        assert_eq!(state.peer_gain(peer(3)), Some((150, 0)));
+    }
+
+    /// A session started on a socket the room was never told of would send
+    /// and hear no one, with nothing on the screen to say why.
+    ///
+    /// Verifies: REQ-CON-024
+    #[tokio::test]
+    async fn a_link_asked_for_when_no_socket_was_prepared_is_refused_and_starts_no_session() {
+        let app = tauri::test::mock_app();
+        let dir = tempfile::tempdir().unwrap();
+        app.manage(StreamingState::new());
+        app.manage(crate::config::ConfigState::at(
+            dir.path().join("config.toml"),
+            crate::config::AppConfig::default(),
+        ));
+        app.manage(crate::settings::SettingsState::new());
+        app.manage(crate::usage::UsageState::with_reporter(
+            jamjam::telemetry::UsageReporter::new(
+                None,
+                "test",
+                Arc::new(jamjam::telemetry::NoTransport),
+                false,
+            ),
+        ));
+        assert!(!app.state::<StreamingState>().has_prepared_socket().await);
+
+        let refused = streaming_link(
+            LinkTarget {
+                peer: peer(2),
+                candidates: vec!["192.0.2.2:5000".parse().unwrap()],
+                link: None,
+            },
+            app.state(),
+            app.state(),
+            app.state(),
+            app.state(),
+        )
+        .await;
+
+        assert!(refused.is_err());
+        assert!(!app.state::<StreamingState>().is_active());
+    }
+
+    #[tokio::test]
+    async fn a_link_to_a_participant_with_no_address_is_refused_and_starts_no_session() {
+        let app = tauri::test::mock_app();
+        let dir = tempfile::tempdir().unwrap();
+        app.manage(StreamingState::new());
+        app.manage(crate::config::ConfigState::at(
+            dir.path().join("config.toml"),
+            crate::config::AppConfig::default(),
+        ));
+        app.manage(crate::settings::SettingsState::new());
+        app.manage(crate::usage::UsageState::with_reporter(
+            jamjam::telemetry::UsageReporter::new(
+                None,
+                "test",
+                Arc::new(jamjam::telemetry::NoTransport),
+                false,
+            ),
+        ));
+
+        let refused = streaming_link(
+            LinkTarget {
+                peer: peer(2),
+                candidates: Vec::new(),
+                link: None,
+            },
+            app.state(),
+            app.state(),
+            app.state(),
+            app.state(),
+        )
+        .await;
+
+        assert!(refused.is_err());
+        assert!(!app.state::<StreamingState>().is_active());
     }
 
     /// After audio starts the socket belongs to the audio session, so the
@@ -3049,31 +3682,6 @@ mod tests {
         assert!(state.take_prepared_socket().await.is_some());
     }
 
-    /// Going from one peer to another keeps the address the room has: the
-    /// peer being moved to is already sending to it.
-    #[tokio::test]
-    async fn prepare_socket_again_after_the_session_ended_binds_the_port_it_used() {
-        let state = StreamingState::new();
-        let first = state.prepare_socket().await.unwrap();
-        drop(state.take_prepared_socket().await);
-
-        let kept = state.prepare_socket_again().await.unwrap();
-
-        assert!(kept);
-        let again = state.take_prepared_socket().await.unwrap();
-        assert_eq!(again.local_addr().unwrap().port(), first.port());
-    }
-
-    #[tokio::test]
-    async fn prepare_socket_again_when_no_session_ever_ran_binds_a_fresh_port_and_says_so() {
-        let state = StreamingState::new();
-
-        let kept = state.prepare_socket_again().await.unwrap();
-
-        assert!(!kept);
-        assert!(state.take_prepared_socket().await.is_some());
-    }
-
     /// A repeated prepare (re-entering a room, a double invoke) must not move
     /// the port out from under a peer that already learned it.
     #[tokio::test]
@@ -3084,26 +3692,6 @@ mod tests {
         let second = state.prepare_socket().await.unwrap();
 
         assert_eq!(first, second);
-    }
-
-    /// Verifies: REQ-CON-113
-    #[test]
-    fn merge_candidate_addrs_puts_the_lan_candidate_before_the_public_one() {
-        let public: SocketAddr = "203.0.113.7:5000".parse().unwrap();
-        let lan: SocketAddr = "192.168.1.20:5000".parse().unwrap();
-
-        // The caller (the frontend) ranks LAN before public.
-        let merged = merge_candidate_addrs(public, &[lan, public]);
-
-        assert_eq!(merged, vec![lan, public]);
-    }
-
-    /// Verifies: REQ-CON-113
-    #[test]
-    fn merge_candidate_addrs_when_no_other_candidates_falls_back_to_addr() {
-        let public: SocketAddr = "203.0.113.7:5000".parse().unwrap();
-
-        assert_eq!(merge_candidate_addrs(public, &[]), vec![public]);
     }
 
     /// Verifies: REQ-AUD-125
@@ -3185,88 +3773,24 @@ mod tests {
         samples.iter().flat_map(|s| s.to_le_bytes()).collect()
     }
 
-    /// `B` (recording/streaming output) must carry what the peer sent, not
-    /// what the listener's fader and pan turned it into: someone recording
-    /// each participant separately wants their dry signal.
-    #[test]
-    fn mix_peers_feeds_its_dry_tap_before_the_fader_and_pan_are_applied() {
-        const FRAME: u32 = 4;
-        let receive = ReceivePath::new(AudioPreset::ZeroLatency.codec_type(), 48_000, FRAME, 0)
-            .expect("a PCM receive path");
+    /// A mix with one participant in it, who sends stereo frames of `frame`
+    /// samples per channel and is played at `volume` percent
+    fn mix_of_one(frame: u32, volume: u32) -> (PeerMix, ReceivePath, VoiceHandle) {
+        let receive = ReceivePath::new(
+            AudioPreset::ZeroLatency.codec_type(),
+            48_000,
+            frame,
+            AudioPreset::ZeroLatency.jitter_buffer_frames(),
+        )
+        .expect("a PCM receive path");
         receive.follow_peer_channels(2);
-        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.8_f32, 0.2_f32]).collect();
-        assert!(receive.receive(0, &pcm(&sent)));
-
-        let (mut dry_tap, mut dry_consumer) = jamjam::audio::RecordingTap::for_wiring_tests();
-        let mut out = vec![0.0f32; receive.frame_samples()];
-
-        let samples = mix_peers(
-            &receive,
-            &AtomicU32::new(50),                     // half volume
-            &AtomicU32::new(100),                    // master untouched
-            &std::sync::atomic::AtomicI32::new(100), // hard right pan
-            &AtomicU32::new(0),
-            &AtomicU64::new(0),
-            &mut GainRamp::new(48_000),
-            &mut out,
-            Some(&mut dry_tap),
-        );
-
-        assert_eq!(samples, sent.len());
-        assert_ne!(
-            &out[..samples],
-            &sent[..],
-            "the mixed output has the fader/pan applied"
-        );
-        let chunk = dry_consumer
-            .read_chunk(samples)
-            .expect("the dry tap got a frame");
-        let (first, _) = chunk.as_slices();
-        assert_eq!(
-            first,
-            &sent[..],
-            "the dry tap keeps exactly what the peer sent"
-        );
-    }
-
-    /// Muting a participant must not cut their audio off in one sample: that
-    /// step is the click.
-    /// Verifies: REQ-AUD-034
-    #[test]
-    fn mix_peers_fades_a_muted_participant_out_instead_of_cutting_them() {
-        const FRAME: u32 = 480;
-        let receive = ReceivePath::new(AudioPreset::ZeroLatency.codec_type(), 48_000, FRAME, 0)
-            .expect("a PCM receive path");
-        receive.follow_peer_channels(2);
-        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.5_f32, 0.5_f32]).collect();
-        assert!(receive.receive(0, &pcm(&sent)));
-
-        let mut gain = GainRamp::new(48_000);
-        gain.apply(&mut [0.0; 4], WIRE_CHANNELS, 1.0);
-        let mut out = vec![0.0f32; receive.frame_samples()];
-        let samples = mix_peers(
-            &receive,
-            &AtomicU32::new(0), // the participant is muted
-            &AtomicU32::new(100),
-            &std::sync::atomic::AtomicI32::new(0),
-            &AtomicU32::new(0),
-            &AtomicU64::new(0),
-            &mut gain,
-            &mut out,
-            None,
-        );
-
-        assert_eq!(samples, sent.len());
-        let left: Vec<f32> = out[..samples].iter().step_by(2).copied().collect();
-        assert!(
-            left[0] > 0.45,
-            "the first sample is still nearly full level"
-        );
-        assert!(
-            left.windows(2).all(|pair| pair[1] <= pair[0]),
-            "the level only goes down"
-        );
-        assert_eq!(left[FRAME as usize - 1], 0.0, "and it ends silent");
+        let mix = PeerMix::new(MAX_LINKS, 48_000, frame, Arc::new(AtomicU64::new(0)));
+        let gain = Arc::new(PeerGain::default());
+        gain.set_volume(volume);
+        let voice = mix
+            .add(receive.clone(), gain, Arc::new(PeerMeter::default()))
+            .expect("a free place");
+        (mix, receive, voice)
     }
 
     /// `C` (recording/streaming output) must carry exactly what is played:
@@ -3275,9 +3799,7 @@ mod tests {
     #[test]
     fn playout_source_feeds_its_c_tap_the_same_audio_it_plays() {
         const FRAME: u32 = 4;
-        let receive = ReceivePath::new(AudioPreset::ZeroLatency.codec_type(), 48_000, FRAME, 0)
-            .expect("a PCM receive path");
-        receive.follow_peer_channels(2);
+        let (mix, receive, _voice) = mix_of_one(FRAME, 50);
         let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.8_f32, 0.2_f32]).collect();
         assert!(receive.receive(0, &pcm(&sent)));
 
@@ -3291,12 +3813,9 @@ mod tests {
         let (b_tap, mut b_consumer) = jamjam::audio::RecordingTap::for_wiring_tests();
         let (c_tap, mut c_consumer) = jamjam::audio::RecordingTap::for_wiring_tests();
         let mut source = playout_source(
-            receive.clone(),
-            Arc::new(AtomicU32::new(50)),
+            mix,
             Arc::new(AtomicU32::new(100)),
-            Arc::new(std::sync::atomic::AtomicI32::new(0)),
             Arc::new(AtomicU32::new(0)),
-            Arc::new(AtomicU64::new(0)),
             monitor,
             Some((b_tap, c_tap)),
         );
@@ -3425,13 +3944,7 @@ mod tests {
     /// on the speakers.
     fn monitored_output(monitoring: bool) -> Vec<f32> {
         const FRAME: u32 = 32;
-        let receive = ReceivePath::new(
-            AudioPreset::ZeroLatency.codec_type(),
-            48_000,
-            FRAME,
-            AudioPreset::ZeroLatency.jitter_buffer_frames(),
-        )
-        .expect("a PCM receive path");
+        let (mix, receive, _voice) = mix_of_one(FRAME, 100);
         let monitor = LocalMonitor::new(FRAME);
         let mut tap = monitor.tap();
         monitor.set_enabled(monitoring);
@@ -3440,12 +3953,9 @@ mod tests {
         }
 
         let mut source = playout_source(
-            receive.clone(),
+            mix,
             Arc::new(AtomicU32::new(100)),
-            Arc::new(AtomicU32::new(100)),
-            Arc::new(std::sync::atomic::AtomicI32::new(0)),
             Arc::new(AtomicU32::new(0)),
-            Arc::new(AtomicU64::new(0)),
             monitor,
             None,
         );

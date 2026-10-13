@@ -53,16 +53,27 @@ impl FakeSignaling {
     /// key exchange against (as a peer of an older version has). A room that does not exist is
     /// made when someone joins it, as the always-open room of an echo is
     pub fn start_with_resident_at(name: &str, address: SocketAddr) -> Self {
-        Self::start_with_residents(vec![PeerInfo {
-            id: Uuid::new_v4(),
-            name: name.to_string(),
-            candidates: vec![AddressCandidate::host(address)],
-            public_addr: Some(address),
-            local_addr: Some(address),
-            joined_at: 0,
-            features: Vec::new(),
-            link_key: None,
-        }])
+        Self::start_with_residents_at(&[(name, address)])
+    }
+
+    /// [`FakeSignaling::start_with_resident_at`] with several peers in every room, each at its
+    /// own address
+    pub fn start_with_residents_at(residents: &[(&str, SocketAddr)]) -> Self {
+        Self::start_with_residents(
+            residents
+                .iter()
+                .map(|(name, address)| PeerInfo {
+                    id: Uuid::new_v4(),
+                    name: name.to_string(),
+                    candidates: vec![AddressCandidate::host(*address)],
+                    public_addr: Some(*address),
+                    local_addr: Some(*address),
+                    joined_at: 0,
+                    features: Vec::new(),
+                    link_key: None,
+                })
+                .collect(),
+        )
     }
 
     fn start_with_residents(residents: Vec<PeerInfo>) -> Self {

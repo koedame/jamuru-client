@@ -20,7 +20,7 @@ export interface ConsentScreenProps {
  * user has agreed.
  */
 export function ConsentScreen({ text, onAccept, accepting = false, error = null }: ConsentScreenProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [agreed, setAgreed] = useState(false);
   const [adult, setAdult] = useState(false);
 
@@ -30,6 +30,11 @@ export function ConsentScreen({ text, onAccept, accepting = false, error = null 
       <p className="consent__notice" data-testid="consent-ip-notice">
         {t("terms.consent.ipNotice")}
       </p>
+      {i18n.resolvedLanguage !== "ja" && (
+        <p className="consent__notice" data-testid="consent-japanese-only-notice">
+          {t("terms.consent.japaneseOnlyNotice")}
+        </p>
+      )}
       <section className="consent__text" aria-label={t("terms.consent.textLabel")} tabIndex={0}>
         <TermsText text={text} />
       </section>

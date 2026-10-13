@@ -18,6 +18,7 @@ use super::driver::{StreamHost, OPEN_TIMEOUT};
 use super::error::AudioError;
 use super::fault::{self, Call};
 use super::heartbeat::Heartbeat;
+use super::playout::widest_frame_samples;
 use super::resampler::{CaptureResampler, ResamplerError};
 
 /// Events that can occur during audio streaming
@@ -707,12 +708,12 @@ const SOURCE_CHANNELS: usize = 2;
 
 impl<F: FnMut(&mut [f32]) -> usize> FramePuller<F> {
     pub(crate) fn new(frame_samples: usize, fill_frame: F) -> Self {
-        // Frames vary in length once a peer at another sample rate is
-        // resampled, so the buffer is sized for the widest conversion and the
+        // Frames vary in length - a peer runs at its own buffer size and
+        // sample rate - so the buffer is sized for the widest of them and the
         // source reports how much of it it filled.
         Self {
             fill_frame,
-            frame: vec![0.0f32; frame_samples.max(1) * 3],
+            frame: vec![0.0f32; widest_frame_samples(frame_samples)],
             conversion: None,
             filled: 0,
             taken: 0,
@@ -1061,6 +1062,32 @@ mod tests {
             puller.fill(&mut data);
             heard.extend(data);
         }
+
+        let expected: Vec<f32> = (0..heard.len()).map(|n| n as f32).collect();
+        assert_eq!(heard, expected);
+    }
+
+    /// A peer runs at its own buffer size, so its frames can be several times
+    /// the length of ours. The source has to be given room for one, or the
+    /// end of every frame is cut off.
+    ///
+    /// Verifies: REQ-AUD-038
+    #[test]
+    fn a_source_frame_several_times_the_nominal_length_reaches_the_device_whole() {
+        const NOMINAL: usize = 4;
+        const THEIRS: usize = NOMINAL * 8;
+        let mut next = 0.0f32;
+        let mut puller = FramePuller::new(NOMINAL, move |out: &mut [f32]| {
+            assert!(out.len() >= THEIRS, "the source has room for its frame");
+            for sample in &mut out[..THEIRS] {
+                *sample = next;
+                next += 1.0;
+            }
+            THEIRS
+        });
+
+        let mut heard = vec![f32::NAN; THEIRS + 8];
+        puller.fill(&mut heard);
 
         let expected: Vec<f32> = (0..heard.len()).map(|n| n as f32).collect();
         assert_eq!(heard, expected);

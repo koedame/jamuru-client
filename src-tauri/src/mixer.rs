@@ -7,17 +7,17 @@
 //! draws this app's screen from another place (the one of someone helping)
 //! starts from the faders as they are and follows them.
 //!
-//! What is heard follows the strips: the microphone's and the strip of the
-//! participant the audio goes to are set on the audio engine as they change and
-//! again whenever a session starts.
+//! What is heard follows the strips: the microphone's and that of each
+//! participant are set on the audio engine as they change, and the
+//! microphone's again whenever a session starts.
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+use uuid::Uuid;
 
-use crate::session::SessionState;
 use crate::streaming::StreamingState;
 
 /// Announces a change of the mixer. The payload is the new [`Snapshot`].
@@ -164,7 +164,7 @@ impl MixerState {
 
     /// Gives each of `ids` a strip and drops the strips of anyone else: a
     /// participant who is new stands at the default, and one who left leaves
-    /// nothing behind.
+    /// nothing behind - on the audio engine either.
     pub fn keep_only<R: Runtime>(&self, app: &AppHandle<R>, ids: &[String]) {
         self.change(app, |inner| {
             let before = inner.peers.len();
@@ -178,15 +178,23 @@ impl MixerState {
             }
             changed
         });
+        if let Some(audio) = app.try_state::<StreamingState>() {
+            let peers: Vec<Uuid> = ids
+                .iter()
+                .filter_map(|id| Uuid::parse_str(id).ok())
+                .collect();
+            audio.keep_peer_gains(&peers);
+        }
     }
 }
 
-/// Sets `audio` to the microphone's strip and to `peer`'s, the participant the
-/// audio is about to go to. A session starts with the faders where they stand.
+/// Sets `audio` to the microphone's strip and to `peer`'s, a participant an
+/// audio link is about to be opened to. They are heard with the faders where
+/// they stand.
 pub async fn set_on_audio<R: Runtime>(app: &AppHandle<R>, peer: &str) {
     let mixer = app.state::<MixerState>();
     apply_local(app, mixer.local()).await;
-    apply_peer(app, mixer.peer(peer)).await;
+    apply_peer(app, peer, mixer.peer(peer));
 }
 
 async fn apply_local<R: Runtime>(app: &AppHandle<R>, strip: Strip) {
@@ -195,16 +203,15 @@ async fn apply_local<R: Runtime>(app: &AppHandle<R>, strip: Strip) {
     audio.set_local_pan(strip.pan).await;
 }
 
-async fn apply_peer<R: Runtime>(app: &AppHandle<R>, strip: PeerStrip) {
+/// Sets how `peer` is played. Heard on the next frame when there is an audio
+/// link to them, and kept for when there is.
+fn apply_peer<R: Runtime>(app: &AppHandle<R>, peer: &str, strip: PeerStrip) {
+    let Ok(peer) = Uuid::parse_str(peer) else {
+        return;
+    };
     let audio = app.state::<StreamingState>();
-    audio.set_peer_volume(strip.gain_percent()).await;
-    audio.set_peer_pan(strip.pan).await;
-}
-
-/// Whether the audio goes to `peer` at the moment.
-fn is_heard<R: Runtime>(app: &AppHandle<R>, peer: &str) -> bool {
-    app.try_state::<SessionState>()
-        .is_some_and(|session| session.snapshot().streaming_peer_id.as_deref() == Some(peer))
+    audio.set_peer_volume(peer, strip.gain_percent());
+    audio.set_peer_pan(peer, strip.pan);
 }
 
 async fn set_local<R: Runtime>(app: &AppHandle<R>, edit: impl FnOnce(&mut Strip)) -> Snapshot {
@@ -239,9 +246,7 @@ async fn set_peer<R: Runtime>(
     if !known {
         return Err(format!("There is no participant {} in the room", peer));
     }
-    if is_heard(app, peer) {
-        apply_peer(app, snapshot.peers[peer]).await;
-    }
+    apply_peer(app, peer, snapshot.peers[peer]);
     Ok(snapshot)
 }
 
@@ -324,8 +329,15 @@ mod tests {
         snapshot.peers.into_keys().collect()
     }
 
-    fn heard_peer(app: &tauri::App<MockRuntime>) -> (u32, i32) {
-        app.state::<StreamingState>().peer_gain()
+    /// The ids of two participants, as the room gives them
+    const BEN: &str = "00000000-0000-0000-0000-000000000002";
+    const CHO: &str = "00000000-0000-0000-0000-000000000003";
+
+    /// The volume (percent of unity gain) and pan `peer` is played at, or
+    /// `None` when the audio keeps nothing for them
+    fn heard_at(app: &tauri::App<MockRuntime>, peer: &str) -> Option<(u32, i32)> {
+        app.state::<StreamingState>()
+            .peer_gain(Uuid::parse_str(peer).unwrap())
     }
 
     /// Verifies: REQ-RMT-031
@@ -442,48 +454,76 @@ mod tests {
         assert_eq!(app.state::<StreamingState>().local_gain(), (50, 25));
     }
 
-    /// The audio goes to one participant, so only their strip is what is heard.
+    /// The bug this guards: only the strip of the one participant the audio
+    /// went to was set on the audio, so in a room of three the fader of the
+    /// other did nothing.
     ///
     /// Verifies: REQ-RMT-031
+    /// Verifies: REQ-GUI-009
     #[tokio::test]
-    async fn a_participant_the_audio_does_not_go_to_is_moved_leaves_what_is_heard_as_it_was() {
+    async fn the_fader_of_any_participant_is_moved_sets_how_that_one_is_played_and_no_one_else() {
         let app = app();
         let handle = app.handle().clone();
-        app.manage(SessionState::new());
         app.state::<MixerState>()
-            .keep_only(&handle, &ids(&["a", "b"]));
+            .keep_only(&handle, &ids(&[BEN, CHO]));
 
-        set_peer(&handle, "b", |strip| strip.volume = 10)
+        set_peer(&handle, CHO, |strip| {
+            strip.volume = 40;
+            strip.pan = -30;
+        })
+        .await
+        .unwrap();
+        set_peer(&handle, BEN, |strip| strip.muted = true)
             .await
             .unwrap();
 
-        assert_eq!(heard_peer(&app), (100, 0));
+        assert_eq!(heard_at(&app, CHO), Some((50, -30)));
+        assert_eq!(heard_at(&app, BEN), Some((0, 0)));
     }
 
     /// Verifies: REQ-RMT-031
     #[tokio::test]
-    async fn a_session_starts_with_the_faders_where_they_stand_muted_being_silence() {
+    async fn a_participant_leaves_the_room_leaves_nothing_on_the_audio() {
         let app = app();
         let handle = app.handle().clone();
-        app.manage(SessionState::new());
         let mixer = app.state::<MixerState>();
-        mixer.keep_only(&handle, &ids(&["a"]));
+        mixer.keep_only(&handle, &ids(&[BEN, CHO]));
+        set_peer(&handle, BEN, |strip| strip.volume = 40)
+            .await
+            .unwrap();
+        set_peer(&handle, CHO, |strip| strip.volume = 40)
+            .await
+            .unwrap();
+
+        mixer.keep_only(&handle, &ids(&[CHO]));
+
+        assert_eq!(heard_at(&app, BEN), None);
+        assert_eq!(heard_at(&app, CHO), Some((50, 0)));
+    }
+
+    /// Verifies: REQ-RMT-031
+    #[tokio::test]
+    async fn a_link_is_opened_with_the_faders_where_they_stand_muted_being_silence() {
+        let app = app();
+        let handle = app.handle().clone();
+        let mixer = app.state::<MixerState>();
+        mixer.keep_only(&handle, &ids(&[BEN]));
         set_local(&handle, |strip| strip.volume = 100).await;
-        set_peer(&handle, "a", |strip| {
+        set_peer(&handle, BEN, |strip| {
             strip.volume = 40;
             strip.pan = -30;
         })
         .await
         .unwrap();
 
-        set_on_audio(&handle, "a").await;
-        assert_eq!(heard_peer(&app), (50, -30));
+        set_on_audio(&handle, BEN).await;
+        assert_eq!(heard_at(&app, BEN), Some((50, -30)));
         assert_eq!(app.state::<StreamingState>().local_gain().0, 125);
 
-        set_peer(&handle, "a", |strip| strip.muted = true)
+        set_peer(&handle, BEN, |strip| strip.muted = true)
             .await
             .unwrap();
-        set_on_audio(&handle, "a").await;
-        assert_eq!(heard_peer(&app), (0, -30));
+        set_on_audio(&handle, BEN).await;
+        assert_eq!(heard_at(&app, BEN), Some((0, -30)));
     }
 }

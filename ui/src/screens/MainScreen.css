@@ -14,6 +14,19 @@
   font-family: var(--font-family-sans);
 }
 
+/* A package that cannot replace itself says a newer release exists. One line
+   above both the join screen and the connected screen: someone on an old
+   version may not get as far as a room. */
+.main-update-notice {
+  flex-shrink: 0;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-warning-bg);
+  border-bottom: 1px solid var(--color-warning);
+  font-size: var(--font-size-caption);
+  text-align: center;
+}
+
 /* ===================================================================
    Disconnected / connecting path (ConnectionPanel) — DO NOT CHANGE.
    The join screen renders its own header/padding and the window is sized
@@ -280,6 +293,27 @@
 
 .participant__latency-arrow {
   color: var(--color-text-tertiary);
+}
+
+/* The participant whose audio takes longest to go there and back */
+.participant__latency--highest .participant__latency-item {
+  color: var(--color-warning);
+}
+
+/* How the link to a participant is doing, where their latency would be */
+.participant__link {
+  flex-shrink: 0;
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.participant__link--unstable {
+  color: var(--color-warning);
+}
+
+.participant__link--error {
+  color: var(--color-danger);
 }
 
 .room-sidebar__leave {
