@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 269 |
-| うち must | 260 |
+| 要求 総数 | 272 |
+| うち must | 263 |
 | うち should | 9 |
-| 検証済み | 243 |
+| 検証済み | 246 |
 | サーバーを立てた接続テストでのみ検証 | 24 |
 | 未検証（should のみ許容） | 2 |
 
@@ -71,6 +71,9 @@
 | REQ-CLI-005 | must | 同じルームに入った CLI 同士（`create-room` / `join-room`）で音声が双方向に届く。受信した音声は GUI と同じ再生経路（プレイアウトバッファ・PLC・FEC、[ADR-028](./adr/ADR-028-single-stage-playout.md)）を通り、送られた音高・音量のまま再生される | `docs-spec/requirements.md` | `tests/cli_test.rs`::two_clis_in_a_room_hear_each_other |
 | REQ-CLI-006 | must | ローカルモニタリングを CLI から操作できる。`--monitor` で開始時から ON、セッション中の `/monitor` `/unmonitor` で切り替わる。ミュートとは独立である（[ADR-033](./adr/ADR-033-local-monitoring.md)） | `docs-spec/requirements.md` | `src/main.rs`::monitor_commands_switch_local_monitoring<br/>`src/main.rs`::monitoring_without_audio_reports_that_there_is_nothing_to_monitor<br/>`tests/cli_test.rs`::a_monitoring_cli_hears_its_own_input_without_a_peer |
 | REQ-CLI-007 | must | `create-room` / `join-room` は相手につながってから `--duration` の秒数で自分で終わり、`--input-bursts` で送ったバーストが再生されるまでの往復時間（相手が音を保持して返すなら `--echo-delay-ms` を引いたもの）を測り、`--report-json` で往復・ネットワーク・プレイアウトの値を JSON に書く（[ADR-039](./adr/ADR-039-cli-round-trip-measurement.md)） | `docs-spec/requirements.md` | `src/audio/probe.rs`::a_burst_is_noticed_once_however_many_frames_carry_it<br/>`src/audio/probe.rs`::a_burst_signal_starts_every_interval_with_silence_between<br/>`src/audio/probe.rs`::a_sound_heard_before_the_peer_hold_has_passed_is_not_counted<br/>`src/audio/probe.rs`::a_sound_more_than_an_interval_after_the_newest_burst_is_not_counted<br/>`src/audio/probe.rs`::a_sound_with_no_burst_of_ours_before_it_is_not_counted<br/>`src/audio/probe.rs`::bursts_sent_too_late_to_return_are_not_expected<br/>`src/audio/probe.rs`::the_95th_percentile_is_the_nearest_rank<br/>`src/audio/probe.rs`::when_a_burst_is_lost_the_bursts_after_it_still_pair_with_their_own<br/>`src/audio/probe.rs`::when_the_peer_holds_audio_the_hold_is_taken_off_the_delay<br/>`tests/cli_test.rs`::a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts |
+| REQ-CLI-008 | must | `devices list` と `devices set` のデバイス一覧の取得は、ドライバが返ってこなくても時間の上限で諦め、コマンドが固まらない（REQ-AUD-123 と同じ上限） | `docs-spec/requirements.md` | `src/main.rs`::listing_devices_with_a_hung_driver_gives_up_at_the_timeout |
+| REQ-CLI-009 | must | 接続が済むまでに取り込まれた音は、接続が済んだ時点で捨てる。相手に古い音がまとまって届かない（GUI と同じ） | `docs-spec/requirements.md` | `src/main.rs`::audio_queued_while_connecting_is_dropped_once_connected |
+| REQ-CLI-010 | must | 相手に知らせる受信バッファの遅れは、パケット 1 つの長さで数える。1 フレームが 2 パケットに分かれる設定（256 フレーム）でも実際の遅れと一致する（GUI と同じ） | `docs-spec/requirements.md` | `src/main.rs`::jitter_buffer_told_to_the_peer_counts_packets_not_frames |
 | REQ-CON-020 | must | 1 ルームあたりの最大参加者数が 10 名である | `docs-spec/requirements.md` | `src-tauri/src/peer_mix.rs`::a_full_room_has_a_place_for_each_of_the_nine_others_and_no_more<br/>`src-tauri/src/session/roster.rs`::more_than_nine_others_are_listed_links_the_first_nine_and_the_next_when_one_of_them_leaves<br/>`src-tauri/src/session/roster.rs`::nine_others_are_in_a_full_room_opens_a_link_to_each_of_them<br/>`tests/connection_test.rs`::test_session_config<br/>`tests/mesh_connection_test.rs`::a_full_room_of_ten_has_nine_links_per_participant_and_all_of_them_carry_audio |
 | REQ-CON-021 | must | 招待コードは 9 文字の英数字であり、生成値が形式判定を通る。9 文字でないもの（6 文字の旧コードを含む）は形式判定を通らず、招待コードの型にできない | `docs-spec/requirements.md` | `src/network/signaling.rs`::test_an_invite_code_of_six_characters_does_not_parse<br/>`src/network/signaling.rs`::test_generate_invite_code_length |
 | REQ-CON-022 | must | 再接続の検知閾値は keep-alive 間隔の2倍以上に正規化され、健全な回線でフラップしない | `docs-spec/requirements.md` | `src/network/connection.rs`::reconnect_config_cannot_be_configured_to_flap |
