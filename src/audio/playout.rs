@@ -126,18 +126,32 @@ impl PlayoutConfig {
         ((ring_delay_frames as usize) * 2 + 2).max(4)
     }
 
-    /// How large a slot has to be.
-    ///
-    /// A peer running at another sample rate is resampled before it gets here,
-    /// and a rate conversion does not produce a whole number of frames: 44.1k
-    /// to 48k is 1.088 frames' worth, 44.1k to 96k is 2.18. Frames are
-    /// therefore stored at whatever length they are - padding or truncating
-    /// them to a fixed size would add or remove samples, which is what changes
-    /// pitch. The headroom covers the widest conversion the app offers
-    /// (44100 -> 96000, ADR-013) with room to spare.
+    /// How large a slot has to be: [`widest_frame_samples`].
     fn slot_samples(&self) -> usize {
-        self.frame_samples.max(1) * 3
+        widest_frame_samples(self.frame_samples)
     }
+}
+
+/// Interleaved samples in the longest frame a peer sends: what fits in one
+/// audio packet. A frame that does not fit is cut into packets on frame
+/// boundaries (ADR-070), and each packet is played as a frame of its own.
+pub const WIDEST_PACKET_SAMPLES: usize =
+    crate::protocol::MAX_PAYLOAD_SIZE / std::mem::size_of::<f32>();
+
+/// How many samples the longest frame held by a buffer of `frame_samples`
+/// frames can have, which is what a slot holds and what a reader's buffer has
+/// to take.
+///
+/// A peer's frame is as long as the buffer size *its* app runs at, not ours,
+/// up to what a packet carries. A peer running at another sample rate is
+/// resampled before it gets here, and a rate conversion does not produce a
+/// whole number of frames: 44.1k to 48k is 1.088 frames' worth, 44.1k to 96k
+/// is 2.18. Frames are therefore stored at whatever length they are - padding
+/// or truncating them to a fixed size would add or remove samples, which is
+/// what changes pitch. The headroom covers the widest conversion the app
+/// offers (44100 -> 96000, ADR-013) with room to spare.
+pub fn widest_frame_samples(frame_samples: usize) -> usize {
+    frame_samples.max(WIDEST_PACKET_SAMPLES) * 3
 }
 
 /// What a read produced, and how much of the caller's buffer it filled.
@@ -1665,7 +1679,7 @@ mod tests {
 
         assert_eq!(buffer.write(0, &[]), WriteOutcome::WrongLength);
         assert_eq!(
-            buffer.write(0, &[0.5; 4 * 3 + 1]),
+            buffer.write(0, &vec![0.5; widest_frame_samples(4) + 1]),
             WriteOutcome::WrongLength,
             "a frame larger than a slot has nowhere to go"
         );
