@@ -732,6 +732,23 @@ pub async fn gather_candidates(audio_socket: &Arc<tokio::net::UdpSocket>) -> Vec
     gather_candidates_using(audio_socket, super::stun::DEFAULT_STUN_SERVERS).await
 }
 
+/// [`gather_candidates`] for a socket that is not yet handed to the runtime, such as the one
+/// whose port the room is to be told before the audio session starts.
+///
+/// Asks through a duplicate descriptor, which shares the socket - the same port, the same NAT
+/// mapping - and leaves `socket` untouched for whatever will read it afterwards (a
+/// [`UdpMux`](super::UdpMux), which would swallow the reply). `None` if no duplicate could be made.
+pub async fn gather_candidates_on(socket: &std::net::UdpSocket) -> Option<Vec<AddressCandidate>> {
+    let asking = match socket.try_clone().and_then(tokio::net::UdpSocket::from_std) {
+        Ok(socket) => Arc::new(socket),
+        Err(e) => {
+            warn!("Could not ask STUN through the audio socket: {}", e);
+            return None;
+        }
+    };
+    Some(gather_candidates(&asking).await)
+}
+
 /// [`gather_candidates`] with an explicit STUN server list.
 pub async fn gather_candidates_using(
     audio_socket: &Arc<tokio::net::UdpSocket>,
