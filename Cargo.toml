@@ -136,6 +136,18 @@ tempfile = "3"
 jsonschema = { version = "0.58", default-features = false }
 
 
+# The key exchange of every link signs and checks with curve25519, which in an unoptimised
+# build takes milliseconds per operation: a room of ten (ninety links) then needs seconds of
+# CPU to agree its keys, and tests on a shared runner time out.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+
+[profile.dev.package.x25519-dalek]
+opt-level = 3
+
 [profile.release]
 lto = true
 codegen-units = 1
