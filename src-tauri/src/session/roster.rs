@@ -34,7 +34,20 @@ pub enum Audio {
         /// The key the server gave for `peer`, which its key exchange is checked against
         link_key: Option<String>,
     },
+    /// Leave the room and enter it again, as a new participant with a new audio
+    /// address.
+    ///
+    /// For a link that gave up with nobody else to go to: whatever broke it (an
+    /// address that changed on either side, a path that is gone) is not
+    /// something the two ends can tell each other, but a fresh entry tells the
+    /// room the address to use.
+    Rejoin,
 }
+
+/// How many times in a row the room is entered again for a link that gave up,
+/// before the roster leaves it be. A peer that is really gone would otherwise
+/// have the app leaving and entering the room for as long as the server lists it.
+const MAX_REJOINS: u32 = 3;
 
 /// How the audio session to the peer it is with is doing.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +80,9 @@ pub struct Roster {
     /// entries of a participant who came back, and the next stop would
     /// otherwise bounce between two of them.
     left_behind: Vec<Uuid>,
+    /// How many times the room was entered again for a link that gave up, since the
+    /// audio last came back
+    rejoins: u32,
 }
 
 impl Roster {
@@ -139,19 +155,27 @@ impl Roster {
     }
 
     /// The audio session gave up on the peer it is with, so anyone else who
-    /// has an address is better than staying.
+    /// has an address is better than staying. When there is no one, the room is
+    /// entered again: the peer may be waiting for an address this app no longer
+    /// has, or be somewhere this app does not look.
     pub fn audio_failed(&mut self) -> Vec<Audio> {
         if self.streaming_with.is_none() || self.link == Link::Failed {
             return Vec::new();
         }
         self.link = Link::Failed;
-        self.go_onward()
+        let onward = self.go_onward();
+        if !onward.is_empty() || self.rejoins >= MAX_REJOINS {
+            return onward;
+        }
+        self.rejoins += 1;
+        vec![Audio::Rejoin]
     }
 
     /// Packets are arriving again.
     pub fn audio_recovered(&mut self) {
         if self.streaming_with.is_some() {
             self.link = Link::Healthy;
+            self.rejoins = 0;
         }
     }
 
@@ -586,10 +610,12 @@ mod tests {
 
     /// Verifies: REQ-CON-131
     #[test]
-    fn the_audio_gave_up_on_the_peer_and_nobody_else_is_there_waits_for_the_next_one_to_publish() {
+    fn the_audio_gave_up_on_the_peer_and_nobody_else_is_there_enters_the_room_again_and_then_waits_for_the_next_one_to_publish(
+    ) {
         let mut roster = Roster::default();
         the_audio_is_with(&mut roster, 2, "Ben", "192.0.2.2:5000");
 
+        assert_eq!(roster.audio_failed(), vec![Audio::Rejoin]);
         assert_eq!(roster.audio_failed(), vec![]);
         assert_eq!(roster.streaming_with(), Some(Uuid::from_u128(2)));
         roster.joined(named(3, "Cho", None));
@@ -599,6 +625,40 @@ mod tests {
             audio,
             vec![Audio::Stop, Audio::KeepAddress, start(3, "192.0.2.3:6000")]
         );
+    }
+
+    /// Verifies: REQ-CON-131
+    #[test]
+    fn the_audio_gave_up_again_after_entering_the_room_again_enters_it_again_only_a_few_times() {
+        let mut roster = Roster::default();
+        let peers = vec![named(2, "Ben", Some("192.0.2.2:5000"))];
+        roster.entered(me(), peers.clone());
+
+        let mut entered_again = 0;
+        for _ in 0..10 {
+            if roster.audio_failed() == vec![Audio::Rejoin] {
+                entered_again += 1;
+            }
+            roster.entered(Uuid::from_u128(100 + entered_again as u128), peers.clone());
+        }
+
+        assert_eq!(entered_again, 3);
+    }
+
+    /// Verifies: REQ-CON-131
+    #[test]
+    fn the_audio_came_back_after_entering_the_room_again_enters_it_again_when_it_next_gives_up() {
+        let mut roster = Roster::default();
+        let peers = vec![named(2, "Ben", Some("192.0.2.2:5000"))];
+        roster.entered(me(), peers.clone());
+        for id in 100..103 {
+            assert_eq!(roster.audio_failed(), vec![Audio::Rejoin]);
+            roster.entered(Uuid::from_u128(id), peers.clone());
+        }
+        assert_eq!(roster.audio_failed(), vec![]);
+        roster.audio_recovered();
+
+        assert_eq!(roster.audio_failed(), vec![Audio::Rejoin]);
     }
 
     /// Verifies: REQ-CON-131
