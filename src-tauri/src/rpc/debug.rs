@@ -785,16 +785,32 @@ fn stall_streams(params: StallStreamsParams) -> Result<Value, RpcError> {
 
 /// What went wrong with the received audio in this session, or the last one:
 /// the count of each kind, and when the latest of them happened, in
-/// microseconds since the session's audio started. Compare the times of
+/// microseconds since the link's audio started. Compare the times of
 /// `starved` with those of `late_arrival` and `thread_stall` to tell a link
 /// that delivered late from a thread that was away; `reads` over `writes`
 /// says whether the device asks for frames faster than the peer sends them.
+///
+/// `peers` has one such record for each participant an audio link was opened
+/// to, in the order the links were opened. The fields beside it are those of
+/// the first: in a room of two, the other participant.
 fn audio_timing<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
-    let report = app
+    let reports = app
         .state::<crate::streaming::StreamingState>()
-        .flight_report()
+        .flight_reports();
+    let (_, first) = reports
+        .first()
         .ok_or_else(|| RpcError::failed("no session has started audio yet"))?;
-    Ok(timing_json(&report))
+    let mut timing = timing_json(first);
+    let peers: Vec<Value> = reports
+        .iter()
+        .map(|(peer, report)| {
+            let mut of_peer = timing_json(report);
+            of_peer["peer_id"] = json!(peer.to_string());
+            of_peer
+        })
+        .collect();
+    timing["peers"] = json!(peers);
+    Ok(timing)
 }
 
 fn timing_json(report: &jamjam::audio::FlightReport) -> Value {

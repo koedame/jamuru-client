@@ -618,6 +618,212 @@ impl Drop for AnsweringPeer {
     }
 }
 
+/// A peer for a room to hold that plays: it answers the key exchange, sends
+/// the app a steady tone of `hz` at `amplitude` once the keys are agreed, and
+/// counts the audio packets the app sends it.
+struct PlayingPeer {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    heard: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl PlayingPeer {
+    /// Frames in each packet the peer sends: one 64-frame buffer at 48 kHz
+    const FRAMES: usize = 64;
+
+    /// `hz` has to fit a whole number of periods in a packet (750 Hz and its
+    /// multiples do): the meters read one buffer at a time, and only then is
+    /// what they read the same for every buffer, wherever the tone started.
+    fn start(peer: common::Peer, hz: f32, amplitude: f32) -> Self {
+        use jamjam::network::LinkSecurity;
+        use jamjam::protocol::{Packet, PacketType};
+        use std::sync::atomic::Ordering;
+
+        peer.socket
+            .set_read_timeout(Some(Duration::from_millis(1)))
+            .expect("set a read timeout");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let heard = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (stopping, counting) = (stop.clone(), heard.clone());
+        let thread = std::thread::spawn(move || {
+            let frame = Duration::from_micros(Self::FRAMES as u64 * 1_000_000 / 48_000);
+            let mut app = None;
+            let mut sequence = 0u32;
+            let mut next_frame_at = std::time::Instant::now();
+            while !stopping.load(Ordering::SeqCst) {
+                if let Ok(Some((packet, from))) = peer.recv() {
+                    app = Some(from);
+                    if packet.packet_type == PacketType::Audio {
+                        counting.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+                let Some(app) = app else { continue };
+                if peer.link.security() != LinkSecurity::Encrypted {
+                    continue;
+                }
+                // The frames that have come due, and no more than a few at
+                // once: a thread that was away does not send a burst
+                let now = std::time::Instant::now();
+                if now.duration_since(next_frame_at) > frame * 8 {
+                    next_frame_at = now;
+                }
+                while next_frame_at <= now {
+                    let samples: Vec<u8> = (0..Self::FRAMES)
+                        .flat_map(|i| {
+                            let at = (sequence as usize * Self::FRAMES + i) as f32 / 48_000.0;
+                            let sample = amplitude * (at * hz * std::f32::consts::TAU).sin();
+                            [sample, sample]
+                        })
+                        .flat_map(f32::to_le_bytes)
+                        .collect();
+                    let timestamp = sequence.wrapping_mul(Self::FRAMES as u32);
+                    peer.send(Packet::audio(sequence, timestamp, samples), app);
+                    sequence = sequence.wrapping_add(1);
+                    next_frame_at += frame;
+                }
+            }
+        });
+        Self {
+            stop,
+            heard,
+            thread: Some(thread),
+        }
+    }
+
+    /// How many audio packets the app has sent this peer
+    fn heard(&self) -> usize {
+        self.heard.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for PlayingPeer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The bug this guards: with three in a room the app kept an audio link to
+/// one of the others only. The third heard no one and was heard by no one,
+/// while the screen listed everybody.
+///
+/// The app is put in a room with two peers on loopback, each playing a tone
+/// of its own pitch and loudness. It has to hear both, each on the link to
+/// that peer, and send its own audio to both.
+///
+/// Verifies: REQ-CON-133
+/// Verifies: REQ-GUI-009
+#[test]
+fn in_a_room_with_two_peers_the_app_hears_both_and_sends_its_audio_to_both() {
+    let _guard = exclusive();
+    let (quiet, loud) = (common::Peer::bind(), common::Peer::bind());
+    let server = FakeSignaling::start_with_residents_at(&[
+        ("quiet", quiet.local_addr()),
+        ("loud", loud.local_addr()),
+    ]);
+    // A sine at 0.2 reads 14 on the meters (RMS) and one at 0.6 reads 42.
+    // Played together they read 45: the two pitches do not cancel each other,
+    // whatever the moment each started.
+    let quiet = PlayingPeer::start(quiet, 750.0, 0.2);
+    let loud = PlayingPeer::start(loud, 1500.0, 0.6);
+
+    let app = App::launch_with_server_url(server.url()).expect("the app should launch");
+    app.connection_screen()
+        .wait_until_interactive(UI_TIMEOUT)
+        .unwrap_or_else(|e| panic!("{}\nThe log holds:\n{}", e, app.log_text()));
+    let session = app
+        .invoke("session_join", serde_json::json!({ "code": "echo" }))
+        .expect("the control channel should answer")
+        .expect("joining the room should succeed");
+    let id_of = |name: &str| -> String {
+        session["room"]["participants"]
+            .as_array()
+            .expect("the participants")
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is not in the room: {session}"))["id"]
+            .as_str()
+            .expect("an id")
+            .to_string()
+    };
+    let (quiet_id, loud_id) = (id_of("quiet"), id_of("loud"));
+
+    let status = || {
+        app.invoke("streaming_status", serde_json::json!({}))
+            .expect("the control channel should answer")
+            .expect("the status should be read")
+    };
+    let link_to = |status: &serde_json::Value, id: &str| -> serde_json::Value {
+        status["peers"]
+            .as_array()
+            .and_then(|peers| peers.iter().find(|p| p["peer_id"] == id).cloned())
+            .unwrap_or(serde_json::Value::Null)
+    };
+    // The link to `id` is up, has counted packets of its peer (the statistics
+    // follow the link by a moment) and plays them at about `level`
+    let plays = |id: &str, level: u64| {
+        let link = link_to(&status(), id);
+        link["connection_state"] == "connected"
+            && link["network"]["packets_received"].as_u64() > Some(0)
+            && link["level"].as_u64().unwrap_or(0).abs_diff(level) <= 4
+    };
+
+    // Both links are up and each plays its own peer - the quiet one is not
+    // played at the loud one's level, nor the other way round - and what is
+    // played is the two of them together.
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        plays(&quiet_id, 14)
+            && plays(&loud_id, 42)
+            && status()["output_level"].as_u64().unwrap_or(0).abs_diff(45) <= 4
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "the app does not play each peer at its own level and both together. The status is:\n{:#}\nThe log holds:\n{}",
+            status(),
+            app.log_text()
+        )
+    });
+
+    // The session says whom the audio is linked to, and the screen says the
+    // same of each participant.
+    let session = app
+        .invoke("session_get", serde_json::json!({}))
+        .expect("the control channel should answer")
+        .expect("the session should be read");
+    let mut linked: Vec<&str> = session["streaming_peer_ids"]
+        .as_array()
+        .expect("the linked participants")
+        .iter()
+        .filter_map(|id| id.as_str())
+        .collect();
+    linked.sort_unstable();
+    let mut both = [quiet_id.as_str(), loud_id.as_str()];
+    both.sort_unstable();
+    assert_eq!(linked, both);
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        let html = app.main_window_html().unwrap_or_default();
+        html.matches("data-link=\"connected\"").count() == 2
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "the screen does not show both participants connected:\n{}",
+            app.main_window_html().unwrap_or_default()
+        )
+    });
+
+    // The app sends its own audio to each of them.
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || quiet.heard() > 100 && loud.heard() > 100)
+        .unwrap_or_else(|_| {
+            panic!(
+                "the app sent {} audio packets to one peer and {} to the other",
+                quiet.heard(),
+                loud.heard()
+            )
+        });
+}
+
 /// Every run of `a.b.c.d` digits in `text`.
 fn ipv4_addresses(text: &str) -> Vec<String> {
     let bytes = text.as_bytes();
@@ -685,10 +891,11 @@ fn in_a_room_with_a_peer_the_apps_console_output_holds_no_ip_address() {
         .expect("the control channel should answer")
         .expect("joining the room should succeed");
 
-    // The app says it is streaming once the link is up, on the console and
-    // not only in the file, so the search below has something to look through.
+    // The app says how the link to the peer is doing once it is up, on the
+    // console and not only in the file, so the search below has something to
+    // look through.
     jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
-        app.console_text().contains("Streaming active")
+        app.console_text().contains("state: Connected")
     })
     .unwrap_or_else(|_| {
         panic!(
