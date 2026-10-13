@@ -42,6 +42,11 @@ pub struct App {
 }
 
 impl App {
+    /// The operating-system id of the app's process
+    pub fn process_id(&self) -> u32 {
+        self.process.id()
+    }
+
     /// Builds nothing - it launches the binary at `binary` and waits for the
     /// control channel.
     ///
