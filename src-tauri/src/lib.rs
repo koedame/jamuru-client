@@ -18,7 +18,6 @@ mod e2e_control;
 mod help_link;
 mod logging;
 mod mixer;
-mod peer_mix;
 mod report_problem;
 mod restart;
 mod rpc;

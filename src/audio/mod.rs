@@ -15,6 +15,7 @@ pub mod fault;
 mod flight;
 mod heartbeat;
 mod monitor;
+mod peer_mix;
 mod playout;
 mod plc;
 mod preset;
@@ -48,6 +49,7 @@ pub use flight::{
 };
 pub use heartbeat::{Heartbeat, StallGuard, Verdict, MAX_REOPENS, STALL_AFTER};
 pub use monitor::{LocalMonitor, MonitorTap, MONITOR_MARGIN_FRAMES};
+pub use peer_mix::{PeerGain, PeerMeter, PeerMix, VoiceHandle};
 pub use playout::{
     PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult, PlayoutStats, WriteOutcome,
 };
@@ -59,8 +61,8 @@ pub use resampler::{
     FastResampler, PassthroughResampler, ResamplerError,
 };
 pub use stream::{
-    balance_gains, capture_to_wire, mono_to_wire, pan_received, GainRamp, PeerRateChange,
-    ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
+    balance_gains, capture_to_wire, mono_to_wire, pan_received, rms_level, GainRamp,
+    PeerRateChange, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 pub use virtual_output::{
     RecordingFeed, RecordingTap, VirtualOutputSink, CHANNELS as VIRTUAL_OUTPUT_CHANNELS,

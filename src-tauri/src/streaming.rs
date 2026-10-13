@@ -22,24 +22,24 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use jamjam::audio::{
-    capture_attempts, capture_to_wire, AudioConfig, AudioEngine, AudioError, AudioPreset, DeviceId,
-    FlightKind, FlightRecorder, GainRamp, LocalMonitor, MonitorTap, OutputRoute, PeerRateChange,
-    ReceivePath, RecordingFeed, RecordingTap, Verdict, ADAPT_INTERVAL, WIRE_CHANNELS,
+    capture_attempts, capture_to_wire, rms_level, AudioConfig, AudioEngine, AudioError,
+    AudioPreset, DeviceId, FlightKind, FlightRecorder, GainRamp, LocalMonitor, MonitorTap,
+    OutputRoute, PeerGain, PeerMeter, PeerMix, PeerRateChange, ReceivePath, RecordingFeed,
+    RecordingTap, Verdict, VoiceHandle, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
 use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
 use jamjam::network::{
     audio_packet_duration_ms, required_bps, status_label, AudioEncodingConfig, BandwidthEstimator,
     BandwidthStatus, BandwidthVerdict, Connection, ConnectionState, ConnectionStats,
-    LatencyBreakdown, LinkFacts, LinkIdentity, LinkSnapshot, LocalLatencyInfo, PeerLatencyInfo,
-    QualityMonitor, UdpMux, MAX_PEERS_PER_ROOM,
+    LatencyBreakdown, LinkFacts, LinkHealth, LinkIdentity, LinkSnapshot, LocalLatencyInfo,
+    PeerLatencyInfo, QualityMonitor, UdpMux, MAX_PEERS_PER_ROOM,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
 #[cfg(target_os = "windows")]
 use crate::audio_slot::AsioSwitch;
 use crate::audio_slot::DeviceSlot;
-use crate::peer_mix::{PeerGain, PeerMeter, PeerMix, VoiceHandle};
 use crate::settings::{pair_in_use, Devices};
 
 /// How many audio links a session holds at most: one to each of the others in
@@ -271,7 +271,7 @@ impl StreamingState {
             links: Arc::new(RwLock::new(Vec::new())),
             peer_gains: Arc::new(RwLock::new(HashMap::new())),
             device_problems: Arc::new(RwLock::new(Vec::new())),
-            buffer_size: Mutex::new(64), // Default: 64 samples
+            buffer_size: Mutex::new(jamjam::config::DEFAULT_BUFFER_SIZE),
             underrun_count: Arc::new(AtomicU64::new(0)),
             delay_adjustments: Arc::new(AtomicU64::new(0)),
             reconnect_count: Arc::new(AtomicU64::new(0)),
@@ -437,23 +437,17 @@ impl StreamingState {
     /// which would swallow the reply.
     pub async fn gather_candidates(&self) -> Option<Vec<jamjam::network::AddressCandidate>> {
         let prepared = self.prepared_socket.lock().await;
-        let socket = prepared.as_ref()?;
-        // A duplicate descriptor shares the socket - the same port, the same NAT
-        // mapping - while leaving the original untouched for the audio session.
-        let asking = match socket.try_clone().and_then(tokio::net::UdpSocket::from_std) {
-            Ok(socket) => Arc::new(socket),
-            Err(e) => {
-                tracing::warn!("Could not ask STUN through the audio socket: {}", e);
-                return None;
-            }
-        };
-        Some(jamjam::network::gather_candidates(&asking).await)
+        jamjam::network::gather_candidates_on(prepared.as_ref()?).await
     }
 
     /// Local latency info based on the audio config, for the link whose
     /// play-out buffer holds `jitter_buffer_delay_us`
     fn local_latency_info(&self, jitter_buffer_delay_us: u32) -> LocalLatencyInfo {
-        let frame_size = self.buffer_size.try_lock().map(|s| *s).unwrap_or(64);
+        let frame_size = self
+            .buffer_size
+            .try_lock()
+            .map(|s| *s)
+            .unwrap_or(jamjam::config::DEFAULT_BUFFER_SIZE);
         let sample_rate = self.sample_rate.load(Ordering::SeqCst);
         let mut info = LocalLatencyInfo::from_audio_config(frame_size, sample_rate, "pcm");
 
@@ -679,21 +673,6 @@ impl PartialEq for LinkTarget {
         };
         self.peer == other.peer && self.candidates == other.candidates && keys(self) == keys(other)
     }
-}
-
-/// How the audio link to one participant is doing, as far as deciding what to
-/// do about it goes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LinkHealth {
-    /// Nothing has been heard from them yet: the link is being set up, or it
-    /// is up on an address that has not answered
-    Starting,
-    /// Their packets arrive
-    Heard,
-    /// Their packets stopped arriving; the link is still trying
-    Silent,
-    /// The link gave up on them. It is taken up again if they are heard.
-    Failed,
 }
 
 /// What the audio thread publishes about the link to one participant, for
@@ -1852,33 +1831,6 @@ fn capture_or_silence(
             CaptureRing::silent(wanted_channels as usize)
         }
     }
-}
-
-/// Converts a frame of samples to the 0-100 level the meters display.
-///
-/// RMS, not peak: a full-scale sine reads 71, not 100. That is deliberate -
-/// the meter is meant to track perceived loudness, and a peak meter would sit
-/// pinned at 100 for any normalised signal.
-///
-/// Extracted because the identical calculation previously appeared at three
-/// call sites (capture, device switch, playback), so a correction to one would
-/// silently have missed the others. It is also the only part of input
-/// metering that can be verified without real audio hardware: whether
-/// CoreAudio/WASAPI/ALSA delivers samples to the callback is the OS's
-/// business, but whether a delivered frame turns into the right number is
-/// ours.
-pub(crate) fn rms_level(samples: &[f32]) -> u32 {
-    if samples.is_empty() {
-        return 0;
-    }
-    let sum_squares: f32 = samples.iter().map(|s| s * s).sum();
-    let rms = (sum_squares / samples.len() as f32).sqrt();
-    // NaN would make the comparison below false and round() yield 0, so clamp
-    // explicitly rather than relying on that.
-    if !rms.is_finite() {
-        return 0;
-    }
-    ((rms * 100.0).min(100.0)).round() as u32
 }
 
 /// The ASIO driver `input` and `output` should open as one session, if they
@@ -3839,82 +3791,6 @@ mod tests {
             &sent[..samples],
             "C is not dry: the fader and monitor were applied"
         );
-    }
-
-    /// Verifies: REQ-AUD-029
-    #[test]
-    fn test_rms_level_is_zero_for_silence() {
-        assert_eq!(rms_level(&[0.0; 128]), 0);
-    }
-
-    /// An empty frame must not divide by zero or report a stale level.
-    ///
-    /// Verifies: REQ-AUD-029
-    #[test]
-    fn test_rms_level_is_zero_for_an_empty_frame() {
-        assert_eq!(rms_level(&[]), 0);
-    }
-
-    /// The meter has to move with the signal - a constant would make it
-    /// useless (.claude/rules/traceability.md, "指標は定数化させない").
-    ///
-    /// Verifies: REQ-AUD-029
-    #[test]
-    fn test_rms_level_rises_with_amplitude() {
-        let quiet = rms_level(&[0.1; 128]);
-        let medium = rms_level(&[0.5; 128]);
-        let loud = rms_level(&[1.0; 128]);
-
-        assert_eq!(quiet, 10);
-        assert_eq!(medium, 50);
-        assert_eq!(loud, 100);
-        assert!(quiet < medium && medium < loud);
-    }
-
-    /// RMS, not peak: a full-scale sine is 1/sqrt(2) of full scale.
-    ///
-    /// Verifies: REQ-AUD-029
-    #[test]
-    fn test_rms_level_of_a_full_scale_sine_is_about_71() {
-        let samples: Vec<f32> = (0..4800)
-            .map(|i| (i as f32 / 48000.0 * 440.0 * std::f32::consts::TAU).sin())
-            .collect();
-
-        let level = rms_level(&samples);
-        assert!(
-            (69..=73).contains(&level),
-            "expected about 71 for a full-scale sine, got {}",
-            level
-        );
-    }
-
-    /// Sign must not matter: the meter shows magnitude.
-    ///
-    /// Verifies: REQ-AUD-029
-    #[test]
-    fn test_rms_level_ignores_polarity() {
-        assert_eq!(rms_level(&[0.5; 64]), rms_level(&[-0.5; 64]));
-    }
-
-    /// Samples beyond full scale are clamped rather than reported above 100,
-    /// which the meter's 0-100 range could not display.
-    ///
-    /// Verifies: REQ-AUD-029
-    #[test]
-    fn test_rms_level_clamps_above_full_scale() {
-        assert_eq!(rms_level(&[4.0; 64]), 100);
-        assert_eq!(rms_level(&[-4.0; 64]), 100);
-    }
-
-    /// A non-finite sample must not surface as a nonsense level. `f32::NAN`
-    /// would otherwise fall through `min` and round to 0 by accident rather
-    /// than by decision.
-    ///
-    /// Verifies: REQ-AUD-029
-    #[test]
-    fn test_rms_level_rejects_non_finite_samples() {
-        assert_eq!(rms_level(&[f32::NAN, 0.5, 0.5]), 0);
-        assert_eq!(rms_level(&[f32::INFINITY, 0.5]), 0);
     }
 
     /// Switching preset changes the play-out delay, and zero-latency must

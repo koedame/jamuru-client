@@ -21,7 +21,7 @@ use crate::audio::LINUX_MIN_OUTPUT_PERIOD;
 const APP_NAME: &str = "jamuru";
 
 /// Default buffer size in samples (64 samples @ 48kHz = 1.33ms)
-const DEFAULT_BUFFER_SIZE: u32 = 64;
+pub const DEFAULT_BUFFER_SIZE: u32 = 64;
 
 /// The version of the terms of use bundled with this build (`docs/terms.md`
 /// ends with `版 N`; the app's tests check the two agree). Raise it when the
