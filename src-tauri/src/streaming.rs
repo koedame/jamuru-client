@@ -271,7 +271,7 @@ impl StreamingState {
             links: Arc::new(RwLock::new(Vec::new())),
             peer_gains: Arc::new(RwLock::new(HashMap::new())),
             device_problems: Arc::new(RwLock::new(Vec::new())),
-            buffer_size: Mutex::new(64), // Default: 64 samples
+            buffer_size: Mutex::new(jamjam::config::DEFAULT_BUFFER_SIZE),
             underrun_count: Arc::new(AtomicU64::new(0)),
             delay_adjustments: Arc::new(AtomicU64::new(0)),
             reconnect_count: Arc::new(AtomicU64::new(0)),
@@ -453,7 +453,10 @@ impl StreamingState {
     /// Local latency info based on the audio config, for the link whose
     /// play-out buffer holds `jitter_buffer_delay_us`
     fn local_latency_info(&self, jitter_buffer_delay_us: u32) -> LocalLatencyInfo {
-        let frame_size = self.buffer_size.try_lock().map(|s| *s).unwrap_or(64);
+        let frame_size = self.buffer_size
+            .try_lock()
+            .map(|s| *s)
+            .unwrap_or(jamjam::config::DEFAULT_BUFFER_SIZE);
         let sample_rate = self.sample_rate.load(Ordering::SeqCst);
         let mut info = LocalLatencyInfo::from_audio_config(frame_size, sample_rate, "pcm");
 
