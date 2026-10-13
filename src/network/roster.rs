@@ -1,17 +1,47 @@
 //! Who is in the room and which of them an audio link goes to.
 //!
 //! This decides; it does no I/O. [`Roster`] is told what the room and the
-//! links did and answers with what to do to the audio, and `session` carries
-//! that out. Kept apart so the rules about the audio - who gets a link, what
-//! happens when someone leaves or goes silent - are tested without a server or
-//! a sound card.
+//! links did and answers with what to do to the audio, and whoever drives the
+//! audio - the app's `session`, the CLI - carries that out. Kept apart, and in
+//! the core, so that both decide the same way and the rules about the audio -
+//! who gets a link, what happens when someone leaves or goes silent - are
+//! tested without a server or a sound card.
 
 use std::net::SocketAddr;
 
-use jamjam::network::{PeerInfo, MAX_PEERS_PER_ROOM};
 use uuid::Uuid;
 
-use crate::streaming::LinkHealth;
+use super::{ConnectionState, PeerInfo, MAX_PEERS_PER_ROOM};
+
+/// How the audio link to one participant is doing, as far as deciding what to
+/// do about it goes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkHealth {
+    /// Nothing has been heard from them yet: the link is being set up, or it
+    /// is up on an address that has not answered
+    Starting,
+    /// Their packets arrive
+    Heard,
+    /// Their packets stopped arriving; the link is still trying
+    Silent,
+    /// The link gave up on them. It is taken up again if they are heard.
+    Failed,
+}
+
+impl LinkHealth {
+    /// The health of a link whose connection is in `state` and which has
+    /// received `packets_received` packets so far. "Heard" is a packet
+    /// arriving, not the connection coming up: it comes up on the first
+    /// address even if nobody answers there.
+    pub fn of(state: ConnectionState, packets_received: u64) -> Self {
+        match state {
+            ConnectionState::Failed => Self::Failed,
+            ConnectionState::Reconnecting => Self::Silent,
+            ConnectionState::Connected if packets_received > 0 => Self::Heard,
+            _ => Self::Starting,
+        }
+    }
+}
 
 /// One thing to do to the audio, in the order given.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -296,7 +326,7 @@ impl Roster {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jamjam::network::AddressCandidate;
+    use crate::network::AddressCandidate;
 
     fn me() -> Uuid {
         Uuid::from_u128(1)
@@ -353,6 +383,44 @@ mod tests {
             assert_eq!(roster.link_is(id(*peer), LinkHealth::Heard), vec![]);
         }
         roster
+    }
+
+    /// "Heard" is a packet arriving, not the connection coming up: it comes up on the first
+    /// address even when nobody answers there, and counting that as heard would stop the
+    /// roster from ever trying another address.
+    ///
+    /// Verifies: REQ-CON-134
+    #[test]
+    fn a_connection_is_up_but_nothing_arrived_is_starting_and_is_heard_once_something_does() {
+        assert_eq!(
+            LinkHealth::of(ConnectionState::Connected, 0),
+            LinkHealth::Starting
+        );
+        assert_eq!(
+            LinkHealth::of(ConnectionState::Connected, 1),
+            LinkHealth::Heard
+        );
+    }
+
+    /// Verifies: REQ-CON-134
+    #[test]
+    fn a_connection_is_setting_up_reconnecting_or_failed_has_the_health_the_roster_acts_on() {
+        for setting_up in [
+            ConnectionState::Disconnected,
+            ConnectionState::Connecting,
+            ConnectionState::GatheringCandidates,
+            ConnectionState::CheckingConnectivity,
+        ] {
+            assert_eq!(LinkHealth::of(setting_up, 0), LinkHealth::Starting);
+        }
+        assert_eq!(
+            LinkHealth::of(ConnectionState::Reconnecting, 100),
+            LinkHealth::Silent
+        );
+        assert_eq!(
+            LinkHealth::of(ConnectionState::Failed, 100),
+            LinkHealth::Failed
+        );
     }
 
     /// Verifies: REQ-CON-113

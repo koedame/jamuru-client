@@ -8,10 +8,9 @@
 //! when it changes, and acts with one command per operation - so the screen,
 //! the E2E channel and the remote portals all see and drive the same state.
 //!
-//! Deciding about the peers and the audio is [`roster`]'s; this is the part
-//! that talks to the server and the audio engine and keeps the state.
-
-mod roster;
+//! Deciding about the peers and the audio is [`Roster`]'s (in the core, which the
+//! CLI uses too); this is the part that talks to the server and the audio engine
+//! and keeps the state.
 
 use std::sync::MutexGuard;
 use std::time::Duration;
@@ -26,7 +25,7 @@ use crate::mixer::{self, MixerState};
 use crate::settings_help::HelpEvent;
 use crate::signaling::{self, JoinResult, SignalingEvent, SignalingState};
 use crate::streaming;
-use roster::{Audio, Roster};
+use jamjam::network::roster::{Audio, Roster};
 
 /// Announces a change of the session. The payload is the new [`Snapshot`].
 pub const CHANGED_EVENT: &str = "session:changed";
