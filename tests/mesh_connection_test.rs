@@ -205,6 +205,56 @@ async fn audio_sealed_for_one_participant_is_not_played_by_another_it_is_sent_to
     assert!(room[0].heard_from(1).is_empty());
 }
 
+/// Anyone who learns the audio port can send to it. What comes from an address no
+/// participant published is offered to every link, so every link has to turn it away:
+/// none plays it, and none stops carrying the audio of its own peer.
+///
+/// Verifies: REQ-CON-033
+#[tokio::test]
+async fn datagrams_from_a_stranger_are_played_by_no_link_and_leave_every_link_working() {
+    let room = room_of(3).await;
+    let stranger = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let target = room[0].addr();
+
+    // Noise, then well-formed audio packets that are not sealed for anyone
+    let mut seed = 0x2545_F491u32;
+    for n in 0..200u32 {
+        let noise: Vec<u8> = (0..(n % 97 + 1))
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            })
+            .collect();
+        stranger.send_to(&noise, target).await.unwrap();
+        let forged = jamjam::protocol::Packet::audio(n, 0, bytes_of(&signal_of(9)));
+        stranger.send_to(&forged.to_bytes(), target).await.unwrap();
+        // Lets the socket be read, so that it does not overflow before any of this is seen
+        tokio::time::sleep(Duration::from_micros(200)).await;
+    }
+    everyone_sends(&room).await;
+
+    for other in [1, 2] {
+        until("the frame of the participant arrived", || {
+            !room[0].heard_from(other).is_empty()
+        })
+        .await;
+        assert_eq!(
+            room[0].heard_from(other),
+            vec![bytes_of(&signal_of(other))],
+            "only what participant {other} sent is played on the link to {other}"
+        );
+        assert_eq!(room[0].links[&other].state(), ConnectionState::Connected);
+        // The forged packets did reach the link, which is what turned them away
+        assert!(
+            room[0].links[&other].stats().packets_refused >= 100,
+            "refused {}",
+            room[0].links[&other].stats().packets_refused
+        );
+    }
+}
+
 /// Verifies: REQ-CON-133
 #[tokio::test]
 async fn when_one_participant_leaves_the_links_between_the_others_keep_carrying_audio() {
