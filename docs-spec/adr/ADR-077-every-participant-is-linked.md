@@ -149,15 +149,37 @@ sequenceDiagram
 - 利用状況の記録の形は変えない。RTT とロスは全部の接続を標本にし、接続の立ち上がり方は最初に立ち上がった 1 本を記録する。
 - 録音・配信用の仮想出力の B は、ほかの全員の音（フェーダー前）の和にする。
 
+### 9. CLI も同じ判断・同じ部品で全員と繋ぐ。判断と混合はコアに置く
+
+CLI（`jamuru`）とアプリはどちらも画面・コマンドという入口であり、エンジンは共通にする。全員と繋ぐのに要る部品のうち、画面に依らないものは
+コアのクレートに置き、アプリと CLI が同じものを使う。
+
+| 部品 | 置き場 | 中身 |
+|------|--------|------|
+| `Roster`・`LinkHealth` | `src/network/roster.rs` | 誰と繋ぐか・抜けた相手・途切れた相手の判断（入出力なし）。`LinkHealth::of` が接続の状態と受信数から健全性を決める |
+| `PeerMix`・`PeerGain`・`PeerMeter` | `src/audio/peer_mix.rs` | 全員の音を足し合わせる再生。音量・パンは参加者ごと |
+| `UdpMux`・`Connection::on` | `src/network/udp_mux.rs` | 1 つの音声ソケットを相手ごとの接続で共有する |
+| `gather_candidates_on` | `src/network/signaling.rs` | `UdpMux` が読み始める前に、公開するソケットで STUN に聞く |
+
+CLI は `Roster` の答え（`Audio::Start`・`End`・`Stop`）を実行するだけで、判断を持たない。違いは入口に付くものだけである:
+
+- 音声ソケットは CLI の間ずっと同じで、最初に 1 度公開する。最後の 1 本が終わっても作り直さないので、`Audio::Advertise` は何もしない
+  （`Audio::Stop` は全部の接続を閉じる）。
+- 全員の音声が途切れて誰の音も届かないとき、アプリは入り直す（`Audio::Rejoin`）。CLI は入り直さず、警告を出す。
+- 接続の確認は相手ごとのタスクで走らせ、終わった接続から送信と再生の対象に加える（確認の間、ほかの相手の音とキー入力が止まらない）。
+- `/stats` と終了時の統計は相手ごとに出す。`--report-json` の `peer`・`network`・`playout` は最初に繋いだ相手のもので、2 人のルームでは相手そのもの。
+  全員の値は `peers` に並ぶ。
+
 ## Consequences
 
 - 3 人以上のルームで、全員が全員の音を聞ける。検証は、ループバック上の実ソケットで 3 人・10 人を繋ぐ結合テスト
-  （`tests/mesh_connection_test.rs`）、名簿・混合・状態の単体テスト、実アプリ 3 台。
+  （`tests/mesh_connection_test.rs`）、名簿・混合・状態の単体テスト、実アプリ 3 台、実際の CLI を 3 つ立てて互いの音を聞かせる結合テスト
+  （`tests/cli_test.rs`、REQ-CLI-011）。
 - 定常の 1 対 1 の経路（接続の確認・送受信・再生バッファ・符号化）は変えていない。2 人のルームでは、ソケットの読み手が `UdpMux` になり、
   再生が `PeerMix` を通るだけで、読み残しが出ないので遅延は同じ。
 - 帯域と、封をする・復号する処理は相手の数に比例する。
-- **この変更より前の版のアプリは 1 人としか繋がない。** 3 人以上のルームに古い版が混ざると、古い版は 1 人とだけ音声を繋ぎ、ほかの人からは
-  「接続できない参加者」に見える。全員がこの変更を含む版である必要がある。CLI（`jamuru`）は 1 対 1 のままで、同じ見え方になる。
+- **この変更より前の版のアプリ・CLI は 1 人としか繋がない。** 3 人以上のルームに古い版が混ざると、古い版は 1 人とだけ音声を繋ぎ、ほかの人からは
+  「接続できない参加者」に見える。全員がこの変更を含む版である必要がある。
 - 2 人の間の経路だけが通らない組（どちらかの NAT が相手を通さない）は、その 2 人の間だけ聞こえない。中継（TURN）を持たないので、
   ほかの人を経由して届けることはしない。画面にはその相手との接続が切れていると出る。
 
@@ -167,5 +189,5 @@ sequenceDiagram
 - [ADR-028](./ADR-028-single-stage-playout.md): 出力コールバックが再生バッファから直接読む
 - [ADR-064](./ADR-064-encrypt-the-audio-link.md)・[ADR-067](./ADR-067-check-the-peer-in-the-key-exchange.md): 接続ごとの鍵と相手の確認
 - [ADR-068](./ADR-068-follow-the-peer-after-rejoin.md): 入り直しのあとの追従（決定 2・3 を本 ADR が置き換える）
-- `src/network/udp_mux.rs`・`src-tauri/src/peer_mix.rs`・`src-tauri/src/session/roster.rs`・`src-tauri/src/streaming.rs`
-- 要求: `REQ-CON-033`・`REQ-CON-133`・`REQ-CON-134`・`REQ-LAT-102`・`REQ-AUD-038`
+- `src/network/udp_mux.rs`・`src/audio/peer_mix.rs`・`src/network/roster.rs`・`src-tauri/src/streaming.rs`・`src/main.rs`・`src/links.rs`（CLI）
+- 要求: `REQ-CON-033`・`REQ-CON-133`・`REQ-CON-134`・`REQ-LAT-102`・`REQ-AUD-038`・`REQ-CLI-011`
