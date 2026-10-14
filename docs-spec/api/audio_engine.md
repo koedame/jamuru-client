@@ -123,6 +123,23 @@ fn set_input_device(device_id: DeviceId) -> Result<(), AudioError>;
 
 ```
 
+#### 機器を 1 つ選ぶ規則（REQ-AUD-039）
+
+人が ID や名前で機器を指すときの規則は、コアに 1 つだけある。アプリの設定と CLI（`devices set`・`--input-device`・`--output-device`）が同じものを使う。
+保存され、`resolve_input_device` が開くのは ID である（表示名は ALSA で重なるので機器を決められない）。
+
+```rust
+/// ID が一致する機器。無ければ None
+fn find_device<'a>(devices: &'a [AudioDevice], id: &str) -> Option<&'a AudioDevice>;
+
+/// 使う機器。選ばれていなければ既定の機器。選ばれた機器が一覧に無ければ None
+fn device_in_use<'a>(devices: &'a [AudioDevice], chosen: Option<&str>) -> Option<&'a AudioDevice>;
+
+/// ID か表示名で機器を 1 つに決める。ID が先で、名前は 1 つの機器だけが持つときに限る
+/// 同じ名前の機器が複数あれば `Ambiguous`（ID を挙げる）、無ければ `NotFound`
+fn choose_device<'a>(devices: &'a [AudioDevice], wanted: &str) -> Result<&'a AudioDevice, ChooseDeviceError>;
+```
+
 出力デバイスを設定する `AudioEngine` の API は無い。再生ストリームは供給元（§5.2 の `fill_frame`）を所有して動くので、エンジン単独では作り直せない。呼び出し側が `stop_playback` してから、同じ受信経路を指す供給元で `start_playback_with_source` を呼び直す（GUI の `SetOutputDevice` コマンドがこの形）。
 
 ---
