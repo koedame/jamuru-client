@@ -28,8 +28,8 @@ use jamjam::audio::{driver_name_of, is_asio_id, AsioDuplex, OutputRoute, OPEN_TI
 use jamjam::network::roster::{Audio, Roster};
 use jamjam::network::{
     audio_packet_duration_ms, bind_std, gather_candidates_on, AudioEncodingConfig, ConnectionStats,
-    LatencyBreakdown, LinkIdentity, LocalLatencyInfo, PeerLatencyInfo, SignalingClient,
-    SignalingConnection, SignalingMessage, UdpMux, MAX_PEERS_PER_ROOM,
+    EnterError, EnterRequest, LatencyBreakdown, LinkIdentity, LocalLatencyInfo, PeerLatencyInfo,
+    RoomEntry, SignalingClient, SignalingConnection, SignalingMessage, UdpMux, MAX_PEERS_PER_ROOM,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
@@ -768,15 +768,6 @@ fn signaling_client(server: &str) -> SignalingClient {
     SignalingClient::new(server, Arc::new(identity))
 }
 
-#[allow(clippy::too_many_arguments)]
-/// How the CLI enters a room.
-enum RoomEntry {
-    /// Create a room and print the invite code others join with.
-    Create { room_name: String },
-    /// Join an existing room by id or invite code.
-    Join { room_id: String },
-}
-
 /// What the user typed at the `chat>` prompt.
 enum Input {
     /// Send it to the room.
@@ -872,67 +863,50 @@ async fn run_room_session(
     // The key the others in the room check our key exchange against
     let link_identity = LinkIdentity::generate();
 
-    // The CLI takes no peer messages, so it announces no features.
-    let request = match &entry {
-        RoomEntry::Create { room_name } => SignalingMessage::CreateRoom {
-            link_key: Some(link_identity.public_key()),
-            room_name: room_name.clone(),
-            password: None,
+    let entered = conn
+        .enter_room(EnterRequest {
+            entry,
             peer_name: peer_name.clone(),
+            link_key: link_identity.public_key(),
+            // The CLI takes no peer messages, so it announces no features.
             features: vec![],
             client_info: None,
-        },
-        RoomEntry::Join { room_id } => SignalingMessage::JoinRoom {
-            link_key: Some(link_identity.public_key()),
-            room_id: room_id.clone(),
-            password: None,
-            peer_name: peer_name.clone(),
-            features: vec![],
-            client_info: None,
-        },
-    };
-    conn.send(request).await?;
-
-    let (my_peer_id, peers) = match conn.recv().await? {
-        SignalingMessage::RoomCreated {
-            room_id,
-            peer_id,
-            invite_code,
-        } => {
-            println!("\nRoom created: {}", room_id);
-            println!("Invite code:  {}", invite_code);
+        })
+        .await
+        .map_err(|e| match e {
+            EnterError::Refused(message) => {
+                anyhow::anyhow!("Signaling server refused the request: {}", message)
+            }
+            EnterError::Unexpected(other) => {
+                anyhow::anyhow!("Unexpected response from server: {:?}", other)
+            }
+            EnterError::Connection(e) => anyhow::Error::new(e),
+        })?;
+    let (my_peer_id, peers) = (entered.peer_id, entered.peers);
+    if entered.created {
+        println!("\nRoom created: {}", entered.room_id);
+    } else {
+        println!("\nJoined room: {}", entered.room_id);
+    }
+    if let Some(invite_code) = &entered.invite_code {
+        println!("Invite code:  {}", invite_code);
+        if entered.created {
             println!(
                 "Others join with:\n  jamuru join-room --server {} --room {}",
                 server, invite_code
             );
-            println!("Your peer ID: {}", peer_id);
-            (peer_id, Vec::new())
         }
-        SignalingMessage::RoomJoined {
-            room_id,
-            peer_id,
-            invite_code,
-            peers,
-        } => {
-            println!("\nJoined room: {}", room_id);
-            if let Some(invite_code) = invite_code {
-                println!("Invite code:  {}", invite_code);
-            }
-            println!("Your peer ID: {}", peer_id);
-            println!("\nPeers in room ({}):", peers.len());
-            for peer in &peers {
-                println!(
-                    "  - {} (id: {}, addr: {:?})",
-                    peer.name, peer.id, peer.public_addr
-                );
-            }
-            (peer_id, peers)
+    }
+    println!("Your peer ID: {}", my_peer_id);
+    if !entered.created {
+        println!("\nPeers in room ({}):", peers.len());
+        for peer in &peers {
+            println!(
+                "  - {} (id: {}, addr: {:?})",
+                peer.name, peer.id, peer.public_addr
+            );
         }
-        SignalingMessage::Error { message } => {
-            anyhow::bail!("Signaling server refused the request: {}", message);
-        }
-        other => anyhow::bail!("Unexpected response from server: {:?}", other),
-    };
+    }
 
     let my_peer_id_str = my_peer_id.to_string();
     let signaling_conn_arc = Arc::new(tokio::sync::Mutex::new(conn));
