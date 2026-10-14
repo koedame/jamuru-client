@@ -1587,8 +1587,17 @@ async fn run_single_message(
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
+    let result = runtime.block_on(run());
+    // Dropping a runtime waits for every blocking thread it started, and the thread reading
+    // stdin for the prompt only ends when stdin does. The session is over; whatever is left is
+    // not worth waiting for.
+    runtime.shutdown_background();
+    result
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     setup_logging(cli.verbose);
