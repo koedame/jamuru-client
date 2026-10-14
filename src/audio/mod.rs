@@ -34,8 +34,8 @@ pub use codec::{
 };
 pub(crate) use device::stable_device_id;
 pub use device::{
-    list_input_devices, list_output_devices, resolve_input_device, resolve_output_device,
-    AudioDevice, DeviceId,
+    choose_device, device_in_use, find_device, list_input_devices, list_output_devices,
+    resolve_input_device, resolve_output_device, AudioDevice, ChooseDeviceError, DeviceId,
 };
 pub use driver::{bounded, LIST_TIMEOUT, OPEN_TIMEOUT};
 pub use engine::{
