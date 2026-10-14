@@ -355,6 +355,8 @@ pub(super) fn senders_of(links: &[Link]) -> Arc<[Arc<tokio::sync::Mutex<Connecti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::network::LinkIdentity;
+    use std::sync::atomic::AtomicU64;
 
     /// The delay shown for a peer is its play-out buffer's depth in packets
     /// times how long a packet of *theirs* lasts. Counted in ours, a peer at
@@ -382,5 +384,129 @@ mod tests {
         // 256 frames go as two packets of 128 (ADR-070)
         assert_eq!(peer_packet_ms(Some(&told(256, 48_000)), ours), ours * 2.0);
         assert_eq!(peer_packet_ms(Some(&told(0, 0)), ours), ours);
+    }
+
+    fn setup<'a>(
+        mux: &'a UdpMux,
+        mix: &'a PeerMix,
+        encoding: &'a AudioEncodingConfig,
+        shared: &'a Shared,
+        buffer_size: u32,
+    ) -> LinkSetup<'a> {
+        LinkSetup {
+            mux,
+            mix,
+            encoding,
+            sample_rate: 48_000,
+            buffer_size,
+            packet_duration_ms: audio_packet_duration_ms(buffer_size, WIRE_CHANNELS, 48_000),
+            shared,
+        }
+    }
+
+    fn encoding(buffer_size: u32) -> AudioEncodingConfig {
+        let preset = AudioPreset::HighQuality;
+        AudioEncodingConfig {
+            codec_type: preset.codec_type(),
+            sample_rate: 48_000,
+            channels: WIRE_CHANNELS as u16,
+            frame_size: buffer_size,
+            bitrate: 0,
+            fec_group_size: preset.fec_group_size(),
+        }
+    }
+
+    /// A link that is still being checked is not one the captured audio goes to, so what is
+    /// captured meanwhile is not held for it and cannot reach the peer as a burst of old audio
+    /// when the check ends. It is sent to from the moment its check has ended.
+    ///
+    /// Verifies: REQ-CLI-009
+    #[tokio::test]
+    async fn audio_captured_while_a_link_is_checked_is_not_held_for_it_and_goes_to_it_once_it_is_up(
+    ) {
+        let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
+        let (our_key, their_key) = (ours.public_key(), theirs.public_key());
+        let (our_mux, their_mux) = (
+            UdpMux::bind("127.0.0.1:0").await.expect("our socket"),
+            UdpMux::bind("127.0.0.1:0").await.expect("their socket"),
+        );
+        let (our_addr, their_addr) = (our_mux.local_addr(), their_mux.local_addr());
+        let mix = PeerMix::new(2, 48_000, 128, Arc::new(AtomicU64::new(0)));
+        let encoding = encoding(128);
+        let shared = Shared::new();
+        let mut link = setup(&our_mux, &mix, &encoding, &shared, 128)
+            .open(
+                LinkTarget {
+                    peer: Uuid::new_v4(),
+                    candidates: vec![their_addr],
+                    link: Some((ours, Some(their_key))),
+                },
+                AudioPreset::HighQuality.jitter_buffer_frames(),
+            )
+            .expect("the link starts");
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            senders_of(std::slice::from_ref(&link)).is_empty(),
+            "nobody has answered, so the link is not up"
+        );
+
+        let mut ben = Connection::on(&their_mux).expect("their link");
+        ben.verify_peer(&theirs, Some(&our_key)).expect("our key");
+        ben.connect(our_addr).await.expect("they answer");
+        let LinkStage::Checking(checking) = &mut link.stage else {
+            panic!("the link is being checked");
+        };
+        let connection = tokio::time::timeout(std::time::Duration::from_secs(10), checking)
+            .await
+            .expect("the check ends")
+            .expect("the check runs")
+            .expect("the check succeeds");
+        link.stage = LinkStage::Up(Arc::new(tokio::sync::Mutex::new(connection)));
+
+        assert_eq!(
+            senders_of(std::slice::from_ref(&link)).len(),
+            1,
+            "the link is sent to once its check has ended"
+        );
+    }
+
+    /// The delay told to the peer counts packets, not frames: a frame too big for one packet
+    /// goes as several, so the buffer's depth lasts packets long (ADR-070).
+    ///
+    /// Verifies: REQ-CLI-010
+    #[tokio::test]
+    async fn jitter_buffer_told_to_the_peer_counts_packets_not_frames() {
+        let mux = UdpMux::bind("127.0.0.1:0").await.expect("a socket");
+        let preset = AudioPreset::HighQuality;
+        let depth = preset.jitter_buffer_frames() as f32;
+        let delay_ms = |buffer_size: u32| {
+            let mix = PeerMix::new(2, 48_000, buffer_size, Arc::new(AtomicU64::new(0)));
+            let encoding = encoding(buffer_size);
+            let shared = Shared::new();
+            let setup = setup(&mux, &mix, &encoding, &shared, buffer_size);
+            let link = setup
+                .open(
+                    LinkTarget {
+                        peer: Uuid::new_v4(),
+                        candidates: vec!["127.0.0.1:9".parse().unwrap()],
+                        link: None,
+                    },
+                    preset.jitter_buffer_frames(),
+                )
+                .expect("the link starts");
+            link.delay_us(setup.packet_duration_ms) as f32 / 1000.0
+        };
+
+        // 256 frames go as two packets of 128: a packet lasts 2.667 ms, not the frame's 5.333 ms
+        let big = delay_ms(256);
+        assert!(
+            (big - depth * 128.0 / 48.0).abs() < 0.01,
+            "256 frames: got {big} ms"
+        );
+        let small = delay_ms(64);
+        assert!(
+            (small - depth * 64.0 / 48.0).abs() < 0.01,
+            "64 frames: got {small} ms"
+        );
     }
 }
