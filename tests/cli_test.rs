@@ -114,6 +114,21 @@ impl Running {
     }
 }
 
+impl Running {
+    /// Waits for the process to end by itself, returning how it ended; None if it was still
+    /// running when `limit` was up.
+    fn wait_for_exit(&mut self, limit: Duration) -> Option<std::process::ExitStatus> {
+        let deadline = Instant::now() + limit;
+        while Instant::now() < deadline {
+            if let Some(status) = self.child.try_wait().expect("the child can be waited on") {
+                return Some(status);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        None
+    }
+}
+
 impl Drop for Running {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -829,5 +844,80 @@ fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
         report["playout"]["frames_played"].as_u64().unwrap_or(0) > 0,
         "the play-out counters should be in the report: {}",
         report
+    );
+}
+
+/// A CLI that has run its `--duration` ends, though whatever started it still holds its stdin
+/// open (a script, a terminal that is not typed in). The prompt reads stdin on a thread of its
+/// own that nothing can interrupt, and the runtime waits for such a thread when it is dropped:
+/// a CLI that did not leave it behind stayed after "Summary", with the room already left.
+///
+/// Verifies: REQ-CLI-007
+#[test]
+fn a_cli_that_reached_its_duration_ends_though_its_stdin_is_still_open() {
+    let _alone = one_audio_session_at_a_time();
+    let server = FakeSignaling::start();
+    let creator_home = tempfile::tempdir().expect("temp HOME");
+    let joiner_home = tempfile::tempdir().expect("temp HOME");
+    let audio = |home: &Path| -> Vec<String> {
+        [
+            "--preset",
+            "balanced",
+            "--sample-rate",
+            "48000",
+            "--input-tone",
+            "440",
+            "--output-file",
+        ]
+        .iter()
+        .map(|arg| arg.to_string())
+        .chain([home.join("played.f32").display().to_string()])
+        .collect()
+    };
+
+    let creator_args: Vec<String> = ["create-room", "--server", server.url()]
+        .iter()
+        .map(|arg| arg.to_string())
+        .chain(audio(creator_home.path()))
+        .collect();
+    let creator = Running::start(
+        creator_home.path(),
+        &creator_args.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    let invite_code = creator
+        .wait_for("Invite code:")
+        .expect("the room should be created")
+        .split_whitespace()
+        .last()
+        .expect("the invite code follows its label")
+        .to_string();
+
+    let joiner_args: Vec<String> = [
+        "join-room",
+        "--server",
+        server.url(),
+        "--room",
+        &invite_code,
+        "--duration",
+        "2",
+    ]
+    .iter()
+    .map(|arg| arg.to_string())
+    .chain(audio(joiner_home.path()))
+    .collect();
+    let mut joiner = Running::start(
+        joiner_home.path(),
+        &joiner_args.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    joiner
+        .wait_for("Audio is flowing")
+        .expect("the joining CLI should connect");
+
+    // `Running` keeps the joiner's stdin open and unwritten for as long as it lives.
+    let status = joiner.wait_for_exit(Duration::from_secs(15));
+    assert!(
+        status.is_some_and(|status| status.success()),
+        "--duration 2 should end the CLI with its stdin still open, got {:?}",
+        status
     );
 }
