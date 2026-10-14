@@ -20,11 +20,11 @@ use uuid::Uuid;
 use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
-use crate::settings_help::{
-    notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
-};
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
+use jamjam::network::settings_help::{
+    notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
+};
 use jamjam::telemetry::{Component, EndReason, SessionMode};
 
 /// Connection ID counter

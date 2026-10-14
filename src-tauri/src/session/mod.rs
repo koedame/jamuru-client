@@ -22,10 +22,10 @@ use uuid::Uuid;
 
 use crate::config::ConfigState;
 use crate::mixer::{self, MixerState};
-use crate::settings_help::HelpEvent;
 use crate::signaling::{self, JoinResult, SignalingEvent, SignalingState};
 use crate::streaming;
 use jamjam::network::roster::{Audio, Roster};
+use jamjam::network::settings_help::HelpEvent;
 
 /// Announces a change of the session. The payload is the new [`Snapshot`].
 pub const CHANGED_EVENT: &str = "session:changed";
