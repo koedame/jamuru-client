@@ -13,8 +13,8 @@ use serde::Serialize;
 use super::taps::taps;
 use super::{
     capture_attempts, input_devices, output_devices, pair_in_use, rms_level, AudioEngine,
-    AudioError, DeviceId, Devices, LocalMonitor, MonitorTap, OutputRoute, PeerMix, RecordingFeed,
-    RecordingTap,
+    AudioError, BurstProbe, DeviceId, Devices, LocalMonitor, MonitorTap, OutputRoute, PeerMix,
+    RecordingFeed, RecordingTap,
 };
 #[cfg(target_os = "windows")]
 use super::{AsioDuplex, OPEN_TIMEOUT};
@@ -126,6 +126,7 @@ pub fn playout_source(
     output_level: Arc<AtomicU32>,
     monitor: LocalMonitor,
     recording: Option<(RecordingTap, RecordingTap)>,
+    probe: Option<Arc<BurstProbe>>,
 ) -> impl FnMut(&mut [f32]) -> usize + Send + 'static {
     let mut recording = recording;
     // Everyone else as they sent it, before the listener's faders and pans:
@@ -145,6 +146,10 @@ pub fn playout_source(
             tap.push_stereo(&dry[..samples]);
         }
         output_level.store(rms_level(&out[..samples]), Ordering::Relaxed);
+        // Before the monitor mix: what the peer sent, not our own input.
+        if let Some(probe) = &probe {
+            probe.note_played(&out[..samples]);
+        }
         // Added after the peers, whatever they did this frame: hearing yourself
         // must not wait for, or depend on, anyone being connected (ADR-033).
         monitor.mix_into(&mut out[..samples]);
@@ -436,6 +441,7 @@ pub fn open_asio(
             output_level,
             monitor,
             recording.map(|feed| (feed.tap_b(), feed.tap_c())),
+            None,
         ),
     )?;
 
@@ -444,7 +450,11 @@ pub fn open_asio(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
+
     use super::*;
+    use crate::audio::{AudioPreset, PeerGain, PeerMeter, ReceivePath, VoiceHandle};
+    use crate::network::MAX_PEERS_PER_ROOM;
 
     /// Verifies: REQ-AUD-125
     #[test]
@@ -517,5 +527,132 @@ mod tests {
             5.0,
             "what follows is the live audio"
         );
+    }
+
+    /// A PCM payload as `ReceivePath::receive` expects it: `f32` samples as
+    /// little-endian bytes (matches `PcmCodec::encode`).
+    fn pcm(samples: &[f32]) -> Vec<u8> {
+        samples.iter().flat_map(|s| s.to_le_bytes()).collect()
+    }
+
+    /// A mix with one participant in it, who sends stereo frames of `frame`
+    /// samples per channel and is played at `volume` percent
+    fn mix_of_one(frame: u32, volume: u32) -> (PeerMix, ReceivePath, VoiceHandle) {
+        let receive = ReceivePath::new(
+            AudioPreset::ZeroLatency.codec_type(),
+            48_000,
+            frame,
+            AudioPreset::ZeroLatency.jitter_buffer_frames(),
+        )
+        .expect("a PCM receive path");
+        receive.follow_peer_channels(2);
+        let mix = PeerMix::new(
+            MAX_PEERS_PER_ROOM - 1,
+            48_000,
+            frame,
+            Arc::new(AtomicU64::new(0)),
+        );
+        let gain = Arc::new(PeerGain::default());
+        gain.set_volume(volume);
+        let voice = mix
+            .add(receive.clone(), gain, Arc::new(PeerMeter::default()))
+            .expect("a free place");
+        (mix, receive, voice)
+    }
+
+    /// `C` (recording/streaming output) must carry exactly what is played:
+    /// post-fader, with the local monitor mixed in, same as what a listener
+    /// on the output device hears.
+    #[test]
+    fn playout_source_feeds_its_c_tap_the_same_audio_it_plays() {
+        const FRAME: u32 = 4;
+        let (mix, receive, _voice) = mix_of_one(FRAME, 50);
+        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.8_f32, 0.2_f32]).collect();
+        assert!(receive.receive(0, &pcm(&sent)));
+
+        let monitor = LocalMonitor::new(FRAME);
+        let mut monitor_tap = monitor.tap();
+        monitor.set_enabled(true);
+        for _ in 0..3 {
+            monitor_tap.push(&[0.1; FRAME as usize]);
+        }
+
+        let (b_tap, mut b_consumer) = RecordingTap::for_wiring_tests();
+        let (c_tap, mut c_consumer) = RecordingTap::for_wiring_tests();
+        let mut source = playout_source(
+            mix,
+            Arc::new(AtomicU32::new(100)),
+            Arc::new(AtomicU32::new(0)),
+            monitor,
+            Some((b_tap, c_tap)),
+            None,
+        );
+        let mut out = vec![0.0f32; receive.frame_samples() * 3];
+        let samples = source(&mut out);
+        out.truncate(samples);
+
+        let b_chunk = b_consumer.read_chunk(samples).expect("B got a frame");
+        let (b_first, _) = b_chunk.as_slices();
+        assert_eq!(
+            b_first,
+            &sent[..samples],
+            "B stays dry even though C mixes in the monitor"
+        );
+
+        let c_chunk = c_consumer.read_chunk(samples).expect("C got a frame");
+        let (c_first, _) = c_chunk.as_slices();
+        assert_eq!(c_first, &out[..], "C matches exactly what is played");
+        assert_ne!(
+            c_first,
+            &sent[..samples],
+            "C is not dry: the fader and monitor were applied"
+        );
+    }
+
+    /// A session with nobody to hear yet: the play-out buffer has nothing, and
+    /// the output callback is the only thing that can put the monitored input
+    /// on the speakers.
+    fn monitored_output(monitoring: bool) -> Vec<f32> {
+        const FRAME: u32 = 32;
+        let (mix, receive, _voice) = mix_of_one(FRAME, 100);
+        let monitor = LocalMonitor::new(FRAME);
+        let mut tap = monitor.tap();
+        monitor.set_enabled(monitoring);
+        for _ in 0..3 {
+            tap.push(&[0.25; FRAME as usize]);
+        }
+
+        let mut source = playout_source(
+            mix,
+            Arc::new(AtomicU32::new(100)),
+            Arc::new(AtomicU32::new(0)),
+            monitor,
+            None,
+            None,
+        );
+        let mut out = vec![0.0f32; receive.frame_samples() * 3];
+        let samples = source(&mut out);
+        assert_eq!(samples, receive.frame_samples(), "one nominal frame");
+        out.truncate(samples);
+        out
+    }
+
+    /// Verifies: REQ-AUD-111
+    #[test]
+    fn test_monitored_input_is_played_before_any_peer_has_sent_audio() {
+        let out = monitored_output(true);
+
+        assert!(
+            out.iter().all(|s| (*s - 0.25).abs() < 1e-6),
+            "the input is mixed into both channels: {out:?}"
+        );
+    }
+
+    /// Verifies: REQ-AUD-112
+    #[test]
+    fn test_output_is_silent_with_monitoring_off_and_no_peer_audio() {
+        let out = monitored_output(false);
+
+        assert!(out.iter().all(|s| *s == 0.0), "{out:?}");
     }
 }
