@@ -36,6 +36,30 @@ impl Point {
     }
 }
 
+/// What the audio path of the core calls on each frame.
+struct CoreTaps;
+
+impl jamjam::audio::Taps for CoreTaps {
+    fn input(&self, samples: &[f32], channels: usize) {
+        observe(Point::Input, samples, channels);
+    }
+
+    fn sent(&self, stereo: &mut [f32]) {
+        inject(Point::Sent, stereo, jamjam::audio::WIRE_CHANNELS);
+        observe(Point::Sent, stereo, jamjam::audio::WIRE_CHANNELS);
+    }
+
+    fn output(&self, stereo: &mut [f32]) {
+        inject(Point::Output, stereo, jamjam::audio::WIRE_CHANNELS);
+        observe(Point::Output, stereo, jamjam::audio::WIRE_CHANNELS);
+    }
+}
+
+/// Puts the taps in the audio path of the core.
+pub fn install() {
+    jamjam::audio::set_taps(&CoreTaps);
+}
+
 /// The longest recording. The method runs at most 25 seconds (ADR-044 §4).
 pub const MAX_RECORD_SECONDS: f32 = 20.0;
 

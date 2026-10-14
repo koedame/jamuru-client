@@ -8,7 +8,9 @@
 use uuid::Uuid;
 
 use super::error::NetworkError;
-use super::signaling::{ClientInfo, InviteCode, PeerInfo, SignalingConnection, SignalingMessage};
+use super::signaling::{
+    ClientInfo, InviteCode, PeerInfo, RoomInfo, SignalingConnection, SignalingMessage,
+};
 
 /// How a participant means to enter a room
 #[derive(Debug, Clone)]
@@ -128,6 +130,31 @@ impl SignalingConnection {
     pub async fn enter_room(&mut self, request: EnterRequest) -> Result<Entered, EnterError> {
         self.send(request.into_message()).await?;
         read_reply(self.recv().await?)
+    }
+
+    /// Asks the server which rooms it lists
+    pub async fn list_rooms(&mut self) -> Result<Vec<RoomInfo>, EnterError> {
+        self.send(SignalingMessage::ListRooms).await?;
+
+        // What the room's other participants sent before they heard this participant left can
+        // still be on its way, and comes ahead of the answer. It is for a room this
+        // participant is no longer in, so it is let go rather than taken for the answer
+        // (leaving, then listing the rooms, failed with "Unexpected response" when a helper's
+        // message was in flight).
+        loop {
+            match self.recv().await? {
+                SignalingMessage::RoomList { rooms } => return Ok(rooms),
+                SignalingMessage::Error { message } => return Err(EnterError::Refused(message)),
+                SignalingMessage::PeerJoined { .. }
+                | SignalingMessage::PeerLeft { .. }
+                | SignalingMessage::PeerUpdated { .. }
+                | SignalingMessage::ChatMessage { .. }
+                | SignalingMessage::PeerMessage { .. } => {
+                    tracing::debug!("Letting go of a room message that came before the room list");
+                }
+                other => return Err(EnterError::Unexpected(Box::new(other))),
+            }
+        }
     }
 }
 

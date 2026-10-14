@@ -15,12 +15,11 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Mutex;
 
-use jamjam::audio::{device_in_use, find_device, AudioDevice};
+use jamjam::audio::{channel_count, device_in_use, find_device, pair_in_use, AudioDevice, Devices};
 use jamjam::config::{
     offered_buffer_sizes, AppConfig, AudioPreset, MAX_DEVICE_CHANNELS, VALID_SAMPLE_RATES,
 };
 
-use crate::audio;
 use crate::config::{self, ConfigState, SampleRateInfo};
 use crate::logging::{redact_device_id, redaction_enabled};
 use crate::streaming::{SessionSetting, StreamingState};
@@ -210,41 +209,6 @@ impl From<SettingsError> for String {
     }
 }
 
-/// The devices on offer when a change is planned.
-#[derive(Debug, Clone, Default)]
-pub struct Devices {
-    pub input: Vec<AudioDevice>,
-    pub output: Vec<AudioDevice>,
-}
-
-impl Devices {
-    /// The devices the system lists. A direction that cannot be listed counts
-    /// as offering none: that refuses choosing one of its devices, but leaves
-    /// every other setting (buffer size, sample rate, ...) changeable.
-    ///
-    /// Both directions are listed at once, so a driver that does not answer
-    /// costs one wait, not two.
-    pub(crate) fn list() -> Self {
-        let or_none = |listed: Result<Vec<AudioDevice>, String>, kind: &str| {
-            listed.unwrap_or_else(|e| {
-                tracing::warn!("Could not list the {} devices: {}", kind, e);
-                Vec::new()
-            })
-        };
-        std::thread::scope(|scope| {
-            let output = scope.spawn(audio::output_devices);
-            let input = audio::input_devices();
-            Self {
-                input: or_none(input, "input"),
-                output: or_none(
-                    output.join().unwrap_or_else(|_| Err("panicked".into())),
-                    "output",
-                ),
-            }
-        })
-    }
-}
-
 /// What a change does: the config to save, and what a running session is told.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
@@ -357,41 +321,6 @@ fn offered<'a>(
 
 fn selected<'a>(devices: &'a [AudioDevice], chosen: &Option<String>) -> Option<&'a AudioDevice> {
     device_in_use(devices, chosen.as_deref())
-}
-
-/// The most channels `device` offers; `None` when it does not say.
-fn channel_count(device: &AudioDevice) -> Option<u32> {
-    device
-        .supported_channels
-        .iter()
-        .max()
-        .map(|&c| u32::from(c))
-}
-
-/// The channel pair the device in use is opened with: the saved `pair` when the
-/// device has both channels, otherwise its first ones. Decided whenever a
-/// device is opened and whenever the settings are shown, never saved.
-pub fn pair_in_use(
-    devices: &[AudioDevice],
-    chosen: &Option<String>,
-    (left, right): (u32, Option<u32>),
-) -> (u32, Option<u32>) {
-    let available = selected(devices, chosen).and_then(channel_count);
-    fit_channels(left, right, available)
-}
-
-/// Keeps the pair when the device has both channels, and falls back to the
-/// first ones as a pair when it does not: channels 1 and 2 (1 and 1 on a mono
-/// device; mono stays mono). A device that does not say keeps the pair.
-fn fit_channels(left: u32, right: Option<u32>, available: Option<u32>) -> (u32, Option<u32>) {
-    let Some(available) = available else {
-        return (left, right);
-    };
-    let fits = |channel: u32| channel <= available;
-    if fits(left) && right.is_none_or(fits) {
-        return (left, right);
-    }
-    (1, right.map(|_| available.min(2)))
 }
 
 /// The pair with `side` set to `channel`, checked against the device in use.
@@ -1328,10 +1257,10 @@ mod tests {
             // answered in time.
             let before = loop {
                 let listed = current(app.handle()).await.unwrap();
-                if !crate::audio::a_listing_is_hung() {
+                if !jamjam::audio::a_listing_is_hung() {
                     break listed;
                 }
-                while crate::audio::a_listing_is_hung() {
+                while jamjam::audio::a_listing_is_hung() {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             };
