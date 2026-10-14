@@ -184,6 +184,34 @@ pub enum PeerRateChange {
     Failed(ResamplerError),
 }
 
+impl PeerRateChange {
+    /// Says in the log what following the rate of `peer` came to, where we run at `our_rate`.
+    pub fn log(&self, peer: &impl std::fmt::Display, our_rate: u32) {
+        match self {
+            PeerRateChange::Unchanged => {}
+            PeerRateChange::Resampling {
+                from,
+                to,
+                latency_ms,
+            } => tracing::info!(
+                "Resampler created for {}: {} Hz -> {} Hz (latency: {:.2} ms)",
+                peer,
+                from,
+                to,
+                latency_ms
+            ),
+            PeerRateChange::Passthrough => tracing::info!(
+                "Resampler disabled for {}: peer rate matches local rate ({} Hz)",
+                peer,
+                our_rate
+            ),
+            PeerRateChange::Failed(e) => {
+                tracing::warn!("Failed to create resampler: {}", e)
+            }
+        }
+    }
+}
+
 /// Decoder with the scratch frame it decodes into, so decoding allocates
 /// nothing per packet.
 struct Decoder {
@@ -480,6 +508,14 @@ impl ReceivePath {
                 PeerRateChange::Failed(e)
             }
         }
+    }
+
+    /// Follows what the peer reported of its audio: its sample rate, then how many channels it
+    /// sends. Call it whenever the peer reports; the rate's change is what to log.
+    pub fn follow_peer(&self, reported: &crate::network::PeerLatencyInfo) -> PeerRateChange {
+        let change = self.follow_peer_rate(reported.sample_rate);
+        self.follow_peer_channels(reported.channel_count);
+        change
     }
 
     /// Records how many channels the peer sends. Call it whenever the peer

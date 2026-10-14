@@ -15,7 +15,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
-use links::{Checked, LinkReport, LinkSettings, Links, Senders};
+use jamjam::link::Senders;
+use links::{Checked, LinkReport, LinkSettings, Links};
 
 use jamjam::audio::{
     bounded, choose_device, list_input_devices, list_output_devices, mono_to_wire, AudioConfig,
