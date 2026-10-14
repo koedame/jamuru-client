@@ -96,6 +96,8 @@ pub trait Backend: Send + Sync + 'static {
         conn: u32,
     ) -> impl Future<Output = Result<Vec<Polled<Self::Other>>, String>> + Send;
     fn other_event(&self, event: Self::Other) -> impl Future<Output = ()> + Send;
+    /// A room event, as it comes and before the session follows it
+    fn room_event(&self, _event: &RoomEvent) {}
     /// The name the participant enters rooms with
     fn peer_name(&self) -> String;
     /// Whether the computer's clock agrees with the server's closely enough to connect
@@ -291,6 +293,23 @@ impl<B: Backend> Driver<B> {
         }
         let epoch = self.next_epoch();
         self.reconnect(epoch).await
+    }
+
+    /// Leaves the room, if in one, lets go of the connection and ends whatever step is running:
+    /// the session is done with.
+    pub async fn end(&self) {
+        self.next_epoch();
+        let _flow = self.session.flow.lock().await;
+        let (conn, in_room) = {
+            let session = self.lock();
+            (session.connection_id(), session.in_room())
+        };
+        if let (Some(conn), true) = (conn, in_room) {
+            if let Err(e) = self.backend().leave_room(conn).await {
+                tracing::error!("Failed to leave the room: {}", e);
+            }
+        }
+        self.drop_connection().await;
     }
 
     // =========================================================================
@@ -585,6 +604,9 @@ impl<B: Backend> Driver<B> {
     /// after the one that ended it are not to be read.
     async fn handle_events(&self, conn: u32, events: Vec<Polled<B::Other>>) -> bool {
         for event in events {
+            if let Polled::Room(event) = &event {
+                self.backend().room_event(event);
+            }
             match event {
                 Polled::Other(event) => self.backend().other_event(event).await,
                 Polled::Room(RoomEvent::PeerJoined(peer)) => {
@@ -667,5 +689,260 @@ impl<B: Backend> Driver<B> {
         if let Err(e) = self.backend().advertise(conn).await {
             tracing::error!("Failed to publish our audio address: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use super::*;
+    use crate::network::room_session::Phase;
+    use crate::network::signaling::InviteCode;
+
+    /// A server that lets everyone in, and what it was asked, in order
+    #[derive(Default)]
+    struct FakeBackend {
+        asked: Mutex<Vec<String>>,
+        /// What each poll brings, oldest first; a poll with nothing left brings nothing
+        polls: Mutex<VecDeque<Vec<Polled<()>>>>,
+        /// How many connects fail before one is made
+        refusing: Mutex<u32>,
+        connections: Mutex<u32>,
+    }
+
+    impl FakeBackend {
+        fn asked(&self, what: &str) -> usize {
+            self.asked
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|asked| asked.as_str() == what)
+                .count()
+        }
+
+        fn ask(&self, what: impl Into<String>) {
+            self.asked.lock().unwrap().push(what.into());
+        }
+
+        fn entered(&self) -> Entered {
+            Entered {
+                room_id: "room".to_string(),
+                peer_id: Uuid::from_u128(1),
+                invite_code: Some("ABC234XYZ".parse::<InviteCode>().unwrap()),
+                peers: Vec::new(),
+                created: false,
+            }
+        }
+    }
+
+    impl Backend for FakeBackend {
+        type Other = ();
+
+        async fn connect(&self) -> Result<u32, NetworkError> {
+            self.ask("connect");
+            let mut refusing = self.refusing.lock().unwrap();
+            if *refusing > 0 {
+                *refusing -= 1;
+                return Err(NetworkError::ConnectionClosed);
+            }
+            let mut connections = self.connections.lock().unwrap();
+            *connections += 1;
+            Ok(*connections)
+        }
+
+        async fn disconnect(&self, _conn: u32) -> Result<(), String> {
+            self.ask("disconnect");
+            Ok(())
+        }
+
+        async fn list_rooms(&self, _conn: u32) -> Result<Vec<RoomInfo>, String> {
+            self.ask("list_rooms");
+            Ok(Vec::new())
+        }
+
+        async fn create_room(&self, _conn: u32, _peer_name: &str) -> Result<Entered, String> {
+            self.ask("create_room");
+            Ok(self.entered())
+        }
+
+        async fn join_room(
+            &self,
+            _conn: u32,
+            code: &str,
+            _peer_name: &str,
+        ) -> Result<Entered, String> {
+            self.ask(format!("join_room {code}"));
+            Ok(self.entered())
+        }
+
+        async fn leave_room(&self, _conn: u32) -> Result<(), String> {
+            self.ask("leave_room");
+            Ok(())
+        }
+
+        async fn poll_events(&self, _conn: u32) -> Result<Vec<Polled<()>>, String> {
+            Ok(self.polls.lock().unwrap().pop_front().unwrap_or_default())
+        }
+
+        async fn other_event(&self, _event: ()) {}
+
+        fn peer_name(&self) -> String {
+            "Aki".to_string()
+        }
+
+        async fn clock_is_right(&self) -> bool {
+            true
+        }
+
+        async fn stop_audio(&self) {
+            self.ask("stop_audio");
+        }
+
+        fn audio_state(&self) -> (bool, Vec<(Uuid, LinkHealth)>) {
+            (false, Vec::new())
+        }
+
+        async fn advertise(&self, _conn: u32) -> Result<(), String> {
+            self.ask("advertise");
+            Ok(())
+        }
+
+        async fn link(
+            &self,
+            _conn: u32,
+            _peer: Uuid,
+            _candidates: Vec<std::net::SocketAddr>,
+            _link_key: Option<String>,
+        ) -> Result<(), String> {
+            self.ask("link");
+            Ok(())
+        }
+
+        async fn unlink(&self, _peer: Uuid) -> Result<(), String> {
+            self.ask("unlink");
+            Ok(())
+        }
+
+        fn announce(&self, _snapshot: &Snapshot) {}
+    }
+
+    fn driver_over(backend: FakeBackend) -> Driver<FakeBackend> {
+        let timing = Timing {
+            reconnect_base_delay: Duration::from_millis(10),
+            clock_recheck_interval: Duration::from_millis(100),
+            poll_interval: Duration::from_millis(10),
+        };
+        Driver::new(Arc::new(Session::new(timing)), Arc::new(backend))
+    }
+
+    async fn until(driver: &Driver<FakeBackend>, wanted: impl Fn(&Snapshot) -> bool) -> Snapshot {
+        for _ in 0..500 {
+            let snapshot = driver.snapshot();
+            if wanted(&snapshot) {
+                return snapshot;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "the session never got there; it is at {:?}",
+            driver.snapshot()
+        );
+    }
+
+    /// Verifies: REQ-RMT-028
+    #[tokio::test]
+    async fn a_room_is_created_after_connecting_lists_the_rooms_first_and_puts_the_participant_in_it(
+    ) {
+        let driver = driver_over(FakeBackend::default());
+
+        driver.connect_afresh().await.unwrap();
+        let snapshot = driver.create().await.unwrap();
+
+        assert_eq!(snapshot.phase, Phase::Connected);
+        assert_eq!(
+            snapshot.room.map(|room| room.invite_code),
+            Some("ABC234XYZ".to_string())
+        );
+        let asked = driver.backend().asked.lock().unwrap().clone();
+        assert_eq!(asked, ["connect", "list_rooms", "create_room", "advertise"]);
+    }
+
+    /// Verifies: REQ-RMT-028
+    #[tokio::test]
+    async fn the_connection_is_lost_in_a_room_enters_the_same_room_again_over_a_new_connection() {
+        let driver = driver_over(FakeBackend::default());
+        driver.connect_afresh().await.unwrap();
+        driver.create().await.unwrap();
+
+        driver
+            .backend()
+            .polls
+            .lock()
+            .unwrap()
+            .push_back(vec![Polled::Room(RoomEvent::ConnectionLost(
+                "reset".to_string(),
+            ))]);
+        until(&driver, |_| {
+            driver.backend().asked("join_room ABC234XYZ") == 1
+        })
+        .await;
+        let snapshot = until(&driver, |s| {
+            s.phase == Phase::Connected && s.connection_id == Some(2)
+        })
+        .await;
+
+        assert!(snapshot.room.is_some());
+        assert_eq!(driver.backend().asked("connect"), 2);
+        assert_eq!(driver.backend().asked("disconnect"), 1);
+    }
+
+    /// Verifies: REQ-RMT-028
+    #[tokio::test]
+    async fn the_server_does_not_answer_the_first_attempts_to_get_the_connection_back_tries_again()
+    {
+        let driver = driver_over(FakeBackend::default());
+        driver.connect_afresh().await.unwrap();
+        driver.create().await.unwrap();
+        *driver.backend().refusing.lock().unwrap() = 2;
+
+        driver
+            .backend()
+            .polls
+            .lock()
+            .unwrap()
+            .push_back(vec![Polled::Room(RoomEvent::ConnectionLost(
+                "reset".to_string(),
+            ))]);
+        until(&driver, |_| {
+            driver.backend().asked("join_room ABC234XYZ") == 1
+        })
+        .await;
+
+        assert_eq!(driver.backend().asked("connect"), 4);
+    }
+
+    /// Verifies: REQ-RMT-028
+    #[tokio::test]
+    async fn the_participant_is_done_leaves_the_room_and_lets_go_of_the_connection_for_good() {
+        let driver = driver_over(FakeBackend::default());
+        driver.connect_afresh().await.unwrap();
+        driver.create().await.unwrap();
+
+        driver.end().await;
+        // A connection that dropped after this is not a reason to connect again
+        driver
+            .backend()
+            .polls
+            .lock()
+            .unwrap()
+            .push_back(vec![Polled::Room(RoomEvent::ConnectionLost(
+                "reset".to_string(),
+            ))]);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        assert_eq!(driver.backend().asked("leave_room"), 1);
+        assert_eq!(driver.backend().asked("disconnect"), 1);
+        assert_eq!(driver.backend().asked("connect"), 1);
     }
 }
