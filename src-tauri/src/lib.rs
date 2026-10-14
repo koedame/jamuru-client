@@ -23,7 +23,6 @@ mod restart;
 mod rpc;
 mod session;
 mod settings;
-mod settings_help;
 mod signaling;
 mod software_render;
 mod streaming;
