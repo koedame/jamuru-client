@@ -77,6 +77,7 @@
 | [ADR-070](./adr/ADR-070-split-audio-frames-that-do-not-fit-a-packet.md) | 暗号化後に 1460 バイトを超える音声フレーム（256 フレームのステレオ PCM）は、フレーム境界で等分した複数のパケットで送る。IP の断片化に載せない |
 | [ADR-071](./adr/ADR-071-remove-direct-connection.md) | サーバーを使わない直接接続（CLI の `host` / `join`）を無くし、往復の測定は `create-room` / `join-room` で行う。相手を確かめない経路が無くなる |
 | [ADR-077](./adr/ADR-077-every-participant-is-linked.md) | ルームの参加者は全員と音声を繋ぐ（最大 10 人のフルメッシュ）。音声ソケットは参加者ごとに 1 つで、相手ごとの接続が共有する。相手との音声が途切れたら、その相手だけを張り直し、誰の音も届かないときだけ入り直す |
+| [ADR-078](./adr/ADR-078-remove-the-unused-session.md) | 使い手のない複数人用の部品 `Session` を消す。相手ごとの `Connection` で足りる |
 
 ---
 

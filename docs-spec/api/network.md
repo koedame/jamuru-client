@@ -28,7 +28,6 @@ network/
 ├── transport.rs        # UDPトランスポート
 ├── udp_mux.rs          # 1 つの音声ソケットを相手ごとの接続で共有する（ADR-077）
 ├── roster.rs           # 誰と音声を繋ぐかの判断（入出力なし。アプリと CLI で共有。ADR-077 §9）
-├── session.rs          # セッション管理
 ├── signaling.rs        # シグナリング
 ├── stun.rs             # STUNクライアント
 ├── fec.rs              # FEC処理
@@ -116,12 +115,12 @@ fn verify_peer(&mut self, ours: &LinkIdentity, peer_key: Option<&str>) -> Result
 fn checks_peer(&self) -> bool;
 ```
 
-複数の相手へ送る `Session` は `set_link_identity(LinkIdentity)` で自分の鍵を渡すと、そのあとに `add_peer` した相手ごとに、`PeerInfo::link_key` で同じことをする。
+ルームの相手ごとの `Connection` に、それぞれの `PeerInfo::link_key` を渡して呼ぶ（次節）。
 
 ### 3.2.1 ルームの全員と繋ぐ（1 つのソケットを共有する）
 
 ルームの参加者は、音声アドレスを 1 つだけ公開し、ほかの全員がそこへ送る。相手ごとの接続は、そのソケットを共有して作る
-（[ADR-077](../adr/ADR-077-every-participant-is-linked.md)、REQ-CON-033）。アプリは `Session` ではなくこの形を使う:
+（[ADR-077](../adr/ADR-077-every-participant-is-linked.md)、REQ-CON-033）。アプリも CLI もこの形を使う:
 接続の確認・鍵・FEC・ロスの計測・RTT・再接続を、相手ごとの `Connection` がそのまま持つ。
 
 ```rust
