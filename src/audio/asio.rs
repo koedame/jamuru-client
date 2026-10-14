@@ -7,7 +7,7 @@
 //! two unrelated `cpal` streams, so an ASIO session is opened and driven
 //! through this module instead, and the two paths converge again on the
 //! `FnMut` callbacks a caller hands to either one
-//! (see `AudioIo::start` in `main.rs`).
+//! (see `audio_session::run`).
 //!
 //! This talks to the driver's COM interface directly, through the `azo`
 //! crate, rather than through Steinberg's ASIO SDK: the SDK's proprietary
