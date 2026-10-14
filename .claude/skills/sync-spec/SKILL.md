@@ -38,7 +38,7 @@ Use this mapping table:
 | Spec File | Implementation Files |
 |-----------|---------------------|
 | docs-spec/api/audio_engine.md | src/audio/engine.rs, src/audio/device.rs, src/audio/effects.rs, src/audio/recording.rs, src/audio/metronome.rs |
-| docs-spec/api/network.md | src/network/connection.rs, src/network/session.rs, src/network/fec.rs, src/network/transport.rs |
+| docs-spec/api/network.md | src/network/connection.rs, src/network/roster.rs, src/network/udp_mux.rs, src/network/fec.rs, src/network/transport.rs |
 | docs-spec/api/signaling.md | src/network/signaling.rs |
 | docs-spec/api/plugin.md | src/audio/plugin.rs |
 | docs-spec/api/i18n.md | ui/locales/*.json, ui/src/i18n/* |

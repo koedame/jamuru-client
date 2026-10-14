@@ -15,21 +15,22 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
-use links::{Checked, LinkReport, LinkSettings, Links, Senders};
+use jamjam::link::Senders;
+use links::{Checked, LinkReport, LinkSettings, Links};
 
 use jamjam::audio::{
-    bounded, list_input_devices, list_output_devices, mono_to_wire, AudioConfig, AudioDevice,
-    AudioEngine, AudioError, AudioPreset, BurstProbe, BurstSignal, DeviceId, GainRamp,
-    LocalMonitor, PeerMix, PlayoutStats, RoundTripReport, ADAPT_INTERVAL, LIST_TIMEOUT,
-    WIRE_CHANNELS,
+    bounded, choose_device, list_input_devices, list_output_devices, mono_to_wire, AudioConfig,
+    AudioDevice, AudioEngine, AudioError, AudioPreset, BurstProbe, BurstSignal, ChooseDeviceError,
+    DeviceId, GainRamp, LocalMonitor, PeerMix, PlayoutStats, RoundTripReport, ADAPT_INTERVAL,
+    LIST_TIMEOUT, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
-use jamjam::audio::{driver_name_of, is_asio_id, AsioDuplex, OutputRoute, OPEN_TIMEOUT};
+use jamjam::audio::{shared_asio_driver, AsioDuplex, OutputRoute, OPEN_TIMEOUT};
 use jamjam::network::roster::{Audio, Roster};
 use jamjam::network::{
     audio_packet_duration_ms, bind_std, gather_candidates_on, AudioEncodingConfig, ConnectionStats,
-    LatencyBreakdown, LinkIdentity, LocalLatencyInfo, PeerLatencyInfo, SignalingClient,
-    SignalingConnection, SignalingMessage, UdpMux, MAX_PEERS_PER_ROOM,
+    EnterError, EnterRequest, LatencyBreakdown, LinkIdentity, LocalLatencyInfo, PeerLatencyInfo,
+    RoomEntry, SignalingClient, SignalingConnection, SignalingMessage, UdpMux, MAX_PEERS_PER_ROOM,
 };
 use jamjam::protocol::LatencyInfoMessage;
 
@@ -65,11 +66,11 @@ struct AudioArgs {
     #[arg(long)]
     frame_size: Option<u32>,
 
-    /// Input device name (use 'devices list' to see available devices)
+    /// Input device id or name (use 'devices list' to see available devices)
     #[arg(long)]
     input_device: Option<String>,
 
-    /// Output device name (use 'devices list' to see available devices)
+    /// Output device id or name (use 'devices list' to see available devices)
     #[arg(long)]
     output_device: Option<String>,
 
@@ -193,11 +194,11 @@ enum DevicesAction {
 
     /// Choose the devices sessions use, saving them for next time
     Set {
-        /// Input device name, or 'default' for the system default
+        /// Input device id or name, or 'default' for the system default
         #[arg(long)]
         input: Option<String>,
 
-        /// Output device name, or 'default' for the system default
+        /// Output device id or name, or 'default' for the system default
         #[arg(long)]
         output: Option<String>,
     },
@@ -250,7 +251,7 @@ fn list_devices() {
         Ok(devices) => {
             for device in devices {
                 let default_marker = if device.is_default { " (default)" } else { "" };
-                println!("  - {}{}", device.name, default_marker);
+                println!("  - {}  {}{}", device.id.0, device.name, default_marker);
             }
         }
         Err(e) => {
@@ -263,7 +264,7 @@ fn list_devices() {
         Ok(devices) => {
             for device in devices {
                 let default_marker = if device.is_default { " (default)" } else { "" };
-                println!("  - {}{}", device.name, default_marker);
+                println!("  - {}  {}{}", device.id.0, device.name, default_marker);
             }
         }
         Err(e) => {
@@ -278,7 +279,10 @@ fn list_devices() {
 struct AudioSettings {
     sample_rate: u32,
     frame_size: u32,
+    /// Id of the device to capture from, as the app saves it (`None`: the
+    /// system default)
     input_device: Option<String>,
+    /// Id of the device to play to (`None`: the system default)
     output_device: Option<String>,
     preset: AudioPreset,
     /// Stand-in for the input device: a sine tone at this frequency.
@@ -317,11 +321,28 @@ impl AudioArgs {
             (None, None) => config.buffer_size,
         };
 
+        let input_device = match &self.input_device {
+            Some(wanted) => Some(device_id_of(
+                wanted,
+                &list_input_devices_bounded().map_err(|e| anyhow::anyhow!("{}", e))?,
+                "input",
+            )?),
+            None => config.input_device_id,
+        };
+        let output_device = match &self.output_device {
+            Some(wanted) => Some(device_id_of(
+                wanted,
+                &list_output_devices_bounded().map_err(|e| anyhow::anyhow!("{}", e))?,
+                "output",
+            )?),
+            None => config.output_device_id,
+        };
+
         Ok(AudioSettings {
             sample_rate: self.sample_rate.unwrap_or(config.sample_rate),
             frame_size,
-            input_device: self.input_device.clone().or(config.input_device_id),
-            output_device: self.output_device.clone().or(config.output_device_id),
+            input_device,
+            output_device,
             preset,
             input_tone: self.input_tone,
             input_bursts: self.input_bursts,
@@ -374,24 +395,35 @@ fn set_devices(input: Option<String>, output: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Refuses a device the machine does not offer, rather than saving a name that
-/// silently falls back to the default at session start.
+/// What `devices set` saves for `wanted`: nothing for the default keyword,
+/// otherwise the id of the device it names.
 fn resolve_device_choice(
-    name: &str,
-    available: &[jamjam::audio::AudioDevice],
+    wanted: &str,
+    available: &[AudioDevice],
     kind: &str,
 ) -> Result<Option<String>> {
-    if name == DEFAULT_DEVICE_KEYWORD {
+    if wanted == DEFAULT_DEVICE_KEYWORD {
         return Ok(None);
     }
-    if !available.iter().any(|device| device.name == name) {
-        anyhow::bail!(
-            "no {} device named {:?}. `jamuru devices list` shows what this machine has",
+    device_id_of(wanted, available, kind).map(Some)
+}
+
+/// The id of the device `wanted` (an id or a name) names. The id is what the
+/// app saves and what a session opens, so a name is turned into it here rather
+/// than saved: a name saved as is would match no device at session start.
+/// Refuses a device the machine does not offer, and a name several devices share.
+fn device_id_of(wanted: &str, available: &[AudioDevice], kind: &str) -> Result<String> {
+    match choose_device(available, wanted) {
+        Ok(device) => Ok(device.id.0.clone()),
+        Err(ChooseDeviceError::NotFound(_)) => anyhow::bail!(
+            "no {} device has the id or the name {:?}. `jamuru devices list` shows what this machine has",
             kind,
-            name
-        );
+            wanted
+        ),
+        Err(refused @ ChooseDeviceError::Ambiguous { .. }) => {
+            anyhow::bail!("{} device: {}", kind, refused)
+        }
     }
-    Ok(Some(name.to_string()))
 }
 
 /// Prints the presets with the numbers ADR-019 fixes for them.
@@ -737,15 +769,6 @@ fn signaling_client(server: &str) -> SignalingClient {
     SignalingClient::new(server, Arc::new(identity))
 }
 
-#[allow(clippy::too_many_arguments)]
-/// How the CLI enters a room.
-enum RoomEntry {
-    /// Create a room and print the invite code others join with.
-    Create { room_name: String },
-    /// Join an existing room by id or invite code.
-    Join { room_id: String },
-}
-
 /// What the user typed at the `chat>` prompt.
 enum Input {
     /// Send it to the room.
@@ -841,67 +864,50 @@ async fn run_room_session(
     // The key the others in the room check our key exchange against
     let link_identity = LinkIdentity::generate();
 
-    // The CLI takes no peer messages, so it announces no features.
-    let request = match &entry {
-        RoomEntry::Create { room_name } => SignalingMessage::CreateRoom {
-            link_key: Some(link_identity.public_key()),
-            room_name: room_name.clone(),
-            password: None,
+    let entered = conn
+        .enter_room(EnterRequest {
+            entry,
             peer_name: peer_name.clone(),
+            link_key: link_identity.public_key(),
+            // The CLI takes no peer messages, so it announces no features.
             features: vec![],
             client_info: None,
-        },
-        RoomEntry::Join { room_id } => SignalingMessage::JoinRoom {
-            link_key: Some(link_identity.public_key()),
-            room_id: room_id.clone(),
-            password: None,
-            peer_name: peer_name.clone(),
-            features: vec![],
-            client_info: None,
-        },
-    };
-    conn.send(request).await?;
-
-    let (my_peer_id, peers) = match conn.recv().await? {
-        SignalingMessage::RoomCreated {
-            room_id,
-            peer_id,
-            invite_code,
-        } => {
-            println!("\nRoom created: {}", room_id);
-            println!("Invite code:  {}", invite_code);
+        })
+        .await
+        .map_err(|e| match e {
+            EnterError::Refused(message) => {
+                anyhow::anyhow!("Signaling server refused the request: {}", message)
+            }
+            EnterError::Unexpected(other) => {
+                anyhow::anyhow!("Unexpected response from server: {:?}", other)
+            }
+            EnterError::Connection(e) => anyhow::Error::new(e),
+        })?;
+    let (my_peer_id, peers) = (entered.peer_id, entered.peers);
+    if entered.created {
+        println!("\nRoom created: {}", entered.room_id);
+    } else {
+        println!("\nJoined room: {}", entered.room_id);
+    }
+    if let Some(invite_code) = &entered.invite_code {
+        println!("Invite code:  {}", invite_code);
+        if entered.created {
             println!(
                 "Others join with:\n  jamuru join-room --server {} --room {}",
                 server, invite_code
             );
-            println!("Your peer ID: {}", peer_id);
-            (peer_id, Vec::new())
         }
-        SignalingMessage::RoomJoined {
-            room_id,
-            peer_id,
-            invite_code,
-            peers,
-        } => {
-            println!("\nJoined room: {}", room_id);
-            if let Some(invite_code) = invite_code {
-                println!("Invite code:  {}", invite_code);
-            }
-            println!("Your peer ID: {}", peer_id);
-            println!("\nPeers in room ({}):", peers.len());
-            for peer in &peers {
-                println!(
-                    "  - {} (id: {}, addr: {:?})",
-                    peer.name, peer.id, peer.public_addr
-                );
-            }
-            (peer_id, peers)
+    }
+    println!("Your peer ID: {}", my_peer_id);
+    if !entered.created {
+        println!("\nPeers in room ({}):", peers.len());
+        for peer in &peers {
+            println!(
+                "  - {} (id: {}, addr: {:?})",
+                peer.name, peer.id, peer.public_addr
+            );
         }
-        SignalingMessage::Error { message } => {
-            anyhow::bail!("Signaling server refused the request: {}", message);
-        }
-        other => anyhow::bail!("Unexpected response from server: {:?}", other),
-    };
+    }
 
     let my_peer_id_str = my_peer_id.to_string();
     let signaling_conn_arc = Arc::new(tokio::sync::Mutex::new(conn));
@@ -1490,17 +1496,10 @@ impl AudioIo {
         // real hardware, which an ASIO driver is not.
         #[cfg(target_os = "windows")]
         if stand_in.is_none() && settings.output_file.is_none() {
-            let asio_driver = match (&settings.input_device, &settings.output_device) {
-                (Some(input), Some(output)) if input == output => {
-                    let id = DeviceId(input.clone());
-                    is_asio_id(&id).then(|| {
-                        driver_name_of(&id)
-                            .expect("checked by is_asio_id")
-                            .to_string()
-                    })
-                }
-                _ => None,
-            };
+            let asio_driver = shared_asio_driver(
+                settings.input_device.clone().map(DeviceId).as_ref(),
+                settings.output_device.clone().map(DeviceId).as_ref(),
+            );
             if let Some(driver_name) = asio_driver {
                 let mut tap = monitor.tap();
                 let mut capture_cb = on_capture.take().expect("not yet taken");
@@ -1949,6 +1948,80 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "the caller should not have waited for the driver"
+        );
+    }
+
+    fn device(id: &str, name: &str) -> AudioDevice {
+        AudioDevice {
+            id: DeviceId(id.to_string()),
+            name: name.to_string(),
+            supported_sample_rates: vec![48000],
+            supported_channels: vec![2],
+            is_default: false,
+            is_asio: false,
+            is_bluetooth: false,
+        }
+    }
+
+    /// The app reads a saved device as an id and opens the device whose id it
+    /// is. A name saved as it was typed matched no device when a session started.
+    ///
+    /// Verifies: REQ-CLI-012
+    #[test]
+    fn a_device_chosen_by_name_is_saved_as_its_id() {
+        let available = vec![
+            device("alsa:hw:0,0", "Built-in Audio"),
+            device("alsa:hw:1,0", "USB Interface"),
+        ];
+
+        assert_eq!(
+            resolve_device_choice("USB Interface", &available, "input").unwrap(),
+            Some("alsa:hw:1,0".to_string())
+        );
+        assert_eq!(
+            resolve_device_choice("alsa:hw:1,0", &available, "input").unwrap(),
+            Some("alsa:hw:1,0".to_string())
+        );
+    }
+
+    /// Verifies: REQ-CLI-012
+    #[test]
+    fn the_default_keyword_saves_no_choice() {
+        let available = vec![device("alsa:hw:0,0", "Built-in Audio")];
+
+        assert_eq!(
+            resolve_device_choice("default", &available, "output").unwrap(),
+            None
+        );
+    }
+
+    /// Verifies: REQ-CLI-004, REQ-CLI-012
+    #[test]
+    fn a_device_the_machine_does_not_have_is_refused_naming_how_to_list_the_real_ones() {
+        let available = vec![device("alsa:hw:0,0", "Built-in Audio")];
+
+        let message = resolve_device_choice("Missing", &available, "input")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            message.contains("Missing") && message.contains("devices list"),
+            "got {message:?}"
+        );
+    }
+
+    /// Verifies: REQ-CLI-012
+    #[test]
+    fn a_name_that_two_devices_share_is_refused_naming_their_ids() {
+        let available = vec![device("alsa:hw:2,0", "Twin"), device("alsa:hw:3,0", "Twin")];
+
+        let message = resolve_device_choice("Twin", &available, "output")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            message.contains("alsa:hw:2,0") && message.contains("alsa:hw:3,0"),
+            "got {message:?}"
         );
     }
 
