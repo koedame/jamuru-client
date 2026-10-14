@@ -1,7 +1,7 @@
 //! One direction of a running session's audio, and the device being switched to
 //!
 //! Opening a device can take as long as a hung driver likes, and the session
-//! thread also carries the network (`streaming`), so it must not do the
+//! thread also carries the network (`session`), so it must not do the
 //! opening itself. The engine goes to a thread of its own for the open, and
 //! the session thread looks in on it every turn. Asking for another device
 //! while one is still being opened gives up on that open: the engine it holds
@@ -9,7 +9,7 @@
 //! queued behind a driver that does not answer.
 //!
 //! The slot also watches the stream it holds: one that stops calling back
-//! without an error (see `jamjam::audio::StallGuard`) is said so by
+//! without an error (see [`StallGuard`]) is said so by
 //! [`watch`](DeviceSlot::watch), and the session thread opens it again with
 //! the same [`switch`](DeviceSlot::switch) it uses for a new device.
 
@@ -18,8 +18,8 @@ use std::thread;
 use std::time::Instant;
 
 #[cfg(target_os = "windows")]
-use jamjam::audio::AsioDuplex;
-use jamjam::audio::{
+use super::AsioDuplex;
+use super::{
     AudioConfig, AudioEngine, AudioError, DeviceId, Heartbeat, StallGuard, Verdict, MAX_REOPENS,
     STALL_AFTER,
 };
@@ -28,7 +28,7 @@ use jamjam::audio::{
 /// and how the open went
 type Opened<T> = (AudioEngine, Result<T, AudioError>);
 
-pub(crate) struct DeviceSlot<T> {
+pub struct DeviceSlot<T> {
     /// "input" or "output", for the log
     what: &'static str,
     config: AudioConfig,
@@ -51,7 +51,7 @@ pub(crate) struct DeviceSlot<T> {
 
 impl<T: Send + 'static> DeviceSlot<T> {
     /// A slot around `engine`, which has `device` open
-    pub(crate) fn new(
+    pub fn new(
         what: &'static str,
         config: AudioConfig,
         engine: AudioEngine,
@@ -72,7 +72,7 @@ impl<T: Send + 'static> DeviceSlot<T> {
 
     /// For a slot whose engine has just failed to open its device: nothing is
     /// running, so nothing is watched until a switch opens a stream.
-    pub(crate) fn without_stream(mut self) -> Self {
+    pub fn without_stream(mut self) -> Self {
         self.streaming = false;
         self
     }
@@ -89,7 +89,7 @@ impl<T: Send + 'static> DeviceSlot<T> {
     ///
     /// While a stream is being opened it is not watched, and the wait starts
     /// again once the open is done.
-    pub(crate) fn watch(&mut self, now: Instant) -> Verdict {
+    pub fn watch(&mut self, now: Instant) -> Verdict {
         if self.opening.is_some() || std::mem::take(&mut self.just_opened) {
             self.guard.hold(now);
             return Verdict::Flowing;
@@ -101,7 +101,7 @@ impl<T: Send + 'static> DeviceSlot<T> {
     }
 
     /// The device last asked for; `None` is the system default
-    pub(crate) fn device(&self) -> Option<&DeviceId> {
+    pub fn device(&self) -> Option<&DeviceId> {
         self.device.as_ref()
     }
 
@@ -112,7 +112,7 @@ impl<T: Send + 'static> DeviceSlot<T> {
     /// the next real [`switch`](Self::switch) sees, the same as if this slot
     /// had opened it.
     #[cfg(target_os = "windows")]
-    pub(crate) fn park(&mut self, device: Option<DeviceId>) {
+    pub fn park(&mut self, device: Option<DeviceId>) {
         self.opening = None;
         self.engine = None;
         self.device = device;
@@ -121,7 +121,7 @@ impl<T: Send + 'static> DeviceSlot<T> {
 
     /// Starts opening `device`: `open` runs on a thread of its own, on the
     /// engine. Returns at once; [`poll`](Self::poll) says how it went.
-    pub(crate) fn switch(
+    pub fn switch(
         &mut self,
         device: Option<DeviceId>,
         open: impl FnOnce(&mut AudioEngine) -> Result<T, AudioError> + Send + 'static,
@@ -163,7 +163,7 @@ impl<T: Send + 'static> DeviceSlot<T> {
     }
 
     /// How the open that was started went, once it has finished
-    pub(crate) fn poll(&mut self) -> Option<Result<T, AudioError>> {
+    pub fn poll(&mut self) -> Option<Result<T, AudioError>> {
         let opening = self.opening.as_ref()?;
         match opening.try_recv() {
             Ok((engine, result)) => {
@@ -201,20 +201,20 @@ impl<T: Send + 'static> DeviceSlot<T> {
 /// between switches (there is no persistent resource here to hand back, the
 /// way `DeviceSlot` hands back its engine).
 #[cfg(target_os = "windows")]
-pub(crate) struct AsioSwitch<T> {
+pub struct AsioSwitch<T> {
     opening: Option<mpsc::Receiver<Result<(AsioDuplex, T), AudioError>>>,
 }
 
 #[cfg(target_os = "windows")]
 impl<T: Send + 'static> AsioSwitch<T> {
-    pub(crate) fn idle() -> Self {
+    pub fn idle() -> Self {
         Self { opening: None }
     }
 
     /// Starts closing `previous` (when given) and opening a new session with
     /// `open`, on a thread of its own. Returns at once; [`poll`](Self::poll)
     /// reports how it went.
-    pub(crate) fn switch(
+    pub fn switch(
         &mut self,
         previous: Option<AsioDuplex>,
         open: impl FnOnce() -> Result<(AsioDuplex, T), AudioError> + Send + 'static,
@@ -241,7 +241,7 @@ impl<T: Send + 'static> AsioSwitch<T> {
     }
 
     /// How the switch that was started went, once it has finished.
-    pub(crate) fn poll(&mut self) -> Option<Result<(AsioDuplex, T), AudioError>> {
+    pub fn poll(&mut self) -> Option<Result<(AsioDuplex, T), AudioError>> {
         let opening = self.opening.as_ref()?;
         match opening.try_recv() {
             Ok(result) => {
