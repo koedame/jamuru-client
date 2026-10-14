@@ -61,8 +61,8 @@ pub use monitor::{LocalMonitor, MonitorTap, MONITOR_MARGIN_FRAMES};
 pub use open::open_asio;
 pub use open::{
     capture_or_silence, clear_device_problem, discard_queued, note_device_problem, note_trouble,
-    playout_source, start_capture_ring, start_playout, CaptureRing, DeviceProblem, DeviceSide,
-    DeviceTrouble,
+    on_captured_frame, playout_source, start_capture_ring, start_playout, CaptureRing,
+    DeviceProblem, DeviceSide, DeviceTrouble,
 };
 pub use peer_mix::{PeerGain, PeerMeter, PeerMix, VoiceHandle};
 pub use playout::{
@@ -82,6 +82,7 @@ pub use stream::{
     balance_gains, capture_to_wire, mono_to_wire, pan_received, rms_level, GainRamp,
     PeerRateChange, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
+pub(crate) use taps::taps;
 pub use taps::{set_taps, Taps};
 pub use virtual_output::{
     RecordingFeed, RecordingTap, VirtualOutputSink, CHANNELS as VIRTUAL_OUTPUT_CHANNELS,

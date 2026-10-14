@@ -4,6 +4,7 @@
 //! streaming between musicians over a network.
 
 pub mod audio;
+pub mod audio_session;
 pub mod config;
 pub mod diagnostics;
 pub mod environment;
