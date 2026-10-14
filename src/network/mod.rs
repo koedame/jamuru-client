@@ -14,6 +14,7 @@ mod latency;
 mod link_facts;
 mod quality;
 mod remote;
+pub mod room_driver;
 mod room_entry;
 pub mod room_session;
 pub mod roster;

@@ -252,29 +252,11 @@ pub async fn signaling_list_rooms(
         .get_mut(&conn_id)
         .ok_or("Connection not found")?;
 
-    conn.send(SignalingMessage::ListRooms)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // What the room's other participants sent before they heard this app left
-    // can still be on its way, and comes ahead of the answer. It is for a room
-    // this app is no longer in, so it is let go rather than taken for the
-    // answer (leaving, then listing the rooms, failed with "Unexpected
-    // response" when a helper's message was in flight).
-    loop {
-        match conn.recv().await.map_err(|e| e.to_string())? {
-            SignalingMessage::RoomList { rooms } => return Ok(rooms),
-            SignalingMessage::Error { message } => return Err(message),
-            SignalingMessage::PeerJoined { .. }
-            | SignalingMessage::PeerLeft { .. }
-            | SignalingMessage::PeerUpdated { .. }
-            | SignalingMessage::ChatMessage { .. }
-            | SignalingMessage::PeerMessage { .. } => {
-                tracing::debug!("Letting go of a room message that came before the room list");
-            }
-            _ => return Err("Unexpected response".to_string()),
-        }
-    }
+    conn.list_rooms().await.map_err(|e| match e {
+        EnterError::Refused(message) => message,
+        EnterError::Unexpected(_) => "Unexpected response".to_string(),
+        EnterError::Connection(e) => e.to_string(),
+    })
 }
 
 /// What to tell the server about this app when entering a room: for the people
