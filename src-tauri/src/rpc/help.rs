@@ -33,7 +33,7 @@ use tokio::time::Instant;
 use super::spec::Portal;
 use super::{authorize, dispatch, Call, Code, RpcError};
 use crate::settings::{self, AudioSettings, SettingChange, SettingsError};
-use crate::settings_help::setting_name;
+use jamjam::network::settings_help::setting_name;
 
 /// The least time between two readings of a meter answered afresh. A reading
 /// asked for sooner is answered with the last one.

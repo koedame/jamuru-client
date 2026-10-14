@@ -16,6 +16,7 @@ mod quality;
 mod remote;
 pub mod roster;
 mod sequence_tracker;
+pub mod settings_help;
 mod signaling;
 mod stun;
 mod transport;
