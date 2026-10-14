@@ -1310,6 +1310,7 @@ dependencies = [
  "hkdf",
  "hound",
  "jsonschema",
+ "libc",
  "libloading",
  "local-ip-address",
  "objc2-core-audio",
@@ -1335,6 +1336,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows",
  "x25519-dalek",
 ]
 

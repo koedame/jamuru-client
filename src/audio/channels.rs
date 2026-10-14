@@ -3,6 +3,43 @@
 //! The settings count channels from 1, the way an interface labels its
 //! inputs. Everything here counts from 0, the way a frame is indexed.
 
+use super::{device_in_use, AudioDevice};
+
+/// The most channels `device` offers; `None` when it does not say.
+pub fn channel_count(device: &AudioDevice) -> Option<u32> {
+    device
+        .supported_channels
+        .iter()
+        .max()
+        .map(|&c| u32::from(c))
+}
+
+/// The channel pair the device in use is opened with: the saved `pair` when the
+/// device has both channels, otherwise its first ones. Decided whenever a
+/// device is opened and whenever the settings are shown, never saved.
+pub fn pair_in_use(
+    devices: &[AudioDevice],
+    chosen: &Option<String>,
+    (left, right): (u32, Option<u32>),
+) -> (u32, Option<u32>) {
+    let available = device_in_use(devices, chosen.as_deref()).and_then(channel_count);
+    fit_channels(left, right, available)
+}
+
+/// Keeps the pair when the device has both channels, and falls back to the
+/// first ones as a pair when it does not: channels 1 and 2 (1 and 1 on a mono
+/// device; mono stays mono). A device that does not say keeps the pair.
+fn fit_channels(left: u32, right: Option<u32>, available: Option<u32>) -> (u32, Option<u32>) {
+    let Some(available) = available else {
+        return (left, right);
+    };
+    let fits = |channel: u32| channel <= available;
+    if fits(left) && right.is_none_or(fits) {
+        return (left, right);
+    }
+    (1, right.map(|_| available.min(2)))
+}
+
 /// The channels capture delivers, as indexes into a device frame.
 ///
 /// One channel for a mono transmit, two for stereo. A stereo transmit needs two

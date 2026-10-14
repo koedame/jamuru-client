@@ -4,8 +4,6 @@
 //! and multi-window management.
 
 mod app_info;
-mod audio;
-mod audio_slot;
 #[cfg(feature = "debug-tools")]
 mod audio_tap;
 mod config;
@@ -82,7 +80,15 @@ pub fn run() {
     let software_render_limits = software_render::limit_software_rendering();
     let log_spec = logging::LogSpec::from_env();
     #[cfg(feature = "debug-tools")]
-    jamjam::perf::enable();
+    {
+        jamjam::perf::enable();
+        audio_tap::install();
+    }
+    // The log writes a device by what the person is shown of it, so each device a listing finds is
+    // told to it before anything is logged about the device.
+    jamjam::audio::observe_listed_devices(|device| {
+        logging::register_device(&device.id.0, &device.name)
+    });
 
     let context = tauri::generate_context!();
     // Only the release build is given updater settings (`tauri.updater.conf.json`,

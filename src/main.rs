@@ -1,12 +1,12 @@
 //! jamuru - Low-latency P2P audio communication for musicians
 
-mod links;
-
+use std::collections::{HashMap, HashSet};
 use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc as std_mpsc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -15,24 +15,19 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
-use jamjam::link::Senders;
-use links::{Checked, LinkReport, LinkSettings, Links};
-
 use jamjam::audio::{
-    bounded, choose_device, list_input_devices, list_output_devices, mono_to_wire, AudioConfig,
-    AudioDevice, AudioEngine, AudioError, AudioPreset, BurstProbe, BurstSignal, ChooseDeviceError,
-    DeviceId, GainRamp, LocalMonitor, PeerMix, PlayoutStats, RoundTripReport, ADAPT_INTERVAL,
-    LIST_TIMEOUT, WIRE_CHANNELS,
+    choose_device, input_devices, output_devices, AudioDevice, AudioPreset, BurstProbe,
+    ChooseDeviceError, PlayoutStats, RoundTripReport,
 };
-#[cfg(target_os = "windows")]
-use jamjam::audio::{shared_asio_driver, AsioDuplex, OutputRoute, OPEN_TIMEOUT};
-use jamjam::network::roster::{Audio, Roster};
+use jamjam::audio_session::{self, Command, InputSignal, LinkTarget, Params, Running, Shared};
+use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, Timing};
 use jamjam::network::{
-    audio_packet_duration_ms, bind_std, gather_candidates_on, AudioEncodingConfig, ConnectionStats,
-    EnterError, EnterRequest, LatencyBreakdown, LinkIdentity, LocalLatencyInfo, PeerLatencyInfo,
-    RoomEntry, SignalingClient, SignalingConnection, SignalingMessage, UdpMux, MAX_PEERS_PER_ROOM,
+    bind_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate, ConnectionStats,
+    EnterError, EnterRequest, Entered, LatencyBreakdown, LinkHealth, LinkIdentity,
+    LocalLatencyInfo, NetworkError, PeerLatencyInfo, RoomEntry, RoomInfo, SignalingClient,
+    SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
 };
-use jamjam::protocol::LatencyInfoMessage;
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "jamuru")]
@@ -227,27 +222,9 @@ fn setup_logging(verbose: bool) {
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 }
 
-/// Lists devices on a thread of its own and gives up at `timeout`, so a driver
-/// that has hung does not hang the command with it (REQ-AUD-123).
-fn listed_within(
-    what: &str,
-    timeout: Duration,
-    list: fn() -> Result<Vec<AudioDevice>, AudioError>,
-) -> Result<Vec<AudioDevice>, AudioError> {
-    bounded(what, timeout, list)?
-}
-
-fn list_input_devices_bounded() -> Result<Vec<AudioDevice>, AudioError> {
-    listed_within("input device listing", LIST_TIMEOUT, list_input_devices)
-}
-
-fn list_output_devices_bounded() -> Result<Vec<AudioDevice>, AudioError> {
-    listed_within("output device listing", LIST_TIMEOUT, list_output_devices)
-}
-
 fn list_devices() {
     println!("Input devices:");
-    match list_input_devices_bounded() {
+    match input_devices() {
         Ok(devices) => {
             for device in devices {
                 let default_marker = if device.is_default { " (default)" } else { "" };
@@ -260,7 +237,7 @@ fn list_devices() {
     }
 
     println!("\nOutput devices:");
-    match list_output_devices_bounded() {
+    match output_devices() {
         Ok(devices) => {
             for device in devices {
                 let default_marker = if device.is_default { " (default)" } else { "" };
@@ -294,6 +271,12 @@ struct AudioSettings {
     output_file: Option<PathBuf>,
     /// Whether the session starts with local monitoring on.
     monitor: bool,
+    /// How many channels are sent (1 mono, 2 stereo), as the app saves it
+    transmit_channels: u32,
+    /// Which channels of a multi-channel interface are read and played on (1-based), as
+    /// the app saves them
+    input_channels: (u32, Option<u32>),
+    output_channels: (u32, Option<u32>),
 }
 
 impl AudioArgs {
@@ -324,7 +307,7 @@ impl AudioArgs {
         let input_device = match &self.input_device {
             Some(wanted) => Some(device_id_of(
                 wanted,
-                &list_input_devices_bounded().map_err(|e| anyhow::anyhow!("{}", e))?,
+                &input_devices().map_err(anyhow::Error::msg)?,
                 "input",
             )?),
             None => config.input_device_id,
@@ -332,7 +315,7 @@ impl AudioArgs {
         let output_device = match &self.output_device {
             Some(wanted) => Some(device_id_of(
                 wanted,
-                &list_output_devices_bounded().map_err(|e| anyhow::anyhow!("{}", e))?,
+                &output_devices().map_err(anyhow::Error::msg)?,
                 "output",
             )?),
             None => config.output_device_id,
@@ -348,6 +331,9 @@ impl AudioArgs {
             input_bursts: self.input_bursts,
             output_file: self.output_file.clone(),
             monitor: self.monitor,
+            transmit_channels: config.transmit_channels,
+            input_channels: (config.input_channel_l, config.input_channel_r),
+            output_channels: (config.output_channel_l, config.output_channel_r),
         })
     }
 }
@@ -368,15 +354,15 @@ fn set_devices(input: Option<String>, output: Option<String>) -> Result<()> {
     let mut config = jamjam::config::load_config().unwrap_or_default();
 
     if let Some(name) = input {
-        let available = list_input_devices_bounded().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let available = input_devices().map_err(anyhow::Error::msg)?;
         config.input_device_id = resolve_device_choice(&name, &available, "input")?;
     }
     if let Some(name) = output {
-        let available = list_output_devices_bounded().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let available = output_devices().map_err(anyhow::Error::msg)?;
         config.output_device_id = resolve_device_choice(&name, &available, "output")?;
     }
 
-    jamjam::config::save_config(&config).map_err(|e| anyhow::anyhow!("{}", e))?;
+    jamjam::config::save_config(&config).map_err(anyhow::Error::msg)?;
 
     println!(
         "input:  {}",
@@ -466,7 +452,7 @@ fn use_preset(name: &str) -> Result<()> {
     // Streaming reads buffer_size, so leaving it behind would run the session
     // at a frame size this preset never chose.
     config.buffer_size = preset.frame_size();
-    jamjam::config::save_config(&config).map_err(|e| anyhow::anyhow!("{}", e))?;
+    jamjam::config::save_config(&config).map_err(anyhow::Error::msg)?;
 
     println!(
         "preset: {} ({} samples/frame, {} jitter frame(s), {:.2}ms designed at 48kHz)",
@@ -650,7 +636,7 @@ fn playout_json(playout: &PlayoutStats, delay_frames: u32) -> serde_json::Value 
 /// `round_trip` is present only when the session sent `--input-bursts`.
 fn session_report(
     settings: &AudioSettings,
-    links: &[LinkReport],
+    links: &[LinkSummary],
     connected_for: Duration,
     round_trip: Option<(u64, &RoundTripReport)>,
 ) -> serde_json::Value {
@@ -713,55 +699,6 @@ fn print_audio_settings(settings: &AudioSettings) {
     );
 }
 
-/// Process signaling events and print them to stdout
-fn handle_signaling_event(msg: &SignalingMessage) {
-    match msg {
-        SignalingMessage::PeerJoined { peer } => {
-            println!("\n📥 {} joined the room", peer.name);
-            print!("chat> ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        SignalingMessage::PeerLeft { peer_id } => {
-            println!("\n📤 Peer {} left the room", peer_id);
-            print!("chat> ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        SignalingMessage::ChatMessage {
-            sender_name,
-            content,
-            ..
-        } => {
-            println!("\n💬 {}: {}", sender_name, content);
-            print!("chat> ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        _ => {}
-    }
-}
-
-/// Send a chat message via signaling connection
-async fn send_chat_message(
-    conn: &mut SignalingConnection,
-    peer_id: &str,
-    peer_name: &str,
-    content: &str,
-) -> Result<()> {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    conn.send(SignalingMessage::ChatMessage {
-        sender_id: peer_id.to_string(),
-        sender_name: peer_name.to_string(),
-        content: content.to_string(),
-        timestamp,
-    })
-    .await?;
-
-    Ok(())
-}
-
 /// A signaling client for `server`, proving this installation's device
 /// identity - the one the GUI on this machine uses too.
 fn signaling_client(server: &str) -> SignalingClient {
@@ -781,12 +718,29 @@ enum Input {
     Quit,
 }
 
+/// What a line at the prompt can change of a running audio session
+struct Controls {
+    shared: Shared,
+    commands: std_mpsc::Sender<Command>,
+}
+
+impl Controls {
+    fn mute(&self, on: bool) {
+        self.shared.is_muted.store(on, Ordering::SeqCst);
+        let _ = self.commands.send(Command::SetMute(on));
+    }
+
+    fn monitor(&self, on: bool) {
+        self.shared.is_monitoring.store(on, Ordering::SeqCst);
+        let _ = self.commands.send(Command::SetMonitoring(on));
+    }
+}
+
 /// Interprets a line as a command or as chat.
 ///
 /// Slash commands exist because a debugging session needs the controls the
 /// mixer offers - muting above all - without a second window (ADR-027).
-fn handle_input_line(line: &str, is_muted: &AtomicBool, monitor: Option<&LocalMonitor>) -> Input {
-    let audio_active = monitor.is_some();
+fn handle_input_line(line: &str, audio: Option<&Controls>) -> Input {
     match line {
         "/help" | "/?" => {
             println!("  /mute      stop sending audio");
@@ -799,22 +753,22 @@ fn handle_input_line(line: &str, is_muted: &AtomicBool, monitor: Option<&LocalMo
             Input::Handled
         }
         "/mute" | "/unmute" => {
-            if !audio_active {
+            let Some(audio) = audio else {
                 println!("(no audio in this session, nothing to mute)");
                 return Input::Handled;
-            }
+            };
             let mute = line == "/mute";
-            is_muted.store(mute, Ordering::SeqCst);
+            audio.mute(mute);
             println!("{}", if mute { "🔇 muted" } else { "🔊 unmuted" });
             Input::Handled
         }
         "/monitor" | "/unmonitor" => {
-            let Some(monitor) = monitor else {
+            let Some(audio) = audio else {
                 println!("(no audio in this session, nothing to monitor)");
                 return Input::Handled;
             };
             let on = line == "/monitor";
-            monitor.set_enabled(on);
+            audio.monitor(on);
             println!(
                 "{}",
                 if on {
@@ -839,9 +793,10 @@ fn handle_input_line(line: &str, is_muted: &AtomicBool, monitor: Option<&LocalMo
 /// audio with everyone who publishes an address.
 ///
 /// One function for both entry points because everything after the first
-/// message is identical, and because both need to start streaming when a
-/// peer's address arrives *later* - the creator is alone in the room until
-/// someone joins (the defect ADR-026 fixed in the GUI).
+/// message is identical. The steps from reaching the server to opening a link to whoever
+/// publishes an address - also later, when the creator is alone in the room until someone
+/// joins, and again after the connection was lost - are the core's room driver, which the app
+/// runs too (ADR-044, ADR-077); this is what it steers here and what the prompt does.
 #[allow(clippy::too_many_arguments)]
 async fn run_room_session(
     server: String,
@@ -857,136 +812,51 @@ async fn run_room_session(
         anyhow::bail!("--report-json reports the audio, which --chat-only does not open");
     }
 
-    info!("Connecting through the jamuru server: {}", server);
-    let client = signaling_client(&server);
-    let mut conn = client.connect().await?;
+    let (chat, mut rx_chat) = tokio::sync::mpsc::unbounded_channel();
+    let room_name = match &entry {
+        RoomEntry::Create { room_name } => room_name.clone(),
+        RoomEntry::Join { .. } => String::new(),
+    };
+    let backend = Arc::new(CliBackend::new(server, peer_name.clone(), room_name, chat));
 
-    // The key the others in the room check our key exchange against
-    let link_identity = LinkIdentity::generate();
-
-    let entered = conn
-        .enter_room(EnterRequest {
-            entry,
-            peer_name: peer_name.clone(),
-            link_key: link_identity.public_key(),
-            // The CLI takes no peer messages, so it announces no features.
-            features: vec![],
-            client_info: None,
-        })
-        .await
-        .map_err(|e| match e {
-            EnterError::Refused(message) => {
-                anyhow::anyhow!("Signaling server refused the request: {}", message)
-            }
-            EnterError::Unexpected(other) => {
-                anyhow::anyhow!("Unexpected response from server: {:?}", other)
-            }
-            EnterError::Connection(e) => anyhow::Error::new(e),
-        })?;
-    let (my_peer_id, peers) = (entered.peer_id, entered.peers);
-    if entered.created {
-        println!("\nRoom created: {}", entered.room_id);
-    } else {
-        println!("\nJoined room: {}", entered.room_id);
-    }
-    if let Some(invite_code) = &entered.invite_code {
-        println!("Invite code:  {}", invite_code);
-        if entered.created {
-            println!(
-                "Others join with:\n  jamuru join-room --server {} --room {}",
-                server, invite_code
-            );
-        }
-    }
-    println!("Your peer ID: {}", my_peer_id);
-    if !entered.created {
-        println!("\nPeers in room ({}):", peers.len());
-        for peer in &peers {
-            println!(
-                "  - {} (id: {}, addr: {:?})",
-                peer.name, peer.id, peer.public_addr
-            );
-        }
-    }
-
-    let my_peer_id_str = my_peer_id.to_string();
-    let signaling_conn_arc = Arc::new(tokio::sync::Mutex::new(conn));
-
-    // Audio setup happens before any peer is known: the socket has to be bound
-    // and published for the *other* side to have somewhere to send to.
-    let is_muted = Arc::new(AtomicBool::new(false));
+    // Audio setup happens before any peer is known: the socket has to be bound and published for
+    // the *other* side to have somewhere to send to.
     let probe = settings.input_bursts.then(|| Arc::new(BurstProbe::new()));
-    let (mut audio, mut rx_checks, _no_checks): (Option<AudioSession>, _, _) = if chat_only {
+    if chat_only {
         println!("\n📝 Chat-only mode (no audio)");
-        let (idle, rx_checks) = tokio::sync::mpsc::unbounded_channel();
-        (None, rx_checks, Some(idle))
     } else {
         print_audio_settings(&settings);
-        let (session, rx_checks) =
-            AudioSession::start(&settings, link_identity, is_muted.clone(), probe.clone()).await?;
-        session.advertise(&signaling_conn_arc).await?;
-        (Some(session), rx_checks, None)
-    };
+        let session =
+            AudioSession::start(&settings, backend.identity.clone(), probe.clone()).await?;
+        *backend.audio() = Some(session);
+    }
 
-    // Signaling events arrive on their own task so the main loop can select
-    // over audio, chat and the keyboard at once.
-    let signaling_for_recv = signaling_conn_arc.clone();
-    let (tx_signaling, mut rx_signaling) = tokio::sync::mpsc::channel::<SignalingMessage>(32);
-    let signaling_recv_task = tokio::spawn(async move {
-        loop {
-            let msg = {
-                let mut conn_guard = signaling_for_recv.lock().await;
-                match tokio::time::timeout(Duration::from_millis(100), conn_guard.recv()).await {
-                    Ok(Ok(msg)) => Some(msg),
-                    Ok(Err(_)) => None,
-                    Err(_) => None,
-                }
-            };
-            if let Some(msg) = msg {
-                if tx_signaling.send(msg).await.is_err() {
-                    break;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    });
+    let driver = Driver::new(Arc::new(Session::new(Timing::default())), backend.clone());
+    driver.connect_afresh().await.map_err(anyhow::Error::msg)?;
+    match entry {
+        RoomEntry::Create { .. } => driver.create().await,
+        RoomEntry::Join { room_id } => driver.join(room_id).await,
+    }
+    .map_err(anyhow::Error::msg)?;
 
     // Non-interactive: say one thing, wait for a reply, leave. Used by scripts
     // and smoke tests.
     if let Some(msg_to_send) = message {
-        let result = run_single_message(
-            &signaling_conn_arc,
-            &mut rx_signaling,
-            &my_peer_id_str,
-            &peer_name,
-            &msg_to_send,
-            timeout_secs,
-        )
-        .await;
-        signaling_recv_task.abort();
-        leave_room(&signaling_conn_arc).await;
+        let result = run_single_message(&backend, &mut rx_chat, &msg_to_send, timeout_secs).await;
+        driver.end().await;
         return result;
     }
 
     println!("\n💬 Chat enabled. Type a message and press Enter to send.");
     println!("   /help lists the session commands. Ctrl+C to stop.\n");
-    print!("chat> ");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
+    print_prompt();
 
     let stdin = tokio::io::stdin();
     let mut stdin_reader = BufReader::new(stdin).lines();
 
-    // Everyone in the room who has an address gets a link, whether they were
-    // already there or turn up later.
-    let mut roster = Roster::default();
-    if let Some(session) = audio.as_mut() {
-        let steps = roster.entered(my_peer_id, peers);
-        run_audio(steps, &mut roster, session).await;
-    }
-
     let mut connected_at: Option<Instant> = None;
-    let mut follow = tokio::time::interval(ADAPT_INTERVAL);
-    follow.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut announce = tokio::time::interval(Duration::from_millis(100));
+    announce.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut stdin_open = true;
     loop {
         let session_ends = connected_at
@@ -1001,48 +871,17 @@ async fn run_room_session(
                 info!("Shutting down...");
                 break;
             }
-            Some(msg) = rx_signaling.recv() => {
-                if let SignalingMessage::ChatMessage { sender_id, .. } = &msg {
-                    if sender_id == &my_peer_id_str {
-                        continue;
-                    }
-                }
-                handle_signaling_event(&msg);
-
-                if let Some(session) = audio.as_mut() {
-                    let steps = match msg {
-                        SignalingMessage::PeerJoined { peer } => {
-                            roster.joined(peer);
-                            Vec::new()
-                        }
-                        // A peer that just published an address is one we can stream to.
-                        SignalingMessage::PeerUpdated { peer } => roster.updated(peer),
-                        SignalingMessage::PeerLeft { peer_id } => roster.left(peer_id),
-                        _ => Vec::new(),
-                    };
-                    run_audio(steps, &mut roster, session).await;
-                }
+            Some(line) = rx_chat.recv() => {
+                println!("\n💬 {}: {}", line.sender_name, line.content);
+                print_prompt();
             }
-            Some(checked) = rx_checks.recv() => {
-                if let Some(session) = audio.as_mut() {
-                    if let Some(name) = session.links.checked(checked).await {
+            _ = announce.tick(), if !chat_only => {
+                if let Some(session) = backend.audio().as_mut() {
+                    for name in session.newly_connected() {
                         connected_at.get_or_insert_with(Instant::now);
                         println!("\nConnected to {}. Audio is flowing.\n", name);
-                        print!("chat> ");
-                        let _ = std::io::stdout().flush();
+                        print_prompt();
                     }
-                }
-            }
-            _ = follow.tick(), if audio.is_some() => {
-                if let Some(session) = audio.as_mut() {
-                    session.links.adapt();
-                    let steps: Vec<Audio> = session
-                        .links
-                        .healths()
-                        .into_iter()
-                        .flat_map(|(peer, health)| roster.link_is(peer, health))
-                        .collect();
-                    run_audio(steps, &mut roster, session).await;
                 }
             }
             line_result = stdin_reader.next_line(), if stdin_open => {
@@ -1050,21 +889,19 @@ async fn run_room_session(
                     Ok(Some(line)) => {
                         let line = line.trim();
                         if !line.is_empty() {
-                            match handle_input_line(line, &is_muted, audio.as_ref().map(AudioSession::monitor)) {
+                            let input = handle_input_line(
+                                line,
+                                backend.audio().as_ref().map(|session| &session.controls),
+                            );
+                            match input {
                                 Input::Quit => break,
                                 Input::Handled => {}
-                                Input::Stats => match audio.as_ref() {
-                                    Some(session) => session.print_stats().await,
+                                Input::Stats => match backend.audio().as_ref() {
+                                    Some(session) => session.print_stats(),
                                     None => println!("(no audio in this session, nothing to measure)"),
                                 },
                                 Input::Chat(text) => {
-                                    let mut conn_guard = signaling_conn_arc.lock().await;
-                                    if let Err(e) = send_chat_message(
-                                        &mut conn_guard,
-                                        &my_peer_id_str,
-                                        &peer_name,
-                                        &text,
-                                    ).await {
+                                    if let Err(e) = backend.send_chat(&text).await {
                                         warn!("Failed to send chat: {}", e);
                                     } else {
                                         println!("💬 You: {}", text);
@@ -1072,8 +909,7 @@ async fn run_room_session(
                                 }
                             }
                         }
-                        print!("chat> ");
-                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                        print_prompt();
                     }
                     Ok(None) => {
                         info!("stdin closed");
@@ -1088,9 +924,8 @@ async fn run_room_session(
         }
     }
 
-    signaling_recv_task.abort();
-
-    if let Some(session) = audio {
+    let session = backend.audio().take();
+    if let Some(session) = session {
         let reports = session.finish().await;
 
         if let Some(path) = &run.report_json {
@@ -1109,84 +944,440 @@ async fn run_room_session(
         }
     }
 
-    leave_room(&signaling_conn_arc).await;
+    driver.end().await;
     Ok(())
 }
 
-/// Carries out what the roster decided about the audio, the same decisions the app carries
-/// out (ADR-077).
-async fn run_audio(steps: Vec<Audio>, roster: &mut Roster, session: &mut AudioSession) {
-    for step in steps {
-        match step {
-            Audio::Stop => session.links.end_all().await,
-            // The socket outlives the links here, so what the room was told stays true
-            Audio::Advertise => {}
-            Audio::Rejoin => warn!(
-                "A link gave up and nobody is heard. The app would enter the room again; \
-                 the CLI does not - leave and start it again"
-            ),
-            Audio::End { peer } => session.links.end(peer).await,
-            Audio::Start {
-                peer,
-                candidates,
-                link_key,
-            } => {
-                let name = roster
-                    .peers()
-                    .iter()
-                    .find(|known| known.id == peer)
-                    .map_or_else(|| peer.to_string(), |known| known.name.clone());
-                println!(
-                    "\nConnecting to {} ({} address candidate(s))...",
-                    name,
-                    candidates.len()
-                );
-                if let Err(e) = session.links.start(peer, &name, candidates, link_key) {
-                    // Allow a later update to retry rather than leaving them unheard for good
-                    warn!("Failed to start the link to {}: {}", name, e);
-                    roster.start_failed(peer);
+fn print_prompt() {
+    print!("chat> ");
+    let _ = std::io::stdout().flush();
+}
+
+/// A line of chat from another participant
+struct ChatLine {
+    sender_name: String,
+    content: String,
+}
+
+/// What the room procedure steers in the CLI: one signaling connection, the audio session of the
+/// core library, and what is printed of the room.
+struct CliBackend {
+    server: String,
+    peer_name: String,
+    /// What a room this CLI creates is called
+    room_name: String,
+    /// The key the others in the room check our key exchange against
+    identity: LinkIdentity,
+    /// The connection to the server, by the number [`Backend::connect`] gave it
+    connection: tokio::sync::Mutex<Option<(u32, SignalingConnection)>>,
+    connections_made: AtomicU32,
+    my_peer_id: Mutex<Option<Uuid>>,
+    /// The participants of the room, by the name the room knows them by
+    names: Mutex<HashMap<Uuid, String>>,
+    /// Where what the others say goes
+    chat: tokio::sync::mpsc::UnboundedSender<ChatLine>,
+    /// None in a session without audio, and once it was finished
+    audio: Mutex<Option<AudioSession>>,
+}
+
+impl CliBackend {
+    fn new(
+        server: String,
+        peer_name: String,
+        room_name: String,
+        chat: tokio::sync::mpsc::UnboundedSender<ChatLine>,
+    ) -> Self {
+        Self {
+            server,
+            peer_name,
+            room_name,
+            identity: LinkIdentity::generate(),
+            connection: tokio::sync::Mutex::new(None),
+            connections_made: AtomicU32::new(0),
+            my_peer_id: Mutex::new(None),
+            names: Mutex::new(HashMap::new()),
+            chat,
+            audio: Mutex::new(None),
+        }
+    }
+
+    fn audio(&self) -> MutexGuard<'_, Option<AudioSession>> {
+        self.audio.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn names(&self) -> MutexGuard<'_, HashMap<Uuid, String>> {
+        self.names.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The connection `conn` names, while it is the one held
+    async fn held(
+        &self,
+        conn: u32,
+    ) -> Result<tokio::sync::MappedMutexGuard<'_, SignalingConnection>, String> {
+        tokio::sync::MutexGuard::try_map(self.connection.lock().await, |held| match held {
+            Some((id, connection)) if *id == conn => Some(connection),
+            _ => None,
+        })
+        .map_err(|_| "Not connected to the signaling server".to_string())
+    }
+
+    /// Says one thing to the room
+    async fn send_chat(&self, content: &str) -> Result<()> {
+        let my_peer_id = self
+            .my_peer_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|id| id.to_string())
+            .context("not in a room")?;
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let mut connection = self.connection.lock().await;
+        let (_, connection) = connection.as_mut().context("not connected")?;
+        connection
+            .send(SignalingMessage::ChatMessage {
+                sender_id: my_peer_id,
+                sender_name: self.peer_name.clone(),
+                content: content.to_string(),
+                timestamp,
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Enters a room as `request` says, and prints what the room is
+    async fn enter(&self, conn: u32, entry: RoomEntry, peer_name: &str) -> Result<Entered, String> {
+        let entered = self
+            .held(conn)
+            .await?
+            .enter_room(EnterRequest {
+                entry,
+                peer_name: peer_name.to_string(),
+                link_key: self.identity.public_key(),
+                // The CLI takes no peer messages, so it announces no features.
+                features: vec![],
+                client_info: None,
+            })
+            .await
+            .map_err(|e| match e {
+                EnterError::Refused(message) => {
+                    format!("Signaling server refused the request: {}", message)
                 }
+                EnterError::Unexpected(other) => {
+                    format!("Unexpected response from server: {:?}", other)
+                }
+                EnterError::Connection(e) => e.to_string(),
+            })?;
+
+        *self.my_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(entered.peer_id);
+        self.names().extend(
+            entered
+                .peers
+                .iter()
+                .map(|peer| (peer.id, peer.name.clone())),
+        );
+        if entered.created {
+            println!("\nRoom created: {}", entered.room_id);
+        } else {
+            println!("\nJoined room: {}", entered.room_id);
+        }
+        if let Some(invite_code) = &entered.invite_code {
+            println!("Invite code:  {}", invite_code);
+            if entered.created {
+                println!(
+                    "Others join with:\n  jamuru join-room --server {} --room {}",
+                    self.server, invite_code
+                );
             }
+        }
+        println!("Your peer ID: {}", entered.peer_id);
+        if !entered.created {
+            println!("\nPeers in room ({}):", entered.peers.len());
+            for peer in &entered.peers {
+                println!(
+                    "  - {} (id: {}, addr: {:?})",
+                    peer.name, peer.id, peer.public_addr
+                );
+            }
+        }
+        Ok(entered)
+    }
+}
+
+impl Backend for CliBackend {
+    type Other = SignalingMessage;
+
+    async fn connect(&self) -> Result<u32, NetworkError> {
+        info!("Connecting through the jamuru server: {}", self.server);
+        let connection = signaling_client(&self.server).connect().await?;
+        let conn = self.connections_made.fetch_add(1, Ordering::SeqCst) + 1;
+        *self.connection.lock().await = Some((conn, connection));
+        Ok(conn)
+    }
+
+    async fn disconnect(&self, conn: u32) -> Result<(), String> {
+        let mut held = self.connection.lock().await;
+        if matches!(held.as_ref(), Some((id, _)) if *id == conn) {
+            if let Some((_, connection)) = held.take() {
+                connection.close().await.map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn list_rooms(&self, conn: u32) -> Result<Vec<RoomInfo>, String> {
+        self.held(conn)
+            .await?
+            .list_rooms()
+            .await
+            .map_err(|e| match e {
+                EnterError::Refused(message) => message,
+                EnterError::Unexpected(_) => "Unexpected response".to_string(),
+                EnterError::Connection(e) => e.to_string(),
+            })
+    }
+
+    async fn create_room(&self, conn: u32, peer_name: &str) -> Result<Entered, String> {
+        let entry = RoomEntry::Create {
+            room_name: self.room_name.clone(),
+        };
+        self.enter(conn, entry, peer_name).await
+    }
+
+    async fn join_room(&self, conn: u32, code: &str, peer_name: &str) -> Result<Entered, String> {
+        let entry = RoomEntry::Join {
+            room_id: code.to_string(),
+        };
+        self.enter(conn, entry, peer_name).await
+    }
+
+    async fn leave_room(&self, conn: u32) -> Result<(), String> {
+        self.held(conn)
+            .await?
+            .send(SignalingMessage::LeaveRoom)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn poll_events(&self, conn: u32) -> Result<Vec<Polled<SignalingMessage>>, String> {
+        let Ok(mut connection) = self.held(conn).await else {
+            return Ok(Vec::new());
+        };
+        let mut events = Vec::new();
+        loop {
+            match tokio::time::timeout(Duration::from_millis(50), connection.recv()).await {
+                Ok(Ok(SignalingMessage::PeerJoined { peer })) => {
+                    events.push(Polled::Room(RoomEvent::PeerJoined(peer)))
+                }
+                Ok(Ok(SignalingMessage::PeerUpdated { peer })) => {
+                    events.push(Polled::Room(RoomEvent::PeerUpdated(peer)))
+                }
+                Ok(Ok(SignalingMessage::PeerLeft { peer_id })) => {
+                    events.push(Polled::Room(RoomEvent::PeerLeft(peer_id)))
+                }
+                Ok(Ok(other)) => events.push(Polled::Other(other)),
+                Ok(Err(e)) => {
+                    events.push(Polled::Room(RoomEvent::ConnectionLost(e.to_string())));
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        Ok(events)
+    }
+
+    async fn other_event(&self, event: SignalingMessage) {
+        let SignalingMessage::ChatMessage {
+            sender_id,
+            sender_name,
+            content,
+            ..
+        } = event
+        else {
+            return;
+        };
+        let mine = self
+            .my_peer_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|id| id.to_string());
+        if mine.as_deref() != Some(sender_id.as_str()) {
+            let _ = self.chat.send(ChatLine {
+                sender_name,
+                content,
+            });
+        }
+    }
+
+    fn room_event(&self, event: &RoomEvent) {
+        match event {
+            RoomEvent::PeerJoined(peer) => {
+                self.names().insert(peer.id, peer.name.clone());
+                println!("\n📥 {} joined the room", peer.name);
+                print_prompt();
+            }
+            RoomEvent::PeerUpdated(peer) => {
+                self.names().insert(peer.id, peer.name.clone());
+            }
+            RoomEvent::PeerLeft(peer_id) => {
+                println!("\n📤 Peer {} left the room", peer_id);
+                print_prompt();
+            }
+            RoomEvent::ConnectionLost(_) => {}
+        }
+    }
+
+    fn peer_name(&self) -> String {
+        self.peer_name.clone()
+    }
+
+    async fn clock_is_right(&self) -> bool {
+        matches!(
+            server_clock_offset_secs(&self.server).await,
+            Some(offset) if offset.abs() < CLOCK_SKEW_NOTICE_SECS
+        )
+    }
+
+    /// The links end; the audio session itself goes on, so the socket the room was told stays
+    /// the one audio arrives on.
+    async fn stop_audio(&self) {
+        if let Some(session) = self.audio().as_mut() {
+            session.unlink_all();
+        }
+    }
+
+    fn audio_state(&self) -> (bool, Vec<(Uuid, LinkHealth)>) {
+        match self.audio().as_ref() {
+            Some(session) => (
+                session.controls.shared.is_active.load(Ordering::SeqCst),
+                session.link_healths(),
+            ),
+            None => (false, Vec::new()),
+        }
+    }
+
+    /// Tells the room where to send audio. Done before any peer is known, because the peer needs
+    /// an address to send to (ADR-026).
+    async fn advertise(&self, conn: u32) -> Result<(), String> {
+        let Some(message) = self.audio().as_ref().map(AudioSession::advertisement) else {
+            return Ok(());
+        };
+        self.held(conn)
+            .await?
+            .send(message)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn link(
+        &self,
+        _conn: u32,
+        peer: Uuid,
+        candidates: Vec<SocketAddr>,
+        link_key: Option<String>,
+    ) -> Result<(), String> {
+        let name = named(&self.names(), peer);
+        let mut audio = self.audio();
+        let Some(session) = audio.as_mut() else {
+            return Ok(());
+        };
+        println!(
+            "\nConnecting to {} ({} address candidate(s))...",
+            name,
+            candidates.len()
+        );
+        session
+            .link(peer, &name, candidates, link_key)
+            .map_err(|e| e.to_string())
+    }
+
+    async fn unlink(&self, peer: Uuid) -> Result<(), String> {
+        if let Some(session) = self.audio().as_mut() {
+            session.unlink(peer);
+        }
+        Ok(())
+    }
+
+    fn announce(&self, _snapshot: &jamjam::network::room_session::Snapshot) {}
+}
+
+/// What one link looked like when it was asked about or ended
+#[derive(Clone)]
+struct LinkSummary {
+    name: String,
+    addr: Option<SocketAddr>,
+    stats: ConnectionStats,
+    peer_info: Option<PeerLatencyInfo>,
+    playout: PlayoutStats,
+    /// The play-out delay in force, after any adaptation
+    delay_frames: u32,
+    /// The delay their play-out buffer holds, in microseconds
+    jitter_buffer_delay_us: u32,
+}
+
+impl LinkSummary {
+    fn of(name: String, report: &audio_session::LinkReport) -> Self {
+        Self {
+            name,
+            addr: report.remote_addr.read().ok().and_then(|addr| *addr),
+            stats: report
+                .stats
+                .read()
+                .ok()
+                .and_then(|stats| stats.clone())
+                .unwrap_or_default(),
+            peer_info: report
+                .latency_info
+                .read()
+                .ok()
+                .and_then(|info| info.clone()),
+            playout: report
+                .playout
+                .read()
+                .map(|playout| *playout)
+                .unwrap_or_default(),
+            delay_frames: report.delay_frames.load(Ordering::SeqCst),
+            jitter_buffer_delay_us: report.jitter_buffer_delay_us.load(Ordering::SeqCst),
         }
     }
 }
 
-/// The audio half of a session.
+/// The audio half of a session: the audio session of the core library, which the app runs
+/// too, steered from the prompt (ADR-077).
 ///
-/// Received audio takes the app's path - decoded on arrival, held in the
-/// play-out buffer, concealed when a frame is missing, FEC-recovered where the
-/// preset sends FEC - so a problem with jitter or loss sounds here the way it
-/// sounds in the app (ADR-027, ADR-028). What is sent matches the app too:
-/// stereo, centred, in the preset's codec. And, as in the app, there is a link
-/// to everyone in the room who has an address, what is played is the mix of
-/// them and what is captured goes to each of them (ADR-077).
+/// Received audio takes the app's path - decoded on arrival, held in the play-out buffer,
+/// concealed when a frame is missing, FEC-recovered where the preset sends FEC - so a problem
+/// with jitter or loss sounds here the way it sounds in the app (ADR-027, ADR-028). And, as in
+/// the app, there is a link to everyone in the room who has an address, what is played is the
+/// mix of them and what is captured goes to each of them.
 struct AudioSession {
-    links: Links,
-    local_info: LocalLatencyInfo,
+    controls: Controls,
+    /// The audio thread, which ends after [`Command::Stop`]
+    thread: std::thread::JoinHandle<()>,
+    settings: AudioSettings,
+    /// Our key in the room, which each peer's key exchange is checked against
+    identity: LinkIdentity,
     /// What the room is told of the audio socket
     local_addr: SocketAddr,
-    candidates: Vec<jamjam::network::AddressCandidate>,
-    send_task: tokio::task::JoinHandle<()>,
-    monitor: LocalMonitor,
-    /// Held for as long as the session runs; dropping it stops the audio.
-    io: AudioIo,
+    candidates: Vec<AddressCandidate>,
+    /// The participants linked to, by the name the room knows them by
+    names: HashMap<Uuid, String>,
+    /// The links whose coming up has been told
+    told_up: HashSet<Uuid>,
 }
 
 impl AudioSession {
-    /// Binds the audio socket and starts capture and playback, with no link yet. `identity` is
-    /// our key in the room, which each peer's key exchange is checked against.
+    /// Binds the audio socket and starts the session on the devices, with no link yet.
+    /// `identity` is our key in the room, which each peer's key exchange is checked against.
     ///
-    /// With a `probe`, the bursts sent and the bursts played out are stamped
-    /// on it.
+    /// With a `probe`, the bursts sent and the bursts played out are stamped on it.
     async fn start(
         settings: &AudioSettings,
         identity: LinkIdentity,
-        is_muted: Arc<AtomicBool>,
         probe: Option<Arc<BurstProbe>>,
-    ) -> Result<(Self, tokio::sync::mpsc::UnboundedReceiver<Checked>)> {
-        let preset = &settings.preset;
-        let codec_type = preset.codec_type();
-
+    ) -> Result<Self> {
         // STUN is asked through the socket before anything reads it: the reply would be taken
         // for a datagram of a peer. One socket for the whole session, so every link shares
         // the address the room is told.
@@ -1195,443 +1386,183 @@ impl AudioSession {
         info!("Local UDP socket: {}", local_addr);
         let candidates = gather_candidates_on(&socket).await.unwrap_or_default();
         info!("Gathered {} address candidates", candidates.len());
-        let mux = UdpMux::from_std(socket)?;
 
-        let mix = PeerMix::new(
-            MAX_PEERS_PER_ROOM - 1,
-            settings.sample_rate,
-            settings.frame_size,
-            Arc::new(AtomicU64::new(0)),
-        );
-        let monitor = LocalMonitor::new(settings.frame_size);
-        monitor.set_enabled(settings.monitor);
-
-        let (tx_capture, mut rx_capture) = tokio::sync::mpsc::channel::<(Vec<f32>, u32)>(64);
-        let io = AudioIo::start(
-            settings,
-            &mix,
-            &monitor,
-            probe.clone(),
-            move |samples, timestamp| {
-                let _ = tx_capture.try_send((samples.to_vec(), timestamp));
+        let shared = Shared::new();
+        shared
+            .is_monitoring
+            .store(settings.monitor, Ordering::SeqCst);
+        let input_signal = match (settings.input_tone, settings.input_bursts) {
+            (Some(frequency), _) => Some(InputSignal::Tone(frequency)),
+            (None, true) => Some(InputSignal::Bursts),
+            (None, false) => None,
+        };
+        let Running {
+            commands,
+            started,
+            thread,
+        } = audio_session::start(
+            Params {
+                prepared_socket: socket,
+                input_device_id: settings.input_device.clone(),
+                output_device_id: settings.output_device.clone(),
+                buffer_size: settings.frame_size,
+                preset: settings.preset.clone(),
+                sample_rate: settings.sample_rate,
+                transmit_channels: settings.transmit_channels,
+                input_channels: settings.input_channels,
+                output_channels: settings.output_channels,
+                input_signal,
+                output_file: settings.output_file.clone(),
+                probe,
             },
-        )?;
+            &shared,
+            |_| {},
+        );
+        match tokio::task::spawn_blocking(move || started.recv()).await? {
+            Ok(Ok(())) => {}
+            Ok(Err(reason)) => anyhow::bail!(reason),
+            Err(_) => anyhow::bail!("the audio session ended before it started"),
+        }
 
-        let codec = format!("{:?}", codec_type).to_lowercase();
-        let mut local_info =
-            LocalLatencyInfo::from_audio_config(settings.frame_size, settings.sample_rate, &codec);
-        local_info.set_jitter_buffer_ms(jitter_buffer_ms(preset, settings));
-
-        let senders: Senders = Arc::new(RwLock::new(Arc::from(Vec::new())));
-        let (links, checks) = Links::new(
-            mux,
-            mix,
-            link_settings(settings, &local_info),
+        Ok(Self {
+            controls: Controls { shared, commands },
+            thread,
+            settings: settings.clone(),
             identity,
-            senders.clone(),
-        );
-
-        let sample_rate = settings.sample_rate;
-        let send_task = tokio::spawn(async move {
-            let mut stereo = Vec::new();
-            // Muting fades the microphone out (and unmuting in) rather than
-            // cutting it, so the other side does not hear a click.
-            let mut mute_ramp = GainRamp::new(sample_rate);
-            while let Some((samples, timestamp)) = rx_capture.recv().await {
-                let mute_target = if is_muted.load(Ordering::SeqCst) {
-                    0.0
-                } else {
-                    1.0
-                };
-                if mute_ramp.is_silent_at(mute_target) {
-                    continue;
-                }
-                stereo.resize(samples.len() * WIRE_CHANNELS, 0.0);
-                mono_to_wire(&samples, 1.0, 0, &mut stereo);
-                mute_ramp.apply(&mut stereo, WIRE_CHANNELS, mute_target);
-                // Each link seals the frame with its own key, so each is sent its own
-                let up = senders.read().unwrap_or_else(|e| e.into_inner()).clone();
-                let mut noted = false;
-                for connection in up.iter() {
-                    let conn = connection.lock().await;
-                    if !conn.is_connected() {
-                        continue;
-                    }
-                    if let (Some(probe), false) = (&probe, noted) {
-                        probe.note_sent(&stereo);
-                        noted = true;
-                    }
-                    if let Err(e) = conn.send_audio(&stereo, timestamp).await {
-                        warn!("Failed to send audio: {}", e);
-                    }
-                }
-            }
-        });
-
-        Ok((
-            Self {
-                links,
-                local_info,
-                local_addr,
-                candidates,
-                send_task,
-                monitor,
-                io,
-            },
-            checks,
-        ))
+            local_addr,
+            candidates,
+            names: HashMap::new(),
+            told_up: HashSet::new(),
+        })
     }
 
-    fn monitor(&self) -> &LocalMonitor {
-        &self.monitor
+    /// What tells the room where to send audio
+    fn advertisement(&self) -> SignalingMessage {
+        SignalingMessage::UpdatePeerInfo {
+            candidates: self.candidates.clone(),
+            public_addr: self.candidates.first().map(|c| c.address),
+            local_addr: Some(self.local_addr),
+        }
     }
 
-    /// Tells the room where to send audio. Done before any peer is known, because the peer needs
-    /// an address to send to (ADR-026).
-    async fn advertise(
-        &self,
-        signaling: &Arc<tokio::sync::Mutex<SignalingConnection>>,
+    /// Opens an audio link to `peer`, racing `candidates`. It is set up on the audio thread;
+    /// [`AudioSession::link_healths`] says how it went.
+    fn link(
+        &mut self,
+        peer: Uuid,
+        name: &str,
+        candidates: Vec<SocketAddr>,
+        link_key: Option<String>,
     ) -> Result<()> {
-        signaling
-            .lock()
-            .await
-            .send(SignalingMessage::UpdatePeerInfo {
-                candidates: self.candidates.clone(),
-                public_addr: self.candidates.first().map(|c| c.address),
-                local_addr: Some(self.local_addr),
-            })
-            .await?;
-        Ok(())
+        self.names.insert(peer, name.to_string());
+        self.told_up.remove(&peer);
+        self.controls
+            .commands
+            .send(Command::Link(Box::new(LinkTarget {
+                peer,
+                candidates,
+                link: Some((self.identity.clone(), link_key)),
+            })))
+            .map_err(|_| anyhow::anyhow!("the audio session has ended"))
+    }
+
+    fn unlink(&mut self, peer: Uuid) {
+        self.told_up.remove(&peer);
+        let _ = self.controls.commands.send(Command::Unlink(peer));
+    }
+
+    fn unlink_all(&mut self) {
+        for (peer, _) in self.controls.shared.link_reports() {
+            self.unlink(peer);
+        }
+    }
+
+    /// How the audio link to each participant is doing
+    fn link_healths(&self) -> Vec<(Uuid, LinkHealth)> {
+        self.controls.shared.link_healths()
+    }
+
+    /// The names of the participants whose link has come up since this was last asked
+    fn newly_connected(&mut self) -> Vec<String> {
+        let mut names = Vec::new();
+        for (peer, report) in self.controls.shared.link_reports() {
+            let connected = matches!(report.state(), Some((state, _)) if state == "connected");
+            if connected && self.told_up.insert(peer) {
+                names.push(named(&self.names, peer));
+            }
+        }
+        names
     }
 
     /// What each link looks like, one block of statistics per peer
-    async fn print_stats(&self) {
-        let reports = self.links.reports().await;
+    fn print_stats(&self) {
+        let reports = summaries(&self.names, self.controls.shared.link_reports());
         if reports.is_empty() {
             println!("(no peer connected yet, nothing to measure)");
         }
         for report in &reports {
-            print_link_stats(report, &self.local_info);
+            print_link_stats(report, &self.settings);
         }
     }
 
     /// Stops the audio, closes every link and prints what each looked like.
-    async fn finish(self) -> Vec<LinkReport> {
+    async fn finish(self) -> Vec<LinkSummary> {
         let Self {
-            links,
-            local_info,
-            send_task,
-            io,
+            controls,
+            thread,
+            settings,
+            names,
             ..
         } = self;
-        send_task.abort();
-        let reports = links.finish().await;
-        drop(io);
+        let _ = controls.commands.send(Command::Stop);
+        let _ = tokio::task::spawn_blocking(move || thread.join()).await;
+        let reports = summaries(&names, controls.shared.ended_reports());
         for report in &reports {
-            print_link_stats(report, &local_info);
+            print_link_stats(report, &settings);
         }
         reports
     }
 }
 
-fn print_link_stats(report: &LinkReport, local_info: &LocalLatencyInfo) {
+fn named(names: &HashMap<Uuid, String>, peer: Uuid) -> String {
+    names
+        .get(&peer)
+        .cloned()
+        .unwrap_or_else(|| peer.to_string())
+}
+
+fn summaries(
+    names: &HashMap<Uuid, String>,
+    reports: Vec<(Uuid, Arc<audio_session::LinkReport>)>,
+) -> Vec<LinkSummary> {
+    reports
+        .into_iter()
+        .map(|(peer, report)| LinkSummary::of(named(names, peer), &report))
+        .collect()
+}
+
+fn print_link_stats(report: &LinkSummary, settings: &AudioSettings) {
+    let mut local_info =
+        LocalLatencyInfo::from_audio_config(settings.frame_size, settings.sample_rate, "pcm");
+    local_info.set_jitter_buffer_ms(report.jitter_buffer_delay_us as f32 / 1000.0);
     print_session_stats(
         &report.stats,
-        local_info,
+        &local_info,
         report.peer_info.as_ref(),
         &report.playout,
         Some(&report.name),
     );
 }
 
-/// How every link of the session carries audio
-fn link_settings(settings: &AudioSettings, local_info: &LocalLatencyInfo) -> LinkSettings {
-    let preset = &settings.preset;
-    LinkSettings {
-        encoding: AudioEncodingConfig {
-            codec_type: preset.codec_type(),
-            sample_rate: settings.sample_rate,
-            channels: WIRE_CHANNELS as u16,
-            frame_size: settings.frame_size,
-            bitrate: 0,
-            fec_group_size: preset.fec_group_size(),
-        },
-        sample_rate: settings.sample_rate,
-        frame_size: settings.frame_size,
-        jitter_buffer_frames: preset.jitter_buffer_frames(),
-        announce: latency_info_message(local_info),
-    }
-}
-
-/// What a link tells its peer of our audio, so it can convert ours and show the latency we add
-/// (ADR-013).
-fn latency_info_message(info: &LocalLatencyInfo) -> LatencyInfoMessage {
-    LatencyInfoMessage {
-        capture_buffer_ms: info.capture_buffer_ms,
-        playback_buffer_ms: info.playback_buffer_ms,
-        encode_ms: info.encode_ms,
-        decode_ms: info.decode_ms,
-        jitter_buffer_ms: info.jitter_buffer_ms,
-        frame_size: info.frame_size,
-        sample_rate: info.sample_rate,
-        codec: info.codec.clone(),
-        // The CLI always upmixes its mono capture to WIRE_CHANNELS before
-        // sending (see `mono_to_wire` above), so that's what's actually
-        // on the wire regardless of any per-user setting.
-        channel_count: WIRE_CHANNELS as u8,
-    }
-}
-
-/// The play-out delay told to the peer, in ms. The buffer counts packets, and
-/// a frame too big for one packet goes as several, so its depth lasts packets
-/// long, not frames long (ADR-070).
-fn jitter_buffer_ms(preset: &AudioPreset, settings: &AudioSettings) -> f32 {
-    preset.jitter_buffer_frames() as f32
-        * audio_packet_duration_ms(settings.frame_size, WIRE_CHANNELS, settings.sample_rate)
-}
-
-/// Peak level of `--input-tone`, below full scale so the centred stereo mix
-/// cannot clip.
-const TONE_AMPLITUDE: f32 = 0.5;
-
-/// Fills a captured frame with a stand-in signal.
-type SignalGenerator = Box<dyn FnMut(&mut [f32]) + Send>;
-
-/// Hands off each captured frame and its timestamp. Boxed so `AudioIo::start`
-/// can choose at runtime which of capture's backends ends up calling it.
-type OnCapture = Box<dyn FnMut(&[f32], u32) + Send>;
-
-/// Fills a device-sized request with what a peer sent. Boxed for the same
-/// reason as [`OnCapture`].
-type FrameSource = Box<dyn FnMut(&mut [f32]) -> usize + Send>;
-
-/// Capture and playback, on the devices or on their stand-ins.
-///
-/// The stand-ins (`--input-tone`, `--output-file`) let a session run where
-/// there is no sound card, and make what was sent and what was heard
-/// reproducible. They run at the session's own frame clock, as a device would.
-struct AudioIo {
-    capture: AudioEngine,
-    playback: AudioEngine,
-    /// Cleared to stop the stand-in threads.
-    running: Arc<AtomicBool>,
-    stand_ins: Vec<std::thread::JoinHandle<()>>,
-    /// Set instead of running `capture`/`playback` when the input and output
-    /// device name the same ASIO driver (Windows only): one ASIO session
-    /// serves both directions, so there is nothing for `capture`/`playback`
-    /// to open in that case (see `audio::asio`).
-    #[cfg(target_os = "windows")]
-    asio: Option<AsioDuplex>,
-}
-
-impl AudioIo {
-    /// Starts capture, handing each mono frame and its sample timestamp to
-    /// `on_capture`, and playback, taking frames from `mix`. What is
-    /// captured also goes to `monitor`, which mixes it into what is played
-    /// while it is on. What is played is also shown to `probe`.
-    fn start<F>(
-        settings: &AudioSettings,
-        mix: &PeerMix,
-        monitor: &LocalMonitor,
-        probe: Option<Arc<BurstProbe>>,
-        on_capture: F,
-    ) -> Result<Self>
-    where
-        F: FnMut(&[f32], u32) + Send + 'static,
-    {
-        // The CLI has no input or output channel choice: the app's pickers
-        // (`set_capture_picks` / `set_playback_route`) are left out on purpose.
-        let config = |channels: usize| AudioConfig {
-            sample_rate: settings.sample_rate,
-            channels: channels as u16,
-            frame_size: settings.frame_size,
-        };
-        let mut io = Self {
-            capture: AudioEngine::new(config(1)),
-            playback: AudioEngine::new(config(WIRE_CHANNELS)),
-            running: Arc::new(AtomicBool::new(true)),
-            stand_ins: Vec::new(),
-            #[cfg(target_os = "windows")]
-            asio: None,
-        };
-
-        let stand_in: Option<SignalGenerator> = if let Some(frequency) = settings.input_tone {
-            let step = std::f64::consts::TAU * frequency as f64 / settings.sample_rate as f64;
-            let mut angle = 0.0f64;
-            Some(Box::new(move |frame: &mut [f32]| {
-                for sample in frame.iter_mut() {
-                    *sample = TONE_AMPLITUDE * angle.sin() as f32;
-                    angle = (angle + step) % std::f64::consts::TAU;
-                }
-            }))
-        } else if settings.input_bursts {
-            let mut signal = BurstSignal::new(settings.sample_rate);
-            Some(Box::new(move |frame: &mut [f32]| signal.fill(frame)))
-        } else {
-            None
-        };
-
-        // Boxed, and taken by whichever of the three branches below ends up
-        // using it, so the choice can be made with an `Option`s runtime
-        // check rather than needing the compiler to see one static branch -
-        // `asio_driver`'s branch only exists on Windows, and stays absent
-        // (never `Some`) everywhere else.
-        let mut on_capture: Option<OnCapture> = Some(Box::new(on_capture));
-        let for_output = mix.clone();
-        let for_monitor = monitor.clone();
-        let mut source: Option<FrameSource> = Some(Box::new(move |out: &mut [f32]| {
-            let samples = for_output.mix_into(out, 100, None);
-            // Before the monitor mix: what the peer sent, not our own input.
-            if let Some(probe) = &probe {
-                probe.note_played(&out[..samples]);
-            }
-            for_monitor.mix_into(&mut out[..samples]);
-            samples
-        }));
-
-        // The input and output device name the same ASIO driver: one ASIO
-        // session serves both directions (`audio::asio`), so it takes over
-        // from the two independent opens below. Not considered together
-        // with a stand-in (`--input-tone` etc.) - those exist to run without
-        // real hardware, which an ASIO driver is not.
-        #[cfg(target_os = "windows")]
-        if stand_in.is_none() && settings.output_file.is_none() {
-            let asio_driver = shared_asio_driver(
-                settings.input_device.clone().map(DeviceId).as_ref(),
-                settings.output_device.clone().map(DeviceId).as_ref(),
-            );
-            if let Some(driver_name) = asio_driver {
-                let mut tap = monitor.tap();
-                let mut capture_cb = on_capture.take().expect("not yet taken");
-                let fill_frame = source.take().expect("not yet taken");
-                io.asio = Some(AsioDuplex::start(
-                    &driver_name,
-                    settings.sample_rate,
-                    settings.frame_size,
-                    mix.frame_samples(),
-                    OPEN_TIMEOUT,
-                    vec![0],
-                    OutputRoute::default(),
-                    move |samples, timestamp| {
-                        tap.push(samples);
-                        capture_cb(samples, timestamp as u32);
-                    },
-                    fill_frame,
-                )?);
-            }
-        }
-
-        if let Some(mut on_capture) = on_capture.take() {
-            match stand_in {
-                Some(mut fill) => {
-                    let mut timestamp = 0u32;
-                    let mut frame = vec![0.0f32; settings.frame_size as usize];
-                    let mut tap = monitor.tap();
-                    io.stand_ins
-                        .push(run_at_frame_rate(settings, io.running.clone(), move || {
-                            fill(&mut frame);
-                            tap.push(&frame);
-                            on_capture(&frame, timestamp);
-                            timestamp = timestamp.wrapping_add(frame.len() as u32);
-                        }));
-                }
-                None => {
-                    let mut tap = monitor.tap();
-                    io.capture.start_capture(
-                        settings.input_device.clone().map(DeviceId).as_ref(),
-                        move |samples, timestamp| {
-                            tap.push(samples);
-                            on_capture(samples, timestamp as u32)
-                        },
-                    )?
-                }
-            }
-        }
-
-        if let Some(mut source) = source.take() {
-            match &settings.output_file {
-                Some(path) => {
-                    let mut file = std::fs::File::create(path)
-                        .with_context(|| format!("cannot write {}", path.display()))?;
-                    let mut frame = vec![0.0f32; mix.frame_samples()];
-                    let mut bytes = Vec::with_capacity(frame.len() * 4);
-                    let path = path.to_path_buf();
-                    io.stand_ins
-                        .push(run_at_frame_rate(settings, io.running.clone(), move || {
-                            let samples = source(&mut frame);
-                            bytes.clear();
-                            bytes.extend(frame[..samples].iter().flat_map(|s| s.to_le_bytes()));
-                            // Unbuffered on purpose: whatever was played is on disk
-                            // even if the process is killed.
-                            if let Err(e) = file.write_all(&bytes) {
-                                warn!("Failed to write {}: {}", path.display(), e);
-                            }
-                        }));
-                }
-                None => io.playback.start_playback_with_source(
-                    settings.output_device.clone().map(DeviceId).as_ref(),
-                    mix.frame_samples(),
-                    source,
-                )?,
-            }
-        }
-
-        Ok(io)
-    }
-}
-
-impl Drop for AudioIo {
-    fn drop(&mut self) {
-        self.running.store(false, Ordering::SeqCst);
-        #[cfg(target_os = "windows")]
-        if let Some(asio) = self.asio.take() {
-            asio.stop();
-        }
-        self.capture.stop_capture();
-        self.playback.stop_playback();
-        for stand_in in self.stand_ins.drain(..) {
-            let _ = stand_in.join();
-        }
-    }
-}
-
-/// Calls `tick` once per frame period on its own thread until `running`
-/// clears - the clock a device would otherwise provide. Deadlines are counted
-/// from the start, so a late wake-up does not slow the stream down.
-fn run_at_frame_rate(
-    settings: &AudioSettings,
-    running: Arc<AtomicBool>,
-    mut tick: impl FnMut() + Send + 'static,
-) -> std::thread::JoinHandle<()> {
-    let period = Duration::from_secs_f64(settings.frame_size as f64 / settings.sample_rate as f64);
-    std::thread::spawn(move || {
-        let start = Instant::now();
-        let mut frames = 0u32;
-        while running.load(Ordering::SeqCst) {
-            tick();
-            frames = frames.wrapping_add(1);
-            let due = start + period * frames;
-            if let Some(wait) = due.checked_duration_since(Instant::now()) {
-                std::thread::sleep(wait);
-            }
-        }
-    })
-}
-
 /// Sends one message, waits for a reply, and reports whether one came.
 async fn run_single_message(
-    signaling: &Arc<tokio::sync::Mutex<SignalingConnection>>,
-    rx_signaling: &mut tokio::sync::mpsc::Receiver<SignalingMessage>,
-    my_peer_id: &str,
-    peer_name: &str,
+    backend: &CliBackend,
+    rx_chat: &mut tokio::sync::mpsc::UnboundedReceiver<ChatLine>,
     message: &str,
     timeout_secs: u64,
 ) -> Result<()> {
     println!("📤 Sending: {}", message);
-    {
-        let mut conn_guard = signaling.lock().await;
-        send_chat_message(&mut conn_guard, my_peer_id, peer_name, message).await?;
-    }
+    backend.send_chat(message).await?;
 
     let deadline = Duration::from_secs(timeout_secs);
     let start = std::time::Instant::now();
@@ -1640,17 +1571,11 @@ async fn run_single_message(
 
     while start.elapsed() <= deadline {
         tokio::select! {
-            Some(msg) = rx_signaling.recv() => {
-                if let SignalingMessage::ChatMessage { sender_id, sender_name, content, .. } = &msg {
-                    if sender_id != my_peer_id {
-                        println!("📥 {}: {}", sender_name, content);
-                        received_response = true;
-                        // A small window for anything that follows.
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                    }
-                } else {
-                    handle_signaling_event(&msg);
-                }
+            Some(line) = rx_chat.recv() => {
+                println!("📥 {}: {}", line.sender_name, line.content);
+                received_response = true;
+                // A small window for anything that follows.
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
             _ = tokio::time::sleep(Duration::from_millis(100)) => {}
         }
@@ -1660,11 +1585,6 @@ async fn run_single_message(
         println!("⚠️  Timeout: no response received");
     }
     Ok(())
-}
-
-async fn leave_room(signaling: &Arc<tokio::sync::Mutex<SignalingConnection>>) {
-    let mut conn_guard = signaling.lock().await;
-    let _ = conn_guard.send(SignalingMessage::LeaveRoom).await;
 }
 
 #[tokio::main]
@@ -1732,6 +1652,19 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jamjam::audio::DeviceId;
+
+    /// A session that is not running: the commands it is sent arrive on the returned receiver.
+    fn controls() -> (Controls, std_mpsc::Receiver<Command>) {
+        let (commands, sent) = std_mpsc::channel();
+        (
+            Controls {
+                shared: Shared::new(),
+                commands,
+            },
+            sent,
+        )
+    }
 
     /// The session commands are what make the CLI usable for debugging without
     /// a second window (ADR-027): they have to be recognised, act, and not be
@@ -1740,31 +1673,38 @@ mod tests {
     /// Verifies: REQ-CLI-002
     #[test]
     fn session_commands_are_recognised_and_act() {
-        let muted = AtomicBool::new(false);
-        let monitor = LocalMonitor::new(64);
+        let (audio, sent) = controls();
 
         assert!(matches!(
-            handle_input_line("/mute", &muted, Some(&monitor)),
+            handle_input_line("/mute", Some(&audio)),
             Input::Handled
         ));
-        assert!(muted.load(Ordering::SeqCst), "/mute should mute");
+        assert!(
+            audio.shared.is_muted.load(Ordering::SeqCst),
+            "/mute should mute"
+        );
+        assert_eq!(sent.try_recv(), Ok(Command::SetMute(true)));
 
         assert!(matches!(
-            handle_input_line("/unmute", &muted, Some(&monitor)),
+            handle_input_line("/unmute", Some(&audio)),
             Input::Handled
         ));
-        assert!(!muted.load(Ordering::SeqCst), "/unmute should unmute");
+        assert!(
+            !audio.shared.is_muted.load(Ordering::SeqCst),
+            "/unmute should unmute"
+        );
+        assert_eq!(sent.try_recv(), Ok(Command::SetMute(false)));
 
         assert!(matches!(
-            handle_input_line("/stats", &muted, Some(&monitor)),
+            handle_input_line("/stats", Some(&audio)),
             Input::Stats
         ));
         assert!(matches!(
-            handle_input_line("/help", &muted, Some(&monitor)),
+            handle_input_line("/help", Some(&audio)),
             Input::Handled
         ));
         assert!(matches!(
-            handle_input_line("/quit", &muted, Some(&monitor)),
+            handle_input_line("/quit", Some(&audio)),
             Input::Quit
         ));
     }
@@ -1775,23 +1715,19 @@ mod tests {
     /// Verifies: REQ-CLI-002
     #[test]
     fn only_commands_are_intercepted() {
-        let muted = AtomicBool::new(false);
-        let monitor = LocalMonitor::new(64);
+        let (audio, sent) = controls();
 
-        match handle_input_line("hello everyone", &muted, Some(&monitor)) {
+        match handle_input_line("hello everyone", Some(&audio)) {
             Input::Chat(text) => assert_eq!(text, "hello everyone"),
             _ => panic!("plain text should be chat"),
         }
 
         assert!(
-            matches!(
-                handle_input_line("/mutee", &muted, Some(&monitor)),
-                Input::Handled
-            ),
+            matches!(handle_input_line("/mutee", Some(&audio)), Input::Handled),
             "a mistyped command must not be broadcast as chat"
         );
         assert!(
-            !muted.load(Ordering::SeqCst),
+            !audio.shared.is_muted.load(Ordering::SeqCst) && sent.try_recv().is_err(),
             "a mistyped command must not change anything"
         );
     }
@@ -1802,43 +1738,38 @@ mod tests {
     /// Verifies: REQ-CLI-002
     #[test]
     fn muting_without_audio_reports_that_there_is_nothing_to_mute() {
-        let muted = AtomicBool::new(false);
-
-        assert!(matches!(
-            handle_input_line("/mute", &muted, None),
-            Input::Handled
-        ));
-        assert!(
-            !muted.load(Ordering::SeqCst),
-            "there is no audio to mute, so the flag stays put"
-        );
+        assert!(matches!(handle_input_line("/mute", None), Input::Handled));
     }
 
     /// `/monitor` is the CLI's switch for hearing yourself; it has to reach the
-    /// monitor the audio callbacks read, not just print a line.
+    /// session the audio callbacks read, not just print a line.
     ///
     /// Verifies: REQ-CLI-006
     #[test]
     fn monitor_commands_switch_local_monitoring() {
-        let muted = AtomicBool::new(false);
-        let monitor = LocalMonitor::new(64);
+        let (audio, sent) = controls();
 
         assert!(matches!(
-            handle_input_line("/monitor", &muted, Some(&monitor)),
-            Input::Handled
-        ));
-        assert!(monitor.is_enabled(), "/monitor should turn monitoring on");
-
-        assert!(matches!(
-            handle_input_line("/unmonitor", &muted, Some(&monitor)),
+            handle_input_line("/monitor", Some(&audio)),
             Input::Handled
         ));
         assert!(
-            !monitor.is_enabled(),
+            audio.shared.is_monitoring.load(Ordering::SeqCst),
+            "/monitor should turn monitoring on"
+        );
+        assert_eq!(sent.try_recv(), Ok(Command::SetMonitoring(true)));
+
+        assert!(matches!(
+            handle_input_line("/unmonitor", Some(&audio)),
+            Input::Handled
+        ));
+        assert!(
+            !audio.shared.is_monitoring.load(Ordering::SeqCst),
             "/unmonitor should turn monitoring off"
         );
+        assert_eq!(sent.try_recv(), Ok(Command::SetMonitoring(false)));
         assert!(
-            !muted.load(Ordering::SeqCst),
+            !audio.shared.is_muted.load(Ordering::SeqCst),
             "monitoring is what you hear; it does not touch what is sent"
         );
     }
@@ -1854,6 +1785,9 @@ mod tests {
             input_bursts: false,
             output_file: None,
             monitor: false,
+            transmit_channels: 1,
+            input_channels: (1, Some(2)),
+            output_channels: (1, Some(2)),
         }
     }
 
@@ -1862,8 +1796,8 @@ mod tests {
         addr: Option<&str>,
         packets_received: u64,
         frames_played: u64,
-    ) -> LinkReport {
-        LinkReport {
+    ) -> LinkSummary {
+        LinkSummary {
             name: name.to_string(),
             addr: addr.map(|addr| addr.parse().unwrap()),
             stats: ConnectionStats {
@@ -1876,6 +1810,7 @@ mod tests {
                 ..Default::default()
             },
             delay_frames: 3,
+            jitter_buffer_delay_us: 0,
         }
     }
 
@@ -1922,33 +1857,10 @@ mod tests {
     /// Verifies: REQ-CLI-006
     #[test]
     fn monitoring_without_audio_reports_that_there_is_nothing_to_monitor() {
-        let muted = AtomicBool::new(false);
-
         assert!(matches!(
-            handle_input_line("/monitor", &muted, None),
+            handle_input_line("/monitor", None),
             Input::Handled
         ));
-    }
-
-    /// Verifies: REQ-CLI-008
-    #[test]
-    fn listing_devices_with_a_hung_driver_gives_up_at_the_timeout() {
-        fn hung() -> Result<Vec<AudioDevice>, AudioError> {
-            std::thread::sleep(Duration::from_secs(3));
-            Ok(Vec::new())
-        }
-
-        let started = Instant::now();
-        let outcome = listed_within("test listing", Duration::from_millis(100), hung);
-
-        assert!(
-            matches!(outcome, Err(AudioError::DeviceUnresponsive(_))),
-            "a listing that does not return should end as unresponsive, got {outcome:?}"
-        );
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "the caller should not have waited for the driver"
-        );
     }
 
     fn device(id: &str, name: &str) -> AudioDevice {
@@ -2022,86 +1934,6 @@ mod tests {
         assert!(
             message.contains("alsa:hw:2,0") && message.contains("alsa:hw:3,0"),
             "got {message:?}"
-        );
-    }
-
-    /// A link that is still being checked is not one the captured audio goes to, so what is
-    /// captured meanwhile is not held for it and cannot reach the peer as a burst of old audio
-    /// when the check ends. It is sent to from the moment its check has ended.
-    ///
-    /// Verifies: REQ-CLI-009
-    #[tokio::test]
-    async fn audio_captured_while_a_link_is_checked_is_not_held_for_it_and_goes_to_it_once_it_is_up(
-    ) {
-        let settings = settings();
-        let local_info = LocalLatencyInfo::from_audio_config(128, 48_000, "pcm");
-        let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
-        let (our_key, their_key) = (ours.public_key(), theirs.public_key());
-        let (our_mux, their_mux) = (
-            UdpMux::bind("127.0.0.1:0").await.expect("our socket"),
-            UdpMux::bind("127.0.0.1:0").await.expect("their socket"),
-        );
-        let (our_addr, their_addr) = (our_mux.local_addr(), their_mux.local_addr());
-        let senders: Senders = Arc::new(RwLock::new(Arc::from(Vec::new())));
-        let (mut links, mut checks) = Links::new(
-            our_mux,
-            PeerMix::new(
-                MAX_PEERS_PER_ROOM - 1,
-                settings.sample_rate,
-                settings.frame_size,
-                Arc::new(AtomicU64::new(0)),
-            ),
-            link_settings(&settings, &local_info),
-            ours,
-            senders.clone(),
-        );
-        let sent_to = || senders.read().unwrap().len();
-
-        links
-            .start(
-                uuid::Uuid::new_v4(),
-                "ben",
-                vec![their_addr],
-                Some(their_key),
-            )
-            .expect("the link starts");
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(sent_to(), 0, "nobody has answered, so the link is not up");
-
-        let mut ben = jamjam::network::Connection::on(&their_mux).expect("their link");
-        ben.verify_peer(&theirs, Some(&our_key)).expect("our key");
-        ben.connect(our_addr).await.expect("they answer");
-        let checked = tokio::time::timeout(Duration::from_secs(10), checks.recv())
-            .await
-            .expect("the check ends")
-            .expect("the check reports");
-
-        assert_eq!(links.checked(checked).await.as_deref(), Some("ben"));
-        assert_eq!(sent_to(), 1, "the link is sent to once its check has ended");
-    }
-
-    /// Verifies: REQ-CLI-010
-    #[test]
-    fn jitter_buffer_told_to_the_peer_counts_packets_not_frames() {
-        let settings = |frame_size| AudioSettings {
-            frame_size,
-            preset: AudioPreset::HighQuality,
-            ..settings()
-        };
-        let depth = AudioPreset::HighQuality.jitter_buffer_frames() as f32;
-
-        // 256 frames go as two packets of 128: a packet lasts 2.667 ms, not
-        // the frame's 5.333 ms.
-        let big = jitter_buffer_ms(&AudioPreset::HighQuality, &settings(256));
-        assert!(
-            (big - depth * 128.0 / 48.0).abs() < 0.01,
-            "256 frames: got {big} ms"
-        );
-
-        let small = jitter_buffer_ms(&AudioPreset::HighQuality, &settings(64));
-        assert!(
-            (small - depth * 64.0 / 48.0).abs() < 0.01,
-            "64 frames: got {small} ms"
         );
     }
 }

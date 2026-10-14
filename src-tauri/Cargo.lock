@@ -2322,6 +2322,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "hkdf",
+ "libc",
  "libloading 0.9.0",
  "local-ip-address",
  "objc2-core-audio",
@@ -2344,6 +2345,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows",
  "x25519-dalek",
 ]
 
