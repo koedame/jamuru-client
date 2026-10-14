@@ -6,25 +6,19 @@
 //! the core's `Roster`, the same as in the app. This carries those decisions out.
 
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use jamjam::audio::{
-    PeerGain, PeerMeter, PeerMix, PeerRateChange, PlayoutStats, ReceivePath, VoiceHandle,
-};
+use jamjam::audio::{PeerGain, PeerMeter, PeerMix, PlayoutStats, ReceivePath, VoiceHandle};
+use jamjam::link::{LinkSpec, Opened, Senders};
 use jamjam::network::{
-    AudioEncodingConfig, Connection, ConnectionState, ConnectionStats, LinkHealth, LinkIdentity,
-    PeerLatencyInfo, UdpMux,
+    AudioEncodingConfig, Connection, ConnectionStats, LinkHealth, LinkIdentity, PeerLatencyInfo,
+    UdpMux,
 };
 use jamjam::protocol::LatencyInfoMessage;
-
-/// The connections the send task sends each captured frame to: those of the links that are up.
-/// Replaced whole when a link comes up or goes, so the send task takes it without waiting for
-/// whoever changes it.
-pub type Senders = Arc<RwLock<Arc<[Arc<tokio::sync::Mutex<Connection>>]>>>;
 
 /// How every link of a session carries audio
 pub struct LinkSettings {
@@ -130,62 +124,31 @@ impl Links {
         candidates: Vec<SocketAddr>,
         link_key: Option<String>,
     ) -> Result<()> {
-        let mut connection = Connection::on(&self.mux)?;
-        connection.verify_peer(&self.identity, link_key.as_deref())?;
-        connection.set_audio_encoding(self.settings.encoding.clone())?;
-
-        let receive = ReceivePath::new(
-            self.settings.encoding.codec_type,
-            self.settings.sample_rate,
-            self.settings.frame_size,
-            self.settings.jitter_buffer_frames,
+        let spec = LinkSpec {
+            mux: &self.mux,
+            mix: &self.mix,
+            encoding: &self.settings.encoding,
+            sample_rate: self.settings.sample_rate,
+            frame_size: self.settings.frame_size,
+            jitter_buffer_frames: self.settings.jitter_buffer_frames,
+        };
+        let Opened {
+            mut connection,
+            receive,
+            voice,
+        } = spec.open(
+            Connection::on(&self.mux)?,
+            Some((&self.identity, link_key.as_deref())),
+            Arc::new(PeerGain::default()),
+            Arc::new(PeerMeter::default()),
+            |_| {},
         )?;
-        let voice = self
-            .mix
-            .add(
-                receive.clone(),
-                Arc::new(PeerGain::default()),
-                Arc::new(PeerMeter::default()),
-            )
-            .ok_or_else(|| anyhow!("the session has no room for another link"))?;
-
-        let for_audio = receive.clone();
-        connection.set_audio_callback(move |sequence, payload, _timestamp| {
-            if !for_audio.receive(sequence, &payload) {
-                tracing::trace!("Play-out buffer refused frame {}", sequence);
-            }
-        });
 
         let for_rate = receive.clone();
+        let sample_rate = self.settings.sample_rate;
+        let who = name.to_string();
         connection.set_latency_info_callback(move |peer| {
-            for_rate.follow_peer_channels(peer.channel_count);
-            match for_rate.follow_peer_rate(peer.sample_rate) {
-                PeerRateChange::Unchanged => {}
-                PeerRateChange::Resampling {
-                    from,
-                    to,
-                    latency_ms,
-                } => info!(
-                    "Converting the peer's audio: {} Hz -> {} Hz (+{:.2} ms)",
-                    from, to, latency_ms
-                ),
-                PeerRateChange::Passthrough => info!("Peer runs at our sample rate"),
-                PeerRateChange::Failed(e) => {
-                    warn!(
-                        "Cannot convert the peer's sample rate, playing as is: {}",
-                        e
-                    )
-                }
-            }
-        });
-
-        // Sequence numbers carry on across an outage, so what was waiting before it must not
-        // play after it (ADR-022).
-        let for_state = receive.clone();
-        connection.set_state_change_callback(move |state| {
-            if state == ConnectionState::Connected {
-                for_state.reset();
-            }
+            for_rate.follow_peer(&peer).log(&who, sample_rate);
         });
 
         self.next_serial += 1;

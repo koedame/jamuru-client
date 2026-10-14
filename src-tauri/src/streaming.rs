@@ -24,11 +24,12 @@ use uuid::Uuid;
 use jamjam::audio::{
     capture_attempts, capture_to_wire, rms_level, AudioConfig, AudioEngine, AudioError,
     AudioPreset, DeviceId, FlightKind, FlightRecorder, GainRamp, LocalMonitor, MonitorTap,
-    OutputRoute, PeerGain, PeerMeter, PeerMix, PeerRateChange, ReceivePath, RecordingFeed,
-    RecordingTap, Verdict, VoiceHandle, ADAPT_INTERVAL, WIRE_CHANNELS,
+    OutputRoute, PeerGain, PeerMeter, PeerMix, ReceivePath, RecordingFeed, RecordingTap, Verdict,
+    VoiceHandle, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
 use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
+use jamjam::link::{LinkSpec, Opened, Senders};
 use jamjam::network::{
     audio_packet_duration_ms, required_bps, status_label, AudioEncodingConfig, BandwidthEstimator,
     BandwidthStatus, BandwidthVerdict, Connection, ConnectionState, ConnectionStats,
@@ -1925,11 +1926,6 @@ fn open_asio(
     Ok((session, CaptureRing { consumer, channels }))
 }
 
-/// The connections the send thread sends each captured frame to: those of the
-/// links that are up. Replaced whole when a link comes up or goes, so the
-/// send thread takes it without waiting for whoever changes it.
-type Senders = Arc<RwLock<Arc<[Arc<tokio::sync::Mutex<Connection>>]>>>;
-
 /// Where setting up the link to a participant has got
 enum LinkStage {
     /// The connectivity check is running. It hands the connection over when
@@ -1986,31 +1982,8 @@ impl LinkSetup<'_> {
     /// and the session's commands do not wait for it.
     fn open(&self, target: LinkTarget, jitter_buffer_frames: u32) -> Result<Link, String> {
         let peer = target.peer;
-        let mut connection = Connection::on(self.mux)
+        let connection = Connection::on(self.mux)
             .map_err(|e| format!("Failed to create the connection: {}", e))?;
-        if let Some((ours, peer_key)) = &target.link {
-            connection
-                .verify_peer(ours, peer_key.as_deref())
-                .map_err(|e| format!("Failed to set up the link to the peer: {}", e))?;
-        }
-        // The codec and FEC come from the preset (ADR-021)
-        connection
-            .set_audio_encoding(self.encoding.clone())
-            .map_err(|e| format!("Failed to configure audio encoding: {}", e))?;
-
-        // Receive path: jitter buffer keyed by sequence number (ADR-020).
-        // Received audio waits in the play-out buffer, and only there, until
-        // the output callback takes it (ADR-028). The CLI uses the same path.
-        let receive = ReceivePath::new(
-            self.encoding.codec_type,
-            self.sample_rate,
-            self.buffer_size,
-            jitter_buffer_frames,
-        )
-        .map_err(|e| format!("Failed to create audio decoder: {}", e))?;
-        if let Ok(mut flights) = self.shared_flights.write() {
-            flights.push((peer, receive.flight().clone()));
-        }
 
         let report = Arc::new(LinkReport::default());
         report.jitter_buffer_delay_us.store(
@@ -2023,15 +1996,7 @@ impl LinkSetup<'_> {
             let mut gains = self.peer_gains.write().unwrap_or_else(|e| e.into_inner());
             gains.entry(peer).or_default().clone()
         };
-        let voice = self
-            .mix
-            .add(receive.clone(), gain, report.meter.clone())
-            .ok_or_else(|| "The session has no room for another link".to_string())?;
 
-        // Rebuild the jitter buffer when the link recovers: sequence numbers
-        // carry on from before the outage, so stale packets would play out of
-        // order (ADR-022).
-        let receive_for_state = receive.clone();
         let report_for_state = report.clone();
         let reconnect_count = self.reconnect_count.clone();
         let silence_giveups = self.silence_giveups.clone();
@@ -2039,33 +2004,48 @@ impl LinkSetup<'_> {
         if let Ok(mut shared) = self.shared_link_facts.write() {
             shared.get_or_insert_with(|| link_facts.clone());
         }
-        connection.set_state_change_callback(move |state| {
-            tracing::info!("Audio connection to {} state: {:?}", peer, state);
-            if state == ConnectionState::Connected {
-                receive_for_state.reset();
-            }
-            if state == ConnectionState::Reconnecting {
-                reconnect_count.fetch_add(1, Ordering::Relaxed);
-            }
-            // Failing to connect at all is reported by the connect call itself;
-            // a failure after the link came up is the peer going silent.
-            if state == ConnectionState::Failed && link_facts.snapshot().route.is_some() {
-                silence_giveups.fetch_add(1, Ordering::Relaxed);
-            }
+        let spec = LinkSpec {
+            mux: self.mux,
+            mix: self.mix,
+            encoding: self.encoding,
+            sample_rate: self.sample_rate,
+            frame_size: self.buffer_size,
+            jitter_buffer_frames,
+        };
+        let identity = target
+            .link
+            .as_ref()
+            .map(|(ours, peer_key)| (ours, peer_key.as_deref()));
+        let Opened {
+            mut connection,
+            receive,
+            voice,
+        } = spec
+            .open(
+                connection,
+                identity,
+                gain,
+                report.meter.clone(),
+                move |state| {
+                    tracing::info!("Audio connection to {} state: {:?}", peer, state);
+                    if state == ConnectionState::Reconnecting {
+                        reconnect_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    // Failing to connect at all is reported by the connect call itself;
+                    // a failure after the link came up is the peer going silent.
+                    if state == ConnectionState::Failed && link_facts.snapshot().route.is_some() {
+                        silence_giveups.fetch_add(1, Ordering::Relaxed);
+                    }
 
-            // Publish the transition so the UI can show reconnection progress
-            // and prompt once recovery gives up (REQ-CON-110).
-            report_for_state.set_state(&format!("{:?}", state).to_lowercase(), None);
-        });
-
-        // Runs on the network task, not the realtime audio callback, so
-        // locking and taking ownership of the payload are both acceptable here.
-        let receive_for_callback = receive.clone();
-        connection.set_audio_callback(move |sequence, payload, _timestamp| {
-            if !receive_for_callback.receive(sequence, &payload) {
-                tracing::trace!("Play-out buffer refused frame {}", sequence);
-            }
-        });
+                    // Publish the transition so the UI can show reconnection progress
+                    // and prompt once recovery gives up (REQ-CON-110).
+                    report_for_state.set_state(&format!("{:?}", state).to_lowercase(), None);
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        if let Ok(mut flights) = self.shared_flights.write() {
+            flights.push((peer, receive.flight().clone()));
+        }
 
         // Race all their candidates, so a peer on the same network is reached
         // directly rather than only through its public address (REQ-CON-113).
@@ -2240,29 +2220,7 @@ impl Link {
         }
         // Update peer latency info (ADR-013: sample rate from remote peer)
         if let Some(peer_info) = conn.peer_latency_info() {
-            match self.receive.follow_peer_rate(peer_info.sample_rate) {
-                PeerRateChange::Unchanged => {}
-                PeerRateChange::Resampling {
-                    from,
-                    to,
-                    latency_ms,
-                } => tracing::info!(
-                    "Resampler created for {}: {} Hz -> {} Hz (latency: {:.2} ms)",
-                    peer,
-                    from,
-                    to,
-                    latency_ms
-                ),
-                PeerRateChange::Passthrough => tracing::info!(
-                    "Resampler disabled for {}: peer rate matches local rate ({} Hz)",
-                    peer,
-                    sample_rate
-                ),
-                PeerRateChange::Failed(e) => {
-                    tracing::warn!("Failed to create resampler: {}", e)
-                }
-            }
-            self.receive.follow_peer_channels(peer_info.channel_count);
+            self.receive.follow_peer(&peer_info).log(&peer, sample_rate);
             if let Ok(mut info) = self.report.latency_info.write() {
                 *info = Some(peer_info);
             }
