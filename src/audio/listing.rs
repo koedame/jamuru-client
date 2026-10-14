@@ -1,14 +1,13 @@
-//! Audio devices for the settings (ADR-043)
+//! The audio devices on offer, listed the way the app and the CLI both need them (ADR-043).
 //!
-//! Lists the audio devices on offer. Choosing one, like every other audio
-//! setting, goes through [`crate::settings::settings_change`]; the choice in
-//! effect is the saved config.
+//! A driver that has hung never answers a listing, so a listing is made on a thread of its own
+//! and waited for a limited time. What the last successful listing said is given instead.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use jamjam::audio::{bounded, list_input_devices, list_output_devices, AudioDevice, LIST_TIMEOUT};
+use super::{bounded, list_input_devices, list_output_devices, AudioDevice, LIST_TIMEOUT};
 
 /// One direction's device list, and the call that has hung, if one has
 ///
@@ -27,6 +26,15 @@ struct Listing {
 
 static INPUTS: Listing = Listing::new(LIST_TIMEOUT);
 static OUTPUTS: Listing = Listing::new(LIST_TIMEOUT);
+
+/// Told of each device a listing finds, once. Where the app keeps what it must not write to its
+/// log in the clear.
+static LISTED: std::sync::OnceLock<fn(&AudioDevice)> = std::sync::OnceLock::new();
+
+/// Has `observe` called with every device a listing finds from now on. Only the first call counts.
+pub fn observe_listed_devices(observe: fn(&AudioDevice)) {
+    let _ = LISTED.set(observe);
+}
 
 /// Marks the listing call as ended when it is dropped, a panic included
 struct Ends(Arc<AtomicBool>);
@@ -73,8 +81,10 @@ impl Listing {
                 // Kept by the call itself, so a listing that comes back late
                 // still becomes the last one
                 if let Ok(devices) = &listed {
-                    for device in devices {
-                        crate::logging::register_device(&device.id.0, &device.name);
+                    if let Some(observe) = LISTED.get() {
+                        for device in devices {
+                            observe(device);
+                        }
                     }
                     *self.last.lock().unwrap_or_else(|e| e.into_inner()) = Some(devices.clone());
                 }
@@ -104,6 +114,41 @@ impl Listing {
                 direction
             )),
         }
+    }
+}
+
+/// The devices on offer when a change is planned or a device is opened.
+#[derive(Debug, Clone, Default)]
+pub struct Devices {
+    pub input: Vec<AudioDevice>,
+    pub output: Vec<AudioDevice>,
+}
+
+impl Devices {
+    /// The devices the system lists. A direction that cannot be listed counts
+    /// as offering none: that refuses choosing one of its devices, but leaves
+    /// every other setting (buffer size, sample rate, ...) changeable.
+    ///
+    /// Both directions are listed at once, so a driver that does not answer
+    /// costs one wait, not two.
+    pub fn list() -> Self {
+        let or_none = |listed: Result<Vec<AudioDevice>, String>, kind: &str| {
+            listed.unwrap_or_else(|e| {
+                tracing::warn!("Could not list the {} devices: {}", kind, e);
+                Vec::new()
+            })
+        };
+        std::thread::scope(|scope| {
+            let output = scope.spawn(output_devices);
+            let input = input_devices();
+            Self {
+                input: or_none(input, "input"),
+                output: or_none(
+                    output.join().unwrap_or_else(|_| Err("panicked".into())),
+                    "output",
+                ),
+            }
+        })
     }
 }
 
@@ -167,8 +212,8 @@ fn log_devices(kind: &str, devices: &[AudioDevice]) {
 
 /// Whether a listing call that hung is still out, in either direction. A
 /// test that needs the listings to answer in time waits for this to be false.
-#[cfg(test)]
-pub(crate) fn a_listing_is_hung() -> bool {
+#[doc(hidden)]
+pub fn a_listing_is_hung() -> bool {
     [&INPUTS, &OUTPUTS].into_iter().any(|listing| {
         listing
             .hung
@@ -182,7 +227,7 @@ pub(crate) fn a_listing_is_hung() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jamjam::audio::DeviceId;
+    use crate::audio::DeviceId;
     use std::sync::atomic::AtomicUsize;
 
     static CALLS: AtomicUsize = AtomicUsize::new(0);

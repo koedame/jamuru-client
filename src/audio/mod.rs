@@ -14,21 +14,25 @@ mod error;
 pub mod fault;
 mod flight;
 mod heartbeat;
+mod listing;
 mod monitor;
+mod open;
 mod peer_mix;
 mod playout;
 mod plc;
 mod preset;
 mod probe;
 mod resampler;
+mod slot;
 mod stream;
+mod taps;
 #[cfg(target_os = "macos")]
 mod transport;
 mod virtual_output;
 
 #[cfg(target_os = "windows")]
 pub use asio::AsioDuplex;
-pub use channels::{capture_attempts, OutputRoute};
+pub use channels::{capture_attempts, channel_count, pair_in_use, OutputRoute};
 pub use codec::{
     create_codec, AudioCodec, CodecConfig, CodecError, CodecType, OpusCodec, PcmCodec,
 };
@@ -49,7 +53,17 @@ pub use flight::{
     CAPACITY as FLIGHT_CAPACITY,
 };
 pub use heartbeat::{Heartbeat, StallGuard, Verdict, MAX_REOPENS, STALL_AFTER};
+pub use listing::{
+    a_listing_is_hung, input_devices, observe_listed_devices, output_devices, Devices,
+};
 pub use monitor::{LocalMonitor, MonitorTap, MONITOR_MARGIN_FRAMES};
+#[cfg(target_os = "windows")]
+pub use open::open_asio;
+pub use open::{
+    capture_or_silence, clear_device_problem, discard_queued, note_device_problem, note_trouble,
+    playout_source, start_capture_ring, start_playout, CaptureRing, DeviceProblem, DeviceSide,
+    DeviceTrouble,
+};
 pub use peer_mix::{PeerGain, PeerMeter, PeerMix, VoiceHandle};
 pub use playout::{
     PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult, PlayoutStats, WriteOutcome,
@@ -61,10 +75,14 @@ pub use resampler::{
     create_resampler, create_resampler_with_channels, AudioResampler, CaptureResampler,
     FastResampler, PassthroughResampler, ResamplerError,
 };
+#[cfg(target_os = "windows")]
+pub use slot::AsioSwitch;
+pub use slot::DeviceSlot;
 pub use stream::{
     balance_gains, capture_to_wire, mono_to_wire, pan_received, rms_level, GainRamp,
     PeerRateChange, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
+pub use taps::{set_taps, Taps};
 pub use virtual_output::{
     RecordingFeed, RecordingTap, VirtualOutputSink, CHANNELS as VIRTUAL_OUTPUT_CHANNELS,
     NODE_NAME_OUT,
