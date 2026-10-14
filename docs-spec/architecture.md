@@ -83,7 +83,6 @@ src/
 │   ├── fec.rs          # 前方誤り訂正
 │   ├── roster.rs       # 参加者のうち誰と音声を繋ぐか・相手が抜けたり途切れたりしたときの判断（入出力なし。CLI と GUI で共有。ADR-077）
 │   ├── sequence_tracker.rs # シーケンス追跡
-│   ├── session.rs      # セッション管理
 │   ├── signaling.rs    # シグナリング
 │   ├── stun.rs         # STUN クライアント
 │   ├── transport.rs    # UDPトランスポート
