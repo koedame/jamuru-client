@@ -157,6 +157,34 @@ pub fn resolve_output_device(device_id: Option<&DeviceId>) -> Result<cpal::Devic
     }
 }
 
+/// What the id of an ASIO driver starts with, which tells it from a `cpal` device's. `cpal`
+/// never opens ASIO devices here (see `audio::asio`), so this prefix is the only way one is
+/// reachable at all.
+pub(crate) const ASIO_ID_PREFIX: &str = "asio:";
+
+/// Whether `id` names an ASIO driver rather than a `cpal` device.
+pub fn is_asio_id(id: &DeviceId) -> bool {
+    id.0.starts_with(ASIO_ID_PREFIX)
+}
+
+/// The driver name inside an ASIO [`DeviceId`], or `None` if `id` is not one.
+pub fn driver_name_of(id: &DeviceId) -> Option<&str> {
+    id.0.strip_prefix(ASIO_ID_PREFIX)
+}
+
+/// The ASIO driver `input` and `output` should open as one session, if they name the same one:
+/// ASIO has one channel set per direction under a single driver, so an input and output that
+/// agree on the driver both mean that driver, opened once, rather than two independent streams
+/// (see `audio::asio`). `None` when either is unset, they differ, or neither names an ASIO
+/// driver at all.
+pub fn shared_asio_driver(input: Option<&DeviceId>, output: Option<&DeviceId>) -> Option<String> {
+    let (input, output) = (input?, output?);
+    if input != output {
+        return None;
+    }
+    driver_name_of(input).map(str::to_string)
+}
+
 /// Why what was typed names no single device
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ChooseDeviceError {
@@ -462,6 +490,54 @@ mod tests {
                 device
             );
         }
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn a_device_id_with_the_asio_prefix_is_recognized_as_one_and_the_driver_name_is_read_out() {
+        let asio = DeviceId(format!("{ASIO_ID_PREFIX}Focusrite USB ASIO"));
+
+        assert!(is_asio_id(&asio));
+        assert_eq!(driver_name_of(&asio), Some("Focusrite USB ASIO"));
+        let wasapi = DeviceId("wasapi:{gu-id}".to_string());
+        assert!(!is_asio_id(&wasapi));
+        assert_eq!(driver_name_of(&wasapi), None);
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn the_same_asio_driver_on_both_sides_is_the_shared_driver() {
+        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
+        assert_eq!(
+            shared_asio_driver(Some(&asio), Some(&asio)),
+            Some("Focusrite USB ASIO".to_string())
+        );
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn two_different_asio_drivers_are_not_a_shared_driver() {
+        let a = DeviceId("asio:Focusrite USB ASIO".to_string());
+        let b = DeviceId("asio:RME Fireface".to_string());
+        assert_eq!(shared_asio_driver(Some(&a), Some(&b)), None);
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn a_non_asio_device_on_either_side_is_not_a_shared_driver() {
+        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
+        let wasapi = DeviceId("wasapi:{some-guid}".to_string());
+        assert_eq!(shared_asio_driver(Some(&asio), Some(&wasapi)), None);
+        assert_eq!(shared_asio_driver(Some(&wasapi), Some(&wasapi)), None);
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn with_no_device_on_either_side_there_is_no_shared_driver() {
+        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
+        assert_eq!(shared_asio_driver(None, Some(&asio)), None);
+        assert_eq!(shared_asio_driver(Some(&asio), None), None);
+        assert_eq!(shared_asio_driver(None, None), None);
     }
 
     fn device(id: &str, name: &str, is_default: bool) -> AudioDevice {

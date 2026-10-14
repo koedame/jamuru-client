@@ -25,7 +25,7 @@ use jamjam::audio::{
     LIST_TIMEOUT, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
-use jamjam::audio::{driver_name_of, is_asio_id, AsioDuplex, OutputRoute, OPEN_TIMEOUT};
+use jamjam::audio::{shared_asio_driver, AsioDuplex, OutputRoute, OPEN_TIMEOUT};
 use jamjam::network::roster::{Audio, Roster};
 use jamjam::network::{
     audio_packet_duration_ms, bind_std, gather_candidates_on, AudioEncodingConfig, ConnectionStats,
@@ -1496,17 +1496,10 @@ impl AudioIo {
         // real hardware, which an ASIO driver is not.
         #[cfg(target_os = "windows")]
         if stand_in.is_none() && settings.output_file.is_none() {
-            let asio_driver = match (&settings.input_device, &settings.output_device) {
-                (Some(input), Some(output)) if input == output => {
-                    let id = DeviceId(input.clone());
-                    is_asio_id(&id).then(|| {
-                        driver_name_of(&id)
-                            .expect("checked by is_asio_id")
-                            .to_string()
-                    })
-                }
-                _ => None,
-            };
+            let asio_driver = shared_asio_driver(
+                settings.input_device.clone().map(DeviceId).as_ref(),
+                settings.output_device.clone().map(DeviceId).as_ref(),
+            );
             if let Some(driver_name) = asio_driver {
                 let mut tap = monitor.tap();
                 let mut capture_cb = on_capture.take().expect("not yet taken");
