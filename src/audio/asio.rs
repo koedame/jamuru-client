@@ -34,14 +34,15 @@
 //!   interface this was written against reports `direct_process == true`.
 
 use std::ffi::c_void;
+use std::marker::PhantomData;
 use std::time::Duration;
 
 use parking_lot::Mutex;
 
+use azo::driver::{Driver, Metadata, UnsafeHandle};
 use azo::dto::ChannelId;
 use azo::sys::{self, Bool, Callbacks, MessageSelector, SampleType};
-use azo::utils::com::InitGuard;
-use azo::{Driver, DriverMetadata};
+use azo::win::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
 use super::channels::{pick_channels, OutputRoute};
 use super::device::AudioDevice;
@@ -75,15 +76,53 @@ pub fn driver_name_of(id: &DeviceId) -> Option<&str> {
 /// supports none of the common rates) is left out rather than shown as a
 /// dead end.
 pub(crate) fn list_drivers() -> Vec<AudioDevice> {
-    let Ok(metas) = azo::get_drivers() else {
+    let Ok(metas) = Metadata::enumerate() else {
         return Vec::new();
     };
     metas.iter().filter_map(probe_driver).collect()
 }
 
-fn probe_driver(meta: &DriverMetadata) -> Option<AudioDevice> {
-    let guard = meta.create_instance().ok()?;
-    let driver: &Driver = &guard;
+/// A COM apartment entered on the current thread; leaving it (on drop) must
+/// happen on that same thread, so it is `!Send`.
+struct ComApartment(PhantomData<*const ()>);
+
+impl ComApartment {
+    fn enter() -> azo::WinResult<Self> {
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED as _) }.ok()?;
+        Ok(Self(PhantomData))
+    }
+}
+
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize() };
+    }
+}
+
+/// An ASIO driver instance together with the apartment it lives in.
+///
+/// `driver` is declared before `_apartment` so it is released first: the
+/// last `CoUninitialize` on a thread can unload the driver's DLL, and
+/// releasing the interface afterwards would call into unloaded code.
+struct DriverInstance {
+    driver: UnsafeHandle,
+    _apartment: ComApartment,
+}
+
+fn create_instance(meta: &Metadata) -> azo::WinResult<DriverInstance> {
+    let apartment = ComApartment::enter()?;
+    // Safety: COM is initialized on this thread and stays so until `driver`
+    // is dropped (see `DriverInstance`).
+    let driver = unsafe { UnsafeHandle::new(&meta.clsid) }?;
+    Ok(DriverInstance {
+        driver,
+        _apartment: apartment,
+    })
+}
+
+fn probe_driver(meta: &Metadata) -> Option<AudioDevice> {
+    let instance = create_instance(meta).ok()?;
+    let driver = &instance.driver;
     if !driver.init(None) {
         return None;
     }
@@ -115,7 +154,7 @@ fn probe_driver(meta: &DriverMetadata) -> Option<AudioDevice> {
 /// A running ASIO session: one driver, opened once for both directions.
 ///
 /// Held on the thread that opened it, like [`StreamHost`] - the ASIO
-/// session's COM apartment (`azo::utils::com::InitGuard`) cannot leave the
+/// session's COM apartment (`ComApartment`) cannot leave the
 /// thread that initialized it, so the same "closes on request, from the
 /// thread that owns it" shape is reused rather than re-invented.
 pub struct AsioDuplex {
@@ -180,14 +219,14 @@ impl AsioDuplex {
 /// that built it - see [`AsioDuplex`]) stops the driver, releases its
 /// buffers, clears [`CALLBACK`] and finally uninitializes COM, in that order.
 struct AsioResources {
-    driver: InitGuard<Driver>,
+    instance: DriverInstance,
 }
 
 impl Drop for AsioResources {
     fn drop(&mut self) {
         *CALLBACK.lock() = None;
-        let _ = self.driver.stop();
-        let _ = self.driver.dispose_all_buffers();
+        let _ = self.instance.driver.stop();
+        let _ = self.instance.driver.dispose_buffers();
     }
 }
 
@@ -205,16 +244,15 @@ fn open_duplex(
     capture_callback: impl FnMut(&[f32], u64) + Send + 'static,
     fill_frame: impl FnMut(&mut [f32]) -> usize + Send + 'static,
 ) -> Result<AsioResources, AudioError> {
-    let metas = azo::get_drivers()
+    let metas = Metadata::enumerate()
         .map_err(|e| AudioError::DeviceOpenFailed(format!("listing ASIO drivers: {e}")))?;
     let meta = metas
         .iter()
         .find(|m| m.description == driver_name)
         .ok_or_else(|| AudioError::DeviceNotFound(driver_name.to_string()))?;
-    let guard = meta
-        .create_instance()
+    let instance = create_instance(meta)
         .map_err(|e| AudioError::DeviceOpenFailed(format!("creating {driver_name}: {e}")))?;
-    let driver: &Driver = &guard;
+    let driver = &instance.driver;
     if !driver.init(None) {
         return Err(AudioError::DeviceOpenFailed(format!(
             "{driver_name} failed to initialize: {:?}",
@@ -351,7 +389,7 @@ fn open_duplex(
         .start()
         .map_err(|e| AudioError::StreamError(format!("starting {driver_name}: {e}")))?;
 
-    Ok(AsioResources { driver: guard })
+    Ok(AsioResources { instance })
 }
 
 fn is_supported(sample_type: SampleType) -> bool {
