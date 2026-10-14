@@ -81,6 +81,8 @@ src/
 │   ├── encryption.rs   # 暗号化レイヤー（AES-GCM, X25519）
 │   ├── error.rs        # ネットワークエラー
 │   ├── fec.rs          # 前方誤り訂正
+│   ├── room_entry.rs   # ルームを作る・入る手順: 要求を組み、返事を「入った部屋・拒否・想定外」に読む（CLI と GUI で共有）
+│   ├── room_entry.rs   # ルームを作る・入る手順: 要求を組み、返事を「入った部屋・拒否・想定外」に読む（CLI と GUI で共有）
 │   ├── roster.rs       # 参加者のうち誰と音声を繋ぐか・相手が抜けたり途切れたりしたときの判断（入出力なし。CLI と GUI で共有。ADR-077）
 │   ├── sequence_tracker.rs # シーケンス追跡
 │   ├── settings_help.rs # 参加者の設定の手伝い: 依頼・答え・終わりの状態遷移（通信なし。アプリの signaling.rs が送る。ADR-044 §5）
