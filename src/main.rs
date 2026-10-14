@@ -4,9 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc as std_mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -17,14 +17,15 @@ use tracing_subscriber::FmtSubscriber;
 
 use jamjam::audio::{
     choose_device, input_devices, output_devices, AudioDevice, AudioPreset, BurstProbe,
-    ChooseDeviceError, PlayoutStats, RoundTripReport, ADAPT_INTERVAL,
+    ChooseDeviceError, PlayoutStats, RoundTripReport,
 };
 use jamjam::audio_session::{self, Command, InputSignal, LinkTarget, Params, Running, Shared};
-use jamjam::network::roster::{Audio, Roster};
+use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, Timing};
 use jamjam::network::{
-    bind_std, gather_candidates_on, AddressCandidate, ConnectionStats, EnterError, EnterRequest,
-    LatencyBreakdown, LinkHealth, LinkIdentity, LocalLatencyInfo, PeerLatencyInfo, RoomEntry,
-    SignalingClient, SignalingConnection, SignalingMessage,
+    bind_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate, ConnectionStats,
+    EnterError, EnterRequest, Entered, LatencyBreakdown, LinkHealth, LinkIdentity,
+    LocalLatencyInfo, NetworkError, PeerLatencyInfo, RoomEntry, RoomInfo, SignalingClient,
+    SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
 };
 use uuid::Uuid;
 
@@ -698,55 +699,6 @@ fn print_audio_settings(settings: &AudioSettings) {
     );
 }
 
-/// Process signaling events and print them to stdout
-fn handle_signaling_event(msg: &SignalingMessage) {
-    match msg {
-        SignalingMessage::PeerJoined { peer } => {
-            println!("\n📥 {} joined the room", peer.name);
-            print!("chat> ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        SignalingMessage::PeerLeft { peer_id } => {
-            println!("\n📤 Peer {} left the room", peer_id);
-            print!("chat> ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        SignalingMessage::ChatMessage {
-            sender_name,
-            content,
-            ..
-        } => {
-            println!("\n💬 {}: {}", sender_name, content);
-            print!("chat> ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        _ => {}
-    }
-}
-
-/// Send a chat message via signaling connection
-async fn send_chat_message(
-    conn: &mut SignalingConnection,
-    peer_id: &str,
-    peer_name: &str,
-    content: &str,
-) -> Result<()> {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    conn.send(SignalingMessage::ChatMessage {
-        sender_id: peer_id.to_string(),
-        sender_name: peer_name.to_string(),
-        content: content.to_string(),
-        timestamp,
-    })
-    .await?;
-
-    Ok(())
-}
-
 /// A signaling client for `server`, proving this installation's device
 /// identity - the one the GUI on this machine uses too.
 fn signaling_client(server: &str) -> SignalingClient {
@@ -841,9 +793,10 @@ fn handle_input_line(line: &str, audio: Option<&Controls>) -> Input {
 /// audio with everyone who publishes an address.
 ///
 /// One function for both entry points because everything after the first
-/// message is identical, and because both need to start streaming when a
-/// peer's address arrives *later* - the creator is alone in the room until
-/// someone joins (the defect ADR-026 fixed in the GUI).
+/// message is identical. The steps from reaching the server to opening a link to whoever
+/// publishes an address - also later, when the creator is alone in the room until someone
+/// joins, and again after the connection was lost - are the core's room driver, which the app
+/// runs too (ADR-044, ADR-077); this is what it steers here and what the prompt does.
 #[allow(clippy::too_many_arguments)]
 async fn run_room_session(
     server: String,
@@ -859,133 +812,49 @@ async fn run_room_session(
         anyhow::bail!("--report-json reports the audio, which --chat-only does not open");
     }
 
-    info!("Connecting through the jamuru server: {}", server);
-    let client = signaling_client(&server);
-    let mut conn = client.connect().await?;
+    let (chat, mut rx_chat) = tokio::sync::mpsc::unbounded_channel();
+    let room_name = match &entry {
+        RoomEntry::Create { room_name } => room_name.clone(),
+        RoomEntry::Join { .. } => String::new(),
+    };
+    let backend = Arc::new(CliBackend::new(server, peer_name.clone(), room_name, chat));
 
-    // The key the others in the room check our key exchange against
-    let link_identity = LinkIdentity::generate();
-
-    let entered = conn
-        .enter_room(EnterRequest {
-            entry,
-            peer_name: peer_name.clone(),
-            link_key: link_identity.public_key(),
-            // The CLI takes no peer messages, so it announces no features.
-            features: vec![],
-            client_info: None,
-        })
-        .await
-        .map_err(|e| match e {
-            EnterError::Refused(message) => {
-                anyhow::anyhow!("Signaling server refused the request: {}", message)
-            }
-            EnterError::Unexpected(other) => {
-                anyhow::anyhow!("Unexpected response from server: {:?}", other)
-            }
-            EnterError::Connection(e) => anyhow::Error::new(e),
-        })?;
-    let (my_peer_id, peers) = (entered.peer_id, entered.peers);
-    if entered.created {
-        println!("\nRoom created: {}", entered.room_id);
-    } else {
-        println!("\nJoined room: {}", entered.room_id);
-    }
-    if let Some(invite_code) = &entered.invite_code {
-        println!("Invite code:  {}", invite_code);
-        if entered.created {
-            println!(
-                "Others join with:\n  jamuru join-room --server {} --room {}",
-                server, invite_code
-            );
-        }
-    }
-    println!("Your peer ID: {}", my_peer_id);
-    if !entered.created {
-        println!("\nPeers in room ({}):", peers.len());
-        for peer in &peers {
-            println!(
-                "  - {} (id: {}, addr: {:?})",
-                peer.name, peer.id, peer.public_addr
-            );
-        }
-    }
-
-    let my_peer_id_str = my_peer_id.to_string();
-    let signaling_conn_arc = Arc::new(tokio::sync::Mutex::new(conn));
-
-    // Audio setup happens before any peer is known: the socket has to be bound
-    // and published for the *other* side to have somewhere to send to.
+    // Audio setup happens before any peer is known: the socket has to be bound and published for
+    // the *other* side to have somewhere to send to.
     let probe = settings.input_bursts.then(|| Arc::new(BurstProbe::new()));
-    let mut audio: Option<AudioSession> = if chat_only {
+    if chat_only {
         println!("\n📝 Chat-only mode (no audio)");
-        None
     } else {
         print_audio_settings(&settings);
-        let session = AudioSession::start(&settings, link_identity, probe.clone()).await?;
-        session.advertise(&signaling_conn_arc).await?;
-        Some(session)
-    };
+        let session =
+            AudioSession::start(&settings, backend.identity.clone(), probe.clone()).await?;
+        *backend.audio() = Some(session);
+    }
 
-    // Signaling events arrive on their own task so the main loop can select
-    // over audio, chat and the keyboard at once.
-    let signaling_for_recv = signaling_conn_arc.clone();
-    let (tx_signaling, mut rx_signaling) = tokio::sync::mpsc::channel::<SignalingMessage>(32);
-    let signaling_recv_task = tokio::spawn(async move {
-        loop {
-            let msg = {
-                let mut conn_guard = signaling_for_recv.lock().await;
-                match tokio::time::timeout(Duration::from_millis(100), conn_guard.recv()).await {
-                    Ok(Ok(msg)) => Some(msg),
-                    Ok(Err(_)) => None,
-                    Err(_) => None,
-                }
-            };
-            if let Some(msg) = msg {
-                if tx_signaling.send(msg).await.is_err() {
-                    break;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    });
+    let driver = Driver::new(Arc::new(Session::new(Timing::default())), backend.clone());
+    driver.connect_afresh().await.map_err(anyhow::Error::msg)?;
+    match entry {
+        RoomEntry::Create { .. } => driver.create().await,
+        RoomEntry::Join { room_id } => driver.join(room_id).await,
+    }
+    .map_err(anyhow::Error::msg)?;
 
     // Non-interactive: say one thing, wait for a reply, leave. Used by scripts
     // and smoke tests.
     if let Some(msg_to_send) = message {
-        let result = run_single_message(
-            &signaling_conn_arc,
-            &mut rx_signaling,
-            &my_peer_id_str,
-            &peer_name,
-            &msg_to_send,
-            timeout_secs,
-        )
-        .await;
-        signaling_recv_task.abort();
-        leave_room(&signaling_conn_arc).await;
+        let result = run_single_message(&backend, &mut rx_chat, &msg_to_send, timeout_secs).await;
+        driver.end().await;
         return result;
     }
 
     println!("\n💬 Chat enabled. Type a message and press Enter to send.");
     println!("   /help lists the session commands. Ctrl+C to stop.\n");
-    print!("chat> ");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
+    print_prompt();
 
     let stdin = tokio::io::stdin();
     let mut stdin_reader = BufReader::new(stdin).lines();
 
-    // Everyone in the room who has an address gets a link, whether they were
-    // already there or turn up later.
-    let mut roster = Roster::default();
-    if let Some(session) = audio.as_mut() {
-        let steps = roster.entered(my_peer_id, peers);
-        run_audio(steps, &mut roster, session);
-    }
-
     let mut connected_at: Option<Instant> = None;
-    let mut follow = tokio::time::interval(ADAPT_INTERVAL);
-    follow.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut announce = tokio::time::interval(Duration::from_millis(100));
     announce.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut stdin_open = true;
@@ -1002,46 +871,17 @@ async fn run_room_session(
                 info!("Shutting down...");
                 break;
             }
-            Some(msg) = rx_signaling.recv() => {
-                if let SignalingMessage::ChatMessage { sender_id, .. } = &msg {
-                    if sender_id == &my_peer_id_str {
-                        continue;
-                    }
-                }
-                handle_signaling_event(&msg);
-
-                if let Some(session) = audio.as_mut() {
-                    let steps = match msg {
-                        SignalingMessage::PeerJoined { peer } => {
-                            roster.joined(peer);
-                            Vec::new()
-                        }
-                        // A peer that just published an address is one we can stream to.
-                        SignalingMessage::PeerUpdated { peer } => roster.updated(peer),
-                        SignalingMessage::PeerLeft { peer_id } => roster.left(peer_id),
-                        _ => Vec::new(),
-                    };
-                    run_audio(steps, &mut roster, session);
-                }
+            Some(line) = rx_chat.recv() => {
+                println!("\n💬 {}: {}", line.sender_name, line.content);
+                print_prompt();
             }
-            _ = announce.tick(), if audio.is_some() => {
-                if let Some(session) = audio.as_mut() {
+            _ = announce.tick(), if !chat_only => {
+                if let Some(session) = backend.audio().as_mut() {
                     for name in session.newly_connected() {
                         connected_at.get_or_insert_with(Instant::now);
                         println!("\nConnected to {}. Audio is flowing.\n", name);
-                        print!("chat> ");
-                        let _ = std::io::stdout().flush();
+                        print_prompt();
                     }
-                }
-            }
-            _ = follow.tick(), if audio.is_some() => {
-                if let Some(session) = audio.as_mut() {
-                    let steps: Vec<Audio> = session
-                        .link_healths()
-                        .into_iter()
-                        .flat_map(|(peer, health)| roster.link_is(peer, health))
-                        .collect();
-                    run_audio(steps, &mut roster, session);
                 }
             }
             line_result = stdin_reader.next_line(), if stdin_open => {
@@ -1049,21 +889,19 @@ async fn run_room_session(
                     Ok(Some(line)) => {
                         let line = line.trim();
                         if !line.is_empty() {
-                            match handle_input_line(line, audio.as_ref().map(|session| &session.controls)) {
+                            let input = handle_input_line(
+                                line,
+                                backend.audio().as_ref().map(|session| &session.controls),
+                            );
+                            match input {
                                 Input::Quit => break,
                                 Input::Handled => {}
-                                Input::Stats => match audio.as_ref() {
+                                Input::Stats => match backend.audio().as_ref() {
                                     Some(session) => session.print_stats(),
                                     None => println!("(no audio in this session, nothing to measure)"),
                                 },
                                 Input::Chat(text) => {
-                                    let mut conn_guard = signaling_conn_arc.lock().await;
-                                    if let Err(e) = send_chat_message(
-                                        &mut conn_guard,
-                                        &my_peer_id_str,
-                                        &peer_name,
-                                        &text,
-                                    ).await {
+                                    if let Err(e) = backend.send_chat(&text).await {
                                         warn!("Failed to send chat: {}", e);
                                     } else {
                                         println!("💬 You: {}", text);
@@ -1071,8 +909,7 @@ async fn run_room_session(
                                 }
                             }
                         }
-                        print!("chat> ");
-                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                        print_prompt();
                     }
                     Ok(None) => {
                         info!("stdin closed");
@@ -1087,9 +924,8 @@ async fn run_room_session(
         }
     }
 
-    signaling_recv_task.abort();
-
-    if let Some(session) = audio {
+    let session = backend.audio().take();
+    if let Some(session) = session {
         let reports = session.finish().await;
 
         if let Some(path) = &run.report_json {
@@ -1108,46 +944,363 @@ async fn run_room_session(
         }
     }
 
-    leave_room(&signaling_conn_arc).await;
+    driver.end().await;
     Ok(())
 }
 
-/// Carries out what the roster decided about the audio, the same decisions the app carries
-/// out (ADR-077).
-fn run_audio(steps: Vec<Audio>, roster: &mut Roster, session: &mut AudioSession) {
-    for step in steps {
-        match step {
-            Audio::Stop => session.unlink_all(),
-            // The socket outlives the links here, so what the room was told stays true
-            Audio::Advertise => {}
-            Audio::Rejoin => warn!(
-                "A link gave up and nobody is heard. The app would enter the room again; \
-                 the CLI does not - leave and start it again"
-            ),
-            Audio::End { peer } => session.unlink(peer),
-            Audio::Start {
-                peer,
-                candidates,
-                link_key,
-            } => {
-                let name = roster
-                    .peers()
-                    .iter()
-                    .find(|known| known.id == peer)
-                    .map_or_else(|| peer.to_string(), |known| known.name.clone());
-                println!(
-                    "\nConnecting to {} ({} address candidate(s))...",
-                    name,
-                    candidates.len()
-                );
-                if let Err(e) = session.link(peer, &name, candidates, link_key) {
-                    // Allow a later update to retry rather than leaving them unheard for good
-                    warn!("Failed to start the link to {}: {}", name, e);
-                    roster.start_failed(peer);
-                }
-            }
+fn print_prompt() {
+    print!("chat> ");
+    let _ = std::io::stdout().flush();
+}
+
+/// A line of chat from another participant
+struct ChatLine {
+    sender_name: String,
+    content: String,
+}
+
+/// What the room procedure steers in the CLI: one signaling connection, the audio session of the
+/// core library, and what is printed of the room.
+struct CliBackend {
+    server: String,
+    peer_name: String,
+    /// What a room this CLI creates is called
+    room_name: String,
+    /// The key the others in the room check our key exchange against
+    identity: LinkIdentity,
+    /// The connection to the server, by the number [`Backend::connect`] gave it
+    connection: tokio::sync::Mutex<Option<(u32, SignalingConnection)>>,
+    connections_made: AtomicU32,
+    my_peer_id: Mutex<Option<Uuid>>,
+    /// The participants of the room, by the name the room knows them by
+    names: Mutex<HashMap<Uuid, String>>,
+    /// Where what the others say goes
+    chat: tokio::sync::mpsc::UnboundedSender<ChatLine>,
+    /// None in a session without audio, and once it was finished
+    audio: Mutex<Option<AudioSession>>,
+}
+
+impl CliBackend {
+    fn new(
+        server: String,
+        peer_name: String,
+        room_name: String,
+        chat: tokio::sync::mpsc::UnboundedSender<ChatLine>,
+    ) -> Self {
+        Self {
+            server,
+            peer_name,
+            room_name,
+            identity: LinkIdentity::generate(),
+            connection: tokio::sync::Mutex::new(None),
+            connections_made: AtomicU32::new(0),
+            my_peer_id: Mutex::new(None),
+            names: Mutex::new(HashMap::new()),
+            chat,
+            audio: Mutex::new(None),
         }
     }
+
+    fn audio(&self) -> MutexGuard<'_, Option<AudioSession>> {
+        self.audio.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn names(&self) -> MutexGuard<'_, HashMap<Uuid, String>> {
+        self.names.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The connection `conn` names, while it is the one held
+    async fn held(
+        &self,
+        conn: u32,
+    ) -> Result<tokio::sync::MappedMutexGuard<'_, SignalingConnection>, String> {
+        tokio::sync::MutexGuard::try_map(self.connection.lock().await, |held| match held {
+            Some((id, connection)) if *id == conn => Some(connection),
+            _ => None,
+        })
+        .map_err(|_| "Not connected to the signaling server".to_string())
+    }
+
+    /// Says one thing to the room
+    async fn send_chat(&self, content: &str) -> Result<()> {
+        let my_peer_id = self
+            .my_peer_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|id| id.to_string())
+            .context("not in a room")?;
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let mut connection = self.connection.lock().await;
+        let (_, connection) = connection.as_mut().context("not connected")?;
+        connection
+            .send(SignalingMessage::ChatMessage {
+                sender_id: my_peer_id,
+                sender_name: self.peer_name.clone(),
+                content: content.to_string(),
+                timestamp,
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Enters a room as `request` says, and prints what the room is
+    async fn enter(&self, conn: u32, entry: RoomEntry, peer_name: &str) -> Result<Entered, String> {
+        let entered = self
+            .held(conn)
+            .await?
+            .enter_room(EnterRequest {
+                entry,
+                peer_name: peer_name.to_string(),
+                link_key: self.identity.public_key(),
+                // The CLI takes no peer messages, so it announces no features.
+                features: vec![],
+                client_info: None,
+            })
+            .await
+            .map_err(|e| match e {
+                EnterError::Refused(message) => {
+                    format!("Signaling server refused the request: {}", message)
+                }
+                EnterError::Unexpected(other) => {
+                    format!("Unexpected response from server: {:?}", other)
+                }
+                EnterError::Connection(e) => e.to_string(),
+            })?;
+
+        *self.my_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(entered.peer_id);
+        self.names().extend(
+            entered
+                .peers
+                .iter()
+                .map(|peer| (peer.id, peer.name.clone())),
+        );
+        if entered.created {
+            println!("\nRoom created: {}", entered.room_id);
+        } else {
+            println!("\nJoined room: {}", entered.room_id);
+        }
+        if let Some(invite_code) = &entered.invite_code {
+            println!("Invite code:  {}", invite_code);
+            if entered.created {
+                println!(
+                    "Others join with:\n  jamuru join-room --server {} --room {}",
+                    self.server, invite_code
+                );
+            }
+        }
+        println!("Your peer ID: {}", entered.peer_id);
+        if !entered.created {
+            println!("\nPeers in room ({}):", entered.peers.len());
+            for peer in &entered.peers {
+                println!(
+                    "  - {} (id: {}, addr: {:?})",
+                    peer.name, peer.id, peer.public_addr
+                );
+            }
+        }
+        Ok(entered)
+    }
+}
+
+impl Backend for CliBackend {
+    type Other = SignalingMessage;
+
+    async fn connect(&self) -> Result<u32, NetworkError> {
+        info!("Connecting through the jamuru server: {}", self.server);
+        let connection = signaling_client(&self.server).connect().await?;
+        let conn = self.connections_made.fetch_add(1, Ordering::SeqCst) + 1;
+        *self.connection.lock().await = Some((conn, connection));
+        Ok(conn)
+    }
+
+    async fn disconnect(&self, conn: u32) -> Result<(), String> {
+        let mut held = self.connection.lock().await;
+        if matches!(held.as_ref(), Some((id, _)) if *id == conn) {
+            if let Some((_, connection)) = held.take() {
+                connection.close().await.map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn list_rooms(&self, conn: u32) -> Result<Vec<RoomInfo>, String> {
+        self.held(conn)
+            .await?
+            .list_rooms()
+            .await
+            .map_err(|e| match e {
+                EnterError::Refused(message) => message,
+                EnterError::Unexpected(_) => "Unexpected response".to_string(),
+                EnterError::Connection(e) => e.to_string(),
+            })
+    }
+
+    async fn create_room(&self, conn: u32, peer_name: &str) -> Result<Entered, String> {
+        let entry = RoomEntry::Create {
+            room_name: self.room_name.clone(),
+        };
+        self.enter(conn, entry, peer_name).await
+    }
+
+    async fn join_room(&self, conn: u32, code: &str, peer_name: &str) -> Result<Entered, String> {
+        let entry = RoomEntry::Join {
+            room_id: code.to_string(),
+        };
+        self.enter(conn, entry, peer_name).await
+    }
+
+    async fn leave_room(&self, conn: u32) -> Result<(), String> {
+        self.held(conn)
+            .await?
+            .send(SignalingMessage::LeaveRoom)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn poll_events(&self, conn: u32) -> Result<Vec<Polled<SignalingMessage>>, String> {
+        let Ok(mut connection) = self.held(conn).await else {
+            return Ok(Vec::new());
+        };
+        let mut events = Vec::new();
+        loop {
+            match tokio::time::timeout(Duration::from_millis(50), connection.recv()).await {
+                Ok(Ok(SignalingMessage::PeerJoined { peer })) => {
+                    events.push(Polled::Room(RoomEvent::PeerJoined(peer)))
+                }
+                Ok(Ok(SignalingMessage::PeerUpdated { peer })) => {
+                    events.push(Polled::Room(RoomEvent::PeerUpdated(peer)))
+                }
+                Ok(Ok(SignalingMessage::PeerLeft { peer_id })) => {
+                    events.push(Polled::Room(RoomEvent::PeerLeft(peer_id)))
+                }
+                Ok(Ok(other)) => events.push(Polled::Other(other)),
+                Ok(Err(e)) => {
+                    events.push(Polled::Room(RoomEvent::ConnectionLost(e.to_string())));
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        Ok(events)
+    }
+
+    async fn other_event(&self, event: SignalingMessage) {
+        let SignalingMessage::ChatMessage {
+            sender_id,
+            sender_name,
+            content,
+            ..
+        } = event
+        else {
+            return;
+        };
+        let mine = self
+            .my_peer_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|id| id.to_string());
+        if mine.as_deref() != Some(sender_id.as_str()) {
+            let _ = self.chat.send(ChatLine {
+                sender_name,
+                content,
+            });
+        }
+    }
+
+    fn room_event(&self, event: &RoomEvent) {
+        match event {
+            RoomEvent::PeerJoined(peer) => {
+                self.names().insert(peer.id, peer.name.clone());
+                println!("\n📥 {} joined the room", peer.name);
+                print_prompt();
+            }
+            RoomEvent::PeerUpdated(peer) => {
+                self.names().insert(peer.id, peer.name.clone());
+            }
+            RoomEvent::PeerLeft(peer_id) => {
+                println!("\n📤 Peer {} left the room", peer_id);
+                print_prompt();
+            }
+            RoomEvent::ConnectionLost(_) => {}
+        }
+    }
+
+    fn peer_name(&self) -> String {
+        self.peer_name.clone()
+    }
+
+    async fn clock_is_right(&self) -> bool {
+        matches!(
+            server_clock_offset_secs(&self.server).await,
+            Some(offset) if offset.abs() < CLOCK_SKEW_NOTICE_SECS
+        )
+    }
+
+    /// The links end; the audio session itself goes on, so the socket the room was told stays
+    /// the one audio arrives on.
+    async fn stop_audio(&self) {
+        if let Some(session) = self.audio().as_mut() {
+            session.unlink_all();
+        }
+    }
+
+    fn audio_state(&self) -> (bool, Vec<(Uuid, LinkHealth)>) {
+        match self.audio().as_ref() {
+            Some(session) => (
+                session.controls.shared.is_active.load(Ordering::SeqCst),
+                session.link_healths(),
+            ),
+            None => (false, Vec::new()),
+        }
+    }
+
+    /// Tells the room where to send audio. Done before any peer is known, because the peer needs
+    /// an address to send to (ADR-026).
+    async fn advertise(&self, conn: u32) -> Result<(), String> {
+        let Some(message) = self.audio().as_ref().map(AudioSession::advertisement) else {
+            return Ok(());
+        };
+        self.held(conn)
+            .await?
+            .send(message)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn link(
+        &self,
+        _conn: u32,
+        peer: Uuid,
+        candidates: Vec<SocketAddr>,
+        link_key: Option<String>,
+    ) -> Result<(), String> {
+        let name = named(&self.names(), peer);
+        let mut audio = self.audio();
+        let Some(session) = audio.as_mut() else {
+            return Ok(());
+        };
+        println!(
+            "\nConnecting to {} ({} address candidate(s))...",
+            name,
+            candidates.len()
+        );
+        session
+            .link(peer, &name, candidates, link_key)
+            .map_err(|e| e.to_string())
+    }
+
+    async fn unlink(&self, peer: Uuid) -> Result<(), String> {
+        if let Some(session) = self.audio().as_mut() {
+            session.unlink(peer);
+        }
+        Ok(())
+    }
+
+    fn announce(&self, _snapshot: &jamjam::network::room_session::Snapshot) {}
 }
 
 /// What one link looked like when it was asked about or ended
@@ -1283,22 +1436,13 @@ impl AudioSession {
         })
     }
 
-    /// Tells the room where to send audio. Done before any peer is known, because the peer needs
-    /// an address to send to (ADR-026).
-    async fn advertise(
-        &self,
-        signaling: &Arc<tokio::sync::Mutex<SignalingConnection>>,
-    ) -> Result<()> {
-        signaling
-            .lock()
-            .await
-            .send(SignalingMessage::UpdatePeerInfo {
-                candidates: self.candidates.clone(),
-                public_addr: self.candidates.first().map(|c| c.address),
-                local_addr: Some(self.local_addr),
-            })
-            .await?;
-        Ok(())
+    /// What tells the room where to send audio
+    fn advertisement(&self) -> SignalingMessage {
+        SignalingMessage::UpdatePeerInfo {
+            candidates: self.candidates.clone(),
+            public_addr: self.candidates.first().map(|c| c.address),
+            local_addr: Some(self.local_addr),
+        }
     }
 
     /// Opens an audio link to `peer`, racing `candidates`. It is set up on the audio thread;
@@ -1412,18 +1556,13 @@ fn print_link_stats(report: &LinkSummary, settings: &AudioSettings) {
 
 /// Sends one message, waits for a reply, and reports whether one came.
 async fn run_single_message(
-    signaling: &Arc<tokio::sync::Mutex<SignalingConnection>>,
-    rx_signaling: &mut tokio::sync::mpsc::Receiver<SignalingMessage>,
-    my_peer_id: &str,
-    peer_name: &str,
+    backend: &CliBackend,
+    rx_chat: &mut tokio::sync::mpsc::UnboundedReceiver<ChatLine>,
     message: &str,
     timeout_secs: u64,
 ) -> Result<()> {
     println!("📤 Sending: {}", message);
-    {
-        let mut conn_guard = signaling.lock().await;
-        send_chat_message(&mut conn_guard, my_peer_id, peer_name, message).await?;
-    }
+    backend.send_chat(message).await?;
 
     let deadline = Duration::from_secs(timeout_secs);
     let start = std::time::Instant::now();
@@ -1432,17 +1571,11 @@ async fn run_single_message(
 
     while start.elapsed() <= deadline {
         tokio::select! {
-            Some(msg) = rx_signaling.recv() => {
-                if let SignalingMessage::ChatMessage { sender_id, sender_name, content, .. } = &msg {
-                    if sender_id != my_peer_id {
-                        println!("📥 {}: {}", sender_name, content);
-                        received_response = true;
-                        // A small window for anything that follows.
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                    }
-                } else {
-                    handle_signaling_event(&msg);
-                }
+            Some(line) = rx_chat.recv() => {
+                println!("📥 {}: {}", line.sender_name, line.content);
+                received_response = true;
+                // A small window for anything that follows.
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
             _ = tokio::time::sleep(Duration::from_millis(100)) => {}
         }
@@ -1452,11 +1585,6 @@ async fn run_single_message(
         println!("⚠️  Timeout: no response received");
     }
     Ok(())
-}
-
-async fn leave_room(signaling: &Arc<tokio::sync::Mutex<SignalingConnection>>) {
-    let mut conn_guard = signaling.lock().await;
-    let _ = conn_guard.send(SignalingMessage::LeaveRoom).await;
 }
 
 #[tokio::main]
