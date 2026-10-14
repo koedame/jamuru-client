@@ -8,21 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
-use jamjam::audio::{bounded, list_input_devices, list_output_devices, LIST_TIMEOUT};
-
-/// Audio device information for IPC
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AudioDeviceInfo {
-    pub id: String,
-    pub name: String,
-    pub supported_sample_rates: Vec<u32>,
-    pub supported_channels: Vec<u16>,
-    pub is_default: bool,
-    pub is_asio: bool,
-    pub is_bluetooth: bool,
-}
+use jamjam::audio::{bounded, list_input_devices, list_output_devices, AudioDevice, LIST_TIMEOUT};
 
 /// One direction's device list, and the call that has hung, if one has
 ///
@@ -36,7 +22,7 @@ struct Listing {
     timeout: Duration,
     /// Set by the call that hung when it finally returns
     hung: Mutex<Option<Arc<AtomicBool>>>,
-    last: Mutex<Option<Vec<AudioDeviceInfo>>>,
+    last: Mutex<Option<Vec<AudioDevice>>>,
 }
 
 static INPUTS: Listing = Listing::new(LIST_TIMEOUT);
@@ -63,8 +49,8 @@ impl Listing {
     fn list(
         &'static self,
         direction: &'static str,
-        enumerate: fn() -> Result<Vec<AudioDeviceInfo>, String>,
-    ) -> Result<Vec<AudioDeviceInfo>, String> {
+        enumerate: fn() -> Result<Vec<AudioDevice>, String>,
+    ) -> Result<Vec<AudioDevice>, String> {
         let mut hung = self.hung.lock().unwrap_or_else(|e| e.into_inner());
         if hung
             .as_ref()
@@ -88,7 +74,7 @@ impl Listing {
                 // still becomes the last one
                 if let Ok(devices) = &listed {
                     for device in devices {
-                        crate::logging::register_device(&device.id, &device.name);
+                        crate::logging::register_device(&device.id.0, &device.name);
                     }
                     *self.last.lock().unwrap_or_else(|e| e.into_inner()) = Some(devices.clone());
                 }
@@ -104,7 +90,7 @@ impl Listing {
         }
     }
 
-    fn last_listing(&self, direction: &str) -> Result<Vec<AudioDeviceInfo>, String> {
+    fn last_listing(&self, direction: &str) -> Result<Vec<AudioDevice>, String> {
         match self.last.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             Some(devices) => {
                 tracing::warn!(
@@ -122,55 +108,31 @@ impl Listing {
 }
 
 /// Available input (microphone) devices
-pub fn input_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+pub fn input_devices() -> Result<Vec<AudioDevice>, String> {
     INPUTS.list("input", list_inputs)
 }
 
 /// Available output (speaker) devices
-pub fn output_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+pub fn output_devices() -> Result<Vec<AudioDevice>, String> {
     OUTPUTS.list("output", list_outputs)
 }
 
-fn list_inputs() -> Result<Vec<AudioDeviceInfo>, String> {
+fn list_inputs() -> Result<Vec<AudioDevice>, String> {
     let devices = list_input_devices().map_err(|e| {
         tracing::error!("Listing input devices failed: {}", e);
         e.to_string()
     })?;
 
-    let devices: Vec<AudioDeviceInfo> = devices
-        .into_iter()
-        .map(|d| AudioDeviceInfo {
-            id: d.id.0,
-            name: d.name,
-            supported_sample_rates: d.supported_sample_rates,
-            supported_channels: d.supported_channels,
-            is_default: d.is_default,
-            is_asio: d.is_asio,
-            is_bluetooth: d.is_bluetooth,
-        })
-        .collect();
     log_devices("input", &devices);
     Ok(devices)
 }
 
-fn list_outputs() -> Result<Vec<AudioDeviceInfo>, String> {
+fn list_outputs() -> Result<Vec<AudioDevice>, String> {
     let devices = list_output_devices().map_err(|e| {
         tracing::error!("Listing output devices failed: {}", e);
         e.to_string()
     })?;
 
-    let devices: Vec<AudioDeviceInfo> = devices
-        .into_iter()
-        .map(|d| AudioDeviceInfo {
-            id: d.id.0,
-            name: d.name,
-            supported_sample_rates: d.supported_sample_rates,
-            supported_channels: d.supported_channels,
-            is_default: d.is_default,
-            is_asio: d.is_asio,
-            is_bluetooth: d.is_bluetooth,
-        })
-        .collect();
     log_devices("output", &devices);
     Ok(devices)
 }
@@ -179,7 +141,7 @@ fn list_outputs() -> Result<Vec<AudioDeviceInfo>, String> {
 /// from "the interface was found but not selected". Written when the list
 /// differs from the one written last: the settings list the devices on every
 /// change, and the same list again says nothing new.
-fn log_devices(kind: &str, devices: &[AudioDeviceInfo]) {
+fn log_devices(kind: &str, devices: &[AudioDevice]) {
     static LAST: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
     let names: Vec<String> = devices
@@ -220,18 +182,19 @@ pub(crate) fn a_listing_is_hung() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jamjam::audio::DeviceId;
     use std::sync::atomic::AtomicUsize;
 
     static CALLS: AtomicUsize = AtomicUsize::new(0);
     static DRIVER_HUNG: AtomicBool = AtomicBool::new(false);
 
-    fn a_driver_that_can_hang() -> Result<Vec<AudioDeviceInfo>, String> {
+    fn a_driver_that_can_hang() -> Result<Vec<AudioDevice>, String> {
         CALLS.fetch_add(1, Ordering::SeqCst);
         while DRIVER_HUNG.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(10));
         }
-        Ok(vec![AudioDeviceInfo {
-            id: "interface".to_string(),
+        Ok(vec![AudioDevice {
+            id: DeviceId("interface".to_string()),
             name: "Interface".to_string(),
             supported_sample_rates: vec![48000],
             supported_channels: vec![2],
@@ -275,7 +238,7 @@ mod tests {
     #[test]
     fn when_the_driver_hangs_before_any_listing_it_says_so_instead_of_showing_no_devices() {
         static LISTING: Listing = Listing::new(Duration::from_millis(100));
-        fn never() -> Result<Vec<AudioDeviceInfo>, String> {
+        fn never() -> Result<Vec<AudioDevice>, String> {
             std::thread::sleep(Duration::from_secs(3));
             Ok(Vec::new())
         }
