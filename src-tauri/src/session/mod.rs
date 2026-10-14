@@ -15,16 +15,16 @@
 use std::sync::MutexGuard;
 use std::time::Duration;
 
-use jamjam::network::{server_clock_offset_secs, NetworkError, RoomInfo, CLOCK_SKEW_NOTICE_SECS};
-use serde::Serialize;
+use jamjam::network::room_session::{Reconnect, Snapshot, State};
+use jamjam::network::{server_clock_offset_secs, Entered, NetworkError, CLOCK_SKEW_NOTICE_SECS};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use uuid::Uuid;
 
 use crate::config::ConfigState;
 use crate::mixer::{self, MixerState};
-use crate::signaling::{self, JoinResult, SignalingEvent, SignalingState};
+use crate::signaling::{self, SignalingEvent, SignalingState};
 use crate::streaming;
-use jamjam::network::roster::{Audio, Roster};
+use jamjam::network::roster::Audio;
 use jamjam::network::settings_help::HelpEvent;
 
 /// Announces a change of the session. The payload is the new [`Snapshot`].
@@ -54,167 +54,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// What a room this app creates is called.
 const ROOM_NAME: &str = "My Room";
 
-/// How far the app has got.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Phase {
-    /// Reaching the signaling server.
-    #[default]
-    ConnectingServer,
-    /// Connected to the server, in no room.
-    ServerConnected,
-    Creating,
-    Joining,
-    /// In a room.
-    Connected,
-    /// The last step failed. `error` says how; the connection, if there is
-    /// one, is still usable for another try.
-    Error,
-}
-
-impl Phase {
-    fn name(self) -> &'static str {
-        match self {
-            Phase::ConnectingServer => "connecting_server",
-            Phase::ServerConnected => "server_connected",
-            Phase::Creating => "creating",
-            Phase::Joining => "joining",
-            Phase::Connected => "connected",
-            Phase::Error => "error",
-        }
-    }
-}
-
-/// Getting the signaling connection back after it dropped unexpectedly, while
-/// in a room. Distinct from the audio link being re-established
-/// (`streaming_reconnect`, REQ-CON-110).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Reconnect {
-    #[default]
-    Idle,
-    Reconnecting,
-    /// Every attempt failed; `session_reconnect` tries again.
-    Failed,
-}
-
-/// Someone else in the room. Their addresses stay in the backend.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Participant {
-    pub id: String,
-    pub name: String,
-    /// What their app can do beyond the base protocol (ADR-043).
-    pub features: Vec<String>,
-}
-
-/// The room this app is in.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct RoomView {
-    pub room_id: String,
-    /// The code others can join with, as the server reported it. Empty from a
-    /// server that reports none.
-    pub invite_code: String,
-    /// This app's id in the room.
-    pub peer_id: String,
-    /// The name this app joined with.
-    pub peer_name: String,
-    pub participants: Vec<Participant>,
-}
-
-/// The whole session at one moment.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Snapshot {
-    /// Rises with every change, so a reader that hears an old snapshot after a
-    /// newer one can tell.
-    pub revision: u64,
-    pub phase: Phase,
-    /// The connection the room's commands (chat, help) are addressed to. None
-    /// while there is no connection to the server.
-    pub connection_id: Option<u32>,
-    /// The invite code of the room the server offers for trying a connection,
-    /// or None when it offers none. The app holds no such code itself.
-    pub test_room_invite_code: Option<String>,
-    /// The code being joined, while `phase` is `joining`.
-    pub joining_code: Option<String>,
-    /// Why `phase` is `error`.
-    pub error: Option<String>,
-    pub room: Option<RoomView>,
-    pub signaling_reconnect: Reconnect,
-    pub signaling_reconnect_error: Option<String>,
-    /// The participants there is an audio link to, in the order the links
-    /// were opened.
-    pub streaming_peer_ids: Vec<String>,
-    /// The first of `streaming_peer_ids`: in a room of two, the participant
-    /// the audio goes to, which is what a reader written for such a room
-    /// expects.
-    pub streaming_peer_id: Option<String>,
-}
-
-struct Room {
-    room_id: String,
-    invite_code: String,
-    peer_id: String,
-    peer_name: String,
-}
-
-#[derive(Default)]
-struct Inner {
-    revision: u64,
-    /// Raised to end a step that is still running and start another: a step
-    /// that finds it changed stops without touching the session.
-    epoch: u64,
-    phase: Phase,
-    connection_id: Option<u32>,
-    test_room_invite_code: Option<String>,
-    joining_code: Option<String>,
-    error: Option<String>,
-    room: Option<Room>,
-    reconnect: Reconnect,
-    reconnect_error: Option<String>,
-    roster: Roster,
-    /// What was last announced (its revision left at 0), so a change that
-    /// only undoes a quiet one is still told, and one that changes nothing
-    /// is not.
-    announced: Option<Snapshot>,
-}
-
-impl Inner {
-    fn view(&self) -> Snapshot {
-        let linked = self.roster.linked();
-        Snapshot {
-            revision: self.revision,
-            phase: self.phase,
-            connection_id: self.connection_id,
-            test_room_invite_code: self.test_room_invite_code.clone(),
-            joining_code: self.joining_code.clone(),
-            error: self.error.clone(),
-            room: self.room.as_ref().map(|room| RoomView {
-                room_id: room.room_id.clone(),
-                invite_code: room.invite_code.clone(),
-                peer_id: room.peer_id.clone(),
-                peer_name: room.peer_name.clone(),
-                participants: self
-                    .roster
-                    .peers()
-                    .iter()
-                    .map(|peer| Participant {
-                        id: peer.id.to_string(),
-                        name: peer.name.clone(),
-                        features: peer.features.clone(),
-                    })
-                    .collect(),
-            }),
-            signaling_reconnect: self.reconnect,
-            signaling_reconnect_error: self.reconnect_error.clone(),
-            streaming_peer_ids: linked.iter().map(ToString::to_string).collect(),
-            streaming_peer_id: linked.first().map(ToString::to_string),
-        }
-    }
-}
-
 /// The session, managed by Tauri.
 pub struct SessionState {
-    inner: std::sync::Mutex<Inner>,
+    inner: std::sync::Mutex<State>,
     /// Held by a step that talks to the server, so two do not interleave their
     /// messages or their changes. A step that is to be ended does not wait on
     /// it: it raises `epoch` first, and the step that holds it lets go at its
@@ -225,12 +67,12 @@ pub struct SessionState {
 impl SessionState {
     pub fn new() -> Self {
         Self {
-            inner: std::sync::Mutex::new(Inner::default()),
+            inner: std::sync::Mutex::new(State::default()),
             flow: tokio::sync::Mutex::new(()),
         }
     }
 
-    fn lock(&self) -> MutexGuard<'_, Inner> {
+    fn lock(&self) -> MutexGuard<'_, State> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -239,76 +81,39 @@ impl SessionState {
     }
 
     fn epoch(&self) -> u64 {
-        self.lock().epoch
+        self.lock().epoch()
     }
 
     /// Ends whatever step is running (it stops at its next check) and returns
     /// the number of the one that takes over.
     fn next_epoch(&self) -> u64 {
-        let mut inner = self.lock();
-        inner.epoch += 1;
-        inner.epoch
+        self.lock().next_epoch()
     }
 
     /// [`SessionState::next_epoch`], but only while `conn` is still the
     /// session's connection: an event of a connection that was let go of
     /// meanwhile ends nothing.
     fn next_epoch_of(&self, conn: u32) -> Option<u64> {
-        let mut inner = self.lock();
-        if inner.connection_id != Some(conn) {
-            return None;
-        }
-        inner.epoch += 1;
-        Some(inner.epoch)
+        self.lock().next_epoch_of(conn)
     }
 
     fn connection_id(&self) -> Option<u32> {
-        self.lock().connection_id
+        self.lock().connection_id()
     }
 
     /// The code to rejoin the room with after the connection was lost, or
     /// None when there is no room to rejoin.
     fn rejoin_code(&self) -> Option<String> {
-        self.lock().room.as_ref().map(|room| {
-            if room.invite_code.is_empty() {
-                room.room_id.clone()
-            } else {
-                room.invite_code.clone()
-            }
-        })
+        self.lock().rejoin_code()
     }
 
     /// Changes the session and, if that made a difference to what was last
     /// announced, announces it.
-    fn change<R: Runtime, T>(&self, app: &AppHandle<R>, change: impl FnOnce(&mut Inner) -> T) -> T {
+    fn change<R: Runtime, T>(&self, app: &AppHandle<R>, change: impl FnOnce(&mut State) -> T) -> T {
         let (value, announce) = {
             let mut inner = self.lock();
             let value = change(&mut inner);
-            let mut now = inner.view();
-            now.revision = 0;
-            if inner.announced.as_ref() == Some(&now) {
-                (value, None)
-            } else {
-                let before = inner.announced.replace(now.clone());
-                inner.revision += 1;
-                now.revision = inner.revision;
-                // Which step the app is at decides which buttons do anything,
-                // so its transitions are the first thing a bug report needs
-                // (ADR-036).
-                let from = before.as_ref().map(|b| b.phase.name()).unwrap_or("(start)");
-                let changed = before
-                    .as_ref()
-                    .is_none_or(|b| b.phase != now.phase || b.error != now.error);
-                if changed {
-                    match &now.error {
-                        Some(error) if now.phase == Phase::Error => {
-                            tracing::info!("[session] {} -> {}: {}", from, now.phase.name(), error)
-                        }
-                        _ => tracing::info!("[session] {} -> {}", from, now.phase.name()),
-                    }
-                }
-                (value, Some(now))
-            }
+            (value, inner.announcement())
         };
         if let Some(snapshot) = announce {
             if let Err(e) = app.emit(CHANGED_EVENT, &snapshot) {
@@ -403,13 +208,6 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
 // Steps
 // =============================================================================
 
-fn test_room_code_of(rooms: &[RoomInfo]) -> Option<String> {
-    rooms
-        .iter()
-        .find(|room| room.test_room)
-        .map(|room| room.invite_code.to_string())
-}
-
 fn peer_name<R: Runtime>(app: &AppHandle<R>) -> String {
     app.state::<ConfigState>()
         .get()
@@ -422,11 +220,8 @@ fn peer_name<R: Runtime>(app: &AppHandle<R>) -> String {
 
 /// Ends the step with `message` as what went wrong.
 fn fail<R: Runtime>(app: &AppHandle<R>, message: String) -> Result<Snapshot, String> {
-    app.state::<SessionState>().change(app, |session| {
-        session.phase = Phase::Error;
-        session.error = Some(message.clone());
-        session.joining_code = None;
-    });
+    app.state::<SessionState>()
+        .change(app, |session| session.failed(message.clone()));
     Err(message)
 }
 
@@ -463,11 +258,7 @@ async fn disconnect<R: Runtime>(app: &AppHandle<R>, conn: u32) {
 /// state is left for the caller to change in the same breath.
 async fn drop_connection<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<SessionState>();
-    let (conn, in_room) = {
-        let mut session = state.lock();
-        session.roster.audio_ended();
-        (session.connection_id.take(), session.room.is_some())
-    };
+    let (conn, in_room) = state.lock().dropping_the_connection();
     if in_room {
         stop_audio(app).await;
     }
@@ -515,16 +306,7 @@ async fn connect<R: Runtime>(app: &AppHandle<R>, epoch: u64) -> Result<Snapshot,
     }
 
     drop_connection(app).await;
-    state.change(app, |session| {
-        session.phase = Phase::ConnectingServer;
-        session.error = None;
-        session.joining_code = None;
-        session.test_room_invite_code = None;
-        session.room = None;
-        session.roster.clear();
-        session.reconnect = Reconnect::Idle;
-        session.reconnect_error = None;
-    });
+    state.change(app, |session| session.connecting_server());
 
     let connected = unless_ended(
         &state,
@@ -555,7 +337,7 @@ async fn connect<R: Runtime>(app: &AppHandle<R>, epoch: u64) -> Result<Snapshot,
         return Ok(state.snapshot());
     }
 
-    state.change(app, |session| session.connection_id = Some(conn));
+    state.change(app, |session| session.connected(conn));
     spawn_pump(app.clone(), conn);
     // Ended before the list came: the step that ended this one drops the
     // connection, since it is the session's now.
@@ -568,10 +350,7 @@ async fn connect<R: Runtime>(app: &AppHandle<R>, epoch: u64) -> Result<Snapshot,
     {
         None => Ok(state.snapshot()),
         Some(Ok(rooms)) => {
-            state.change(app, |session| {
-                session.test_room_invite_code = test_room_code_of(&rooms);
-                session.phase = Phase::ServerConnected;
-            });
+            state.change(app, |session| session.listed(&rooms));
             Ok(state.snapshot())
         }
         Some(Err(e)) => fail_unless_ended(app, epoch, e),
@@ -604,29 +383,12 @@ fn connect_again_when_the_clock_is_right<R: Runtime>(app: AppHandle<R>, epoch: u
 fn enter_room<R: Runtime>(
     app: &AppHandle<R>,
     conn: u32,
-    result: JoinResult,
+    entered: Entered,
     peer_name: String,
     fallback_code: &str,
 ) -> Vec<Audio> {
-    let own = Uuid::parse_str(&result.peer_id).unwrap_or_default();
     app.state::<SessionState>().change(app, |session| {
-        session.connection_id = Some(conn);
-        session.room = Some(Room {
-            room_id: result.room_id,
-            invite_code: if result.invite_code.is_empty() {
-                fallback_code.to_string()
-            } else {
-                result.invite_code
-            },
-            peer_id: result.peer_id,
-            peer_name,
-        });
-        session.phase = Phase::Connected;
-        session.error = None;
-        session.joining_code = None;
-        session.reconnect = Reconnect::Idle;
-        session.reconnect_error = None;
-        session.roster.entered(own, result.peers)
+        session.entered(conn, entered, peer_name, fallback_code)
     })
 }
 
@@ -634,11 +396,11 @@ fn enter_room<R: Runtime>(
 fn connection_to_enter<R: Runtime>(app: &AppHandle<R>) -> Result<u32, String> {
     let state = app.state::<SessionState>();
     let session = state.lock();
-    if session.room.is_some() {
+    if session.in_room() {
         return Err("Already in a room".to_string());
     }
     session
-        .connection_id
+        .connection_id()
         .ok_or_else(|| "Not connected to the signaling server".to_string())
 }
 
@@ -647,10 +409,7 @@ async fn create<R: Runtime>(app: &AppHandle<R>) -> Result<Snapshot, String> {
     let _flow = state.flow.lock().await;
     let conn = connection_to_enter(app)?;
     let name = peer_name(app);
-    state.change(app, |session| {
-        session.phase = Phase::Creating;
-        session.error = None;
-    });
+    state.change(app, |session| session.creating());
 
     let result = match signaling::signaling_create_room(
         conn,
@@ -675,11 +434,7 @@ async fn join<R: Runtime>(app: &AppHandle<R>, code: String) -> Result<Snapshot, 
     let _flow = state.flow.lock().await;
     let conn = connection_to_enter(app)?;
     let name = peer_name(app);
-    state.change(app, |session| {
-        session.phase = Phase::Joining;
-        session.error = None;
-        session.joining_code = Some(code.clone());
-    });
+    state.change(app, |session| session.joining(code.clone()));
 
     let result = match signaling::signaling_join_room(
         conn,
@@ -702,7 +457,7 @@ async fn join<R: Runtime>(app: &AppHandle<R>, code: String) -> Result<Snapshot, 
 
 async fn leave<R: Runtime>(app: &AppHandle<R>) -> Result<Snapshot, String> {
     let state = app.state::<SessionState>();
-    if state.connection_id().is_none() || state.lock().reconnect != Reconnect::Idle {
+    if state.connection_id().is_none() || state.lock().reconnect() != Reconnect::Idle {
         // The connection is gone and is being got back. The person no longer
         // wants the room: end that, and start from the server.
         let epoch = state.next_epoch();
@@ -716,7 +471,7 @@ async fn leave<R: Runtime>(app: &AppHandle<R>) -> Result<Snapshot, String> {
         let epoch = state.next_epoch();
         return connect(app, epoch).await;
     };
-    if state.lock().room.is_none() {
+    if !state.lock().in_room() {
         return Err("Not in a room".to_string());
     }
 
@@ -729,20 +484,7 @@ async fn leave<R: Runtime>(app: &AppHandle<R>) -> Result<Snapshot, String> {
         Ok(()) => signaling::signaling_list_rooms(conn, app.state()).await,
         Err(e) => Err(e),
     };
-    state.change(app, |session| {
-        session.room = None;
-        session.roster.clear();
-        match &listed {
-            Ok(rooms) => {
-                session.test_room_invite_code = test_room_code_of(rooms);
-                session.phase = Phase::ServerConnected;
-            }
-            Err(e) => {
-                session.phase = Phase::Error;
-                session.error = Some(e.clone());
-            }
-        }
-    });
+    state.change(app, |session| session.left(&listed));
     listed.map(|_| state.snapshot())
 }
 
@@ -765,19 +507,7 @@ async fn reconnect<R: Runtime>(app: &AppHandle<R>, epoch: u64) -> Result<Snapsho
 
     drop_connection(app).await;
     let was_in_room = rejoin.is_some();
-    state.change(app, |session| {
-        session.test_room_invite_code = None;
-        if was_in_room {
-            session.reconnect = Reconnect::Reconnecting;
-            session.reconnect_error = None;
-        } else {
-            session.phase = Phase::ConnectingServer;
-            session.error = None;
-            session.joining_code = None;
-            session.room = None;
-            session.roster.clear();
-        }
-    });
+    state.change(app, |session| session.reconnecting(was_in_room));
 
     for attempt in 1..=MAX_RECONNECT_ATTEMPTS {
         if state.epoch() != epoch {
@@ -795,10 +525,7 @@ async fn reconnect<R: Runtime>(app: &AppHandle<R>, epoch: u64) -> Result<Snapsho
         );
         if attempt == MAX_RECONNECT_ATTEMPTS {
             if was_in_room {
-                state.change(app, |session| {
-                    session.reconnect = Reconnect::Failed;
-                    session.reconnect_error = Some(e.clone());
-                });
+                state.change(app, |session| session.reconnect_failed(e.clone()));
                 return Err(e);
             }
             return fail_unless_ended(app, epoch, e);
@@ -855,11 +582,7 @@ async fn try_reconnect<R: Runtime>(
             }
             None => {
                 let rooms = signaling::signaling_list_rooms(conn, app.state()).await?;
-                state.change(app, |session| {
-                    session.connection_id = Some(conn);
-                    session.test_room_invite_code = test_room_code_of(&rooms);
-                    session.phase = Phase::ServerConnected;
-                });
+                state.change(app, |session| session.reconnected(conn, &rooms));
                 spawn_pump(app.clone(), conn);
             }
         }
@@ -925,20 +648,7 @@ async fn follow_the_audio_links<R: Runtime>(app: &AppHandle<R>, conn: u32) {
     let audio = app.state::<streaming::StreamingState>();
     let (running, healths) = (audio.is_active(), audio.link_healths());
     let audio = state.change(app, |session| {
-        if session.connection_id != Some(conn) || session.room.is_none() {
-            return Vec::new();
-        }
-        if !running {
-            // The session ended on its own (a device that would not open):
-            // there are no links to follow, and the next thing that happens
-            // in the room opens them again.
-            session.roster.audio_ended();
-            return Vec::new();
-        }
-        healths
-            .into_iter()
-            .flat_map(|(peer, health)| session.roster.link_is(peer, health))
-            .collect()
+        session.following_the_links(conn, running, healths)
     });
     run_audio(app, conn, audio).await;
 }
@@ -979,21 +689,11 @@ async fn handle_events<R: Runtime>(
             SignalingEvent::ChatMessageReceived { .. } => {}
             SignalingEvent::PeerJoined { peer } => {
                 let _flow = state.flow.lock().await;
-                state.change(app, |session| {
-                    if session.connection_id == Some(conn) && session.room.is_some() {
-                        session.roster.joined(peer);
-                    }
-                });
+                state.change(app, |session| session.peer_joined(conn, peer));
             }
             SignalingEvent::PeerUpdated { peer } => {
                 let _flow = state.flow.lock().await;
-                let audio = state.change(app, |session| {
-                    if session.connection_id == Some(conn) && session.room.is_some() {
-                        session.roster.updated(peer)
-                    } else {
-                        Vec::new()
-                    }
-                });
+                let audio = state.change(app, |session| session.peer_updated(conn, peer));
                 run_audio(app, conn, audio).await;
             }
             SignalingEvent::PeerLeft { peer_id } => {
@@ -1001,13 +701,7 @@ async fn handle_events<R: Runtime>(
                     continue;
                 };
                 let _flow = state.flow.lock().await;
-                let audio = state.change(app, |session| {
-                    if session.connection_id == Some(conn) && session.room.is_some() {
-                        session.roster.left(peer_id)
-                    } else {
-                        Vec::new()
-                    }
-                });
+                let audio = state.change(app, |session| session.peer_left(conn, peer_id));
                 run_audio(app, conn, audio).await;
             }
             SignalingEvent::ConnectionLost { reason } => {
@@ -1087,7 +781,7 @@ async fn run_audio<R: Runtime>(app: &AppHandle<R>, conn: u32, audio: Vec<Audio>)
                         // Allow a later update to retry rather than leaving
                         // the participant permanently unheard.
                         app.state::<SessionState>()
-                            .change(app, |session| session.roster.start_failed(peer));
+                            .change(app, |session| session.start_failed(peer));
                         tracing::error!("Failed to start an audio link: {}", e);
                     }
                 }
@@ -1127,6 +821,7 @@ async fn advertise<R: Runtime>(app: &AppHandle<R>, conn: u32) {
 
 #[cfg(test)]
 mod tests {
+    use jamjam::network::room_session::Phase;
     use std::sync::{Arc, Mutex};
 
     use futures_util::{SinkExt, StreamExt};
@@ -2265,7 +1960,7 @@ mod tests {
     #[test]
     fn an_event_of_a_connection_the_session_let_go_of_ends_no_step() {
         let state = SessionState::new();
-        state.lock().connection_id = Some(2);
+        state.lock().connected(2);
         let epoch = state.epoch();
 
         assert_eq!(state.next_epoch_of(1), None);
@@ -2287,9 +1982,9 @@ mod tests {
                 .unwrap()
                 .push(serde_json::from_str(event.payload()).unwrap());
         });
-        state.change(app.handle(), |session| session.connection_id = Some(1));
+        state.change(app.handle(), |session| session.connected(1));
 
-        state.lock().connection_id = None;
+        state.lock().dropping_the_connection();
         state.change(app.handle(), |_| {});
 
         // The mock app delivers events on its own thread.
