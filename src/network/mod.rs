@@ -15,6 +15,7 @@ mod link_facts;
 mod quality;
 mod remote;
 mod room_entry;
+pub mod room_session;
 pub mod roster;
 mod sequence_tracker;
 pub mod settings_help;
