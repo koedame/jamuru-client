@@ -16,7 +16,6 @@ mod quality;
 mod remote;
 pub mod roster;
 mod sequence_tracker;
-mod session;
 mod signaling;
 mod stun;
 mod transport;
@@ -52,7 +51,6 @@ pub use remote::{
 };
 pub use roster::{LinkHealth, Roster};
 pub use sequence_tracker::SequenceTracker;
-pub use session::{Session, SessionConfig};
 pub use signaling::{
     candidates_to_addrs, ensure_crypto_provider_installed, gather_candidates, gather_candidates_on,
     gather_candidates_using, gather_host_candidates, invite_url, parse_invite_url,
