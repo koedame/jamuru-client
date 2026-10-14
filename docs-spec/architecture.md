@@ -83,6 +83,7 @@ src/
 │   ├── fec.rs          # 前方誤り訂正
 │   ├── room_entry.rs   # ルームを作る・入る手順: 要求を組み、返事を「入った部屋・拒否・想定外」に読む（CLI と GUI で共有）
 │   ├── room_entry.rs   # ルームを作る・入る手順: 要求を組み、返事を「入った部屋・拒否・想定外」に読む（CLI と GUI で共有）
+│   ├── room_session.rs # 接続・入室の状態: 段階・ルーム・参加者・繋ぎ直しと、各段が変えるもの（入出力なし）。画面に渡す Snapshot の形もここ（ADR-044 §6）
 │   ├── roster.rs       # 参加者のうち誰と音声を繋ぐか・相手が抜けたり途切れたりしたときの判断（入出力なし。CLI と GUI で共有。ADR-077）
 │   ├── sequence_tracker.rs # シーケンス追跡
 │   ├── settings_help.rs # 参加者の設定の手伝い: 依頼・答え・終わりの状態遷移（通信なし。アプリの signaling.rs が送る。ADR-044 §5）
@@ -110,7 +111,7 @@ src/
 src-tauri/              # Tauri デスクトップアプリ
   src/e2e_control.rs    # GUI E2E 制御チャネル（feature = "e2e-control"、既定で無効。ADR-025）
   src/rpc/              # 口ごとの許可の表（spec.rs）と、口から呼ぶ層（ADR-044）。E2E の制御チャネルはこの層の口の 1 つ。help.rs は手伝いの口で手伝う人に渡さないもの（デバイス ID・エラーの文面）を守る
-  src/session/          # 接続・入室の状態機械（接続の段階・ルーム・参加者・音声を繋いでいる参加者・繋ぎ直し）。画面は `session_get` と `session:changed` で描く。参加者と音声の判断は、入出力の無いコアの `network/roster.rs`（ADR-044 §6・ADR-077 §9）
+  src/session/          # 接続・入室の手順: サーバーと音声エンジンを呼び、コアの状態（`network/room_session.rs`）に変えさせ、変わったら画面へ知らせる。画面は `session_get` と `session:changed` で描く。参加者と音声の判断は、入出力の無いコアの `network/roster.rs`（ADR-044 §6・ADR-077 §9）
   src/settings.rs       # 音声の設定の変更を 1 か所で適用する（設定ウィンドウ・E2E・遠隔設定が共有。ADR-043）
   src/help_link.rs      # 手伝いの中継の両端: 手伝われる側は手伝いの口として受ける、手伝う側は窓を開いて相手のアプリの呼びを運ぶ（ADR-044 §5）
 ui/
