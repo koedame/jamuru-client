@@ -1,11 +1,13 @@
 //! Audio device enumeration and management
 
 use cpal::traits::{DeviceTrait, HostTrait};
+use serde::{Deserialize, Serialize};
 
 use super::error::AudioError;
 
 /// Unique identifier for an audio device
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct DeviceId(pub String);
 
 /// Identifier that survives restarts and reconnections: cpal's `DeviceId`
@@ -22,8 +24,9 @@ pub(crate) fn display_name(device: &cpal::Device) -> Option<String> {
     device.description().ok().map(|d| d.name().to_string())
 }
 
-/// Information about an audio device
-#[derive(Debug, Clone)]
+/// Information about an audio device. Serialized as the app's settings send it
+/// to the screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioDevice {
     /// Device identifier
     pub id: DeviceId,
@@ -151,6 +154,88 @@ pub fn resolve_output_device(device_id: Option<&DeviceId>) -> Result<cpal::Devic
         None => host
             .default_output_device()
             .ok_or_else(|| AudioError::DeviceNotFound("No default output device".into())),
+    }
+}
+
+/// What the id of an ASIO driver starts with, which tells it from a `cpal` device's. `cpal`
+/// never opens ASIO devices here (see `audio::asio`), so this prefix is the only way one is
+/// reachable at all.
+pub(crate) const ASIO_ID_PREFIX: &str = "asio:";
+
+/// Whether `id` names an ASIO driver rather than a `cpal` device.
+pub fn is_asio_id(id: &DeviceId) -> bool {
+    id.0.starts_with(ASIO_ID_PREFIX)
+}
+
+/// The driver name inside an ASIO [`DeviceId`], or `None` if `id` is not one.
+pub fn driver_name_of(id: &DeviceId) -> Option<&str> {
+    id.0.strip_prefix(ASIO_ID_PREFIX)
+}
+
+/// The ASIO driver `input` and `output` should open as one session, if they name the same one:
+/// ASIO has one channel set per direction under a single driver, so an input and output that
+/// agree on the driver both mean that driver, opened once, rather than two independent streams
+/// (see `audio::asio`). `None` when either is unset, they differ, or neither names an ASIO
+/// driver at all.
+pub fn shared_asio_driver(input: Option<&DeviceId>, output: Option<&DeviceId>) -> Option<String> {
+    let (input, output) = (input?, output?);
+    if input != output {
+        return None;
+    }
+    driver_name_of(input).map(str::to_string)
+}
+
+/// Why what was typed names no single device
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ChooseDeviceError {
+    #[error("no device has the id or the name {0:?}")]
+    NotFound(String),
+    #[error("{wanted:?} is the name of {} devices; choose one by its id: {}", ids.len(), ids.join(", "))]
+    Ambiguous { wanted: String, ids: Vec<String> },
+}
+
+/// The device whose id is `id`, among the devices on offer.
+pub fn find_device<'a>(devices: &'a [AudioDevice], id: &str) -> Option<&'a AudioDevice> {
+    devices.iter().find(|device| device.id.0 == id)
+}
+
+/// The device in use: the chosen one, or the system default when none is
+/// chosen. `None` when neither is on offer (unplugged, or no devices).
+pub fn device_in_use<'a>(
+    devices: &'a [AudioDevice],
+    chosen: Option<&str>,
+) -> Option<&'a AudioDevice> {
+    match chosen {
+        Some(id) => find_device(devices, id),
+        None => devices.iter().find(|device| device.is_default),
+    }
+}
+
+/// The device a person means by `wanted`, which is an id or a display name.
+///
+/// An id is what the settings save and what [`resolve_input_device`] opens, so
+/// it wins over a name that happens to be spelt the same. A name picks a device
+/// only when exactly one has it: on ALSA several devices share one name, and
+/// guessing among them would open another device than the one meant.
+pub fn choose_device<'a>(
+    devices: &'a [AudioDevice],
+    wanted: &str,
+) -> Result<&'a AudioDevice, ChooseDeviceError> {
+    if let Some(device) = find_device(devices, wanted) {
+        return Ok(device);
+    }
+    let mut named = devices.iter().filter(|device| device.name == wanted);
+    match (named.next(), named.next()) {
+        (Some(device), None) => Ok(device),
+        (None, _) => Err(ChooseDeviceError::NotFound(wanted.to_string())),
+        (Some(first), Some(second)) => Err(ChooseDeviceError::Ambiguous {
+            wanted: wanted.to_string(),
+            ids: [first, second]
+                .into_iter()
+                .chain(named)
+                .map(|device| device.id.0.clone())
+                .collect(),
+        }),
     }
 }
 
@@ -405,6 +490,173 @@ mod tests {
                 device
             );
         }
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn a_device_id_with_the_asio_prefix_is_recognized_as_one_and_the_driver_name_is_read_out() {
+        let asio = DeviceId(format!("{ASIO_ID_PREFIX}Focusrite USB ASIO"));
+
+        assert!(is_asio_id(&asio));
+        assert_eq!(driver_name_of(&asio), Some("Focusrite USB ASIO"));
+        let wasapi = DeviceId("wasapi:{gu-id}".to_string());
+        assert!(!is_asio_id(&wasapi));
+        assert_eq!(driver_name_of(&wasapi), None);
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn the_same_asio_driver_on_both_sides_is_the_shared_driver() {
+        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
+        assert_eq!(
+            shared_asio_driver(Some(&asio), Some(&asio)),
+            Some("Focusrite USB ASIO".to_string())
+        );
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn two_different_asio_drivers_are_not_a_shared_driver() {
+        let a = DeviceId("asio:Focusrite USB ASIO".to_string());
+        let b = DeviceId("asio:RME Fireface".to_string());
+        assert_eq!(shared_asio_driver(Some(&a), Some(&b)), None);
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn a_non_asio_device_on_either_side_is_not_a_shared_driver() {
+        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
+        let wasapi = DeviceId("wasapi:{some-guid}".to_string());
+        assert_eq!(shared_asio_driver(Some(&asio), Some(&wasapi)), None);
+        assert_eq!(shared_asio_driver(Some(&wasapi), Some(&wasapi)), None);
+    }
+
+    /// Verifies: REQ-AUD-126
+    #[test]
+    fn with_no_device_on_either_side_there_is_no_shared_driver() {
+        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
+        assert_eq!(shared_asio_driver(None, Some(&asio)), None);
+        assert_eq!(shared_asio_driver(Some(&asio), None), None);
+        assert_eq!(shared_asio_driver(None, None), None);
+    }
+
+    fn device(id: &str, name: &str, is_default: bool) -> AudioDevice {
+        AudioDevice {
+            id: DeviceId(id.to_string()),
+            name: name.to_string(),
+            supported_sample_rates: vec![48000],
+            supported_channels: vec![2],
+            is_default,
+            is_asio: false,
+            is_bluetooth: false,
+        }
+    }
+
+    fn offered() -> Vec<AudioDevice> {
+        vec![
+            device("alsa:hw:0,0", "Built-in Audio", true),
+            device("alsa:hw:1,0", "USB Interface", false),
+            device("alsa:hw:2,0", "Twin", false),
+            device("alsa:hw:3,0", "Twin", false),
+        ]
+    }
+
+    /// Verifies: REQ-AUD-039
+    #[test]
+    fn when_an_id_is_given_that_device_is_chosen() {
+        let devices = offered();
+
+        let chosen = choose_device(&devices, "alsa:hw:1,0").unwrap();
+
+        assert_eq!(chosen.name, "USB Interface");
+    }
+
+    /// Verifies: REQ-AUD-039
+    #[test]
+    fn when_a_name_is_given_that_only_one_device_has_that_device_is_chosen() {
+        let devices = offered();
+
+        let chosen = choose_device(&devices, "USB Interface").unwrap();
+
+        assert_eq!(chosen.id.0, "alsa:hw:1,0");
+    }
+
+    /// Verifies: REQ-AUD-039
+    #[test]
+    fn when_a_name_is_given_that_several_devices_have_none_is_chosen_and_the_ids_are_named() {
+        let devices = offered();
+
+        let refused = choose_device(&devices, "Twin").unwrap_err();
+
+        assert_eq!(
+            refused,
+            ChooseDeviceError::Ambiguous {
+                wanted: "Twin".to_string(),
+                ids: vec!["alsa:hw:2,0".to_string(), "alsa:hw:3,0".to_string()],
+            }
+        );
+        let message = refused.to_string();
+        assert!(message.contains("alsa:hw:2,0") && message.contains("alsa:hw:3,0"));
+    }
+
+    /// Verifies: REQ-AUD-039
+    #[test]
+    fn when_the_text_is_one_device_s_id_and_another_device_s_name_the_id_wins() {
+        let mut devices = offered();
+        devices.push(device("alsa:other", "alsa:hw:1,0", false));
+
+        let chosen = choose_device(&devices, "alsa:hw:1,0").unwrap();
+
+        assert_eq!(chosen.name, "USB Interface");
+    }
+
+    /// Verifies: REQ-AUD-039
+    #[test]
+    fn when_nothing_has_that_id_or_name_it_is_refused() {
+        let devices = offered();
+
+        assert_eq!(
+            choose_device(&devices, "no-such-device").unwrap_err(),
+            ChooseDeviceError::NotFound("no-such-device".to_string())
+        );
+    }
+
+    /// Verifies: REQ-AUD-039
+    #[test]
+    fn when_no_device_is_chosen_the_default_is_in_use_and_a_chosen_one_that_is_gone_leaves_none() {
+        let devices = offered();
+
+        assert_eq!(
+            device_in_use(&devices, None).map(|d| d.id.0.as_str()),
+            Some("alsa:hw:0,0")
+        );
+        assert_eq!(
+            device_in_use(&devices, Some("alsa:hw:1,0")).map(|d| d.name.as_str()),
+            Some("USB Interface")
+        );
+        assert_eq!(device_in_use(&devices, Some("alsa:unplugged")), None);
+    }
+
+    /// The screen reads the device list as the app has always sent it: the id
+    /// as a plain string beside the other fields.
+    ///
+    /// Verifies: REQ-AUD-039
+    #[test]
+    fn a_device_is_sent_to_the_screen_with_its_id_as_a_plain_string() {
+        let sent = serde_json::to_value(device("alsa:hw:1,0", "USB Interface", false)).unwrap();
+
+        assert_eq!(
+            sent,
+            serde_json::json!({
+                "id": "alsa:hw:1,0",
+                "name": "USB Interface",
+                "supported_sample_rates": [48000],
+                "supported_channels": [2],
+                "is_default": false,
+                "is_asio": false,
+                "is_bluetooth": false,
+            })
+        );
     }
 
     fn config(channels: u16) -> cpal::SupportedStreamConfigRange {

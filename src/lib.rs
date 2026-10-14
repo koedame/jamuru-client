@@ -8,6 +8,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod environment;
 pub mod identity_store;
+pub mod link;
 pub mod network;
 pub mod perf;
 pub mod protocol;
