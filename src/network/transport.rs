@@ -45,8 +45,12 @@ pub fn bind_std(addr: &str) -> Result<std::net::UdpSocket, NetworkError> {
     };
     let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
 
-    // SO_REUSEADDR so a quick rejoin after leaving a session can rebind.
-    socket.set_reuse_address(true)?;
+    // SO_REUSEADDR so a quick rejoin after leaving a session can rebind its port. Not for a
+    // port the system picks: it then gives the same port to every socket that asks with the
+    // option, and the datagrams of all of them go to whichever bound last.
+    if parsed_addr.port() != 0 {
+        socket.set_reuse_address(true)?;
+    }
     // Non-blocking is required before Tokio adopts the socket.
     socket.set_nonblocking(true)?;
     socket.bind(&parsed_addr.into())?;
@@ -290,6 +294,18 @@ mod tests {
             "Should be able to rebind to same port with SO_REUSEADDR"
         );
         assert_eq!(transport2.unwrap().local_addr().port(), port);
+    }
+
+    /// Test a port the system picks stays with its socket: another one that asks for the
+    /// port with SO_REUSEADDR would take the datagrams meant for it. (On Windows
+    /// SO_REUSEADDR lets a socket take over a port whatever the other asked for.)
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_transport_port_the_system_picked_is_refused_to_a_second_socket() {
+        let transport = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+        let addr = format!("127.0.0.1:{}", transport.local_addr().port());
+
+        assert!(UdpTransport::bind(&addr).await.is_err());
     }
 
     /// Test multiple consecutive rebinds to same port
