@@ -12,19 +12,20 @@ use tokio::sync::Mutex;
 use tokio::time::Duration;
 
 use jamjam::network::{
-    gather_host_candidates, AddressCandidate, ClientInfo, LinkIdentity, NetworkError, PeerInfo,
-    RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
+    gather_host_candidates, AddressCandidate, ClientInfo, EnterError, EnterRequest, Entered,
+    LinkIdentity, NetworkError, PeerInfo, RoomEntry, RoomInfo, SignalingClient,
+    SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
 };
 use uuid::Uuid;
 
 use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
-use crate::settings_help::{
-    notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
-};
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
+use jamjam::network::settings_help::{
+    notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
+};
 use jamjam::telemetry::{Component, EndReason, SessionMode};
 
 /// Connection ID counter
@@ -153,15 +154,6 @@ impl Default for SignalingState {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Result of joining a room
-#[derive(Debug, Clone, Serialize)]
-pub struct JoinResult {
-    pub room_id: String,
-    pub peer_id: String,
-    pub invite_code: String,
-    pub peers: Vec<PeerInfo>,
 }
 
 /// Connect to the signaling server
@@ -302,76 +294,117 @@ pub async fn signaling_join_room<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, SignalingState>,
     usage: tauri::State<'_, UsageState>,
-) -> Result<JoinResult, String> {
+) -> Result<Entered, String> {
+    // `room_id` is what the user typed - usually an invite code, which lets
+    // whoever reads the log file join the room - so it is not logged.
+    tracing::info!("Joining a room (conn_id={})", conn_id);
+    enter_room(
+        conn_id,
+        RoomEntry::Join { room_id },
+        peer_name,
+        app,
+        state,
+        usage,
+    )
+    .await
+}
+
+/// Create a new room
+pub async fn signaling_create_room<R: Runtime>(
+    conn_id: u32,
+    room_name: String,
+    peer_name: String,
+    app: AppHandle<R>,
+    state: tauri::State<'_, SignalingState>,
+    usage: tauri::State<'_, UsageState>,
+) -> Result<Entered, String> {
+    tracing::info!("Creating a room (conn_id={})", conn_id);
+    enter_room(
+        conn_id,
+        RoomEntry::Create { room_name },
+        peer_name,
+        app,
+        state,
+        usage,
+    )
+    .await
+}
+
+/// Asks the server for the room on `conn_id` and, once in it, keeps what the
+/// app needs of it: the room for chat, the names in the logs, the usage record.
+async fn enter_room<R: Runtime>(
+    conn_id: u32,
+    entry: RoomEntry,
+    peer_name: String,
+    app: AppHandle<R>,
+    state: tauri::State<'_, SignalingState>,
+    usage: tauri::State<'_, UsageState>,
+) -> Result<Entered, String> {
     let mut connections = state.connections.lock().await;
     let conn = connections
         .get_mut(&conn_id)
         .ok_or("Connection not found")?;
 
-    // `room_id` is what the user typed - usually an invite code, which lets
-    // whoever reads the log file join the room - so it is not logged here.
     let client_info = client_info_of(&app, &usage).await;
-    tracing::info!("Joining a room (conn_id={})", conn_id);
-    conn.send(SignalingMessage::JoinRoom {
-        room_id: room_id.clone(),
-        password: None,
-        peer_name: peer_name.clone(),
-        features: vec![PEER_MESSAGE_FEATURE.to_string()],
-        client_info,
-        link_key: Some(state.new_link_identity()),
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    match conn.recv().await.map_err(|e| e.to_string())? {
-        SignalingMessage::RoomJoined {
-            room_id,
-            peer_id,
-            invite_code,
-            peers,
-        } => {
-            // Store room state for chat
-            let peer_id_str = peer_id.to_string();
-            crate::logging::register_room(&room_id, invite_code.as_ref().map(|c| c.as_str()));
-            crate::logging::register_participant_name(&peer_name);
-            for peer in &peers {
-                crate::logging::register_participant_name(&peer.name);
+    let entered = conn
+        .enter_room(EnterRequest {
+            entry,
+            peer_name: peer_name.clone(),
+            link_key: state.new_link_identity(),
+            features: vec![PEER_MESSAGE_FEATURE.to_string()],
+            client_info,
+        })
+        .await
+        .map_err(|e| {
+            match &e {
+                EnterError::Refused(message) => {
+                    tracing::warn!("Server refused to enter the room: {}", message)
+                }
+                EnterError::Unexpected(_) => tracing::warn!("Unexpected reply to entering a room"),
+                EnterError::Connection(_) => {}
             }
-            let mut room_state = state.room_state.lock().await;
-            *room_state = Some(RoomState {
-                _room_id: room_id.clone(),
-                peer_id: peer_id_str.clone(),
-                peer_name,
-                chat_messages: vec![],
-                peer_names: peers
-                    .iter()
-                    .map(|p| (p.id.to_string(), p.name.clone()))
-                    .collect(),
-            });
+            e.to_string()
+        })?;
 
-            tracing::info!(
-                "Joined room {} as peer {} ({} other peer(s))",
-                room_id,
-                peer_id_str,
-                peers.len()
-            );
-            usage.session_started(&app, SessionMode::Join, peers.len() as u32 + 1);
-            Ok(JoinResult {
-                room_id,
-                peer_id: peer_id_str,
-                invite_code: invite_code.map(String::from).unwrap_or_default(),
-                peers,
-            })
-        }
-        SignalingMessage::Error { message } => {
-            tracing::warn!("Server refused to join the room: {}", message);
-            Err(message)
-        }
-        _ => {
-            tracing::warn!("Unexpected reply to JoinRoom");
-            Err("Unexpected response".to_string())
-        }
+    let peer_id = entered.peer_id.to_string();
+    crate::logging::register_room(
+        &entered.room_id,
+        entered.invite_code.as_ref().map(|c| c.as_str()),
+    );
+    crate::logging::register_participant_name(&peer_name);
+    for peer in &entered.peers {
+        crate::logging::register_participant_name(&peer.name);
     }
+    // Store room state for chat
+    *state.room_state.lock().await = Some(RoomState {
+        _room_id: entered.room_id.clone(),
+        peer_id: peer_id.clone(),
+        peer_name,
+        chat_messages: vec![],
+        peer_names: entered
+            .peers
+            .iter()
+            .map(|p| (p.id.to_string(), p.name.clone()))
+            .collect(),
+    });
+
+    tracing::info!(
+        "{} room {} as peer {} ({} other peer(s))",
+        if entered.created { "Created" } else { "Joined" },
+        entered.room_id,
+        peer_id,
+        entered.peers.len()
+    );
+    usage.session_started(
+        &app,
+        if entered.created {
+            SessionMode::Create
+        } else {
+            SessionMode::Join
+        },
+        entered.peers.len() as u32 + 1,
+    );
+    Ok(entered)
 }
 
 /// Advertises this app's audio address to the room.
@@ -500,72 +533,6 @@ pub async fn signaling_leave_room(
     queue_events(&state, ended);
 
     Ok(())
-}
-
-/// Create a new room
-pub async fn signaling_create_room<R: Runtime>(
-    conn_id: u32,
-    room_name: String,
-    peer_name: String,
-    app: AppHandle<R>,
-    state: tauri::State<'_, SignalingState>,
-    usage: tauri::State<'_, UsageState>,
-) -> Result<JoinResult, String> {
-    let mut connections = state.connections.lock().await;
-    let conn = connections
-        .get_mut(&conn_id)
-        .ok_or("Connection not found")?;
-
-    let client_info = client_info_of(&app, &usage).await;
-    tracing::info!("Creating a room (conn_id={})", conn_id);
-    conn.send(SignalingMessage::CreateRoom {
-        room_name,
-        password: None,
-        peer_name: peer_name.clone(),
-        features: vec![PEER_MESSAGE_FEATURE.to_string()],
-        client_info,
-        link_key: Some(state.new_link_identity()),
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    match conn.recv().await.map_err(|e| e.to_string())? {
-        SignalingMessage::RoomCreated {
-            room_id,
-            peer_id,
-            invite_code,
-        } => {
-            // Store room state for chat
-            let peer_id_str = peer_id.to_string();
-            crate::logging::register_room(&room_id, Some(invite_code.as_str()));
-            crate::logging::register_participant_name(&peer_name);
-            let mut room_state = state.room_state.lock().await;
-            *room_state = Some(RoomState {
-                _room_id: room_id.clone(),
-                peer_id: peer_id_str.clone(),
-                peer_name,
-                chat_messages: vec![],
-                peer_names: HashMap::new(),
-            });
-
-            tracing::info!("Created room {} as peer {}", room_id, peer_id_str);
-            usage.session_started(&app, SessionMode::Create, 1);
-            Ok(JoinResult {
-                room_id,
-                peer_id: peer_id_str,
-                invite_code: invite_code.into(),
-                peers: vec![],
-            })
-        }
-        SignalingMessage::Error { message } => {
-            tracing::warn!("Server refused to create the room: {}", message);
-            Err(message)
-        }
-        _ => {
-            tracing::warn!("Unexpected reply to CreateRoom");
-            Err("Unexpected response".to_string())
-        }
-    }
 }
 
 /// Get current timestamp in milliseconds

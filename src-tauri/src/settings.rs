@@ -15,11 +15,12 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Mutex;
 
+use jamjam::audio::{device_in_use, find_device, AudioDevice};
 use jamjam::config::{
     offered_buffer_sizes, AppConfig, AudioPreset, MAX_DEVICE_CHANNELS, VALID_SAMPLE_RATES,
 };
 
-use crate::audio::{self, AudioDeviceInfo};
+use crate::audio;
 use crate::config::{self, ConfigState, SampleRateInfo};
 use crate::logging::{redact_device_id, redaction_enabled};
 use crate::streaming::{SessionSetting, StreamingState};
@@ -122,8 +123,8 @@ pub struct AudioSettings {
     /// Counts up with every change. A window holding settings of a later
     /// revision ignores older ones, whichever order they arrive in.
     pub revision: u64,
-    pub input_devices: Vec<AudioDeviceInfo>,
-    pub output_devices: Vec<AudioDeviceInfo>,
+    pub input_devices: Vec<AudioDevice>,
+    pub output_devices: Vec<AudioDevice>,
     /// The chosen input device; `None` means the system default
     pub input_device_id: Option<String>,
     /// The chosen output device; `None` means the system default
@@ -212,8 +213,8 @@ impl From<SettingsError> for String {
 /// The devices on offer when a change is planned.
 #[derive(Debug, Clone, Default)]
 pub struct Devices {
-    pub input: Vec<AudioDeviceInfo>,
-    pub output: Vec<AudioDeviceInfo>,
+    pub input: Vec<AudioDevice>,
+    pub output: Vec<AudioDevice>,
 }
 
 impl Devices {
@@ -224,7 +225,7 @@ impl Devices {
     /// Both directions are listed at once, so a driver that does not answer
     /// costs one wait, not two.
     pub(crate) fn list() -> Self {
-        let or_none = |listed: Result<Vec<AudioDeviceInfo>, String>, kind: &str| {
+        let or_none = |listed: Result<Vec<AudioDevice>, String>, kind: &str| {
             listed.unwrap_or_else(|e| {
                 tracing::warn!("Could not list the {} devices: {}", kind, e);
                 Vec::new()
@@ -347,29 +348,19 @@ pub fn plan(
 }
 
 fn offered<'a>(
-    devices: &'a [AudioDeviceInfo],
+    devices: &'a [AudioDevice],
     device_id: &str,
-) -> Result<&'a AudioDeviceInfo, SettingsError> {
-    devices
-        .iter()
-        .find(|d| d.id == device_id)
+) -> Result<&'a AudioDevice, SettingsError> {
+    find_device(devices, device_id)
         .ok_or_else(|| SettingsError::DeviceNotOffered(device_id.to_string()))
 }
 
-/// The device in use: the chosen one, or the system default when none is
-/// chosen. `None` when neither is on offer (unplugged, or no devices).
-fn selected<'a>(
-    devices: &'a [AudioDeviceInfo],
-    chosen: &Option<String>,
-) -> Option<&'a AudioDeviceInfo> {
-    match chosen {
-        Some(id) => devices.iter().find(|d| &d.id == id),
-        None => devices.iter().find(|d| d.is_default),
-    }
+fn selected<'a>(devices: &'a [AudioDevice], chosen: &Option<String>) -> Option<&'a AudioDevice> {
+    device_in_use(devices, chosen.as_deref())
 }
 
 /// The most channels `device` offers; `None` when it does not say.
-fn channel_count(device: &AudioDeviceInfo) -> Option<u32> {
+fn channel_count(device: &AudioDevice) -> Option<u32> {
     device
         .supported_channels
         .iter()
@@ -381,7 +372,7 @@ fn channel_count(device: &AudioDeviceInfo) -> Option<u32> {
 /// device has both channels, otherwise its first ones. Decided whenever a
 /// device is opened and whenever the settings are shown, never saved.
 pub fn pair_in_use(
-    devices: &[AudioDeviceInfo],
+    devices: &[AudioDevice],
     chosen: &Option<String>,
     (left, right): (u32, Option<u32>),
 ) -> (u32, Option<u32>) {
@@ -577,11 +568,11 @@ pub async fn settings_change(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jamjam::audio::capture_attempts;
+    use jamjam::audio::{capture_attempts, DeviceId};
 
-    fn device(id: &str, channels: &[u16], is_default: bool) -> AudioDeviceInfo {
-        AudioDeviceInfo {
-            id: id.to_string(),
+    fn device(id: &str, channels: &[u16], is_default: bool) -> AudioDevice {
+        AudioDevice {
+            id: DeviceId(id.to_string()),
             name: id.to_string(),
             supported_sample_rates: vec![48000],
             supported_channels: channels.to_vec(),
