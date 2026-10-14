@@ -14,6 +14,7 @@ mod latency;
 mod link_facts;
 mod quality;
 mod remote;
+mod room_entry;
 pub mod roster;
 mod sequence_tracker;
 pub mod settings_help;
@@ -50,6 +51,7 @@ pub use remote::{
     connect_remote, discover_remote_enrollment, help_relay_url, is_help_session, new_help_session,
     HelpEnd, RemoteEnrollment, RemoteReader, RemoteWriter, REMOTE_ENROLLMENT_PATH,
 };
+pub use room_entry::{EnterError, EnterRequest, Entered, RoomEntry};
 pub use roster::{LinkHealth, Roster};
 pub use sequence_tracker::SequenceTracker;
 pub use signaling::{
