@@ -12,9 +12,9 @@ use tokio::sync::Mutex;
 use tokio::time::Duration;
 
 use jamjam::network::{
-    gather_host_candidates, AddressCandidate, ClientInfo, EnterError, EnterRequest, LinkIdentity,
-    NetworkError, PeerInfo, RoomEntry, RoomInfo, SignalingClient, SignalingConnection,
-    SignalingMessage, PEER_MESSAGE_FEATURE,
+    gather_host_candidates, AddressCandidate, ClientInfo, EnterError, EnterRequest, Entered,
+    LinkIdentity, NetworkError, PeerInfo, RoomEntry, RoomInfo, SignalingClient,
+    SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
 };
 use uuid::Uuid;
 
@@ -156,15 +156,6 @@ impl Default for SignalingState {
     }
 }
 
-/// Result of joining a room
-#[derive(Debug, Clone, Serialize)]
-pub struct JoinResult {
-    pub room_id: String,
-    pub peer_id: String,
-    pub invite_code: String,
-    pub peers: Vec<PeerInfo>,
-}
-
 /// Connect to the signaling server
 ///
 /// The server is resolved here rather than passed in, so the UI and
@@ -303,7 +294,7 @@ pub async fn signaling_join_room<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, SignalingState>,
     usage: tauri::State<'_, UsageState>,
-) -> Result<JoinResult, String> {
+) -> Result<Entered, String> {
     // `room_id` is what the user typed - usually an invite code, which lets
     // whoever reads the log file join the room - so it is not logged.
     tracing::info!("Joining a room (conn_id={})", conn_id);
@@ -326,7 +317,7 @@ pub async fn signaling_create_room<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, SignalingState>,
     usage: tauri::State<'_, UsageState>,
-) -> Result<JoinResult, String> {
+) -> Result<Entered, String> {
     tracing::info!("Creating a room (conn_id={})", conn_id);
     enter_room(
         conn_id,
@@ -348,7 +339,7 @@ async fn enter_room<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, SignalingState>,
     usage: tauri::State<'_, UsageState>,
-) -> Result<JoinResult, String> {
+) -> Result<Entered, String> {
     let mut connections = state.connections.lock().await;
     let conn = connections
         .get_mut(&conn_id)
@@ -413,12 +404,7 @@ async fn enter_room<R: Runtime>(
         },
         entered.peers.len() as u32 + 1,
     );
-    Ok(JoinResult {
-        room_id: entered.room_id,
-        peer_id,
-        invite_code: entered.invite_code.map(String::from).unwrap_or_default(),
-        peers: entered.peers,
-    })
+    Ok(entered)
 }
 
 /// Advertises this app's audio address to the room.
