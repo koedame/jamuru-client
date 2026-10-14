@@ -45,26 +45,10 @@ use azo::sys::{self, Bool, Callbacks, MessageSelector, SampleType};
 use azo::win::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
 use super::channels::{pick_channels, OutputRoute};
-use super::device::AudioDevice;
-use super::device::DeviceId;
+use super::device::{AudioDevice, DeviceId, ASIO_ID_PREFIX};
 use super::driver::StreamHost;
 use super::engine::{FramePuller, RoutedPuller};
 use super::error::AudioError;
-
-/// Marks a [`DeviceId`] as an ASIO driver rather than a `cpal` device.
-/// `cpal` never opens ASIO devices here (see the module doc), so this prefix
-/// is the only way one is reachable at all.
-pub(crate) const ID_PREFIX: &str = "asio:";
-
-/// Whether `id` names an ASIO driver rather than a `cpal` device.
-pub fn is_asio_id(id: &DeviceId) -> bool {
-    id.0.starts_with(ID_PREFIX)
-}
-
-/// The driver name inside an ASIO [`DeviceId`], or `None` if `id` is not one.
-pub fn driver_name_of(id: &DeviceId) -> Option<&str> {
-    id.0.strip_prefix(ID_PREFIX)
-}
 
 /// Lists the ASIO drivers Windows has registered (`HKLM\SOFTWARE\ASIO`), one
 /// [`AudioDevice`] per driver. Usable as both the input and the output
@@ -141,7 +125,7 @@ fn probe_driver(meta: &Metadata) -> Option<AudioDevice> {
         .map(|c| c as u16)
         .collect();
     Some(AudioDevice {
-        id: DeviceId(format!("{ID_PREFIX}{name}")),
+        id: DeviceId(format!("{ASIO_ID_PREFIX}{name}")),
         name,
         supported_sample_rates,
         supported_channels,
@@ -658,21 +642,6 @@ unsafe fn write_sample(sample_type: SampleType, base: *mut u8, i: usize, value: 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_device_id_with_the_asio_prefix_is_recognized_as_one() {
-        assert!(is_asio_id(&DeviceId(format!(
-            "{ID_PREFIX}Focusrite USB ASIO"
-        ))));
-        assert!(!is_asio_id(&DeviceId("wasapi:{gu-id}".to_string())));
-    }
-
-    #[test]
-    fn the_driver_name_is_read_back_out_of_the_device_id() {
-        let id = DeviceId(format!("{ID_PREFIX}Focusrite USB ASIO"));
-        assert_eq!(driver_name_of(&id), Some("Focusrite USB ASIO"));
-        assert_eq!(driver_name_of(&DeviceId("wasapi:x".to_string())), None);
-    }
 
     /// A sample written and read back through the same format must survive
     /// (within rounding), for every format this backend claims to support -
