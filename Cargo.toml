@@ -113,7 +113,7 @@ sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Steinberg's ASIO SDK: the SDK's proprietary license needs a signed
 # submission, and its GPLv3 option conflicts with this app's source-available
 # license.
-azo = "0.2"
+azo = "0.4"
 
 # How CoreAudio says a device is connected (Bluetooth or not), which `cpal`
 # does not pass on. Both are already pulled in by `cpal`; only the features
