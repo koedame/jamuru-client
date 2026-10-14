@@ -904,7 +904,7 @@ fn note_trouble(
     }
     .unwrap_or_default();
     let name = device
-        .and_then(|id| listed.iter().find(|d| d.id == id.0))
+        .and_then(|id| listed.iter().find(|d| d.id == *id))
         .or_else(|| {
             listed
                 .iter()

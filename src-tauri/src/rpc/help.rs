@@ -25,6 +25,7 @@ use std::future::Future;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use jamjam::audio::DeviceId;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::time::Instant;
@@ -125,10 +126,10 @@ impl DeviceHandles {
     /// `settings` as the helper may see them.
     pub fn hide(&mut self, mut settings: AudioSettings) -> AudioSettings {
         for device in settings.input_devices.iter_mut() {
-            device.id = Self::handle(&mut self.input, Self::INPUT, &device.id);
+            device.id = DeviceId(Self::handle(&mut self.input, Self::INPUT, &device.id.0));
         }
         for device in settings.output_devices.iter_mut() {
-            device.id = Self::handle(&mut self.output, Self::OUTPUT, &device.id);
+            device.id = DeviceId(Self::handle(&mut self.output, Self::OUTPUT, &device.id.0));
         }
         settings.input_device_id = settings
             .input_device_id
@@ -291,10 +292,10 @@ impl HelpGuard {
 /// for the tests that look at what a helper is shown.
 #[cfg(test)]
 pub(crate) fn settings_with_devices(ids: &[&str]) -> AudioSettings {
-    use crate::audio::AudioDeviceInfo;
     use crate::settings::ChannelPair;
-    let device = |(index, id): (usize, &&str)| AudioDeviceInfo {
-        id: id.to_string(),
+    use jamjam::audio::{AudioDevice, DeviceId};
+    let device = |(index, id): (usize, &&str)| AudioDevice {
+        id: DeviceId(id.to_string()),
         name: format!("Interface {}", index + 1),
         supported_sample_rates: vec![48000],
         supported_channels: vec![2],

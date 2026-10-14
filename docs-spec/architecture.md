@@ -518,8 +518,8 @@ GUI で操作できるコア機能は CLI からも操作できる。逆方向�
 **コマンド:**
 
 ```
-jamuru devices list                     # デバイス一覧
-jamuru devices set --input <NAME> --output <NAME>   # 設定に保存（'default' で解除）
+jamuru devices list                     # デバイス一覧（ID と名前）
+jamuru devices set --input <ID|NAME> --output <ID|NAME>   # 設定に ID で保存（'default' で解除）
 jamuru preset list                      # プリセットと遅延バジェット
 jamuru preset use <NAME>                # 設定に保存
 jamuru create-room --server <URL>       # ルーム作成、招待コードを表示
