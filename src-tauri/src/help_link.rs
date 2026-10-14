@@ -36,7 +36,7 @@ use crate::device_identity::DeviceIdentityState;
 use crate::rpc::help::HelpGuard;
 use crate::rpc::link::{self, Ended, Session};
 use crate::rpc::{Code, Portal, RpcError};
-use crate::settings_help::{Link, Role};
+use jamjam::network::settings_help::{Link, Role};
 
 /// What the helper's window hears the helped app's events as. The payload is
 /// `{"name": <the event>, "payload": <its payload>}`.

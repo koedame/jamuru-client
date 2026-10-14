@@ -28,7 +28,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use jamjam::network::is_help_session;
+use super::is_help_session;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -711,7 +711,7 @@ pub fn notice(event: NoticeEvent, helper: Uuid, setting: Option<String>) -> Help
 
 /// The name a change travels under (`"input_device"`, `"buffer_size"`, ...),
 /// which the chat turns into the setting's label.
-pub fn setting_name(change: &crate::settings::SettingChange) -> String {
+pub fn setting_name(change: &impl Serialize) -> String {
     serde_json::to_value(change)
         .ok()
         .and_then(|v| v.get("setting").and_then(|s| s.as_str()).map(String::from))
