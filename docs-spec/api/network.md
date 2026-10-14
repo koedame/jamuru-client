@@ -28,6 +28,8 @@ network/
 ├── transport.rs        # UDPトランスポート
 ├── udp_mux.rs          # 1 つの音声ソケットを相手ごとの接続で共有する（ADR-077）
 ├── roster.rs           # 誰と音声を繋ぐかの判断（入出力なし。アプリと CLI で共有。ADR-077 §9）
+├── room_entry.rs       # ルームを作る・入る手順（要求を組み、返事を読む。アプリと CLI で共有）
+├── room_entry.rs       # ルームを作る・入る手順（要求を組み、返事を読む。アプリと CLI で共有）
 ├── signaling.rs        # シグナリング
 ├── stun.rs             # STUNクライアント
 ├── fec.rs              # FEC処理
