@@ -29,7 +29,9 @@
 //!   virtual audio driver).
 
 use std::io::Write;
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
+#[cfg(target_os = "linux")]
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -61,6 +63,7 @@ pub const CHANNELS: usize = 6;
 pub const NODE_NAME_OUT: &str = "jamuru-recording-output";
 
 /// Node name this app writes to (the same virtual cable's other end).
+#[cfg(target_os = "linux")]
 const NODE_NAME_IN: &str = "jamuru-recording-output-in";
 
 /// Owns the `pw-loopback` device pair and the `pw-cat` writer feeding it.
