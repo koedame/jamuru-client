@@ -28,7 +28,7 @@ use jamjam::audio::{
     VoiceHandle, ADAPT_INTERVAL, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
-use jamjam::audio::{driver_name_of, AsioDuplex, OPEN_TIMEOUT};
+use jamjam::audio::{shared_asio_driver, AsioDuplex, OPEN_TIMEOUT};
 use jamjam::link::{LinkSpec, Opened, Senders};
 use jamjam::network::{
     audio_packet_duration_ms, required_bps, status_label, AudioEncodingConfig, BandwidthEstimator,
@@ -1834,21 +1834,6 @@ fn capture_or_silence(
     }
 }
 
-/// The ASIO driver `input` and `output` should open as one session, if they
-/// name the same one: ASIO has one channel set per direction under a single
-/// driver, so an input and output that agree on the driver both mean that
-/// driver, opened once, rather than two independent streams (see
-/// `audio::asio`). `None` when either is unset, they differ, or neither
-/// names an ASIO driver at all.
-#[cfg(target_os = "windows")]
-fn shared_asio_driver(input: Option<&DeviceId>, output: Option<&DeviceId>) -> Option<String> {
-    let (input, output) = (input?, output?);
-    if input != output {
-        return None;
-    }
-    driver_name_of(input).map(str::to_string)
-}
-
 /// Opens `driver_name` for both directions at once: what `start_capture_ring`
 /// and `start_playout` do together, through a single [`AsioDuplex`] session
 /// instead of two `cpal` streams (Windows only, see `audio::asio`).
@@ -3223,46 +3208,6 @@ mod tests {
     use super::*;
     use jamjam::audio::PlayoutConfig;
     use tauri::Manager;
-
-    /// Verifies: REQ-AUD-126
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn the_same_asio_driver_on_both_sides_is_the_shared_driver() {
-        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
-        assert_eq!(
-            shared_asio_driver(Some(&asio), Some(&asio)),
-            Some("Focusrite USB ASIO".to_string())
-        );
-    }
-
-    /// Verifies: REQ-AUD-126
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn two_different_asio_drivers_are_not_a_shared_driver() {
-        let a = DeviceId("asio:Focusrite USB ASIO".to_string());
-        let b = DeviceId("asio:RME Fireface".to_string());
-        assert_eq!(shared_asio_driver(Some(&a), Some(&b)), None);
-    }
-
-    /// Verifies: REQ-AUD-126
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn a_non_asio_device_on_either_side_is_not_a_shared_driver() {
-        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
-        let wasapi = DeviceId("wasapi:{some-guid}".to_string());
-        assert_eq!(shared_asio_driver(Some(&asio), Some(&wasapi)), None);
-        assert_eq!(shared_asio_driver(Some(&wasapi), Some(&wasapi)), None);
-    }
-
-    /// Verifies: REQ-AUD-126
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn with_no_device_on_either_side_there_is_no_shared_driver() {
-        let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
-        assert_eq!(shared_asio_driver(None, Some(&asio)), None);
-        assert_eq!(shared_asio_driver(Some(&asio), None), None);
-        assert_eq!(shared_asio_driver(None, None), None);
-    }
 
     /// The bug this guards: stopping waited a fixed 100 ms, and a thread that
     /// took longer to end cleared `is_active` after the next session had set

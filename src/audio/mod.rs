@@ -27,15 +27,16 @@ mod transport;
 mod virtual_output;
 
 #[cfg(target_os = "windows")]
-pub use asio::{driver_name_of, is_asio_id, AsioDuplex};
+pub use asio::AsioDuplex;
 pub use channels::{capture_attempts, OutputRoute};
 pub use codec::{
     create_codec, AudioCodec, CodecConfig, CodecError, CodecType, OpusCodec, PcmCodec,
 };
 pub(crate) use device::stable_device_id;
 pub use device::{
-    choose_device, device_in_use, find_device, list_input_devices, list_output_devices,
-    resolve_input_device, resolve_output_device, AudioDevice, ChooseDeviceError, DeviceId,
+    choose_device, device_in_use, driver_name_of, find_device, is_asio_id, list_input_devices,
+    list_output_devices, resolve_input_device, resolve_output_device, shared_asio_driver,
+    AudioDevice, ChooseDeviceError, DeviceId,
 };
 pub use driver::{bounded, LIST_TIMEOUT, OPEN_TIMEOUT};
 pub use engine::{
