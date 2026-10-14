@@ -56,12 +56,6 @@ pub enum NetworkError {
     #[error("Connection closed")]
     ConnectionClosed,
 
-    #[error("Session full")]
-    SessionFull,
-
-    #[error("Peer not found: {0}")]
-    PeerNotFound(String),
-
     #[error("Room not found: {0}")]
     RoomNotFound(String),
 

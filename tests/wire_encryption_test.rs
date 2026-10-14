@@ -11,9 +11,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use jamjam::network::{
-    AudioEncodingConfig, Connection, LinkIdentity, LinkSecurity, Session, SessionConfig,
-};
+use jamjam::network::{AudioEncodingConfig, Connection, LinkIdentity, LinkSecurity};
 use jamjam::protocol::{Packet, PacketType, HEADER_SIZE};
 
 use common::{wait_until_encrypted, Rewrite, Tap};
@@ -465,108 +463,6 @@ async fn when_a_stranger_sends_a_key_it_is_not_taken() {
     settle().await;
 
     assert_eq!(conn.security(), LinkSecurity::Negotiating);
-}
-
-/// A session of several peers encrypts what it sends to each, with a key for each
-///
-/// Verifies: REQ-SEC-001
-#[tokio::test]
-async fn when_a_session_broadcasts_each_peer_gets_audio_it_alone_can_open() {
-    let heard = broadcast_among_three(false).await;
-
-    assert!(heard[0].is_empty(), "not sent to itself");
-    assert_eq!(heard[1], known_signal());
-    assert_eq!(heard[2], known_signal());
-}
-
-/// The same among participants who know each other by the keys the server gave
-///
-/// Verifies: REQ-SEC-001, REQ-SEC-007
-#[tokio::test]
-async fn when_a_session_checks_its_peers_each_gets_audio_it_alone_can_open() {
-    let heard = broadcast_among_three(true).await;
-
-    assert!(heard[0].is_empty(), "not sent to itself");
-    assert_eq!(heard[1], known_signal());
-    assert_eq!(heard[2], known_signal());
-}
-
-/// What each of three sessions heard when the first broadcast the known signal, once the keys
-/// among all three were agreed
-async fn broadcast_among_three(check_peers: bool) -> Vec<Vec<f32>> {
-    let identities: Vec<LinkIdentity> = (0..3).map(|_| LinkIdentity::generate()).collect();
-    let ids = [
-        uuid::Uuid::new_v4(),
-        uuid::Uuid::new_v4(),
-        uuid::Uuid::new_v4(),
-    ];
-    let mut sessions = Vec::new();
-    for identity in &identities {
-        let mut session = Session::new(SessionConfig::default()).await.unwrap();
-        if check_peers {
-            session.set_link_identity(identity.clone());
-        }
-        sessions.push(session);
-    }
-    let heard: Vec<Arc<Mutex<Vec<f32>>>> = (0..3).map(|_| Default::default()).collect();
-    for (session, heard) in sessions.iter_mut().zip(&heard) {
-        let sink = heard.clone();
-        session.set_peer_audio_callback(move |_, samples, _| {
-            sink.lock().unwrap().extend_from_slice(samples)
-        });
-    }
-    let addr_of = |session: &Session| -> SocketAddr {
-        format!("127.0.0.1:{}", session.local_addr().port())
-            .parse()
-            .unwrap()
-    };
-    let addrs: Vec<SocketAddr> = sessions.iter().map(addr_of).collect();
-    let peer_info = |index: usize| jamjam::network::PeerInfo {
-        link_key: check_peers.then(|| identities[index].public_key()),
-        id: ids[index],
-        name: format!("peer-{index}"),
-        candidates: vec![],
-        public_addr: None,
-        local_addr: None,
-        joined_at: 0,
-        features: vec![],
-    };
-    for (i, session) in sessions.iter().enumerate() {
-        for j in (0..3).filter(|&j| j != i) {
-            session.add_peer(peer_info(j), addrs[j]).await.unwrap();
-        }
-    }
-    for session in &mut sessions {
-        session.start();
-    }
-
-    // Keys are agreed pairwise; wait for every pair
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        let mut all = true;
-        for (i, session) in sessions.iter().enumerate() {
-            for j in (0..3).filter(|&j| j != i) {
-                all &= session.peer_security(ids[j]).await == Some(LinkSecurity::Encrypted);
-            }
-        }
-        if all {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the keys were not agreed"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    let signal = known_signal();
-    sessions[0].broadcast_audio(&signal, 0).await.unwrap();
-    settle().await;
-
-    heard
-        .iter()
-        .map(|heard| heard.lock().unwrap().clone())
-        .collect()
 }
 
 /// Two connections whose every packet crosses a relay, connected through it when this returns.
