@@ -279,7 +279,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-123
+    /// Verifies: REQ-AUD-123, REQ-CLI-008
     #[test]
     fn when_the_driver_hangs_before_any_listing_it_says_so_instead_of_showing_no_devices() {
         static LISTING: Listing = Listing::new(Duration::from_millis(100));

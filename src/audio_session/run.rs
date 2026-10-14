@@ -151,8 +151,7 @@ pub(super) async fn run(
 
     // The input and output settings name the same ASIO driver (Windows
     // only): one ASIO session serves both directions instead of the two
-    // engines below (see `audio::asio`, and the CLI's `AudioIo::start`,
-    // which the same check comes from).
+    // engines below (see `audio::asio`).
     #[cfg(target_os = "windows")]
     let asio_driver = if input_signal.is_some() || output_file.is_some() {
         None
