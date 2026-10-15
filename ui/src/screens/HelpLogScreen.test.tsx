@@ -13,7 +13,6 @@ import type { HelpRecord, HelpUndoResult } from "../lib/tauri";
 import { HelpLogScreen } from "./HelpLogScreen";
 
 const invoke = vi.hoisted(() => vi.fn());
-const emit = vi.hoisted(() => vi.fn());
 const listeners = vi.hoisted(() => new Map<string, Array<(event: { payload: unknown }) => void>>());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({
@@ -23,7 +22,6 @@ vi.mock("@tauri-apps/api/event", () => ({
       listeners.set(name, (listeners.get(name) ?? []).filter((held) => held !== handler))
     );
   }),
-  emit,
   emitTo: vi.fn(),
 }));
 
@@ -50,7 +48,6 @@ function announce(name: string, payload?: unknown) {
 beforeEach(async () => {
   calls = [];
   listeners.clear();
-  emit.mockReset();
   record = recordOf({});
   undoResult = { restored: ["buffer_size"], failed: [] };
   invoke.mockReset();
@@ -115,13 +112,25 @@ describe("HelpLogScreen", () => {
     expect(await screen.findAllByText(/Aki muted the microphone/)).toHaveLength(1);
   });
 
+  // Verifies: REQ-RMT-035
+  it("the help ends while the window is open, the window reads the record again and says it is over", async () => {
+    render(<HelpLogScreen />);
+    await screen.findByTestId("settings-help-log-stop");
+    record = recordOf({ active: false, remaining_ms: null, changed: ["buffer_size"], can_undo: true });
+
+    announce("help:record-changed");
+
+    expect(await screen.findByTestId("settings-help-log-heading")).toHaveTextContent("The help from Aki is over");
+    expect(screen.queryByTestId("settings-help-log-stop")).not.toBeInTheDocument();
+  });
+
   // Verifies: REQ-RMT-034
   it("Stop is pressed, the main window is asked to stop the help", async () => {
     render(<HelpLogScreen />);
 
     fireEvent.click(await screen.findByTestId("settings-help-log-stop"));
 
-    await waitFor(() => expect(emit).toHaveBeenCalledWith("help:stop-requested", undefined));
+    await waitFor(() => expect(calls).toContain("help_stop_request"));
   });
 
   // Verifies: REQ-RMT-035

@@ -258,6 +258,7 @@ pub fn serve_host<R: Runtime>(
         earlier.record.finish();
     }
     *links.record_slot() = Some(record.clone());
+    help_record::announce_changed(&app);
     let task_app = app.clone();
     let task_session = session.clone();
     let task_record = record.clone();
@@ -287,6 +288,7 @@ pub fn serve_host<R: Runtime>(
             }
         };
         task_record.finish();
+        help_record::announce_changed(&task_app);
         forget_host(&task_app, &task_session);
         if idle {
             crate::signaling::help_timed_out(&task_app, &task_session).await;
@@ -459,6 +461,7 @@ pub fn end<R: Runtime>(app: &AppHandle<R>, role: Role) {
             if let Some(slot) = links.host().take() {
                 slot.task.abort();
                 slot.record.finish();
+                help_record::announce_changed(app);
             }
         }
         Role::Helper => {

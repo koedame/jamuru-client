@@ -9,13 +9,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsHelpBar, SettingsHelpLog, settingLabel, type SettingsHelpLogLine } from "../components/SettingsHelp";
 import { formatRemaining, useHelpRemaining } from "../components/SettingsHelp/useHelpRemaining";
-import { useWindowEmit, useWindowEvent } from "../hooks/useWindowEvents";
+import { useWindowEvent } from "../hooks/useWindowEvents";
 import {
   HELP_LOG_EVENT,
-  HELP_STOP_REQUESTED_EVENT,
+  HELP_RECORD_CHANGED_EVENT,
   SESSION_SETTINGS_HELP,
   helpRecordDismiss,
   helpRecordGet,
+  helpStopRequest,
   helpUndo,
   type HelpEntry,
   type HelpRecord,
@@ -31,7 +32,6 @@ function entryId(entry: HelpEntry): string {
 
 export function HelpLogScreen() {
   const { t } = useTranslation();
-  const emit = useWindowEmit();
   const [record, setRecord] = useState<HelpRecord | null>(null);
   const [undone, setUndone] = useState<string | null>(null);
   const { ms: remainingMs, seed } = useHelpRemaining(record?.active === true);
@@ -56,6 +56,7 @@ export function HelpLogScreen() {
   useWindowEvent<HelpEntry>(HELP_LOG_EVENT, onLogged);
   // The help starting, ending or being asked for again changes what the record is.
   useWindowEvent<unknown>(SESSION_SETTINGS_HELP, read);
+  useWindowEvent<unknown>(HELP_RECORD_CHANGED_EVENT, read);
 
   const undo = useCallback(() => {
     helpUndo()
@@ -131,7 +132,7 @@ export function HelpLogScreen() {
       emptyText={t("settingsHelp.log.empty")}
       after={after}
       stopLabel={record.active ? t("settingsHelp.log.stop") : undefined}
-      onStop={() => void emit(HELP_STOP_REQUESTED_EVENT)}
+      onStop={() => void helpStopRequest().catch((e) => console.error("Could not ask to stop the help:", e))}
     />
   );
 }
