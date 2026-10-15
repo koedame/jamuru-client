@@ -779,7 +779,9 @@
     "helped": {
       "panelTitle": "Audio settings {{name}} has open",
       "bar": "{{name}} is helping with your audio settings",
-      "stop": "Stop"
+      "stop": "Stop",
+      "remaining": "If nothing is done, the help ends by itself in {{time}}",
+      "log": "View log"
     },
     "helper": {
       "title": "{{name}}'s audio settings",
@@ -789,11 +791,13 @@
         "device_gone": "{{name}}'s app could not switch: that device is no longer connected",
         "invalid_value": "{{name}}'s app could not use that value",
         "unavailable": "{{name}}'s app could not save the change"
-      }
+      },
+      "remaining": "If nothing is done, the help ends by itself in {{time}}"
     },
     "ended": {
-      "stopped": "{{name}} stopped the help with settings",
-      "left": "{{name}} left, so the help with settings ended"
+      "stopped": "{{name}} ended the help",
+      "left": "{{name}} left, so the help with settings ended",
+      "timedOut": "Nothing was done for a while, so the help from {{name}} ended"
     },
     "setting": {
       "preset": "Preset",
@@ -803,6 +807,26 @@
       "banner": "You are looking at {{name}}'s jamuru settings together. What you change here changes theirs.",
       "presence": "{{name}} can also see where you point and focus",
       "waiting": "Waiting for {{name}}'s app to be in the room"
+    },
+    "log": {
+      "heading": "{{name}} is helping",
+      "headingOver": "The help from {{name}} is over",
+      "empty": "Nothing has been done yet",
+      "stop": "Stop the help",
+      "started": "{{name}} started helping",
+      "settingChanged": "{{name}} changed the {{setting}} setting",
+      "muted": "{{name}} muted the microphone",
+      "unmuted": "{{name}} unmuted the microphone",
+      "restored": "Put the settings back as they were before the help",
+      "none": "There is no help to show"
+    },
+    "report": {
+      "changed": "{{name}} changed: {{settings}}",
+      "separator": ", ",
+      "undo": "Put back",
+      "dismiss": "Close",
+      "restored": "Put the settings back as they were before the help",
+      "notRestored": "Couldn't put back {{settings}}. Choose it again in the settings"
     }
   },
   "terms": {

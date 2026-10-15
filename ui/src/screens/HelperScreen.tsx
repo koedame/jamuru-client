@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MainScreen } from "./MainScreen";
 import { SettingsHelpPanel, useAudioSettingsPanel, useHelpPresence } from "../components/SettingsHelp";
+import { formatRemaining, useHelpRemaining } from "../components/SettingsHelp/useHelpRemaining";
 import { SidePanel } from "../components/SidePanel";
 import { helpWindowInfo, type HelpRefusal } from "../lib/tauri";
 import "./HelperScreen.css";
@@ -21,6 +22,7 @@ export function HelperScreen() {
   const { t } = useTranslation();
   const [name, setName] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const { ms: remainingMs } = useHelpRemaining(true);
 
   useEffect(() => {
     helpWindowInfo()
@@ -59,6 +61,12 @@ export function HelperScreen() {
         <span className="helper-screen__presence-dot" aria-hidden="true" />
         {t("settingsHelp.window.presence", { name })}
       </p>
+      {remainingMs !== null && (
+        // Not a live region: a count that is read out every second is noise.
+        <p className="helper-screen__banner" data-testid="settings-help-window-remaining">
+          {t("settingsHelp.helper.remaining", { time: formatRemaining(remainingMs) })}
+        </p>
+      )}
       <div className="helper-screen__screen">
         <MainScreen helper={{ name }} onSettingsClick={() => setSettingsOpen(true)} />
       </div>

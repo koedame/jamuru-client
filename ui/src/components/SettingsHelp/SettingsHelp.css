@@ -162,5 +162,57 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
-  margin-bottom: var(--space-sm);
+  padding: var(--space-md) var(--space-md) 0;
+}
+
+.settings-help-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-height: 100vh;
+  padding: var(--space-md);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  box-sizing: border-box;
+}
+
+.settings-help-log__head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
+.settings-help-log__heading {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+}
+
+.settings-help-log__remaining,
+.settings-help-log__empty {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.settings-help-log__lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-caption);
+}
+
+.settings-help-log__line {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.settings-help-log__time {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
 }

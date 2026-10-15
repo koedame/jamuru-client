@@ -334,6 +334,16 @@ impl<'a> SessionScreen<'a> {
         self.element("[data-testid='settings-help-stop-helper']", "stop helping")
     }
 
+    /// How long until the help ends by itself, as the bar on the helped side says it.
+    pub fn settings_help_status(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-status']", "help bar status")
+    }
+
+    /// Put back what the help changed, in the bar shown once the help is over.
+    pub fn settings_help_undo_button(&self) -> Element<'a> {
+        self.element("[data-testid='settings-help-undo']", "put back")
+    }
+
     // --- chat ---
 
     pub fn chat_input(&self) -> Element<'a> {
