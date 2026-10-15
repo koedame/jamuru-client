@@ -338,6 +338,10 @@
           "message": "不安定なネットワーク接続を検出しました",
           "suggestion": "WiFiではなく有線接続の利用を検討してください"
         },
+        "wifiConnection": {
+          "message": "WiFi で接続しています",
+          "suggestion": "WiFi は遅延のばらつきが大きく、音が途切れやすいので、セッションにはお勧めしません。有線接続をお使いください。"
+        },
         "highJitter": {
           "message": "ネットワークジッターが大きいです（{{jitter}}ms）",
           "suggestion": "バッファサイズを大きくするか、より安定した接続を利用してください"

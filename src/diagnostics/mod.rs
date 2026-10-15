@@ -94,6 +94,8 @@ pub enum ProblemCode {
     SymmetricNat,
     /// Connection stability graded C
     UnstableConnection,
+    /// The default route leaves by a Wi-Fi interface
+    WifiConnection,
     /// Jitter above the acceptable threshold
     HighJitter {
         /// Measured jitter in milliseconds
