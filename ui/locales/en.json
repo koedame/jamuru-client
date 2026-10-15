@@ -340,6 +340,10 @@
           "message": "Unstable network connection detected",
           "suggestion": "Consider using a wired connection instead of WiFi"
         },
+        "wifiConnection": {
+          "message": "Connected over Wi-Fi",
+          "suggestion": "Wi-Fi is not recommended for a session: its delay varies and the sound can break up. Use a wired LAN connection."
+        },
         "highJitter": {
           "message": "High network jitter detected ({{jitter}}ms)",
           "suggestion": "Increase buffer size or use a more stable connection"
