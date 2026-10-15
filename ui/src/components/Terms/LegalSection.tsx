@@ -10,7 +10,7 @@ export interface LegalSectionProps {
   onOpenAnnouncements: () => void;
 }
 
-/** The settings screen's rows that open the terms of use, the license and the pages published for users. */
+/** The About tab's rows that open the terms of use, the license and the pages published for users. */
 export function LegalSection({
   onOpenTerms,
   onOpenLicense,
@@ -26,7 +26,7 @@ export function LegalSection({
   ];
   return (
     <section className="legal" data-testid="settings-legal">
-      <h3 className="legal__title">{t("settings.legal.title")}</h3>
+      <h2 className="legal__title">{t("settings.legal.title")}</h2>
       {rows.map((row) => (
         <button
           key={row.id}

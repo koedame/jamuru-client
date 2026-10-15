@@ -1,7 +1,7 @@
 # SettingsPanel - 設定パネル
 
 アプリケーション設定を管理するコンポーネント。
-デバイス設定・一般設定・プロフィール・診断機能を提供する。
+一般（プロフィール・言語・サーバー）・オーディオ・プライバシー・診断とサポート・アプリについて、の 5 つのタブを提供する。タブの分け方は [ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)。
 
 デザインは `ui.pen`（Pencil schema 2.14）の `Screens/Settings` 系を正とする。
 配色・タイポグラフィは `ui/src/styles/tokens.css` のトークンのみを使用する（ハードコード禁止）。
@@ -30,11 +30,11 @@
 ┌──────────────────────────────────────────────────────────┐
 │ 設定                                    ← Header (h56)     │  bg: --color-bg-secondary
 ├──────────┬───────────────────────────────────────────────┤
-│ ≡ 一般    │  オーディオデバイス          ← 見出し(Inter, bold) │
-│ ◈ デバイス │  入力デバイス                                    │
-│ ⏘ プロ...  │  ┌───────────────────────────────┐            │
-│ ∿ 診断    │  │ Built-in Microphone        ▼ │            │  Select(block)
-│          │  └───────────────────────────────┘            │
+│ ≡ 一般    │  デバイス                    ← 見出し(Inter, bold) │
+│ ◈ オーディオ│  入力デバイス                                    │
+│ ◇ プライバ.│  ┌───────────────────────────────┐            │
+│ ∿ 診断と.. │  │ Built-in Microphone        ▼ │            │  Select(block)
+│ ⓘ アプリ.. │  └───────────────────────────────┘            │
 │          │  ...                                            │
 └──────────┴───────────────────────────────────────────────┘
    Sidebar(w200)          Content(flex, overflow-y:auto)
@@ -68,10 +68,10 @@
 Pure コンポーネント（Tauri 非依存）。全データを Props で受け取る。
 
 ```typescript
-type SettingsTabId = "devices" | "general" | "profile" | "diagnostics";
+type SettingsTabId = "general" | "devices" | "privacy" | "diagnostics" | "about";
 
 interface SettingsPanelProps {
-  initialTab?: SettingsTabId;          // 既定 "devices"
+  initialTab?: SettingsTabId;          // 既定 "devices"（Adapter は "general"）
   title?: string;                      // ヘッダー題字（既定 i18n settings.title）
   language: Language;
   displayName: string;
@@ -111,7 +111,7 @@ interface SettingsPanelProps {
   onRunDiagnostics?: () => void;
   onCancelDiagnostics?: () => void;         // 指定時のみ実行中にキャンセルボタン表示
   onApplyPreset?: (preset: RecommendedPreset) => void;
-  onOpenLogFolder?: () => void;             // 指定時のみ診断タブにログファイルの節を表示
+  onOpenLogFolder?: () => void;             // 指定時のみ診断とサポートタブにログファイルの節を表示
   logFolder?: string | null;                // 開いたフォルダ（ボタンの下に表示）
   logFolderError?: string | null;           // 開けなかった理由（フォルダの場所を含む）
   previousHang?: Hang | null;               // 前回終了しなかった記録（無ければ節を出さない）
@@ -119,7 +119,7 @@ interface SettingsPanelProps {
   previousHangAnswered?: boolean;           // 答えた後、節を短い確認表示に切り替える
   previousHangAttachesLog?: boolean;        // 「送る」が jamuru.log も添えるか（1.0.0 未満は true）
   usageReporting?: boolean;                 // 利用状況を送る設定（既定オフ）
-  onUsageReportingChange?: (enabled: boolean) => void; // 指定時のみ診断タブに利用状況の節を表示
+  onUsageReportingChange?: (enabled: boolean) => void; // 指定時のみプライバシータブに利用状況の節を表示
   usagePreview?: string | null;             // 次に送る NDJSON（null = まだ見ていない）
   onShowUsagePreview?: () => void;          // 「送る内容を見る」
   usagePreviewError?: string | null;        // 保存や読み出しに失敗した理由
@@ -127,7 +127,7 @@ interface SettingsPanelProps {
   reportProblemPreview?: string | null;     // 送る jamuru.log の内容（読み込み前は null）
   reportProblemComment?: string;
   reportProblemError?: string | null;       // 読み込み・送信に失敗した理由
-  onOpenReportProblem?: () => void;         // 指定時のみ診断タブに「問題を報告」の節を表示。押すとログを読み込む
+  onOpenReportProblem?: () => void;         // 指定時のみ診断とサポートタブに「問題を報告」の節を表示。押すとログを読み込む
   onReportProblemCommentChange?: (value: string) => void;
   onSendReportProblem?: () => void;
   onCancelReportProblem?: () => void;       // ready/error から idle へ戻す（送信しない）
@@ -140,15 +140,20 @@ type Language = "ja" | "en";
 
 **テーマ選択は廃止した。** jamuru は現状ダーク専用ブランドであり（`tokens.css` の light は dark を複製）、`ui.pen` の一般タブも言語のみを持つ。このため `theme` / `onThemeChange` は SettingsPanel から削除した。
 
-タブ順は `ui.pen` に合わせて **一般 → デバイス → プロフィール → 診断**。各タブにアイコンを表示する。
-初期表示タブは一覧の並び順とは独立に `デバイス`（`initialTab` のデフォルト値）。
+タブは次の 5 つで、並びは使う頻度の順（よく触る設定 → 送信の判断 → 困ったとき → 情報）。各タブにアイコンを表示する。
+`ui.pen` の設定画面は旧構成（一般・プロフィール・デバイス・診断）のままで、更新が要る（[ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)）。
+初期表示タブは一覧の並び順とは独立に `オーディオ`（`initialTab` のデフォルト値。設定ウィンドウは `一般` で開く）。
+`legal`（規約などを開く関数）を渡さないとき、アプリについてのタブは出さない。
 
-| タブ | lucide アイコン |
-|------|----------------|
-| 一般 | `sliders-horizontal` |
-| デバイス | `mic` |
-| プロフィール | `user` |
-| 診断 | `activity` |
+| タブ | id | lucide アイコン | 中身（見出し） |
+|------|----|----------------|----------------|
+| 一般 | `general` | `sliders-horizontal` | プロフィール（表示名）／表示（言語）／接続（サーバー） |
+| オーディオ | `devices` | `mic` | デバイス／音質と遅延 |
+| プライバシー | `privacy` | `shield` | 前回について／利用状況の送信 |
+| 診断とサポート | `diagnostics` | `activity` | システム診断／ログファイル／問題を報告 |
+| アプリについて | `about` | `info` | 規約など |
+
+`devices` の id は DOM の id・E2E・設定の手伝い（ADR-044）が参照しているため、題を「オーディオ」に変えても変えない。
 
 アイコンはライブラリ非依存の手書き SVG（`SettingsPanel/icons.tsx`）で、`currentColor` で色を制御する。
 
@@ -220,11 +225,11 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 ### デバイスタブ（DevicesTab）
 
-1. 見出し「オーディオデバイス」
+1. 見出し「デバイス」
 2. 入力デバイス / 出力デバイス（`stacked` + `block` Select）
 3. 入力チャンネル / 出力チャンネル（`stacked` + `channel` Select × 2。R に "なし"=モノラル）
 4. 区切り線
-5. 見出し「オーディオ設定」
+5. 見出し「音質と遅延」
 6. 送信チャンネル（`row` + セグメントトグル モノラル/ステレオ。選択側は `--color-accent` 罫線＋文字）
 7. サンプルレート / バッファサイズ（`row` + `inline` Select）
 8. 遅延サマリーカード（下記）
@@ -242,16 +247,24 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 ### 一般タブ（GeneralTab）
 
-- 見出し「一般設定」
-- 言語（`stacked` + `block` Select: 日本語 / English）
-- 規約など（`LegalSection`。`legal` を渡したときだけ出る）: 「利用規約」「ライセンス」はアプリに同梱した本文をダイアログ（`TermsViewer`）で読む。「プライバシーとセキュリティ」「お知らせ」はブラウザで開く（開けるのはこの 2 ページだけ。[ADR-072](../../adr/ADR-072-terms-of-use-and-first-launch-consent.md)）
+アプリ全体と利用者自身についての設定。節の間は区切り線で分ける。
 
-### プロフィールタブ（ProfileTab）
+1. 見出し「プロフィール」: 表示名（`stacked` + Input、hint「他の参加者に表示される名前です（1〜32文字）」、最大32文字、空は error）
+2. 見出し「表示」: 言語（`stacked` + `block` Select: 日本語 / English）
+3. 見出し「接続」: サーバー（`stacked` + Input。空なら既定のサーバーを使い、hint に実際の接続先を出す）
 
-- 見出し「プロフィール」
-- 表示名（`stacked` + Input、hint「他の参加者に表示される名前です（1〜32文字）」、最大32文字、空は error）
+### プライバシータブ（PrivacyTab）
 
-### 診断タブ（DiagnosticsTab）
+データを送るかどうかの判断を集める。診断の機能とは別の場面（送信を止めたい・内容を確かめたい）で開かれる。節の仕様は診断タブの記述の「前回についての節」「利用状況の節」と同じ（i18n キーは `settings.privacy.*`、`data-testid` は `privacy-*`）。
+
+- **前回についての節**（`onSendPreviousHang` 指定かつ `previousHang` があるときだけ。先頭）
+- **利用状況の節**（`onUsageReportingChange` 指定時のみ）
+
+### アプリについてタブ（AboutTab）
+
+見出し「規約など」＋ 「利用規約」「ライセンス」「プライバシーとセキュリティ」「お知らせ」の行（`LegalSection`。`legal` を渡したときだけタブごと出る）。「利用規約」「ライセンス」はアプリに同梱した本文をダイアログ（`TermsViewer`）で読む。「プライバシーとセキュリティ」「お知らせ」はブラウザで開く（開けるのはこの 2 ページだけ。[ADR-072](../../adr/ADR-072-terms-of-use-and-first-launch-consent.md)）
+
+### 診断とサポートタブ（DiagnosticsTab）
 
 状態遷移:
 
@@ -270,8 +283,8 @@ stateDiagram-v2
 - **complete**: スコア（`score/100`, Inter）＋ 再診断ボタン（refresh アイコン）＋ 結果カード（ネットワーク／オーディオ／CPU／推奨設定）＋ 問題点
   - 各カード: 見出しアイコン＋タイトル＋グレードバッジ（A=success / B=warning / C=danger / Unknown=非表示）、行は `label`＋`value`（mono）。RTT・ジッタ・パケットロスは良好時 `--color-success`
   - 問題点: 件数バッジ＋カード（カテゴリ／重大度バッジ。Warning=warning、Error=danger、Info=中立）
-- **前回についての節**（idle / complete の、利用状況の節の上。`onSendPreviousHang` 指定かつ `previousHang` があるときだけ）: 見出し「前回について」＋ 前回どの処理（終了処理・再起動・更新の適用・音声デバイスを開く処理・不明のどれか）で止まっていたようかを書いた説明文 ＋「報告を送る」「送らない」ボタン。どちらかを押すと `previousHangAnswered` になり、節は短い確認表示（「わかりました。」）に切り替わる（[ADR-056](../../adr/ADR-056-hang-detection-and-reporting.md)）。`previousHangAttachesLog` が true のとき（1.0.0 未満のアプリ版）、説明文は「送る」で現在の `jamuru.log` も添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く（[ADR-059](../../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）
-- **利用状況の節**（idle / complete の、ログファイルの節の上。`onUsageReportingChange` 指定時のみ）: 見出し「利用状況の送信」＋ スイッチ「利用状況を送る」（`role="switch"`。**既定オフ**）＋ 説明文 ＋ 「送る内容を見る」ボタン。説明文は次の 5 段で、英語・日本語の両方がある
+- **前回についての節**（プライバシータブの先頭。`onSendPreviousHang` 指定かつ `previousHang` があるときだけ）: 見出し「前回について」＋ 前回どの処理（終了処理・再起動・更新の適用・音声デバイスを開く処理・不明のどれか）で止まっていたようかを書いた説明文 ＋「報告を送る」「送らない」ボタン。どちらかを押すと `previousHangAnswered` になり、節は短い確認表示（「わかりました。」）に切り替わる（[ADR-056](../../adr/ADR-056-hang-detection-and-reporting.md)）。`previousHangAttachesLog` が true のとき（1.0.0 未満のアプリ版）、説明文は「送る」で現在の `jamuru.log` も添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く（[ADR-059](../../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）
+- **利用状況の節**（プライバシータブの、前回についての節の下。`onUsageReportingChange` 指定時のみ）: 見出し「利用状況の送信」＋ スイッチ「利用状況を送る」（`role="switch"`。**既定オフ**）＋ 説明文 ＋ 「送る内容を見る」ボタン。説明文は次の 5 段で、英語・日本語の両方がある
   1. 既定はオフ。オンにすると動作の様子をサーバーに送る。何のために送るか（特定の機材や回線の不具合を見つけて直す）
   2. 送るもの: アプリの版・OS・CPU とメモリ・音声デバイスの名前と ID と対応・設定（自前サーバーの URL はホストとポートまで）・セッションごとの集計（経路の種類と接続の所要時間を含む）・自分の IP アドレス・エラーの種別・クラッシュの位置
   3. 送らないもの: 表示名・部屋の履歴・端末識別子・相手についての情報（相手の IP アドレスを含む）・音声・チャット
@@ -330,9 +343,11 @@ stateDiagram-v2
 
 ```
 settings.title
-settings.tabs.{devices,general,profile,diagnostics}
-settings.general.title
-settings.profile.{title,name,nameHint}
+settings.tabs.{general,devices,privacy,diagnostics,about}
+settings.general.{display,connection,serverUrl.*}
+settings.profile.{title,name,nameHint,namePlaceholder,nameRequired,nameTooLong}
+settings.privacy.{previousHang.*,usageTitle,usageToggle,usageDescription,usageSent,usageNotSent,usageDeviceNames,usageIdNote,usageShow,usagePreviewEmpty,usagePreviewOff}
+settings.legal.{title,terms,license,privacy,announcements}
 settings.devices.{title,audioSettings,inputDevice,outputDevice,
   inputChannels,outputChannels,channelL,channelR,selectDevice,
   transmitChannels,transmitChannelsDesc,mono,stereo,

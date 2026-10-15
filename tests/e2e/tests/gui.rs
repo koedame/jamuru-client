@@ -1097,14 +1097,14 @@ fn on_the_first_launch_usage_reporting_is_off_and_nothing_asks_about_it() {
     app.connection_screen().settings_button().click().unwrap();
     let settings = app.settings_screen();
     settings.wait_until_open(UI_TIMEOUT).unwrap();
-    settings.select_tab(SettingsTab::Diagnostics).unwrap();
-    let diagnostics = settings.diagnostics_tab();
-    diagnostics
+    settings.select_tab(SettingsTab::Privacy).unwrap();
+    let privacy = settings.privacy_tab();
+    privacy
         .usage_reporting_switch()
         .wait_until_visible(UI_TIMEOUT)
-        .expect("the diagnostics tab should offer the usage reporting switch");
+        .expect("the privacy tab should offer the usage reporting switch");
 
-    assert!(!diagnostics.is_usage_reporting_on().unwrap());
+    assert!(!privacy.is_usage_reporting_on().unwrap());
     assert!(!settings.window_html().unwrap().contains("role=\"dialog\""));
     assert!(
         !app.usage_state_dir().join("install_id").exists(),
@@ -1125,16 +1125,16 @@ fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it(
     app.connection_screen().settings_button().click().unwrap();
     let settings = app.settings_screen();
     settings.wait_until_open(UI_TIMEOUT).unwrap();
-    settings.select_tab(SettingsTab::Diagnostics).unwrap();
-    let diagnostics = settings.diagnostics_tab();
-    diagnostics
+    settings.select_tab(SettingsTab::Privacy).unwrap();
+    let privacy = settings.privacy_tab();
+    privacy
         .usage_reporting_switch()
         .wait_until_visible(UI_TIMEOUT)
         .unwrap();
 
-    diagnostics.usage_reporting_switch().click().unwrap();
+    privacy.usage_reporting_switch().click().unwrap();
     jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
-        diagnostics.is_usage_reporting_on().unwrap_or(false)
+        privacy.is_usage_reporting_on().unwrap_or(false)
     })
     .expect("the switch should turn on");
     let install_id_file = app.usage_state_dir().join("install_id");
@@ -1145,8 +1145,8 @@ fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it(
     // The launch report is recorded in the background, so read until it is there.
     let mut shown = String::new();
     jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
-        diagnostics.show_usage_button().click().unwrap();
-        shown = diagnostics.usage_preview().text().unwrap_or_default();
+        privacy.show_usage_button().click().unwrap();
+        shown = privacy.usage_preview().text().unwrap_or_default();
         shown.contains("\"event\":\"app_start\"")
     })
     .unwrap_or_else(|_| {
@@ -1171,14 +1171,14 @@ fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it(
         shown
     );
 
-    diagnostics.usage_reporting_switch().click().unwrap();
+    privacy.usage_reporting_switch().click().unwrap();
     jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
-        !diagnostics.is_usage_reporting_on().unwrap_or(true)
+        !privacy.is_usage_reporting_on().unwrap_or(true)
     })
     .expect("the switch should turn off");
     jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
-        diagnostics.show_usage_button().click().unwrap();
-        let text = diagnostics.usage_preview().text().unwrap_or_default();
+        privacy.show_usage_button().click().unwrap();
+        let text = privacy.usage_preview().text().unwrap_or_default();
         !text.contains("install_id") && !text.trim().is_empty()
     })
     .expect("after turning it off, nothing is left to show");
@@ -1194,28 +1194,28 @@ fn with_usage_reporting_on(app: &App) {
     app.connection_screen().settings_button().click().unwrap();
     let settings = app.settings_screen();
     settings.wait_until_open(UI_TIMEOUT).unwrap();
-    settings.select_tab(SettingsTab::Diagnostics).unwrap();
-    let diagnostics = settings.diagnostics_tab();
-    diagnostics
+    settings.select_tab(SettingsTab::Privacy).unwrap();
+    let privacy = settings.privacy_tab();
+    privacy
         .usage_reporting_switch()
         .wait_until_visible(UI_TIMEOUT)
         .unwrap();
-    diagnostics.usage_reporting_switch().click().unwrap();
+    privacy.usage_reporting_switch().click().unwrap();
     jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
         last_usage_line(app, "audio_env").is_some() && last_usage_line(app, "app_start").is_some()
     })
     .expect("turning reporting on should record the launch report");
 }
 
-/// The last line of one kind in what would be sent, read from the Diagnostics
+/// The last line of one kind in what would be sent, read from the Privacy
 /// tab (which it opens). What would be sent is the batch waiting, or the last
 /// batch that went out, so a line that was sent earlier is no longer in it.
 fn last_usage_line(app: &App, event: &str) -> Option<String> {
     let settings = app.settings_screen();
-    settings.select_tab(SettingsTab::Diagnostics).unwrap();
-    let diagnostics = settings.diagnostics_tab();
-    diagnostics.show_usage_button().click().unwrap();
-    let shown = diagnostics.usage_preview().text().unwrap_or_default();
+    settings.select_tab(SettingsTab::Privacy).unwrap();
+    let privacy = settings.privacy_tab();
+    privacy.show_usage_button().click().unwrap();
+    let shown = privacy.usage_preview().text().unwrap_or_default();
     shown
         .lines()
         .rfind(|line| line.contains(&format!("\"event\":\"{event}\"")))
