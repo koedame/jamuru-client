@@ -138,6 +138,8 @@ export const HELP_REMAINING_EVENT = "help:remaining";
 
 /** Heard by the main window when the log window's Stop was pressed */
 export const HELP_STOP_REQUESTED_EVENT = "help:stop-requested";
+/** The record of the help began, ended or was cleared: read it again */
+export const HELP_RECORD_CHANGED_EVENT = "help:record-changed";
 
 /** One line of what a help did; `at_ms` is milliseconds since the Unix epoch */
 export type HelpEntry = { at_ms: number } & (
@@ -185,6 +187,11 @@ export async function helpRecordDismiss(): Promise<void> {
 /** Open the window that shows what the help did, or bring it forward */
 export async function helpLogWindowOpen(): Promise<void> {
   return invoke("help_log_window_open");
+}
+
+/** Ask the main window to stop the help (the log window cannot emit events itself) */
+export async function helpStopRequest(): Promise<void> {
+  return invoke("help_stop_request");
 }
 
 /** What this build is and what it runs on (coarse facts only; no machine or user names) */
