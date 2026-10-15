@@ -137,6 +137,7 @@ app_commands! {
     [Access::NO_HELP] "手伝いで変わった音声の設定を、手伝いの前に戻す" crate::help_record::help_undo;
     [Access::NO_HELP] "手伝いの記録を読み終えて、片付ける" crate::help_record::help_record_dismiss;
     [Access::NO_HELP] "手伝いの記録のウィンドウを開く" crate::help_record::help_log_window_open;
+    [Access::NO_HELP] "手伝いの記録のウィンドウから、手伝いを止めるよう画面に頼む" crate::help_record::help_stop_request;
 
     [Access::ALL] "音声の設定を読む" crate::settings::settings_get;
     [Access::ALL] "音声の設定を変える" crate::settings::settings_change;
@@ -283,7 +284,7 @@ mod tests {
 
     /// Methods that only the app's own screens use to reach one another, which
     /// say nothing about what a helper may do to the person helped.
-    const INTERNAL: [&str; 7] = [
+    const INTERNAL: [&str; 8] = [
         "rpc_settle",
         "help_call",
         "help_window_info",
@@ -291,6 +292,7 @@ mod tests {
         "help_undo",
         "help_record_dismiss",
         "help_log_window_open",
+        "help_stop_request",
     ];
 
     fn help_permissions_doc() -> String {
@@ -415,6 +417,7 @@ mod tests {
             "help_undo",
             "help_record_dismiss",
             "help_log_window_open",
+            "help_stop_request",
             "window_open_settings",
             "log_open_dir",
             "rpc_settle",

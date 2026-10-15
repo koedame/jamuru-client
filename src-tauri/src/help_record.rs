@@ -28,6 +28,9 @@ pub const LOG_EVENT: &str = "help:log";
 /// Emitted with `{"remaining_ms": n}`: how long until the help ends for lack
 /// of anything being done. Sent when something is done and every
 /// [`HEARTBEAT`], so a screen that joined late catches up.
+/// The record began, ended or was cleared: a window showing it reads it again.
+pub const CHANGED_EVENT: &str = "help:record-changed";
+pub const STOP_REQUESTED_EVENT: &str = "help:stop-requested";
 pub const REMAINING_EVENT: &str = "help:remaining";
 
 /// How long a help may go without anything being done before it ends.
@@ -220,6 +223,13 @@ pub fn write<R: Runtime>(app: &AppHandle<R>, record: &HelpRecord, kind: EntryKin
     announce_remaining(app, record);
 }
 
+/// Tells the windows that show the record that it is not what they read.
+pub fn announce_changed<R: Runtime>(app: &AppHandle<R>) {
+    if let Err(e) = app.emit(CHANGED_EVENT, ()) {
+        tracing::warn!("Could not tell the windows the help record changed: {}", e);
+    }
+}
+
 /// Keeps the screens told of the time left until the help has sat idle for
 /// [`IDLE_LIMIT`]; then returns, and the caller ends the help.
 pub async fn watch_idle<R: Runtime>(app: &AppHandle<R>, record: &HelpRecord) {
@@ -394,6 +404,7 @@ pub async fn undo<R: Runtime>(app: &AppHandle<R>, record: &HelpRecord) -> Result
             tracing::debug!("Settings help: a record line was not announced: {}", e);
         }
     }
+    announce_changed(app);
     Ok(UndoView { restored, failed })
 }
 
@@ -418,8 +429,18 @@ pub async fn help_undo(
 /// The person has read what the last help did: it is forgotten, unless it is
 /// still going on.
 #[tauri::command]
-pub fn help_record_dismiss(links: tauri::State<'_, HelpLinks>) {
+pub fn help_record_dismiss(app: AppHandle, links: tauri::State<'_, HelpLinks>) {
     links.forget_record_if_over();
+    announce_changed(&app);
+}
+
+/// The log window asks the main window, which holds the connection, to stop
+/// the help. Sent from here and not from the window, which is not allowed to
+/// emit events.
+#[tauri::command]
+pub fn help_stop_request(app: AppHandle) -> Result<(), String> {
+    app.emit(STOP_REQUESTED_EVENT, ())
+        .map_err(|e| e.to_string())
 }
 
 /// Opens the window that shows the record, or brings it forward.

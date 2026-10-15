@@ -345,7 +345,15 @@
   flex: 1;
   min-width: 0;
   display: flex;
+  flex-direction: column;
   overflow: hidden;
+}
+
+/* The help bar sits above the mixer, which takes what is left */
+.main-mixer-column > .mixer-panel {
+  flex: 1;
+  min-height: 0;
+  height: auto;
 }
 
 /* --- Chat column (docked) --- */
