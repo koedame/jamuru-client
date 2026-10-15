@@ -25,6 +25,7 @@
 | `greet` | 動作確認用のあいさつ |
 | `session_get` | 接続・入室の状態を読む |
 | `signaling_get_chat_messages` | チャットの履歴を読む |
+| `help_presence` | 手伝う人が、いま指している部品とフォーカスしている部品を、相手の画面に伝える |
 | `settings_get` | 音声の設定を読む |
 | `settings_change` | 音声の設定を変える |
 | `streaming_status` | 音声の状態（レベル・遅延・統計）を読む |

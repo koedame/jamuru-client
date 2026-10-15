@@ -1,0 +1,53 @@
+/**
+ * The frames that show where the other person of a settings help is looking.
+ * Above the dialogs and the side panel, and never in the way of a click.
+ */
+.presence-marks {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal) + 10);
+  pointer-events: none;
+}
+
+.presence-mark {
+  position: fixed;
+  box-sizing: border-box;
+  border: 2px solid var(--color-danger);
+  border-radius: var(--radius-control);
+  background: var(--color-danger-bg);
+}
+
+/* The focus is drawn as an outline a little way off, so a part that is both
+   under the pointer and focused shows two frames instead of one. */
+.presence-mark--focus {
+  margin: -4px;
+  padding: 2px;
+  background: transparent;
+  border-style: dashed;
+}
+
+.presence-mark__name {
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 var(--space-xs);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  background: var(--color-danger);
+  color: var(--color-text-inverse);
+  font-size: var(--font-size-caption);
+  line-height: 1.4;
+}
+
+.presence-mark__dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  box-shadow: 0 0 0 2px var(--color-bg-primary);
+}

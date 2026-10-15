@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
-import { buildElementReport, cssPath } from "./elementReport";
+import { cssPath } from "./domTarget";
+import { buildElementReport } from "./elementReport";
 import type { AppEnvironment, AudioSettings, SessionSnapshot } from "./tauri";
 
 const app: AppEnvironment = {
