@@ -544,3 +544,176 @@ async fn fec_recovers_a_dropped_frame_over_the_transport() {
         );
     }
 }
+
+/// Two sockets between a sender and a receiver that can hold back what the
+/// sender sends and let it through in another order, or not at all.
+///
+/// Everything passes in both directions as it comes, so the two ends can agree
+/// keys through it; only what arrives while `holding` is set is kept.
+struct ReorderingRelay {
+    sender_side: std::net::SocketAddr,
+    receiver_side: std::net::SocketAddr,
+    held: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    holding: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    to_receiver: std::sync::Arc<tokio::net::UdpSocket>,
+}
+
+impl ReorderingRelay {
+    async fn start(
+        sender: std::net::SocketAddr,
+        receiver: std::net::SocketAddr,
+    ) -> ReorderingRelay {
+        use std::sync::atomic::Ordering;
+        use std::sync::{Arc, Mutex};
+        use tokio::net::UdpSocket;
+
+        let facing_sender = Arc::new(UdpSocket::bind("127.0.0.1:0").await.expect("relay bind"));
+        let facing_receiver = Arc::new(UdpSocket::bind("127.0.0.1:0").await.expect("relay bind"));
+        let held = Arc::new(Mutex::new(Vec::new()));
+        let holding = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let (from, to, held_for_task, holding_for_task) = (
+            facing_sender.clone(),
+            facing_receiver.clone(),
+            held.clone(),
+            holding.clone(),
+        );
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65536];
+            while let Ok((len, _)) = from.recv_from(&mut buf).await {
+                if holding_for_task.load(Ordering::SeqCst) {
+                    held_for_task.lock().unwrap().push(buf[..len].to_vec());
+                } else {
+                    let _ = to.send_to(&buf[..len], receiver).await;
+                }
+            }
+        });
+
+        let (from, to) = (facing_receiver.clone(), facing_sender.clone());
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65536];
+            while let Ok((len, _)) = from.recv_from(&mut buf).await {
+                let _ = to.send_to(&buf[..len], sender).await;
+            }
+        });
+
+        ReorderingRelay {
+            sender_side: facing_sender.local_addr().unwrap(),
+            receiver_side: facing_receiver.local_addr().unwrap(),
+            held,
+            holding,
+            to_receiver: facing_receiver,
+        }
+    }
+}
+
+/// When the FEC packet reaches the receiver before the group's last data
+/// packet, the one packet that was lost is still recovered.
+///
+/// The group is sent in order, then handed to the receiver as: the data packets
+/// but the last two, the FEC packet, the second-to-last data packet; the last
+/// data packet is lost. Two are missing when the FEC packet arrives, so only
+/// the data packet that follows it can complete the group.
+///
+/// Verifies: REQ-AUD-026
+#[tokio::test]
+async fn fec_recovers_a_dropped_frame_when_the_fec_packet_arrives_before_the_last_data_packet() {
+    use jamjam::network::{AudioEncodingConfig, Connection};
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+
+    let preset = AudioPreset::Balanced;
+    let group_size = preset
+        .fec_group_size()
+        .expect("balanced must enable FEC (ADR-021)");
+    assert!(
+        group_size >= 2,
+        "a group needs a packet to arrive after FEC"
+    );
+    let frame_size = preset.frame_size() as usize;
+    let encoding = AudioEncodingConfig {
+        codec_type: preset.codec_type(),
+        sample_rate: BUDGET_SAMPLE_RATE,
+        channels: 1,
+        frame_size: preset.frame_size(),
+        bitrate: 0,
+        fec_group_size: preset.fec_group_size(),
+    };
+
+    let mut receiver = Connection::new("127.0.0.1:0")
+        .await
+        .expect("receiver socket");
+    receiver
+        .set_audio_encoding(encoding.clone())
+        .expect("receiver encoding");
+    let delivered: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
+    let delivered_for_callback = delivered.clone();
+    receiver.set_audio_callback(move |sequence, _payload, _timestamp| {
+        delivered_for_callback.lock().unwrap().push(sequence);
+    });
+
+    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
+    sender
+        .set_audio_encoding(encoding)
+        .expect("sender encoding");
+
+    let relay = ReorderingRelay::start(sender.local_addr(), receiver.local_addr()).await;
+    receiver
+        .connect(relay.receiver_side)
+        .await
+        .expect("receiver starts its loop");
+    sender
+        .connect(relay.sender_side)
+        .await
+        .expect("sender connects");
+    while sender.security() != jamjam::network::LinkSecurity::Encrypted
+        || receiver.security() != jamjam::network::LinkSecurity::Encrypted
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // One full group, held at the relay: its data packets and then its FEC packet.
+    relay.holding.store(true, Ordering::SeqCst);
+    for index in 0..group_size {
+        let frame = vec![(index as f32 + 1.0) / 16.0; frame_size];
+        sender
+            .send_audio(&frame, index as u32 * frame_size as u32)
+            .await
+            .expect("send");
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    relay.holding.store(false, Ordering::SeqCst);
+
+    let held = relay.held.lock().unwrap().clone();
+    assert_eq!(
+        held.len(),
+        group_size + 1,
+        "the group is its data packets and one FEC packet"
+    );
+    let (data, fec) = held.split_at(group_size);
+    let lost = group_size - 1;
+    let order: Vec<&Vec<u8>> = data[..lost - 1]
+        .iter()
+        .chain(fec.iter())
+        .chain(std::iter::once(&data[lost - 1]))
+        .collect();
+    for datagram in order {
+        relay
+            .to_receiver
+            .send_to(datagram, receiver.local_addr())
+            .await
+            .expect("relay forwards");
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let sequences = delivered.lock().unwrap().clone();
+    for expected in 0..group_size as u32 {
+        let count = sequences.iter().filter(|&&s| s == expected).count();
+        assert_eq!(
+            count, 1,
+            "sequence {} was delivered {} times: {:?}",
+            expected, count, sequences
+        );
+    }
+    assert_eq!(receiver.stats().fec_recovered, Some(1));
+}
