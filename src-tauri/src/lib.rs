@@ -14,6 +14,7 @@ mod diagnostics;
 #[cfg(feature = "e2e-control")]
 mod e2e_control;
 mod help_link;
+mod help_presence;
 mod logging;
 mod mixer;
 mod report_problem;
@@ -168,6 +169,7 @@ pub fn run() {
     app.manage(mixer::MixerState::new());
     app.manage(session::SessionState::new());
     app.manage(help_link::HelpLinks::default());
+    app.manage(help_presence::PresenceState::default());
     app.manage(updater::UpdateNotice::default());
     // What a portal over the relay hears (a helper, and the debug portal of a
     // beta build) comes through this.

@@ -54,6 +54,8 @@ export interface SettingsHelp {
   canAsk: boolean;
   /** Start asking: shows what it means and who can be asked */
   openAsk: () => void;
+  /** Who is helping this app now (their name), or null while no help goes on */
+  helpedBy: string | null;
   /** The bars for help going on, for the session screen */
   bars: ReactNode;
   /** The asking and the question of whether to help, drawn over the screen */
@@ -272,6 +274,7 @@ export function useSettingsHelp(connId: number | null, participants: Participant
     onEvent,
     canAsk,
     openAsk: () => setAsking(true),
+    helpedBy: receiving?.status === "active" ? receiving.name : null,
     bars: bars.length > 0 ? <div className="settings-help-bars">{bars}</div> : null,
     overlays,
   };
