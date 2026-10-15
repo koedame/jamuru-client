@@ -24,7 +24,7 @@ import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
 import { Toast } from "../components/Toast";
 import { LeaveDialog } from "../components/LeaveDialog";
-import { useSettingsHelp } from "../components/SettingsHelp";
+import { SettingsHelpMirror, useHelpPresence, useSettingsHelp } from "../components/SettingsHelp";
 import { formatErrorForDisplay } from "../lib/errorMessages";
 import { registerInviteLinkHandler } from "../lib/deepLink";
 import { listenEvent } from "../lib/backend";
@@ -389,6 +389,15 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     []
   );
   useWindowEvent<HelpEvent>(SESSION_SETTINGS_HELP, handleSettingsHelpEvent);
+
+  // While someone helps this app, the two screens show each other where their
+  // person is pointing and focusing. A helper's window does it in `HelperScreen`.
+  const helpedBy = helping ? null : settingsHelp.helpedBy;
+  const presence = useHelpPresence({
+    role: "helped",
+    enabled: helpedBy !== null,
+    peerName: helpedBy ?? "",
+  });
 
   // Footer indicator inputs: the room as one, which is doing as well as its
   // worst link. The quality band comes from the core library (REQ-LAT-121);
@@ -1024,6 +1033,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         </footer>
 
         {settingsHelp.overlays}
+        {helpedBy !== null && <SettingsHelpMirror name={helpedBy} open={presence.remotePanelOpen} />}
+        {presence.marks}
 
         <LeaveDialog
           open={showLeaveDialog}

@@ -9,20 +9,26 @@ export interface SidePanelProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  /**
+   * True (the default) for a panel that takes the screen over: a dimmed overlay,
+   * no scrolling behind it, Escape closes it. False for a panel shown beside the
+   * screen that is still being used.
+   */
+  modal?: boolean;
   children: React.ReactNode;
 }
 
-export function SidePanel({ isOpen, onClose, title, children }: SidePanelProps) {
+export function SidePanel({ isOpen, onClose, title, modal = true, children }: SidePanelProps) {
   const { t } = useTranslation();
 
   // Close on Escape key
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
+      if (e.key === "Escape" && isOpen && modal) {
         onClose();
       }
     },
-    [isOpen, onClose]
+    [isOpen, modal, onClose]
   );
 
   useEffect(() => {
@@ -32,7 +38,7 @@ export function SidePanel({ isOpen, onClose, title, children }: SidePanelProps) 
 
   // Prevent body scroll when panel is open
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && modal) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -40,22 +46,24 @@ export function SidePanel({ isOpen, onClose, title, children }: SidePanelProps) 
     return () => {
       document.body.style.overflow = "";
     };
-  }, [isOpen]);
+  }, [isOpen, modal]);
 
   return (
     <>
       {/* Overlay */}
-      <div
-        className={`side-panel-overlay ${isOpen ? "side-panel-overlay--open" : ""}`}
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      {modal && (
+        <div
+          className={`side-panel-overlay ${isOpen ? "side-panel-overlay--open" : ""}`}
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
 
       {/* Panel */}
       <aside
         className={`side-panel ${isOpen ? "side-panel--open" : ""}`}
         role="dialog"
-        aria-modal="true"
+        aria-modal={modal}
         aria-label={title}
       >
         <header className="side-panel__header">

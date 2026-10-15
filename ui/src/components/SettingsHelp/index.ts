@@ -4,3 +4,7 @@ export { SettingsHelpBar, type SettingsHelpBarProps, type SettingsHelpBarAction 
 export { SettingsHelpPanel, type SettingsHelpPanelProps } from "./SettingsHelpPanel";
 export { useSettingsHelp, type SettingsHelp } from "./useSettingsHelp";
 export { settingLabel } from "./settingText";
+export { SettingsHelpMirror, type SettingsHelpMirrorProps } from "./SettingsHelpMirror";
+export { PresenceMarks, type PresenceMarksProps, type PresenceMark } from "./PresenceMarks";
+export { useHelpPresence, type HelpPresence, type UseHelpPresenceOptions } from "./useHelpPresence";
+export { useAudioSettingsPanel } from "./useAudioSettingsPanel";

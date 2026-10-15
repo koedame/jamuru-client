@@ -15,6 +15,7 @@ import en from '../../locales/en.json';
 import { setBackend, tauriBackend } from '../lib/backend';
 import { helperBackend, REMOTE_EVENT } from '../lib/helperBackend';
 import type { SessionSnapshot } from '../lib/tauri';
+import { presenceIdOf } from '../lib/presence';
 import { audioSettings } from '../components/SettingsPanel/audioSettingsFixture';
 import { HelperScreen } from './HelperScreen';
 
@@ -65,6 +66,8 @@ let asked: Array<{ method: string; params: Record<string, unknown> }>;
 /** Commands the window kept for itself. */
 let own: string[];
 let helpedSettings = audioSettings();
+/** Whether the helped app says it took what the helper pointed at. */
+let presenceDelivered = true;
 /** What the helped app answers `settings_change` with, or fails with. */
 let onChange: (params: Record<string, unknown>) => unknown;
 
@@ -85,6 +88,7 @@ beforeEach(() => {
   asked = [];
   own = [];
   helpedSettings = audioSettings({ revision: 1, buffer_size: 64 });
+  presenceDelivered = true;
   onChange = () => audioSettings({ revision: 2, buffer_size: 128 });
   listeners.clear();
   setBackend(helperBackend);
@@ -100,6 +104,8 @@ beforeEach(() => {
     switch (method) {
       case 'session_get':
         return inRoom();
+      case 'help_presence':
+        return { delivered: presenceDelivered };
       case 'settings_get':
         return helpedSettings;
       case 'settings_change': {
@@ -277,5 +283,86 @@ describe('HelperScreen', () => {
       visibility.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  // Verifies: REQ-RMT-034
+  it('手伝いの画面を開いたとき、動きが相手にも見えていることが示され、相手の画面に届いたときだけ印が点くこと', async () => {
+    presenceDelivered = false;
+    render(<HelperScreen />);
+
+    const notice = await screen.findByTestId('settings-help-window-presence');
+    expect(notice).toHaveTextContent('Bo can also see where you point and focus');
+    await waitFor(() => expect(askedOf('help_presence').length).toBeGreaterThan(0));
+    expect(notice).toHaveAttribute('data-delivered', 'false');
+
+    presenceDelivered = true;
+    const button = await screen.findByRole('button', { name: en.settings.title });
+    fireEvent.pointerMove(button, { clientX: 5, clientY: 5 });
+
+    await waitFor(() => expect(notice).toHaveAttribute('data-delivered', 'true'));
+  });
+
+  // Verifies: REQ-RMT-034
+  it('設定パネルを開いたとき、その旨が相手の画面に伝わり、閉じるとそれも伝わること', async () => {
+    render(<HelperScreen />);
+    await screen.findByTestId('room-code');
+    await waitFor(() => expect(askedOf('help_presence').length).toBeGreaterThan(0));
+    expect(askedOf('help_presence').slice(-1)[0]?.params).toMatchObject({ presence: { panel: false } });
+
+    fireEvent.click(screen.getByRole('button', { name: en.settings.title }));
+    await waitFor(() =>
+      expect(askedOf('help_presence').slice(-1)[0]?.params).toMatchObject({ presence: { panel: true } })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: en.common.button.close }));
+    await waitFor(() =>
+      expect(askedOf('help_presence').slice(-1)[0]?.params).toMatchObject({ presence: { panel: false } })
+    );
+  });
+
+  // Verifies: REQ-RMT-034
+  it('ボタンの上にポインタを置いたとき、部品の名前と位置だけが送られ、文字や座標は送られないこと', async () => {
+    render(<HelperScreen />);
+    const button = await screen.findByRole('button', { name: en.settings.title });
+    await waitFor(() => expect(askedOf('help_presence').length).toBeGreaterThan(0));
+    asked = [];
+
+    fireEvent.pointerMove(button, { clientX: 3, clientY: 4 });
+
+    await waitFor(() => expect(askedOf('help_presence').length).toBeGreaterThan(0));
+    const sent = askedOf('help_presence')[0].params as { presence: { hover: Record<string, unknown> } };
+    expect(Object.keys(sent)).toEqual(['presence']);
+    expect(Object.keys(sent.presence.hover).sort()).toEqual(['id', 'x', 'y']);
+    expect(JSON.stringify(sent)).not.toContain(en.settings.title);
+  });
+
+  // Verifies: REQ-RMT-034
+  it('相手が部品を指していると知らせてきたとき、その部品に枠が出て、指すのをやめると消えること', async () => {
+    render(<HelperScreen />);
+    const button = await screen.findByRole('button', { name: en.settings.title });
+    const id = presenceIdOf(button)!;
+
+    hear('help:presence', { hover: { id, x: 0.5, y: 0.5 }, focus: null });
+    // jsdom has no layout: the part is given the room it would take.
+    button.getBoundingClientRect = () =>
+      ({ left: 10, top: 20, width: 40, height: 30, right: 50, bottom: 50, x: 10, y: 20, toJSON: () => ({}) }) as DOMRect;
+    hear('help:presence', { hover: { id, x: 0.5, y: 0.5 }, focus: null });
+
+    const mark = await screen.findByTestId('presence-mark-hover');
+    expect(mark).toHaveStyle({ left: '10px', top: '20px', width: '40px', height: '30px' });
+    expect(mark).toHaveTextContent('Bo');
+
+    hear('help:presence', { hover: null, focus: null });
+    await waitFor(() => expect(screen.queryByTestId('presence-mark-hover')).not.toBeInTheDocument());
+  });
+
+  // Verifies: REQ-RMT-034
+  it('相手が画面にない部品の名前を知らせてきたとき、枠は出ないこと', async () => {
+    render(<HelperScreen />);
+    await screen.findByTestId('room-code');
+
+    hear('help:presence', { hover: { id: 'no-such-part', x: 0.5, y: 0.5 }, focus: { id: 'nor-this', x: 0.5, y: 0.5 } });
+
+    expect(screen.queryByTestId('presence-marks')).not.toBeInTheDocument();
   });
 });
