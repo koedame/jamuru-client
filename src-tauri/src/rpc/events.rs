@@ -40,6 +40,16 @@ pub const EVENTS: &[EventSpec] = &[
         name: crate::session::HELP_EVENT,
         access: Access::NO_HELP,
     },
+    // What the helper does, and how long the help may sit idle: the helper's
+    // window shows the time left, as the person's does.
+    EventSpec {
+        name: crate::help_record::LOG_EVENT,
+        access: Access::ALL,
+    },
+    EventSpec {
+        name: crate::help_record::REMAINING_EVENT,
+        access: Access::ALL,
+    },
     // Where the person helped is looking, for the helper's window
     // (REQ-RMT-034). It is published only while their screen is helped.
     EventSpec {

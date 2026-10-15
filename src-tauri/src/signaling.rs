@@ -1157,9 +1157,9 @@ pub async fn settings_help_begin(
     state: tauri::State<'_, SignalingState>,
 ) -> Result<(), String> {
     let peer = Uuid::parse_str(&peer_id).map_err(|e| format!("Invalid peer id: {}", e))?;
-    if !lock_help(&state).is_asked_by(peer) {
+    let Some(helper_name) = lock_help(&state).asker_name(peer) else {
         return Err(HelpError::NotActive.to_string());
-    }
+    };
     let session = jamjam::network::new_help_session();
     let end = match crate::help_link::open_host(&app, &session).await {
         Ok(end) => end,
@@ -1182,7 +1182,7 @@ pub async fn settings_help_begin(
         ))
     })
     .await?;
-    crate::help_link::serve_host(app, session, peer, end);
+    crate::help_link::serve_host(app, session, peer, helper_name, end);
     Ok(())
 }
 
@@ -1217,6 +1217,13 @@ pub async fn stop_helping_from_window<R: Runtime>(app: &AppHandle<R>) {
 /// closed it: the help is over.
 pub async fn help_link_closed<R: Runtime>(app: &AppHandle<R>, role: Role, session: &str) {
     let outs = lock_help(&app.state::<SignalingState>()).link_closed(role, session);
+    deliver(app, outs).await;
+}
+
+/// The help numbered `session`, which this app received, sat idle for too long
+/// and was ended: the room and the helper are told, and the UI hears why.
+pub async fn help_timed_out<R: Runtime>(app: &AppHandle<R>, session: &str) {
+    let outs = lock_help(&app.state::<SignalingState>()).timed_out(session);
     deliver(app, outs).await;
 }
 

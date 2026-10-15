@@ -135,6 +135,12 @@ app_commands! {
     // this; a helped app's own help portal may not start a help of its own.
     [Access::NO_HELP] "手伝いの画面から、手伝っている相手のアプリの操作を呼ぶ" crate::help_link::help_call;
     [Access::NO_HELP] "手伝いの画面が、いま誰を手伝っているかを読む" crate::help_link::help_window_info;
+    // What a help did is the helped person's to read and to undo (REQ-RMT-035).
+    [Access::NO_HELP] "手伝いの記録を読む" crate::help_record::help_record_get;
+    [Access::NO_HELP] "手伝いで変わった音声の設定を、手伝いの前に戻す" crate::help_record::help_undo;
+    [Access::NO_HELP] "手伝いの記録を読み終えて、片付ける" crate::help_record::help_record_dismiss;
+    [Access::NO_HELP] "手伝いの記録のウィンドウを開く" crate::help_record::help_log_window_open;
+    [Access::NO_HELP] "手伝いの記録のウィンドウから、手伝いを止めるよう画面に頼む" crate::help_record::help_stop_request;
     // What the two ends of a help tell each other of where they are looking:
     // parts and places only, ten a second at most (REQ-RMT-034). Only a helper
     // sends the first; only the person's own screen publishes the second.
@@ -260,8 +266,11 @@ mod tests {
 1 件ずつ、この表で判定する。表に無い操作は呼べない。手伝いは、手伝われる人がいつでも止められる。止める・どちらかが退室する・
 接続が切れるのどれかで終わり、アプリを起動し直しても続かない。
 
-手伝いのあいだ、手伝われる人の画面には、手伝っている人の名前と「止める」が出続ける。ルームのチャットには、手伝いの開始と終了、
-音声の設定の変更が記録される（ミュートや音量の変更は記録されない）。
+手伝いのあいだ、手伝われる人の画面には、手伝っている人の名前と「止める」、何もされないまま手伝いが終わるまでの残り時間が出続ける。
+ルームのチャットには、手伝いの開始と終了、音声の設定の変更が記録される（ミュートや音量の変更は記録されない）。
+手伝う人がマイクのミュートを解除することは止めない。かわりに、手伝われる人の画面にすぐ知らせ、手伝いの記録（手伝われる人だけが見られる
+別のウィンドウ）に時刻つきで残す。手伝いが終わると、変わった設定の名前を示し、1 回で手伝いの前に戻せる。手伝う人が何も変えないまま
+30 分たつと、手伝いは自動で終わる。
 
 手伝う人には、次のものは渡らない。
 
@@ -283,10 +292,15 @@ mod tests {
 
     /// Methods that only the app's own screens use to reach one another, which
     /// say nothing about what a helper may do to the person helped.
-    const INTERNAL: [&str; 4] = [
+    const INTERNAL: [&str; 9] = [
         "rpc_settle",
         "help_call",
         "help_window_info",
+        "help_record_get",
+        "help_undo",
+        "help_record_dismiss",
+        "help_log_window_open",
+        "help_stop_request",
         "help_presence_publish",
     ];
 
@@ -408,6 +422,11 @@ mod tests {
             "settings_help_stop",
             "help_call",
             "help_window_info",
+            "help_record_get",
+            "help_undo",
+            "help_record_dismiss",
+            "help_log_window_open",
+            "help_stop_request",
             "help_presence_publish",
             "window_open_settings",
             "log_open_dir",
