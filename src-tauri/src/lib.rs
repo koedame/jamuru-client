@@ -15,6 +15,7 @@ mod diagnostics;
 mod e2e_control;
 mod help_link;
 mod help_presence;
+mod help_record;
 mod logging;
 mod mixer;
 mod report_problem;

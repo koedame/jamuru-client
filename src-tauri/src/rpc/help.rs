@@ -20,9 +20,14 @@
 //!   more than ten readings a second, however slowly the app answers.
 //! - Another participant's address, which the audio status reports, is not
 //!   passed on.
+//! - What the helper does is written to the help's record (a setting changed,
+//!   the microphone muted or unmuted), which the person's screen shows, and
+//!   anything done holds off the help's ending for idleness
+//!   ([`help_record`]).
 
 use std::future::Future;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use jamjam::audio::DeviceId;
@@ -32,6 +37,7 @@ use tokio::time::Instant;
 
 use super::spec::Portal;
 use super::{authorize, dispatch, Call, Code, RpcError};
+use crate::help_record::{self, EntryKind, HelpRecord};
 use crate::settings::{self, AudioSettings, SettingChange, SettingsError};
 use jamjam::network::settings_help::setting_name;
 
@@ -191,16 +197,23 @@ pub struct HelpGuard {
     /// The audio status (`streaming_status`) and the input level
     status: Meter,
     input_level: Meter,
+    /// What this help did
+    record: Arc<HelpRecord>,
+    /// Whether the helper has called anything yet: the first call tells the
+    /// screens how long is left, so the helper's window knows from the start.
+    called: AtomicBool,
     /// Called with the setting's name once a change to it is applied.
     announce: Box<dyn Fn(String) + Send + Sync>,
 }
 
 impl HelpGuard {
-    pub fn new(announce: impl Fn(String) + Send + Sync + 'static) -> Self {
+    pub fn new(record: Arc<HelpRecord>, announce: impl Fn(String) + Send + Sync + 'static) -> Self {
         Self {
             handles: Mutex::new(DeviceHandles::default()),
             status: Meter::default(),
             input_level: Meter::default(),
+            record,
+            called: AtomicBool::new(false),
             announce: Box::new(announce),
         }
     }
@@ -217,13 +230,42 @@ impl HelpGuard {
         call: Call,
     ) -> Result<Value, RpcError> {
         let method = authorize(Portal::Help, &call.method)?;
-        match method.name {
+        if !self.called.swap(true, Ordering::Relaxed) {
+            help_record::announce_remaining(app, &self.record);
+        }
+        let muted = match method.name {
+            "streaming_set_mute" => call.params.get("muted").and_then(Value::as_bool),
+            _ => None,
+        };
+        let result = match method.name {
             "settings_get" => self.settings(app).await,
             "settings_change" => self.change(app, &call.params).await,
             "streaming_status" => self.status.read(|| Self::audio_status(app)).await,
             "streaming_get_input_level" => self.input_level.read(|| Self::input_level(app)).await,
             _ => dispatch(app, Portal::Help, call).await.map_err(scrub),
+        };
+        // A change to a setting wrote itself to the record, where its name is known.
+        let written = method.name == "settings_change";
+        if result.is_ok() && help_record::is_operation(method.name) && !written {
+            match muted {
+                // Unmuting is the helper's to do - a wrong setting can leave
+                // the microphone off - but the person is told it was done.
+                Some(muted) => help_record::write(
+                    app,
+                    &self.record,
+                    if muted {
+                        EntryKind::Muted
+                    } else {
+                        EntryKind::Unmuted
+                    },
+                ),
+                None => {
+                    self.record.touch();
+                    help_record::announce_remaining(app, &self.record);
+                }
+            }
         }
+        result
     }
 
     async fn settings<R: Runtime>(&self, app: &AppHandle<R>) -> Result<Value, RpcError> {
@@ -249,7 +291,15 @@ impl HelpGuard {
             tracing::warn!("A settings change a helper made was refused: {}", e);
             refused(Refusal::from(&e))
         })?;
-        (self.announce)(setting_name(&change));
+        let setting = setting_name(&change);
+        help_record::write(
+            app,
+            &self.record,
+            EntryKind::SettingChanged {
+                setting: setting.clone(),
+            },
+        );
+        (self.announce)(setting);
         self.shown(applied)
     }
 
@@ -339,7 +389,9 @@ mod tests {
         let announced = Arc::new(Mutex::new(Vec::new()));
         let sink = announced.clone();
         (
-            HelpGuard::new(move |setting| sink.lock().unwrap().push(setting)),
+            HelpGuard::new(Arc::new(HelpRecord::begin("Aki".into())), move |setting| {
+                sink.lock().unwrap().push(setting)
+            }),
             announced,
         )
     }

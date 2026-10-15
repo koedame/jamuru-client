@@ -172,6 +172,19 @@ describe('HelperScreen', () => {
     expect(own).not.toContain('window_resize_main');
   });
 
+  // Verifies: REQ-RMT-037
+  it('相手のアプリが残り時間を知らせてきたとき、何もしないと手伝いが終わるまでの時間が帯の下に出ること', async () => {
+    render(<HelperScreen />);
+    await screen.findByTestId('room-code');
+    expect(screen.queryByTestId('settings-help-window-remaining')).not.toBeInTheDocument();
+
+    hear('help:remaining', { remaining_ms: 12 * 60 * 1000 - 500 });
+
+    expect(await screen.findByTestId('settings-help-window-remaining')).toHaveTextContent(
+      en.settingsHelp.helper.remaining.replace('{{time}}', '12:00')
+    );
+  });
+
   // Verifies: REQ-RMT-002
   it('設定ボタンを押したとき、相手の音声の設定が読まれて手伝い用のパネルに出ること', async () => {
     render(<HelperScreen />);

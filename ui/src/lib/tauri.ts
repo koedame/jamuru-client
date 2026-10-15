@@ -71,8 +71,11 @@ export type SystemKind =
 /** Which side of a help this app is on */
 export type HelpRole = "helper" | "helped";
 
-/** Why a help ended: this app stopped it, the peer did, or the peer left */
-export type HelpEndReason = "stopped" | "peer_stopped" | "peer_left";
+/**
+ * Why a help ended: this app stopped it, the peer did, the peer left, or it
+ * sat idle so long that this app (the helped one) ended it
+ */
+export type HelpEndReason = "stopped" | "peer_stopped" | "peer_left" | "timed_out";
 
 /**
  * Why the app being helped did not apply a change, as the closed set of
@@ -125,6 +128,70 @@ export interface HelpWindowInfo {
 /** Who this window helps; rejects in a window that helps no one */
 export async function helpWindowInfo(): Promise<HelpWindowInfo> {
   return invoke("help_window_info");
+}
+
+/** Heard with a {@link HelpEntry} each time the help does something */
+export const HELP_LOG_EVENT = "help:log";
+
+/** Heard with `{ remaining_ms }`: how long until a help that sits idle ends by itself */
+export const HELP_REMAINING_EVENT = "help:remaining";
+
+/** Heard by the main window when the log window's Stop was pressed */
+export const HELP_STOP_REQUESTED_EVENT = "help:stop-requested";
+/** The record of the help began, ended or was cleared: read it again */
+export const HELP_RECORD_CHANGED_EVENT = "help:record-changed";
+
+/** One line of what a help did; `at_ms` is milliseconds since the Unix epoch */
+export type HelpEntry = { at_ms: number } & (
+  | { kind: "started" }
+  | { kind: "setting_changed"; setting: string }
+  | { kind: "muted" }
+  | { kind: "unmuted" }
+  | { kind: "restored" }
+);
+
+/** What a help did: the one going on, or the last one that ended */
+export interface HelpRecord {
+  helper_name: string;
+  entries: HelpEntry[];
+  /** The settings it changed, by name, each once */
+  changed: string[];
+  active: boolean;
+  /** Until it ends for lack of anything being done; null once it is over */
+  remaining_ms: number | null;
+  /** Whether the settings can be put back as they were before it */
+  can_undo: boolean;
+}
+
+/** What putting the settings back did */
+export interface HelpUndoResult {
+  restored: string[];
+  failed: { setting: string; reason: HelpRefusal }[];
+}
+
+/** What the help in progress, or the last one, did; null when there has been none */
+export async function helpRecordGet(): Promise<HelpRecord | null> {
+  return invoke("help_record_get");
+}
+
+/** Put the audio settings back as they were before the last help */
+export async function helpUndo(): Promise<HelpUndoResult> {
+  return invoke("help_undo");
+}
+
+/** Done with the record of the last help: forget it */
+export async function helpRecordDismiss(): Promise<void> {
+  return invoke("help_record_dismiss");
+}
+
+/** Open the window that shows what the help did, or bring it forward */
+export async function helpLogWindowOpen(): Promise<void> {
+  return invoke("help_log_window_open");
+}
+
+/** Ask the main window to stop the help (the log window cannot emit events itself) */
+export async function helpStopRequest(): Promise<void> {
+  return invoke("help_stop_request");
 }
 
 /** One part of the screen and a place in it, from 0 to 1 across and down the part */
