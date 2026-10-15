@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 282 |
-| うち must | 271 |
+| 要求 総数 | 283 |
+| うち must | 272 |
 | うち should | 11 |
-| 検証済み | 257 |
+| 検証済み | 258 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 2 |
 
@@ -39,6 +39,7 @@
 | REQ-AUD-037 | must | Linux では、設定の一覧にバッファサイズ 64 未満（32）を出さない。PipeWire の周期は 64 フレーム以上なので、バッファ 32 でも入力は 64 フレームごとに届き、32 フレームのパケットを 2 つほぼ同時に送る。受け取る側（バッファ 32 = 0.67ms）が塊に追いつけず、相手役が Linux のとき端末の受信に約 300 か所の無音区間が出た。設定の変更（バッファサイズの選択・ゼロ遅延プリセット）は 64 未満を拒む。診断も Linux を 32 非対応として扱い、ゼロ遅延プリセットを勧めない。macOS・Windows は 32 を一覧に出す。設定ファイルと CLI は 32 を受け付けたまま（PipeWire の周期を 32 にした環境と、測定の道具が使う） | `docs-spec/requirements.md` | `src-tauri/src/settings.rs`::a_preset_is_applied_exactly_when_its_frame_size_is_a_buffer_size_on_offer<br/>`src-tauri/src/settings.rs`::off_linux_every_buffer_size_the_app_can_save_is_offered<br/>`src-tauri/src/settings.rs`::on_linux_a_buffer_size_under_64_is_not_offered_and_is_refused<br/>`src/config.rs`::a_buffer_size_the_settings_do_not_offer_is_still_valid_in_the_config<br/>`src/diagnostics/audio.rs`::on_linux_the_diagnostics_do_not_claim_a_buffer_of_32<br/>`tests/e2e/tests/gui.rs`::on_linux_the_running_app_offers_no_buffer_size_under_64 |
 | REQ-AUD-038 | must | 相手のバッファサイズが自分と違っても、相手の音を欠けなく再生する。相手のフレームの長さは相手のバッファサイズで決まり（1 パケットに入る長さまで。超える分は ADR-070 で分けて届く）、自分より長いフレームも短いフレームも、長さを変えずに受け取って順に再生する。受け取る側のバッファ（復号先・再生バッファの 1 枠・出力コールバックが 1 回に受け取る枠）は自分のフレーム長ではなく、届きうる最長のフレームに合わせる | `docs-spec/requirements.md` | `src/audio/engine.rs`::a_source_frame_several_times_the_nominal_length_reaches_the_device_whole<br/>`src/audio/peer_mix.rs`::a_participant_sends_frames_four_times_ours_is_played_whole_over_four_of_our_frames<br/>`src/audio/stream.rs`::a_peer_runs_a_larger_buffer_than_ours_plays_their_frames_whole<br/>`src/audio/stream.rs`::the_longest_packet_from_a_peer_at_the_lowest_rate_is_stored_and_fits_the_widest_frame<br/>`src/audio_session/links.rs`::a_peers_packet_lasts_as_long_as_its_own_buffer_size_says_and_as_ours_until_it_has_told |
 | REQ-AUD-039 | must | 機器の ID か表示名から機器を 1 つ選ぶ規則は、コアに 1 つだけある（アプリと CLI が同じものを使う）。ID が一致する機器があればそれを選び（別の機器の名前が同じ綴りでも ID が先）、ID が無ければ、その名前の機器が 1 つのときだけ選ぶ。同じ名前の機器が複数あるときは選ばず、ID を挙げて断る。どちらでも見つからなければ断る。選ばれていないときは既定の機器を使う。画面に送る機器の一覧の形（ID は文字列）は変わらない | `docs-spec/requirements.md` | `src/audio/device.rs`::a_device_is_sent_to_the_screen_with_its_id_as_a_plain_string<br/>`src/audio/device.rs`::when_a_name_is_given_that_only_one_device_has_that_device_is_chosen<br/>`src/audio/device.rs`::when_a_name_is_given_that_several_devices_have_none_is_chosen_and_the_ids_are_named<br/>`src/audio/device.rs`::when_an_id_is_given_that_device_is_chosen<br/>`src/audio/device.rs`::when_no_device_is_chosen_the_default_is_in_use_and_a_chosen_one_that_is_gone_leaves_none<br/>`src/audio/device.rs`::when_nothing_has_that_id_or_name_it_is_refused<br/>`src/audio/device.rs`::when_the_text_is_one_device_s_id_and_another_device_s_name_the_id_wins |
+| REQ-AUD-040 | must | FEC の受信側が持つパケットの写し（グループ）の数は、損失があってもなくても上限（16 グループ）を超えない。損失がなければ復元は起きないので、復元の成功を待たずに古いグループを捨てる。上限に収めても、直近のグループの欠けた 1 パケットは FEC で復元できる | `docs-spec/requirements.md` | `src/network/fec.rs`::test_decoder_keeps_bounded_groups_without_loss<br/>`src/network/fec.rs`::test_decoder_recovers_after_many_lossless_groups |
 | REQ-AUD-101 | must | 非圧縮PCMコーデックを使用する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_pcm_codec_is_uncompressed |
 | REQ-AUD-104 | must | サンプルレート48kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_48khz |
 | REQ-AUD-105 | must | サンプルレート96kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_96khz |
