@@ -776,3 +776,95 @@ describe('MainScreen の招待リンク', () => {
     expect(openUrl.handler).toBeNull();
   });
 });
+
+describe('MainScreen の手伝われているあいだの動きの表示', () => {
+  const presenceIn = (payload: unknown) => act(() => listeners.get('help:presence-in')!({ payload }));
+  const helpEvent = (payload: unknown) => act(() => listeners.get('session:settings-help')!({ payload }));
+
+  async function helped() {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('room-code');
+    helpEvent({ type: 'started', role: 'helped', peer: 'b', peer_name: 'Aki' });
+    await screen.findByTestId('settings-help-bar');
+    await waitFor(() => expect(listeners.has('help:presence-in')).toBe(true));
+  }
+
+  /** Gives a part the room it would take (jsdom has no layout) */
+  function place(el: Element, left: number, top: number, width: number, height: number) {
+    el.getBoundingClientRect = () =>
+      ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  }
+
+  // Verifies: REQ-RMT-034
+  it('手伝われていないとき、画面の動きは送られず、聞きにも行かないこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    const leave = await screen.findByTestId('leave-room');
+    calls = [];
+
+    fireEvent.pointerMove(leave, { clientX: 1, clientY: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(callsTo('help_presence_publish')).toHaveLength(0);
+    expect(listeners.has('help:presence-in')).toBe(false);
+  });
+
+  // Verifies: REQ-RMT-034
+  it('手伝われているあいだ、ボタンの上にポインタを置くと、部品の名前と位置が手伝う人の窓へ向けて出されること', async () => {
+    await helped();
+    calls = [];
+    const leave = screen.getByTestId('leave-room');
+    place(leave, 0, 0, 100, 40);
+
+    fireEvent.pointerMove(leave, { clientX: 50, clientY: 20 });
+
+    await waitFor(() =>
+      expect(callsTo('help_presence_publish').slice(-1)[0]?.args).toEqual({
+        presence: { hover: { id: 'leave-room', x: 0.5, y: 0.5 }, focus: null },
+      })
+    );
+  });
+
+  // Verifies: REQ-RMT-034
+  it('手伝う人が部品を指しているとき、その部品に名前つきの枠が出て、手伝いが終わると消えること', async () => {
+    await helped();
+    const leave = screen.getByTestId('leave-room');
+    place(leave, 12, 34, 100, 40);
+
+    presenceIn({ hover: { id: 'leave-room', x: 0.25, y: 0.5 }, focus: null });
+
+    const mark = await screen.findByTestId('presence-mark-hover');
+    expect(mark).toHaveStyle({ left: '12px', top: '34px', width: '100px', height: '40px' });
+    expect(mark).toHaveTextContent('Aki');
+
+    helpEvent({ type: 'ended', role: 'helped', peer: 'b', reason: 'peer_stopped' });
+    await waitFor(() => expect(screen.queryByTestId('presence-marks')).not.toBeInTheDocument());
+    expect(listeners.has('help:presence-in')).toBe(false);
+  });
+
+  // Verifies: REQ-RMT-034
+  it('手伝う人が設定パネルを開いたとき、同じパネルが手伝われる人の画面にも出て、閉じると消え、手伝われる人が閉じても次に開かれるまで出ないこと', async () => {
+    await helped();
+    const panelOf = () => screen.getByRole('dialog', { hidden: true });
+    expect(panelOf()).not.toHaveClass('side-panel--open');
+
+    presenceIn({ hover: null, focus: null, panel: true });
+    await waitFor(() => expect(panelOf()).toHaveClass('side-panel--open'));
+    expect(panelOf()).toHaveAttribute('aria-label', 'Audio settings Aki has open');
+    expect(panelOf()).toHaveAttribute('aria-modal', 'false');
+    expect(callsTo('settings_get').length).toBeGreaterThan(0);
+
+    fireEvent.click(within(panelOf()).getByRole('button', { name: 'Close', hidden: true }));
+    await waitFor(() => expect(panelOf()).not.toHaveClass('side-panel--open'));
+    presenceIn({ hover: null, focus: null, panel: true });
+    expect(panelOf()).not.toHaveClass('side-panel--open');
+
+    presenceIn({ hover: null, focus: null, panel: false });
+    presenceIn({ hover: null, focus: null, panel: true });
+    await waitFor(() => expect(panelOf()).toHaveClass('side-panel--open'));
+
+    presenceIn({ hover: null, focus: null, panel: false });
+    await waitFor(() => expect(panelOf()).not.toHaveClass('side-panel--open'));
+  });
+});

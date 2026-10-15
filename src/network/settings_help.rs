@@ -1371,7 +1371,7 @@ mod tests {
         assert_eq!(helper.stop(Role::Helper), Err(HelpError::NotActive));
     }
 
-    /// Verifies: REQ-RMT-036
+    /// Verifies: REQ-RMT-037
     #[test]
     fn when_the_help_sits_idle_too_long_the_helped_side_ends_it_and_says_it_timed_out() {
         let (_, mut helped, helper_id, _) = active();

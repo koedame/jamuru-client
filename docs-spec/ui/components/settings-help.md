@@ -1,6 +1,6 @@
 # SettingsHelp（設定の手伝い）
 
-同じルームの参加者の音声の設定を、手伝ってもらう機能の画面（[ADR-044](../../adr/ADR-044-portals-and-permissions.md) §5、REQ-RMT-001〜008・030・034〜036）。
+同じルームの参加者の音声の設定を、手伝ってもらう機能の画面（[ADR-044](../../adr/ADR-044-portals-and-permissions.md) §5、REQ-RMT-001〜008・030・034〜037）。
 手伝ってほしい人が「設定依頼をする」から始め、相手を選んで頼む。頼まれた人が「手伝う」と答えると始まる。始まったあとは、手伝う人の手元に手伝われる人のアプリと同じ画面が
 別のウィンドウで開き、そこでの操作が相手のアプリに届く。1 つ 1 つの操作は聞かれない。どちらからでもいつでも止められ、
 音声の設定の変更はルームのチャットに記録される。手伝う人がマイクのミュートを解除することは止めず、手伝われる人にすぐ知らせて記録に残す。
@@ -20,6 +20,8 @@
 | 手伝いが終わったあと | 手伝われる人 | 変わった設定があれば、帯に「◯◯さんが変えたのは 入力デバイス・バッファ です」と [元に戻す] [閉じる]（記録のウィンドウでも同じ）。何も変わっていなければ何も出さない。戻せなかった設定は名前を挙げて知らせ、[元に戻す] を残す。時間切れで終わったときは、その旨を一度きりの知らせに出す |
 | 手伝う人の窓 | 手伝う人 | 別のウィンドウ（`HelperScreen`）。上に「◯◯さんの jamuru の設定を一緒に見ています。ここで変えたことは、◯◯さんの jamuru に反映されます。」の帯、その下に手伝いが終わるまでの残り時間の行、その下に手伝われる人のアプリの画面（`MainScreen`）。窓を閉じると手伝いが止まる |
 | 相手の音声の設定 | 手伝う人 | 窓のヘッダーの設定ボタンで右から出る側面パネル（タイトル「◯◯さんの音声の設定」）。中身は設定ウィンドウと同じ Devices タブ。選ぶとその 1 件が相手のアプリに適用され、返った設定が出る。適用できなかったときは、その理由をパネルに出す |
+| 相手の動き | 両方 | 手伝っているあいだ、相手のポインタが重なっている部分とフォーカスしている部分に枠（`PresenceMarks`）を出す。枠は押せる・フォーカスできる要素にだけ付き、相手の名前の小さな札と、ポインタの位置の点が付く（クリックは通す）。手伝う人の窓には、帯の下に「あなたの動きは◯◯さんにも見えています」を出し、相手の画面に届いたときだけ点を点ける |
+| 手伝う人が開いている設定 | 手伝われる人 | 手伝う人が設定のパネルを開いているあいだ、同じ形の側面パネル（`SettingsHelpMirror`。タイトル「◯◯さんが開いている音声の設定」）を、画面の操作を止めない形（背景を暗くせず、Escape で閉じない）で出す。手伝われる人は閉じられ、手伝う人が開き直すまで出ない |
 | 一度きりの知らせ（断られた・相手が止めた・相手が退出した） | ルーム | 帯の位置にトーストで数秒 |
 | 変更の記録 | ルーム | チャットの system 行（下記） |
 
@@ -41,6 +43,9 @@
 | `HelpLogScreen` | Adapter（画面） | 手伝いの記録のウィンドウ。`help_record_get` で記録を読み、イベント `help:log` で行を足し、[元に戻す]（`help_undo`）を呼ぶ。止める操作は、接続を持つメインの画面へ `help:stop-requested` で頼む |
 | `useHelpRemaining` | Adapter（hook） | 残り時間。イベント `help:remaining` と記録の読み取りで合わせ、間は 1 秒ごとに数え下げる。`formatRemaining` は `m:ss`（秒は切り上げ） |
 | `HelperScreen` | Adapter（画面） | 手伝う人の窓。`MainScreen`（`helper` を渡す）と設定パネルを、手伝われる人のアプリに繋いで描く。相手の設定は `settings_get`・`settings_change` とイベント `audio:config-changed`（番号の新しいほうを採る）で追う |
+| `PresenceMarks` | Pure | 相手の動きの枠。`marks`（部分の画面上の位置と大きさ、ポインタの位置）と `name` を受けて、画面に固定した枠を描く。クリックを通し、スクリーンリーダーには読ませない（`aria-hidden`）。REQ-RMT-033 のデバッグの枠（Alt+Shift）とは別の見た目（赤い枠）で、デバッグ版の判定の部品（`lib/domTarget.ts`）だけを共有する |
+| `useHelpPresence` | Adapter（hook） | `role`（`helper` / `helped`）に応じて、自分の動き（`lib/presence.ts` の `watchPresence`。1 秒に 10 回まで、同じ絵は送らない）を相手へ送り、相手の動きを枠（`marks`）にする。手伝う人は `help_presence` の答えで届いたかを知り、手伝われる人は `help_presence_publish` で公開し、手伝う人の窓がイベント `help:presence` として受ける |
+| `SettingsHelpMirror` | Pure | 手伝われる人の画面の、手伝う人が開いている設定の側面パネル（`SidePanel` の `modal=false`）。`useAudioSettingsPanel` が作った中身を `HelperScreen` と共有する |
 | `useAudioSettingsTab` | 共通（hook） | 音声の設定から Devices タブの props を作る。設定ウィンドウと手伝う人のパネルが同じ選択肢を出すための 1 か所 |
 
 窓は、画面から見たバックエンドの入口（`lib/backend.ts`）を `lib/helperBackend.ts` に差し替えて動く。呼びは相手のアプリへ（`help_call`）、
@@ -50,7 +55,7 @@
 `data-testid`: `settings-help-ask-open`（入口）・`settings-help-ask` / `settings-help-ask-next` / `settings-help-ask-choice` / `settings-help-ask-send` / `settings-help-ask-cancel`（依頼）・`settings-help-question` / `settings-help-allow` / `settings-help-decline`（問いかけ）・
 `settings-help-bar` / `settings-help-stop-helped` / `settings-help-stop-helper` / `settings-help-cancel`（帯）・
 `settings-help-window` / `settings-help-window-banner` / `settings-help-window-waiting`（手伝う人の窓）・
-`settings-help-panel` / `settings-help-panel-status`（パネル）・
+`settings-help-panel` / `settings-help-panel-status`（パネル）・`settings-help-window-presence`（動きが見えている旨と、届いたかの点。`data-delivered`）・`presence-marks` / `presence-mark-hover` / `presence-mark-focus`（枠）・
 `settings-help-status` / `settings-help-log-open` / `settings-help-undo` / `settings-help-report-dismiss`（帯）・`settings-help-window-remaining`（手伝う人の窓）・
 `settings-help-log` / `settings-help-log-heading` / `settings-help-log-remaining` / `settings-help-log-lines` / `settings-help-log-stop` / `settings-help-log-undo` / `settings-help-log-undone`（記録のウィンドウ）。
 
@@ -75,6 +80,8 @@
 | `settingsHelp.report.restored` / `.notRestored` | 手伝いの前の設定に戻しました / {{settings}}は戻せませんでした。設定の画面で選び直してください | Put the settings back as they were before the help / Couldn't put back {{settings}}. Choose it again in the settings |
 | `settingsHelp.ended.stopped` / `.timedOut` | {{name}}さんが手伝いを終えました / しばらく動きがなかったので、{{name}}さんの手伝いを終えました | {{name}} ended the help / Nothing was done for a while, so the help from {{name}} ended |
 | `settingsHelp.window.banner` | {{name}}さんの jamuru の設定を一緒に見ています。ここで変えたことは、{{name}}さんの jamuru に反映されます。 | You are looking at {{name}}'s jamuru settings together. What you change here changes theirs. |
+| `settingsHelp.window.presence` | あなたの動きは{{name}}さんにも見えています | {{name}} can also see where you point and focus |
+| `settingsHelp.helped.panelTitle` | {{name}}さんが開いている音声の設定 | Audio settings {{name}} has open |
 | `chat.system.settingsHelpChanged` | {{helper}}さんが{{helped}}さんの{{setting}}設定を変更しました | {{helper}} changed {{helped}}'s {{setting}} setting |
 | `settingsHelp.helper.refused.device_gone` | その機器は{{name}}さんのところで接続されていないため、変更できませんでした | {{name}}'s app could not switch: that device is no longer connected |
 | `settingsHelp.helper.refused.invalid_value` | {{name}}さんのところではその値を使えないため、変更できませんでした | {{name}}'s app could not use that value |

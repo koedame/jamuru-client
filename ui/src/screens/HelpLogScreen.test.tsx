@@ -61,7 +61,7 @@ beforeEach(async () => {
 });
 
 describe("HelpLogScreen", () => {
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("there is no help to show, the window says so", async () => {
     record = null;
 
@@ -70,7 +70,7 @@ describe("HelpLogScreen", () => {
     expect(await screen.findByTestId("settings-help-log-heading")).toHaveTextContent(en.settingsHelp.log.none);
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("a help goes on, the window says who helps, when it ends by itself, and offers Stop", async () => {
     render(<HelpLogScreen />);
 
@@ -81,7 +81,7 @@ describe("HelpLogScreen", () => {
     expect(screen.getByTestId("settings-help-log-stop")).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("the help has done things, they are listed in the order they happened and in plain words", async () => {
     record = recordOf({
       entries: [
@@ -101,7 +101,7 @@ describe("HelpLogScreen", () => {
     ]);
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("a line is announced while the window is open, it is added once even if announced twice", async () => {
     render(<HelpLogScreen />);
     await screen.findByTestId("settings-help-log-heading");
@@ -112,7 +112,7 @@ describe("HelpLogScreen", () => {
     expect(await screen.findAllByText(/Aki muted the microphone/)).toHaveLength(1);
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("the help ends while the window is open, the window reads the record again and says it is over", async () => {
     render(<HelpLogScreen />);
     await screen.findByTestId("settings-help-log-stop");
@@ -124,7 +124,7 @@ describe("HelpLogScreen", () => {
     expect(screen.queryByTestId("settings-help-log-stop")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("Stop is pressed, the main window is asked to stop the help", async () => {
     render(<HelpLogScreen />);
 
@@ -133,7 +133,7 @@ describe("HelpLogScreen", () => {
     await waitFor(() => expect(calls).toContain("help_stop_request"));
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("the help is over and changed settings, the window says which and offers to put them back", async () => {
     record = recordOf({ active: false, remaining_ms: null, changed: ["buffer_size"], can_undo: true });
 
@@ -146,7 +146,7 @@ describe("HelpLogScreen", () => {
     expect(screen.queryByTestId("settings-help-log-remaining")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("Put back is pressed, the settings are put back once and the window says so", async () => {
     record = recordOf({ active: false, remaining_ms: null, changed: ["buffer_size"], can_undo: true });
     render(<HelpLogScreen />);
@@ -158,7 +158,7 @@ describe("HelpLogScreen", () => {
     expect(calls).toContain("help_record_dismiss");
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("a setting cannot be put back, the window says which", async () => {
     record = recordOf({ active: false, remaining_ms: null, changed: ["input_device"], can_undo: true });
     undoResult = { restored: [], failed: [{ setting: "input_device", reason: "device_gone" }] };
