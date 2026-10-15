@@ -108,14 +108,14 @@ function remainingText(time: string) {
 }
 
 describe("the time left", () => {
-  // Verifies: REQ-RMT-036
+  // Verifies: REQ-RMT-037
   it("the help has started, the bar says how long until it ends by itself", async () => {
     await beingHelped();
 
     expect(await screen.findByTestId("settings-help-status")).toHaveTextContent(remainingText("30:00"));
   });
 
-  // Verifies: REQ-RMT-036
+  // Verifies: REQ-RMT-037
   it("the app says there is less time left, the bar follows it", async () => {
     await beingHelped();
     await screen.findByTestId("settings-help-status");
@@ -125,7 +125,7 @@ describe("the time left", () => {
     expect(screen.getByTestId("settings-help-status")).toHaveTextContent(remainingText("10:00"));
   });
 
-  // Verifies: REQ-RMT-036
+  // Verifies: REQ-RMT-037
   it("a few seconds pass with nothing announced, the count runs down by itself", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     await beingHelped();
@@ -138,14 +138,14 @@ describe("the time left", () => {
     expect(screen.getByTestId("settings-help-status")).toHaveTextContent(remainingText("29:55"));
   });
 
-  // Verifies: REQ-RMT-036
+  // Verifies: REQ-RMT-037
   it("the count is not read out as it changes, since it would be every second", async () => {
     await beingHelped();
 
     expect(await screen.findByTestId("settings-help-status")).toHaveAttribute("aria-live", "off");
   });
 
-  // Verifies: REQ-RMT-036
+  // Verifies: REQ-RMT-037
   it("the help ended for sitting idle, the person is told it ended and why", async () => {
     const { send } = await beingHelped();
 
@@ -157,7 +157,7 @@ describe("the time left", () => {
 });
 
 describe("what the helper does to the microphone", () => {
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("the helper unmutes the microphone, the person is told at once", async () => {
     await beingHelped();
 
@@ -166,7 +166,7 @@ describe("what the helper does to the microphone", () => {
     expect(await screen.findByText(en.settingsHelp.log.unmuted.replace("{{name}}", "Aki"))).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("the helper mutes the microphone, the person is told too", async () => {
     await beingHelped();
 
@@ -175,7 +175,7 @@ describe("what the helper does to the microphone", () => {
     expect(await screen.findByText(en.settingsHelp.log.muted.replace("{{name}}", "Aki"))).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("a setting is changed, the chat has it and nothing else is put up over the screen", async () => {
     await beingHelped();
 
@@ -185,7 +185,7 @@ describe("what the helper does to the microphone", () => {
     expect(screen.queryByText(/changed the/)).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("no help is going on, a line of the record put up nothing", () => {
     mount();
 
@@ -194,7 +194,7 @@ describe("what the helper does to the microphone", () => {
     expect(screen.queryByText(/unmuted/)).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("the person opens the log, the log window opens", async () => {
     await beingHelped();
 
@@ -203,7 +203,7 @@ describe("what the helper does to the microphone", () => {
     expect(calls).toContain("help_log_window_open");
   });
 
-  // Verifies: REQ-RMT-034
+  // Verifies: REQ-RMT-035
   it("Stop is pressed in the log window, the help is stopped from here", async () => {
     await beingHelped();
 
@@ -218,7 +218,7 @@ describe("after the help", () => {
   const changedRecord = () =>
     recordOf({ active: false, remaining_ms: null, changed: ["input_device", "buffer_size"], can_undo: true });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("the person stops a help that changed settings, they are told which and can put them back", async () => {
     await beingHelped();
     record = changedRecord();
@@ -230,7 +230,7 @@ describe("after the help", () => {
     expect(screen.getByTestId("settings-help-undo")).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("the help ended by itself having changed settings, they are told which as well", async () => {
     const { send } = await beingHelped();
     record = changedRecord();
@@ -240,7 +240,7 @@ describe("after the help", () => {
     expect(await screen.findByText(/Aki changed:/)).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("the person puts the settings back, it is done in one press and they are told", async () => {
     await beingHelped();
     record = changedRecord();
@@ -254,7 +254,7 @@ describe("after the help", () => {
     expect(calls).toContain("help_record_dismiss");
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("a setting cannot be put back, it stays listed to try again and the person is told which", async () => {
     await beingHelped();
     record = changedRecord();
@@ -270,7 +270,7 @@ describe("after the help", () => {
     expect(screen.getByText("Aki changed: Input Device")).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("how the settings were is not known, they are listed without a way to put them back", async () => {
     await beingHelped();
     record = { ...changedRecord(), can_undo: false };
@@ -281,7 +281,7 @@ describe("after the help", () => {
     expect(screen.queryByTestId("settings-help-undo")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("the person closes the report, it is gone and the record is cleared", async () => {
     await beingHelped();
     record = changedRecord();
@@ -293,7 +293,7 @@ describe("after the help", () => {
     expect(calls).toContain("help_record_dismiss");
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("the help changed nothing, there is no report and the record is cleared", async () => {
     await beingHelped();
     record = recordOf({ active: false, remaining_ms: null });
@@ -304,7 +304,7 @@ describe("after the help", () => {
     expect(screen.queryByText(/changed:/)).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-035
+  // Verifies: REQ-RMT-036
   it("a new help begins, the report of the last one goes away", async () => {
     const { send } = await beingHelped();
     record = changedRecord();
