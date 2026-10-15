@@ -28,17 +28,27 @@ export function SlidersIcon({ size = 14, className }: IconProps) {
   );
 }
 
-/** lucide: user (Profile tab) */
-export function UserIcon({ size = 14, className }: IconProps) {
+/** lucide: shield (Privacy tab) */
+export function ShieldIcon({ size = 14, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...strokeProps()}>
-      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
     </svg>
   );
 }
 
-/** lucide: activity (Diagnostics tab) */
+/** lucide: info (About tab) */
+export function InfoIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...strokeProps()}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </svg>
+  );
+}
+
+/** lucide: activity (Diagnostics and support tab) */
 export function ActivityIcon({ size = 14, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...strokeProps()}>

@@ -53,9 +53,9 @@ describe('the usage reporting switch in the settings panel', () => {
   // Verifies: REQ-TEL-011
   it('the app is opened for the first time, the switch is off and no dialog asks about it', async () => {
     fakeBackend({ usage_reporting: false });
-    render(<SettingsPanelAdapter initialTab="diagnostics" />);
+    render(<SettingsPanelAdapter initialTab="privacy" />);
 
-    const toggle = await screen.findByRole('switch', { name: en.settings.diagnostics.usageToggle });
+    const toggle = await screen.findByRole('switch', { name: en.settings.privacy.usageToggle });
 
     expect(toggle).not.toBeChecked();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -65,9 +65,9 @@ describe('the usage reporting switch in the settings panel', () => {
   // Verifies: REQ-TEL-011
   it('the setting is saved on, the switch starts on', async () => {
     fakeBackend({ usage_reporting: true });
-    render(<SettingsPanelAdapter initialTab="diagnostics" />);
+    render(<SettingsPanelAdapter initialTab="privacy" />);
 
-    const toggle = await screen.findByRole('switch', { name: en.settings.diagnostics.usageToggle });
+    const toggle = await screen.findByRole('switch', { name: en.settings.privacy.usageToggle });
 
     await waitFor(() => expect(toggle).toBeChecked());
   });
@@ -76,9 +76,9 @@ describe('the usage reporting switch in the settings panel', () => {
   it('the user turns the switch on, the setting is saved as on and nothing else in the config changes', async () => {
     const saved = { usage_reporting: false };
     const calls = fakeBackend(saved);
-    render(<SettingsPanelAdapter initialTab="diagnostics" />);
+    render(<SettingsPanelAdapter initialTab="privacy" />);
 
-    fireEvent.click(await screen.findByRole('switch', { name: en.settings.diagnostics.usageToggle }));
+    fireEvent.click(await screen.findByRole('switch', { name: en.settings.privacy.usageToggle }));
 
     await waitFor(() => expect(saved.usage_reporting).toBe(true));
     // Only the switch's own setting travels: nothing read earlier is written
@@ -94,9 +94,9 @@ describe('the usage reporting switch in the settings panel', () => {
       if (command === 'config_set_usage_reporting') throw 'disk full';
       return backend(command, args);
     });
-    render(<SettingsPanelAdapter initialTab="diagnostics" />);
+    render(<SettingsPanelAdapter initialTab="privacy" />);
 
-    const toggle = await screen.findByRole('switch', { name: en.settings.diagnostics.usageToggle });
+    const toggle = await screen.findByRole('switch', { name: en.settings.privacy.usageToggle });
     fireEvent.click(toggle);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('disk full');
@@ -107,33 +107,33 @@ describe('the usage reporting switch in the settings panel', () => {
   it('the user turns it on and asks what is sent, the lines with the install ID are shown', async () => {
     const saved = { usage_reporting: false };
     fakeBackend(saved);
-    render(<SettingsPanelAdapter initialTab="diagnostics" />);
+    render(<SettingsPanelAdapter initialTab="privacy" />);
 
-    fireEvent.click(await screen.findByRole('switch', { name: en.settings.diagnostics.usageToggle }));
+    fireEvent.click(await screen.findByRole('switch', { name: en.settings.privacy.usageToggle }));
     await waitFor(() => expect(saved.usage_reporting).toBe(true));
-    fireEvent.click(screen.getByRole('button', { name: en.settings.diagnostics.usageShow }));
+    fireEvent.click(screen.getByRole('button', { name: en.settings.privacy.usageShow }));
 
-    expect(await screen.findByTestId('diagnostics-usage-preview')).toHaveTextContent(INSTALL_LINE);
+    expect(await screen.findByTestId('privacy-usage-preview')).toHaveTextContent(INSTALL_LINE);
   });
 
   // Verifies: REQ-TEL-013
   it('the user turns it off while the lines are shown, they are replaced by a note that nothing is sent and there is no ID', async () => {
     fakeBackend({ usage_reporting: true });
-    render(<SettingsPanelAdapter initialTab="diagnostics" />);
+    render(<SettingsPanelAdapter initialTab="privacy" />);
 
-    const toggle = await screen.findByRole('switch', { name: en.settings.diagnostics.usageToggle });
+    const toggle = await screen.findByRole('switch', { name: en.settings.privacy.usageToggle });
     await waitFor(() => expect(toggle).toBeChecked());
-    fireEvent.click(screen.getByRole('button', { name: en.settings.diagnostics.usageShow }));
-    expect(await screen.findByTestId('diagnostics-usage-preview')).toHaveTextContent(INSTALL_LINE);
+    fireEvent.click(screen.getByRole('button', { name: en.settings.privacy.usageShow }));
+    expect(await screen.findByTestId('privacy-usage-preview')).toHaveTextContent(INSTALL_LINE);
 
     fireEvent.click(toggle);
 
     await waitFor(() =>
-      expect(screen.getByTestId('diagnostics-usage-preview')).toHaveTextContent(
-        en.settings.diagnostics.usagePreviewOff
+      expect(screen.getByTestId('privacy-usage-preview')).toHaveTextContent(
+        en.settings.privacy.usagePreviewOff
       )
     );
-    expect(screen.getByTestId('diagnostics-usage-preview')).not.toHaveTextContent('install_id');
+    expect(screen.getByTestId('privacy-usage-preview')).not.toHaveTextContent('install_id');
   });
 
   // Verifies: REQ-TEL-012
@@ -143,14 +143,14 @@ describe('the usage reporting switch in the settings panel', () => {
   ])('the language is %s, the section reads in that language', async (language, bundle) => {
     fakeBackend({ usage_reporting: false });
     await i18n.changeLanguage(language);
-    render(<SettingsPanelAdapter initialTab="diagnostics" />);
+    render(<SettingsPanelAdapter initialTab="privacy" />);
 
-    await screen.findByRole('switch', { name: bundle.settings.diagnostics.usageToggle });
+    await screen.findByRole('switch', { name: bundle.settings.privacy.usageToggle });
 
-    const section = screen.getByTestId('diagnostics-usage');
-    expect(section).toHaveTextContent(bundle.settings.diagnostics.usageSent);
-    expect(section).toHaveTextContent(bundle.settings.diagnostics.usageNotSent);
-    expect(section).toHaveTextContent(bundle.settings.diagnostics.usageDeviceNames);
-    expect(section).toHaveTextContent(bundle.settings.diagnostics.usageIdNote);
+    const section = screen.getByTestId('privacy-usage');
+    expect(section).toHaveTextContent(bundle.settings.privacy.usageSent);
+    expect(section).toHaveTextContent(bundle.settings.privacy.usageNotSent);
+    expect(section).toHaveTextContent(bundle.settings.privacy.usageDeviceNames);
+    expect(section).toHaveTextContent(bundle.settings.privacy.usageIdNote);
   });
 });

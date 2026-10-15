@@ -215,6 +215,17 @@
   border-top: 1px solid var(--color-border);
 }
 
+/* The Privacy tab shows these sections on their own: the tab's gap spaces
+   them, and the first one needs no divider above it. */
+.privacy-tab > .diagnostics-tab__usage {
+  margin-top: 0;
+}
+
+.privacy-tab > .diagnostics-tab__usage:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
 .diagnostics-tab__switch {
   display: inline-flex;
   align-items: center;
