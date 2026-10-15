@@ -2,23 +2,26 @@
  * SettingsPanel - Settings panel with header and vertical tabs
  *
  * Design: jamuru brand (ui.pen Screens/Settings). Header bar + left sidebar of
- * icon tabs (Devices / General / Profile / Diagnostics) + content area.
+ * icon tabs (General / Audio / Privacy / Diagnostics and support / About)
+ * + content area.
  */
 
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { VerticalTabs, Tab } from "./VerticalTabs";
 import { GeneralTab, Language } from "./tabs/GeneralTab";
-import { ProfileTab } from "./tabs/ProfileTab";
 import { DevicesTab, DeviceInfo } from "./tabs/DevicesTab";
+import { PrivacyTab } from "./tabs/PrivacyTab";
 import { DiagnosticsTab, DiagnosticsState, ReportProblemState } from "./tabs/DiagnosticsTab";
+import { AboutTab } from "./tabs/AboutTab";
 import { SelectOption } from "./Select";
 import type { LegalSectionProps } from "../Terms/LegalSection";
-import { MicIcon, SlidersIcon, UserIcon, ActivityIcon } from "./icons";
+import { MicIcon, SlidersIcon, ShieldIcon, ActivityIcon, InfoIcon } from "./icons";
 import { CompleteDiagnosticsResult, Hang, RecommendedPreset } from "../../lib/tauri";
 import "./SettingsPanel.css";
 
-export type SettingsTabId = "devices" | "general" | "profile" | "diagnostics";
+/** `devices` is the Audio tab: its id is kept because tests and the settings help address it. */
+export type SettingsTabId = "general" | "devices" | "privacy" | "diagnostics" | "about";
 
 export interface SettingsPanelProps {
   /** Initial tab */
@@ -81,7 +84,7 @@ export interface SettingsPanelProps {
   onLanguageChange: (language: Language) => void;
   /** Server URL change handler. Called with an empty string to clear the override. */
   onServerUrlChange?: (url: string) => void;
-  /** Opens the terms of use, the license and the published pages (General tab) */
+  /** Opens the terms of use, the license and the published pages (About tab, left out when absent) */
   legal?: LegalSectionProps;
   /** Display name change handler */
   onDisplayNameChange: (name: string) => void;
@@ -234,9 +237,10 @@ export function SettingsPanel({
 
   const tabs: Tab[] = [
     { id: "general", label: t("settings.tabs.general", "General"), icon: <SlidersIcon /> },
-    { id: "devices", label: t("settings.tabs.devices", "Devices"), icon: <MicIcon /> },
-    { id: "profile", label: t("settings.tabs.profile", "Profile"), icon: <UserIcon /> },
-    { id: "diagnostics", label: t("settings.tabs.diagnostics", "Diagnostics"), icon: <ActivityIcon /> },
+    { id: "devices", label: t("settings.tabs.devices", "Audio"), icon: <MicIcon /> },
+    { id: "privacy", label: t("settings.tabs.privacy", "Privacy"), icon: <ShieldIcon /> },
+    { id: "diagnostics", label: t("settings.tabs.diagnostics", "Troubleshooting"), icon: <ActivityIcon /> },
+    ...(legal ? [{ id: "about", label: t("settings.tabs.about", "About"), icon: <InfoIcon /> }] : []),
   ];
 
   const handleTabSelect = useCallback((id: string) => {
@@ -248,20 +252,14 @@ export function SettingsPanel({
       case "general":
         return (
           <GeneralTab
+            displayName={displayName}
+            displayNameError={displayNameError}
+            onDisplayNameChange={onDisplayNameChange}
             language={language}
             onLanguageChange={onLanguageChange}
             serverUrl={serverUrl}
             effectiveServerUrl={effectiveServerUrl}
             onServerUrlChange={onServerUrlChange}
-            legal={legal}
-          />
-        );
-      case "profile":
-        return (
-          <ProfileTab
-            displayName={displayName}
-            error={displayNameError}
-            onDisplayNameChange={onDisplayNameChange}
           />
         );
       case "devices":
@@ -295,6 +293,20 @@ export function SettingsPanel({
             onTransmitChannelsChange={onTransmitChannelsChange}
           />
         );
+      case "privacy":
+        return (
+          <PrivacyTab
+            previousHang={previousHang}
+            onSendPreviousHang={onSendPreviousHang}
+            previousHangAnswered={previousHangAnswered}
+            previousHangAttachesLog={previousHangAttachesLog}
+            usageReporting={usageReporting}
+            onUsageReportingChange={onUsageReportingChange}
+            usagePreview={usagePreview}
+            onShowUsagePreview={onShowUsagePreview}
+            usagePreviewError={usagePreviewError}
+          />
+        );
       case "diagnostics":
         return (
           <DiagnosticsTab
@@ -308,15 +320,6 @@ export function SettingsPanel({
             onOpenLogFolder={onOpenLogFolder}
             logFolder={logFolder}
             logFolderError={logFolderError}
-            previousHang={previousHang}
-            onSendPreviousHang={onSendPreviousHang}
-            previousHangAnswered={previousHangAnswered}
-            previousHangAttachesLog={previousHangAttachesLog}
-            usageReporting={usageReporting}
-            onUsageReportingChange={onUsageReportingChange}
-            usagePreview={usagePreview}
-            onShowUsagePreview={onShowUsagePreview}
-            usagePreviewError={usagePreviewError}
             reportProblemState={reportProblemState}
             reportProblemPreview={reportProblemPreview}
             reportProblemComment={reportProblemComment}
@@ -327,6 +330,8 @@ export function SettingsPanel({
             onCancelReportProblem={onCancelReportProblem}
           />
         );
+      case "about":
+        return legal ? <AboutTab {...legal} /> : null;
       default:
         return null;
     }

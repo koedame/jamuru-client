@@ -22,6 +22,8 @@ type Story = StoryObj<typeof meta>;
 
 export const Japanese: Story = {
   args: {
+    displayName: "ユーザー",
+    onDisplayNameChange: () => {},
     language: "ja",
     onLanguageChange: () => {},
     serverUrl: "",
@@ -32,6 +34,8 @@ export const Japanese: Story = {
 
 export const English: Story = {
   args: {
+    displayName: "User",
+    onDisplayNameChange: () => {},
     language: "en",
     onLanguageChange: () => {},
     serverUrl: "",
@@ -43,9 +47,24 @@ export const English: Story = {
 /** A leftover dev/test URL is still configured - the hint calls it out. */
 export const CustomServer: Story = {
   args: {
+    displayName: "User",
+    onDisplayNameChange: () => {},
     language: "en",
     onLanguageChange: () => {},
     serverUrl: "signaling.example.com",
+    effectiveServerUrl: "signaling.example.com",
+    onServerUrlChange: () => {},
+  },
+};
+
+export const DisplayNameError: Story = {
+  args: {
+    displayName: "",
+    displayNameError: "Display name is required",
+    onDisplayNameChange: () => {},
+    language: "en",
+    onLanguageChange: () => {},
+    serverUrl: "",
     effectiveServerUrl: "signaling.example.com",
     onServerUrlChange: () => {},
   },
