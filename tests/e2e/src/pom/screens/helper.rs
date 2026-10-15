@@ -43,6 +43,14 @@ impl<'a> HelperScreen<'a> {
         Element::new(self.driver, selector, Some(self.label.clone()), name)
     }
 
+    /// How long until the help ends by itself.
+    pub fn remaining(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-help-window-remaining']",
+            "helper window remaining time",
+        )
+    }
+
     /// The line that says whose app this window works in.
     pub fn banner(&self) -> Element<'a> {
         self.element(
