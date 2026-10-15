@@ -15,7 +15,10 @@ export interface SettingsHelpBarAction {
 export interface SettingsHelpBarProps {
   /** Who helps whom, in the user's words */
   message: string;
-  /** What is happening now (waiting for an answer, the last answer), if anything */
+  /**
+   * What is happening now (how long until the help ends by itself), if anything.
+   * It is not read out as it changes: a count that changes every second is noise.
+   */
   status?: string | null;
   actions: SettingsHelpBarAction[];
 }
@@ -26,7 +29,7 @@ export function SettingsHelpBar({ message, status, actions }: SettingsHelpBarPro
       <div className="settings-help-bar__text">
         <span className="settings-help-bar__message">{message}</span>
         {status && (
-          <span className="settings-help-bar__status" data-testid="settings-help-status">
+          <span className="settings-help-bar__status" aria-live="off" data-testid="settings-help-status">
             {status}
           </span>
         )}

@@ -776,7 +776,9 @@
     },
     "helped": {
       "bar": "{{name}}さんが音声の設定を手伝っています",
-      "stop": "停止"
+      "stop": "停止",
+      "remaining": "動きがなければ、あと {{time}} で手伝いが自動で終わります",
+      "log": "記録を見る"
     },
     "helper": {
       "title": "{{name}}さんの音声の設定",
@@ -786,11 +788,13 @@
         "device_gone": "その機器は{{name}}さんのところで接続されていないため、変更できませんでした",
         "invalid_value": "{{name}}さんのところではその値を使えないため、変更できませんでした",
         "unavailable": "{{name}}さんのところで変更を保存できませんでした"
-      }
+      },
+      "remaining": "動きがなければ、あと {{time}} で手伝いが自動で終わります"
     },
     "ended": {
-      "stopped": "{{name}}さんが設定の手伝いを止めました",
-      "left": "{{name}}さんが退出したので、設定の手伝いが終わりました"
+      "stopped": "{{name}}さんが手伝いを終えました",
+      "left": "{{name}}さんが退出したので、設定の手伝いが終わりました",
+      "timedOut": "しばらく動きがなかったので、{{name}}さんの手伝いを終えました"
     },
     "setting": {
       "preset": "プリセット",
@@ -799,6 +803,26 @@
     "window": {
       "banner": "{{name}}さんの jamuru の設定を一緒に見ています。ここで変えたことは、{{name}}さんの jamuru に反映されます。",
       "waiting": "{{name}}さんのアプリがルームに入るのを待っています"
+    },
+    "log": {
+      "heading": "{{name}}さんが手伝っています",
+      "headingOver": "{{name}}さんの手伝いは終わりました",
+      "empty": "まだ記録はありません",
+      "stop": "手伝いを停止",
+      "started": "{{name}}さんが手伝いを始めました",
+      "settingChanged": "{{name}}さんが{{setting}}設定を変えました",
+      "muted": "{{name}}さんがミュートにしました",
+      "unmuted": "{{name}}さんがミュートを解除しました",
+      "restored": "手伝いの前の設定に戻しました",
+      "none": "手伝いの記録はありません"
+    },
+    "report": {
+      "changed": "{{name}}さんが変えたのは {{settings}} です",
+      "separator": "・",
+      "undo": "元に戻す",
+      "dismiss": "閉じる",
+      "restored": "手伝いの前の設定に戻しました",
+      "notRestored": "{{settings}}は戻せませんでした。設定の画面で選び直してください"
     }
   },
   "terms": {

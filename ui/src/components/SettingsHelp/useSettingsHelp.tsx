@@ -8,16 +8,27 @@
  * or not now. The help itself is not drawn here. The person helping works in a
  * window of their own that shows the helped app's screen (`HelperScreen`); the
  * person helped keeps working in this one, with the bar to stop it whenever
- * they like.
+ * they like. The bar also says how long until the help ends by itself, and
+ * opens the log of what the helper did. Muting and unmuting by the helper are
+ * told here at once; when the help is over, what it changed is told with a way
+ * to put it back.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useWindowEvent } from "../../hooks/useWindowEvents";
 import {
+  HELP_LOG_EVENT,
+  HELP_STOP_REQUESTED_EVENT,
   PEER_MESSAGE_FEATURE,
+  helpLogWindowOpen,
+  helpRecordDismiss,
+  helpRecordGet,
+  helpUndo,
   settingsHelpAnswer,
   settingsHelpAsk,
   settingsHelpBegin,
   settingsHelpStop,
+  type HelpEntry,
   type HelpEvent,
   type Participant,
 } from "../../lib/tauri";
@@ -25,6 +36,8 @@ import { Toast } from "../Toast";
 import { SettingsHelpAsk } from "./SettingsHelpAsk";
 import { SettingsHelpBar } from "./SettingsHelpBar";
 import { SettingsHelpQuestion } from "./SettingsHelpQuestion";
+import { settingLabel } from "./settingText";
+import { formatRemaining, useHelpRemaining } from "./useHelpRemaining";
 
 /**
  * This app helping someone. `name` is kept from when the help began, so it
@@ -40,6 +53,14 @@ type Giving =
 
 /** Someone helping this app, or asked to */
 type Receiving = { status: "asking" | "starting" | "active"; peer: string; name: string };
+
+/** What a help that is over changed, told to the person helped */
+interface Report {
+  name: string;
+  /** The settings changed, by name */
+  changed: string[];
+  canUndo: boolean;
+}
 
 /** How long a passing notice (declined, ended) stays up */
 const NOTICE_MS = 6000;
@@ -66,6 +87,7 @@ export function useSettingsHelp(connId: number | null, participants: Participant
   const [receiving, setReceiving] = useState<Receiving | null>(null);
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
 
   const participantsRef = useRef(participants);
   participantsRef.current = participants;
@@ -86,15 +108,79 @@ export function useSettingsHelp(connId: number | null, participants: Participant
     return () => clearTimeout(timer);
   }, [notice]);
 
+  const { ms: remainingMs, seed: seedRemaining } = useHelpRemaining(receiving?.status === "active");
+
+  // What a help that is over changed, if it changed anything. Read once the
+  // backend has ended the help, so the record is whole.
+  const showReport = useCallback((name: string) => {
+    helpRecordGet()
+      .then((record) => {
+        if (record === null) return;
+        if (record.changed.length === 0) {
+          helpRecordDismiss().catch((e) => console.error("Could not clear the record of the help:", e));
+          return;
+        }
+        setReport({ name, changed: record.changed, canUndo: record.can_undo });
+      })
+      .catch((e) => console.error("Could not read what the help did:", e));
+  }, []);
+
   const stop = useCallback(
     (role: "helper" | "helped") => {
       if (connId === null) return;
+      const reportName = role === "helped" && receivingRef.current?.status === "active" ? receivingRef.current.name : null;
       if (role === "helper") setGiving(null);
       else setReceiving(null);
-      settingsHelpStop(connId, role).catch((e) => console.error("Could not stop the help with settings:", e));
+      settingsHelpStop(connId, role)
+        .then(() => {
+          if (reportName !== null) showReport(reportName);
+        })
+        .catch((e) => console.error("Could not stop the help with settings:", e));
     },
-    [connId]
+    [connId, showReport]
   );
+
+  // Stop pressed in the log window, which has no hold of the connection.
+  const onStopRequested = useCallback(() => {
+    if (receivingRef.current?.status === "active") stop("helped");
+  }, [stop]);
+  useWindowEvent<void>(HELP_STOP_REQUESTED_EVENT, onStopRequested);
+
+  // The helper unmuting the microphone is the one thing the person would
+  // otherwise not see happen: it is told here, and the log has the rest.
+  const onLogged = useCallback(
+    (entry: HelpEntry) => {
+      const current = receivingRef.current;
+      if (current?.status !== "active") return;
+      if (entry.kind === "muted") setNotice(t("settingsHelp.log.muted", { name: current.name }));
+      if (entry.kind === "unmuted") setNotice(t("settingsHelp.log.unmuted", { name: current.name }));
+    },
+    [t]
+  );
+  useWindowEvent<HelpEntry>(HELP_LOG_EVENT, onLogged);
+
+  const undo = useCallback(() => {
+    helpUndo()
+      .then((result) => {
+        const labels = (settings: string[]) =>
+          settings.map((setting) => settingLabel(setting, t)).join(t("settingsHelp.report.separator"));
+        if (result.failed.length === 0) {
+          setReport(null);
+          setNotice(t("settingsHelp.report.restored"));
+          helpRecordDismiss().catch((e) => console.error("Could not clear the record of the help:", e));
+          return;
+        }
+        const failed = result.failed.map((f) => f.setting);
+        setReport((prev) => (prev ? { ...prev, changed: failed, canUndo: true } : prev));
+        setNotice(t("settingsHelp.report.notRestored", { settings: labels(failed) }));
+      })
+      .catch((e) => console.error("Could not put the settings back:", e));
+  }, [t]);
+
+  const dismissReport = useCallback(() => {
+    setReport(null);
+    helpRecordDismiss().catch((e) => console.error("Could not clear the record of the help:", e));
+  }, []);
 
   // An ask nobody answers is let go, so the person is not left waiting.
   const waitingFor = receiving?.status === "asking" ? receiving : null;
@@ -138,6 +224,10 @@ export function useSettingsHelp(connId: number | null, participants: Participant
             setGiving({ status: "active", peer: event.peer, name: event.peer_name });
           } else {
             setReceiving({ status: "active", peer: event.peer, name: event.peer_name });
+            setReport(null);
+            helpRecordGet()
+              .then((record) => seedRemaining(record?.remaining_ms ?? null))
+              .catch((e) => console.error("Could not read the time left of the help:", e));
           }
           break;
         case "declined": {
@@ -158,6 +248,8 @@ export function useSettingsHelp(connId: number | null, participants: Participant
           if (event.role === "helper") setGiving((prev) => (prev?.peer === event.peer ? null : prev));
           else setReceiving((prev) => (prev?.peer === event.peer ? null : prev));
           const name = (current?.peer === event.peer ? current.name : "") || nameOf(event.peer);
+          if (event.role === "helped" && current?.status === "active" && current.peer === event.peer) showReport(name);
+          if (event.reason === "timed_out") setNotice(t("settingsHelp.ended.timedOut", { name }));
           if (event.reason === "peer_stopped") {
             const withdrawn = event.role === "helper" && current?.status === "asked";
             setNotice(t(withdrawn ? "settingsHelp.ask.withdrawn" : "settingsHelp.ended.stopped", { name }));
@@ -167,7 +259,7 @@ export function useSettingsHelp(connId: number | null, participants: Participant
         }
       }
     },
-    [begin, nameOf, t]
+    [begin, nameOf, seedRemaining, showReport, t]
   );
 
   const candidates = participants.filter((p) => (p.features ?? []).includes(PEER_MESSAGE_FEATURE));
@@ -218,7 +310,30 @@ export function useSettingsHelp(connId: number | null, participants: Participant
       <SettingsHelpBar
         key="helped"
         message={t("settingsHelp.helped.bar", { name: receiving.name })}
-        actions={[{ label: t("settingsHelp.helped.stop"), onClick: () => stop("helped"), testId: "settings-help-stop-helped" }]}
+        status={remainingMs === null ? null : t("settingsHelp.helped.remaining", { time: formatRemaining(remainingMs) })}
+        actions={[
+          {
+            label: t("settingsHelp.helped.log"),
+            onClick: () => helpLogWindowOpen().catch((e) => console.error("Could not open the log of the help:", e)),
+            testId: "settings-help-log-open",
+          },
+          { label: t("settingsHelp.helped.stop"), onClick: () => stop("helped"), testId: "settings-help-stop-helped" },
+        ]}
+      />
+    );
+  }
+  if (report !== null) {
+    bars.push(
+      <SettingsHelpBar
+        key="report"
+        message={t("settingsHelp.report.changed", {
+          name: report.name,
+          settings: report.changed.map((setting) => settingLabel(setting, t)).join(t("settingsHelp.report.separator")),
+        })}
+        actions={[
+          ...(report.canUndo ? [{ label: t("settingsHelp.report.undo"), onClick: undo, testId: "settings-help-undo" }] : []),
+          { label: t("settingsHelp.report.dismiss"), onClick: dismissReport, testId: "settings-help-report-dismiss" },
+        ]}
       />
     );
   }
