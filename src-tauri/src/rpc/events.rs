@@ -40,6 +40,12 @@ pub const EVENTS: &[EventSpec] = &[
         name: crate::session::HELP_EVENT,
         access: Access::NO_HELP,
     },
+    // Where the person helped is looking, for the helper's window
+    // (REQ-RMT-034). It is published only while their screen is helped.
+    EventSpec {
+        name: crate::help_presence::FROM_HELPED_EVENT,
+        access: Access::SCREEN_AND_HELP,
+    },
 ];
 
 /// One event as it was emitted.
@@ -104,6 +110,20 @@ mod tests {
             .unwrap();
         assert_eq!(event.name, "audio:config-changed");
         assert_eq!(event.payload, serde_json::json!({ "revision": 3 }));
+    }
+
+    /// Verifies: REQ-RMT-034
+    #[test]
+    fn what_the_person_helped_points_at_goes_to_the_helper_and_what_the_helper_points_at_does_not_come_back(
+    ) {
+        let heard_by_a_helper = |name: &str| {
+            EVENTS
+                .iter()
+                .any(|spec| spec.name == name && spec.access.allows(Portal::Help))
+        };
+
+        assert!(heard_by_a_helper(crate::help_presence::FROM_HELPED_EVENT));
+        assert!(!heard_by_a_helper(crate::help_presence::FROM_HELPER_EVENT));
     }
 
     #[test]

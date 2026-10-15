@@ -127,6 +127,43 @@ export async function helpWindowInfo(): Promise<HelpWindowInfo> {
   return invoke("help_window_info");
 }
 
+/** One part of the screen and a place in it, from 0 to 1 across and down the part */
+export interface PresenceTarget {
+  /** The part's name; reads the same on both screens (`presence.ts`) */
+  id: string;
+  x: number;
+  y: number;
+}
+
+/** Where one person of a settings help is looking: the part under the pointer and the part with the focus */
+export interface Presence {
+  hover: PresenceTarget | null;
+  focus: PresenceTarget | null;
+  /** Whether the helper has the settings panel open; only the helper says it */
+  panel?: boolean;
+}
+
+/** Whether the helped app's screen took what the helper sent */
+export interface PresenceAck {
+  delivered: boolean;
+}
+
+/** What the helped app's screen hears of the helper's presence */
+export const HELP_PRESENCE_FROM_HELPER = "help:presence-in";
+
+/** What the helper's window hears of the helped person's presence */
+export const HELP_PRESENCE_FROM_HELPED = "help:presence";
+
+/** The helper's window tells the helped app where it is looking (goes through the relay) */
+export async function helpPresence(presence: Presence): Promise<PresenceAck> {
+  return invoke("help_presence", { presence });
+}
+
+/** The helped app's screen tells the helper's window where it is looking */
+export async function helpPresencePublish(presence: Presence): Promise<void> {
+  return invoke("help_presence_publish", { presence });
+}
+
 /** What this build is and what it runs on (coarse facts only; no machine or user names) */
 export interface AppEnvironment {
   app_version: string;
