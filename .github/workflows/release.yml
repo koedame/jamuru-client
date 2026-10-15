@@ -90,16 +90,21 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@v6
+      # A tag run cannot read what another tag run saved, so a tag run that
+      # saved these would add one more copy per tag and push the build cache
+      # out of the 10 GiB the repository gets. Only the develop rehearsal saves.
+      - name: Restore cargo registry
+        id: cache-registry
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-registry-
 
-      - name: Cache cargo git
-        uses: actions/cache@v6
+      - name: Restore cargo git
+        id: cache-git
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -119,8 +124,11 @@ jobs:
             src-tauri/target
             !src-tauri/target/**/bundle
           key: cargo-target-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-target-release-${{ matrix.target }}-
+          # A tag run starts from the nearest build, however old: it saves
+          # nothing, so it cannot pile onto it. The rehearsal starts from the
+          # exact key or from nothing, so what it saves is one clean build and
+          # not every crate version the lock file has ever had.
+          restore-keys: ${{ github.ref_type == 'tag' && format('cargo-target-release-{0}-', matrix.target) || '' }}
 
       # The cache is saved without the bundle directories, but a Windows restore
       # brought back the installers of the build that saved it (`jamuru_0.1.0_*`),
@@ -174,6 +182,20 @@ jobs:
         # own place to look for updates and its own version (ADR-045); a
         # release and a rehearsal (no tag) do not.
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json ${{ contains(needs.prepare.outputs.tag, '-') && format('--config src-tauri/tauri.updater.beta.conf.json --config {0}/build-version.conf.json --features debug-remote', runner.temp) || '' }}
+
+      - name: Save cargo registry
+        if: github.ref_type != 'tag' && steps.cache-registry.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Save cargo git
+        if: github.ref_type != 'tag' && steps.cache-git.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cargo/git
+          key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Save cargo target
         if: github.ref_type != 'tag' && steps.cache-target.outputs.cache-hit != 'true'

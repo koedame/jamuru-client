@@ -10,6 +10,13 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Nothing here is run under a debugger or builds on the previous build, so
+  # the full debug info and the incremental state only make the cached target
+  # directories several times larger (the Opus one passed 4 GB), which pushes
+  # the other caches out of the 10 GiB the repository gets. Line tables are
+  # kept so a backtrace still shows file and line.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   check:
@@ -155,13 +162,16 @@ jobs:
           restore-keys: |
             cargo-git-
 
+      # Not the key Check and Lint share: whichever of those finishes first
+      # saves a target holding only `cargo check` output, and this job, finding
+      # the key, would save nothing and rebuild every test binary each run.
+      # No restore-keys: restoring the last build and adding to it keeps every
+      # crate version the lock file has ever had in the saved cache.
       - name: Cache cargo target
         uses: actions/cache@v6
         with:
           path: target
-          key: cargo-target-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-target-${{ runner.os }}-
+          key: cargo-target-test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests
         run: cargo test --all-targets
@@ -244,13 +254,13 @@ jobs:
           restore-keys: |
             cargo-registry-
 
+      # No restore-keys, for the reason given at the Test job: this entry grew
+      # past 4 GB and took longer to restore than the build it saved.
       - name: Cache cargo target
         uses: actions/cache@v6
         with:
           path: target
           key: cargo-target-opus-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-target-opus-${{ runner.os }}-
 
       - name: Run clippy (opus-codec feature)
         run: cargo clippy --all-targets --features opus-codec -- -D warnings
