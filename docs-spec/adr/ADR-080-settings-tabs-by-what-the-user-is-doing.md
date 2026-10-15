@@ -42,4 +42,4 @@ Accepted
 
 - 利用状況の送信を止めたい人は、診断を開かずに「プライバシー」で見つけられる。利用者向けの説明（`docs/getting-started/privacy.md`・`troubleshooting.md`）の、タブの名前を直す
 - ADR-037 の「Diagnostics タブ」、ADR-056 の「Diagnostics タブの案内」は、「Privacy タブ」と読む
-- `ui.pen` の設定画面は旧構成のまま。デザインの更新が要る
+- `ui.pen` の設定画面（`Screens/Settings` の各フレーム）は、この 5 タブに描き直した
