@@ -677,7 +677,7 @@
                       "id": "jv8AN",
                       "name": "DeviceTitle",
                       "fill": "$text-light",
-                      "content": "オーディオデバイス",
+                      "content": "デバイス",
                       "fontFamily": "$font-heading",
                       "fontSize": 16,
                       "fontWeight": "600"
@@ -1107,7 +1107,7 @@
                       "id": "2Puvy",
                       "name": "audioSettingsTitle",
                       "fill": "$text-light",
-                      "content": "オーディオ設定",
+                      "content": "音質と遅延",
                       "fontFamily": "$font-heading",
                       "fontSize": 16,
                       "fontWeight": "600"
@@ -4791,7 +4791,7 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "q7kIj",
+                  "id": "s5qLB",
                   "name": "SettingsMain",
                   "width": "fill_container",
                   "height": "fill_container",
@@ -4801,17 +4801,94 @@
                   "children": [
                     {
                       "type": "text",
-                      "id": "su1SA",
-                      "name": "GeneralTitle",
+                      "id": "gT2Yy",
+                      "name": "ProfileTitle",
                       "fill": "$text-light",
-                      "content": "一般設定",
+                      "content": "プロフィール",
                       "fontFamily": "$font-heading",
                       "fontSize": 16,
                       "fontWeight": "600"
                     },
                     {
                       "type": "frame",
-                      "id": "ZpGuP",
+                      "id": "jB4My",
+                      "name": "NameSection",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "XVmd0",
+                          "name": "nameLabel",
+                          "fill": "$gray-400",
+                          "content": "表示名",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "o5oZZ",
+                          "name": "NameInput",
+                          "width": "fill_container",
+                          "height": 40,
+                          "fill": "$bg-row",
+                          "cornerRadius": "$radius-control",
+                          "stroke": "$border-dark",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "padding": [
+                            0,
+                            12
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "AG9e1",
+                              "name": "NameInputValue",
+                              "fill": "$text-light",
+                              "content": "Taro",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "6PtOq",
+                          "name": "nameHint",
+                          "fill": "$gray-400",
+                          "content": "他の参加者に表示される名前です（1〜32文字）",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "yHqPd",
+                      "type": "ref",
+                      "ref": "MDDnY",
+                      "name": "Divider",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "6bymQ",
+                      "name": "DisplayTitle",
+                      "fill": "$text-light",
+                      "content": "表示",
+                      "fontFamily": "$font-heading",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "blU2T",
                       "name": "LanguageSection",
                       "width": "fill_container",
                       "layout": "vertical",
@@ -4819,7 +4896,7 @@
                       "children": [
                         {
                           "type": "text",
-                          "id": "6hryO",
+                          "id": "5jgEs",
                           "name": "langLabel",
                           "fill": "$gray-400",
                           "content": "言語",
@@ -4829,7 +4906,7 @@
                         },
                         {
                           "type": "frame",
-                          "id": "lfLSP",
+                          "id": "EOpTV",
                           "name": "LanguageSelect",
                           "width": "fill_container",
                           "height": 40,
@@ -4847,8 +4924,8 @@
                           "children": [
                             {
                               "type": "text",
-                              "id": "6fsOC",
-                              "name": "langValue",
+                              "id": "6nflw",
+                              "name": "LanguageSelectValue",
                               "fill": "$text-light",
                               "content": "日本語",
                               "fontFamily": "$font-heading",
@@ -4856,15 +4933,92 @@
                               "fontWeight": "normal"
                             },
                             {
-                              "id": "T0UTx",
+                              "id": "Zzs8a",
                               "type": "ref",
                               "ref": "79fDd",
-                              "name": "langIcon",
+                              "name": "LanguageSelectIcon",
                               "width": 14,
                               "height": 14,
                               "fill": "$gray-400"
                             }
                           ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "wNnJY",
+                      "type": "ref",
+                      "ref": "MDDnY",
+                      "name": "Divider",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "J7zdY",
+                      "name": "ConnectionTitle",
+                      "fill": "$text-light",
+                      "content": "接続",
+                      "fontFamily": "$font-heading",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "DLEO0",
+                      "name": "ServerSection",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "vcYXv",
+                          "name": "serverLabel",
+                          "fill": "$gray-400",
+                          "content": "サーバー",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Tdmd4",
+                          "name": "ServerInput",
+                          "width": "fill_container",
+                          "height": 40,
+                          "fill": "$bg-row",
+                          "cornerRadius": "$radius-control",
+                          "stroke": "$border-dark",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "padding": [
+                            0,
+                            12
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "azz0P",
+                              "name": "ServerInputValue",
+                              "fill": "$gray-500",
+                              "content": "wss://signal.example.com",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "K0iUJ",
+                          "name": "serverHint",
+                          "fill": "$gray-400",
+                          "content": "既定のサーバーを使用中（wss://signal.example.com）",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -4881,7 +5035,7 @@
       "id": "OFIrh",
       "x": 4848,
       "y": 40,
-      "name": "Screens/Settings/Profile",
+      "name": "Screens/Settings/Privacy",
       "width": 800,
       "height": 850,
       "fill": "$bg-page",
@@ -4895,13 +5049,13 @@
           "width": "fill_container",
           "height": "fill_container",
           "descendants": {
-            "tIdjx": {
+            "HP75O": {
               "fill": "$accent-blue"
             },
-            "DZRDL": {
+            "WsKer": {
               "fill": "$text-light"
             },
-            "jC9m6": {
+            "UY5AF": {
               "fill": "$text-light",
               "fontWeight": "600"
             },
@@ -4909,7 +5063,7 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "uuXg1",
+                  "id": "RYJjQ",
                   "name": "SettingsMain",
                   "width": "fill_container",
                   "height": "fill_container",
@@ -4918,39 +5072,232 @@
                   "padding": 24,
                   "children": [
                     {
-                      "type": "text",
-                      "id": "0sYHQ",
-                      "name": "ProfileTitle",
-                      "fill": "$text-light",
-                      "content": "プロフィール",
-                      "fontFamily": "$font-heading",
-                      "fontSize": 16,
-                      "fontWeight": "600"
-                    },
-                    {
                       "type": "frame",
-                      "id": "i60XL",
-                      "name": "NameSection",
+                      "id": "dVaa6",
+                      "name": "PreviousHangSection",
                       "width": "fill_container",
                       "layout": "vertical",
                       "gap": 8,
                       "children": [
                         {
                           "type": "text",
-                          "id": "txMKQ",
-                          "name": "nameLabel",
-                          "fill": "$gray-400",
-                          "content": "表示名",
+                          "id": "zhzBH",
+                          "name": "previousHangTitle",
+                          "fill": "$text-light",
+                          "content": "前回について",
                           "fontFamily": "$font-heading",
-                          "fontSize": 11,
-                          "fontWeight": "normal"
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "zmlvB",
+                          "name": "previousHangDesc",
+                          "fill": "$gray-400",
+                          "content": "前回、jamuru が正常に終了しませんでした（音声デバイスを開く処理の途中で止まっていたようです）。原因を見つけて直すために、現在の jamuru.log を添えて小さな報告を送りますか？ ログには、サーバーのアドレス・お使いの音声デバイスの名前・ルーム ID・ほかの参加者の識別子が入ることがあります。",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "lineHeight": 1.5
                         },
                         {
                           "type": "frame",
-                          "id": "vpIeD",
-                          "name": "NameInput",
+                          "id": "jPeVy",
+                          "name": "previousHangActions",
+                          "gap": 8,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "dHxiV",
+                              "name": "SendReportButton",
+                              "height": 36,
+                              "fill": "$bg-row",
+                              "cornerRadius": "$radius-control",
+                              "stroke": "$border-dark",
+                              "strokeWidth": 1,
+                              "strokeAlignment": "inner",
+                              "padding": [
+                                0,
+                                16
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "XpHt7",
+                                  "name": "SendReportButtonText",
+                                  "fill": "$text-light",
+                                  "content": "報告を送る",
+                                  "fontFamily": "$font-heading",
+                                  "fontSize": 12,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "QPEAr",
+                              "name": "DismissButton",
+                              "height": 36,
+                              "fill": "$bg-row",
+                              "cornerRadius": "$radius-control",
+                              "stroke": "$border-dark",
+                              "strokeWidth": 1,
+                              "strokeAlignment": "inner",
+                              "padding": [
+                                0,
+                                16
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "dDbRH",
+                                  "name": "DismissButtonText",
+                                  "fill": "$text-light",
+                                  "content": "送らない",
+                                  "fontFamily": "$font-heading",
+                                  "fontSize": 12,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "k8QqY",
+                      "type": "ref",
+                      "ref": "MDDnY",
+                      "name": "Divider",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "2oFT3",
+                      "name": "UsageSection",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "rSEKN",
+                          "name": "usageTitle",
+                          "fill": "$text-light",
+                          "content": "利用状況の送信",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "tybAg",
+                          "name": "UsageToggle",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "GymSN",
+                              "name": "UsageCheckbox",
+                              "width": 16,
+                              "height": 16,
+                              "fill": "$bg-row",
+                              "cornerRadius": 4,
+                              "stroke": "$gray-500",
+                              "strokeWidth": 1,
+                              "strokeAlignment": "inner",
+                              "children": []
+                            },
+                            {
+                              "type": "text",
+                              "id": "kUXis",
+                              "name": "usageToggleText",
+                              "fill": "$text-light",
+                              "content": "利用状況を送る",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "mb3VF",
+                          "name": "usageDesc",
+                          "fill": "$gray-400",
+                          "content": "既定ではオフです。オンにすると、お使いの端末での jamuru の動作の様子を jamuru のサーバーに送ります。特定の機材や回線で起きる不具合を見つけて直すために使います。",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "height": 40,
+                          "lineHeight": 1.5
+                        },
+                        {
+                          "type": "text",
+                          "id": "21vrp",
+                          "name": "usageSentDesc",
+                          "fill": "$gray-400",
+                          "content": "送るもの: アプリの版、OS、CPU とメモリ、音声デバイスの名前・ID と対応、設定（自前サーバーの URL はホストとポートまで）、セッションごとの集計（継続時間・遅延・パケットロス・音声がどんな経路を通ったか・接続にかかった時間）、ご自身の IP アドレス（お使いのネットワーク上のものと公開されているもの）、エラーの種別、クラッシュの位置。",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "lineHeight": 1.5
+                        },
+                        {
+                          "type": "text",
+                          "id": "RbCTQ",
+                          "name": "usageNotSentDesc",
+                          "fill": "$gray-400",
+                          "content": "送らないもの: 表示名、部屋の履歴、端末識別子、部屋にいる相手についての情報（相手の IP アドレスを含む）、音声、チャット。",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "lineHeight": 1.5
+                        },
+                        {
+                          "type": "text",
+                          "id": "c6LIx",
+                          "name": "usageDeviceNamesDesc",
+                          "fill": "$gray-400",
+                          "content": "デバイスの名前は OS が返すとおりに送ります。「太郎の AirPods」のようにご自身の名前が入っていれば、それも送られます。「送る内容を見る」で実際の文字列を確かめられます。",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "lineHeight": 1.5
+                        },
+                        {
+                          "type": "text",
+                          "id": "iNtpL",
+                          "name": "usageIdNoteDesc",
+                          "fill": "$gray-400",
+                          "content": "オンにすると、報告をひとまとめにするための乱数のインストール ID を作ります。オフにすると、この ID と未送信の内容を捨てます。",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "lineHeight": 1.5
+                        },
+                        {
+                          "type": "frame",
+                          "id": "aV0Ja",
+                          "name": "ShowUsageButton",
+                          "height": 36,
                           "fill": "$bg-row",
                           "cornerRadius": "$radius-control",
                           "stroke": "$border-dark",
@@ -4958,31 +5305,22 @@
                           "strokeAlignment": "inner",
                           "padding": [
                             0,
-                            12
+                            16
                           ],
+                          "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
-                              "id": "Oz5TD",
-                              "name": "nameValue",
+                              "id": "p0Df5",
+                              "name": "ShowUsageButtonText",
                               "fill": "$text-light",
-                              "content": "User",
+                              "content": "送る内容を見る",
                               "fontFamily": "$font-heading",
                               "fontSize": 12,
-                              "fontWeight": "normal"
+                              "fontWeight": "500"
                             }
                           ]
-                        },
-                        {
-                          "type": "text",
-                          "id": "19yfL",
-                          "name": "nameHint",
-                          "fill": "$gray-400",
-                          "content": "他の参加者に表示される名前です（1〜32文字）",
-                          "fontFamily": "$font-heading",
-                          "fontSize": 10,
-                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -5086,6 +5424,146 @@
                           "fontFamily": "$font-heading",
                           "fontSize": 12,
                           "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "D53Ke",
+                      "type": "ref",
+                      "ref": "MDDnY",
+                      "name": "Divider",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "dZ645",
+                      "name": "LogFileSection",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "zp9Zu",
+                          "name": "logTitle",
+                          "fill": "$text-light",
+                          "content": "ログファイル",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "P5NRo",
+                          "name": "logDesc",
+                          "fill": "$gray-400",
+                          "content": "うまく動かないときは、このフォルダにある jamuru.log を添えて連絡してください。",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "lineHeight": 1.5
+                        },
+                        {
+                          "type": "frame",
+                          "id": "DrigI",
+                          "name": "OpenLogFolderButton",
+                          "height": 36,
+                          "fill": "$bg-row",
+                          "cornerRadius": "$radius-control",
+                          "stroke": "$border-dark",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "padding": [
+                            0,
+                            16
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "sOTlx",
+                              "name": "OpenLogFolderButtonText",
+                              "fill": "$text-light",
+                              "content": "ログのフォルダを開く",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 12,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "e8ofc",
+                      "type": "ref",
+                      "ref": "MDDnY",
+                      "name": "Divider",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "46Zbo",
+                      "name": "ReportProblemSection",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "sHQdd",
+                          "name": "reportTitle",
+                          "fill": "$text-light",
+                          "content": "問題を報告",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "JEaUr",
+                          "name": "reportDesc",
+                          "fill": "$gray-400",
+                          "content": "いま起きている問題を、jamuru.log と一言のコメントを添えて送ります。",
+                          "fontFamily": "$font-heading",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "lineHeight": 1.5
+                        },
+                        {
+                          "type": "frame",
+                          "id": "m4Hoi",
+                          "name": "ReportProblemButton",
+                          "height": 36,
+                          "fill": "$bg-row",
+                          "cornerRadius": "$radius-control",
+                          "stroke": "$border-dark",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "padding": [
+                            0,
+                            16
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "61FVO",
+                              "name": "ReportProblemButtonText",
+                              "fill": "$text-light",
+                              "content": "問題を報告する",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 12,
+                              "fontWeight": "500"
+                            }
+                          ]
                         }
                       ]
                     }
@@ -16702,7 +17180,7 @@
                       "id": "s5L1j",
                       "name": "TabDevicesText",
                       "fill": "$gray-400",
-                      "content": "デバイス",
+                      "content": "オーディオ",
                       "fontFamily": "$font-heading",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -16711,8 +17189,8 @@
                 },
                 {
                   "type": "frame",
-                  "id": "tIdjx",
-                  "name": "TabProfile",
+                  "id": "HP75O",
+                  "name": "TabPrivacy",
                   "width": "fill_container",
                   "height": 36,
                   "fill": "#00000000",
@@ -16725,19 +17203,21 @@
                   "alignItems": "center",
                   "children": [
                     {
-                      "id": "DZRDL",
-                      "type": "ref",
-                      "ref": "5BQeR",
-                      "name": "TabProfileIcon",
+                      "type": "icon",
+                      "id": "WsKer",
+                      "name": "TabPrivacyIcon",
                       "width": 14,
-                      "height": 14
+                      "height": 14,
+                      "icon": "shield",
+                      "library": "lucide",
+                      "fill": "$gray-400"
                     },
                     {
                       "type": "text",
-                      "id": "jC9m6",
-                      "name": "TabProfileText",
+                      "id": "UY5AF",
+                      "name": "TabPrivacyText",
                       "fill": "$gray-400",
-                      "content": "プロフィール",
+                      "content": "プライバシー",
                       "fontFamily": "$font-heading",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -16774,7 +17254,44 @@
                       "id": "gl5nC",
                       "name": "TabDiagnosticsText",
                       "fill": "$gray-400",
-                      "content": "診断",
+                      "content": "診断とサポート",
+                      "fontFamily": "$font-heading",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "1jJYX",
+                  "name": "TabAbout",
+                  "width": "fill_container",
+                  "height": 36,
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-control",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "ciRZH",
+                      "name": "TabAboutIcon",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "info",
+                      "library": "lucide",
+                      "fill": "$gray-400"
+                    },
+                    {
+                      "type": "text",
+                      "id": "u6Gev",
+                      "name": "TabAboutText",
+                      "fill": "$gray-400",
+                      "content": "アプリについて",
                       "fontFamily": "$font-heading",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -20519,6 +21036,204 @@
               ]
             }
           ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "TC7FH",
+      "x": 8144,
+      "y": 40,
+      "name": "Screens/Settings/About",
+      "width": 800,
+      "height": 850,
+      "fill": "$bg-page",
+      "layout": "vertical",
+      "children": [
+        {
+          "id": "V5XLs",
+          "type": "ref",
+          "ref": "goMqi",
+          "name": "SettingsShellInstance",
+          "width": "fill_container",
+          "height": "fill_container",
+          "descendants": {
+            "1jJYX": {
+              "fill": "$accent-blue"
+            },
+            "ciRZH": {
+              "fill": "$text-light"
+            },
+            "u6Gev": {
+              "fill": "$text-light",
+              "fontWeight": "600"
+            },
+            "N5M6BB": {
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "PGXOm",
+                  "name": "SettingsMain",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "gap": 24,
+                  "padding": 24,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "UYSHb",
+                      "name": "LegalSection",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "LGt01",
+                          "name": "LegalTitleSlot",
+                          "padding": [
+                            0,
+                            0,
+                            4,
+                            0
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "hBOI8",
+                              "name": "LegalTitle",
+                              "fill": "$text-light",
+                              "content": "規約など",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 16,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "5WXVi",
+                          "name": "LegalTermsRow",
+                          "width": "fill_container",
+                          "height": 36,
+                          "fill": "$bg-card",
+                          "cornerRadius": "$radius-control",
+                          "stroke": "$border-dark",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "padding": [
+                            0,
+                            16
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "JuYMa",
+                              "name": "legalTermsText",
+                              "fill": "$text-light",
+                              "content": "利用規約",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "kQjTi",
+                          "name": "LegalLicenseRow",
+                          "width": "fill_container",
+                          "height": 36,
+                          "fill": "$bg-card",
+                          "cornerRadius": "$radius-control",
+                          "stroke": "$border-dark",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "padding": [
+                            0,
+                            16
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "u4rN0",
+                              "name": "legalLicenseText",
+                              "fill": "$text-light",
+                              "content": "ライセンス",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Za2rm",
+                          "name": "LegalPrivacyRow",
+                          "width": "fill_container",
+                          "height": 36,
+                          "fill": "$bg-card",
+                          "cornerRadius": "$radius-control",
+                          "stroke": "$border-dark",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "padding": [
+                            0,
+                            16
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "mRVai",
+                              "name": "legalPrivacyText",
+                              "fill": "$text-light",
+                              "content": "プライバシーとセキュリティ（ブラウザで開く）",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Qup0j",
+                          "name": "LegalAnnouncementsRow",
+                          "width": "fill_container",
+                          "height": 36,
+                          "fill": "$bg-card",
+                          "cornerRadius": "$radius-control",
+                          "stroke": "$border-dark",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "padding": [
+                            0,
+                            16
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "bUeUr",
+                              "name": "legalAnnouncementsText",
+                              "fill": "$text-light",
+                              "content": "お知らせ（ブラウザで開く）",
+                              "fontFamily": "$font-heading",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
         }
       ]
     }
