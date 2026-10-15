@@ -444,8 +444,11 @@ pub fn help_stop_request(app: AppHandle) -> Result<(), String> {
 }
 
 /// Opens the window that shows the record, or brings it forward.
+///
+/// Async on purpose: a window built inside a sync command runs on the main
+/// thread and deadlocks the whole app on Windows.
 #[tauri::command]
-pub fn help_log_window_open(app: AppHandle) -> Result<(), String> {
+pub async fn help_log_window_open(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(LOG_WINDOW) {
         let _ = window.unminimize();
         return window.set_focus().map_err(|e| e.to_string());
