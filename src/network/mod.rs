@@ -24,6 +24,7 @@ mod signaling;
 mod stun;
 mod transport;
 mod udp_mux;
+mod wifi;
 
 pub use bandwidth::{
     audio_packet_duration_ms, required_bps, status_label, BandwidthEstimator, BandwidthStatus,
@@ -67,3 +68,4 @@ pub use signaling::{
 pub use stun::{StunClient, StunResult, DEFAULT_STUN_SERVERS};
 pub use transport::{bind_std, UdpTransport};
 pub use udp_mux::UdpMux;
+pub use wifi::default_route_is_wifi;
