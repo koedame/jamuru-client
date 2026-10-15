@@ -934,6 +934,7 @@ export type ProblemCode =
   | { type: "NoIpv6" }
   | { type: "SymmetricNat" }
   | { type: "UnstableConnection" }
+  | { type: "WifiConnection" }
   | { type: "HighJitter"; data: { jitter_ms: number } }
   | { type: "SignalingUnreachable"; data: { url: string; error: string | null } }
   | { type: "InputEnumerationFailed"; data: { error: string } }
