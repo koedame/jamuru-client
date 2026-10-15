@@ -18,7 +18,7 @@ use crate::protocol::{
 use super::bandwidth::{samples_per_audio_packet, UDP_IP_OVERHEAD_BYTES};
 use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
-use super::fec::{FecDecoder, FecEncoder, FecPacket};
+use super::fec::{FecDecoder, FecEncoder, FecPacket, RecoveredPacket};
 use super::link_facts::{route_handicap, route_preference, LinkFacts, RouteOverride};
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
@@ -406,6 +406,28 @@ impl<'a> Probing<'a> {
             index,
             rtt: self.median(index).expect("it has a round trip"),
             replies: self.reply_count(index),
+        }
+    }
+}
+
+/// Hand a packet the FEC decoder rebuilt to the audio callback and count it.
+///
+/// Both ways a group can complete come through here: the FEC packet arriving
+/// last, and - when packets are reordered - a data packet arriving after it.
+fn deliver_recovered(
+    recovered: Option<RecoveredPacket>,
+    group_size: usize,
+    fec_recovered: &AtomicU64,
+    callback: &Option<Arc<AudioCallback>>,
+) {
+    if let Some(recovered) = recovered {
+        let sequence = recovered.group_sequence * group_size as u32 + recovered.packet_index as u32;
+        trace!("FEC recovered packet seq={}", sequence);
+        fec_recovered.fetch_add(1, Ordering::Relaxed);
+        if let Some(callback) = callback {
+            // Timestamp is not recoverable from FEC; the receive path keys off
+            // sequence (ADR-021).
+            callback(sequence, recovered.data, 0);
         }
     }
 }
@@ -1848,6 +1870,8 @@ impl Connection {
                             tracker.record(packet.sequence);
                         }
 
+                        let mut recovered = None;
+
                         // Register the packet with FEC before handing it on, so
                         // the group is complete when its FEC packet arrives.
                         if let (Some(ref decoder), Some(group_size)) =
@@ -1856,7 +1880,10 @@ impl Connection {
                             if let Ok(mut decoder) = decoder.lock() {
                                 let group = packet.sequence / group_size as u32;
                                 let index = (packet.sequence % group_size as u32) as usize;
-                                decoder.add_packet(group, index, &packet.payload);
+                                // The FEC packet may already be here (reordered
+                                // on the way), and this packet then completes
+                                // the group.
+                                recovered = decoder.add_packet(group, index, &packet.payload);
                             }
                         }
 
@@ -1865,34 +1892,30 @@ impl Connection {
                             // jitter buffer, so a copy here would be wasted.
                             callback(packet.sequence, packet.payload, packet.timestamp);
                         }
+                        if let Some(group_size) = fec_group_size {
+                            deliver_recovered(
+                                recovered,
+                                group_size,
+                                &fec_recovered,
+                                &audio_callback,
+                            );
+                        }
                     }
                     PacketType::Fec => {
-                        let recovered = match (&fec_decoder, fec_group_size) {
-                            (Some(decoder), Some(group_size)) => {
+                        if let (Some(decoder), Some(group_size)) = (&fec_decoder, fec_group_size) {
+                            let recovered =
                                 FecPacket::from_bytes(&packet.payload).and_then(|fec| {
-                                    let group = fec.group_sequence;
                                     decoder
                                         .lock()
                                         .ok()
                                         .and_then(|mut decoder| decoder.add_fec(fec))
-                                        .map(|recovered| {
-                                            let sequence = group * group_size as u32
-                                                + recovered.packet_index as u32;
-                                            (sequence, recovered.data)
-                                        })
-                                })
-                            }
-                            _ => None,
-                        };
-
-                        if let Some((sequence, data)) = recovered {
-                            trace!("FEC recovered packet seq={}", sequence);
-                            fec_recovered.fetch_add(1, Ordering::Relaxed);
-                            if let Some(ref callback) = audio_callback {
-                                // Timestamp is not recoverable from FEC; the
-                                // receive path keys off sequence (ADR-021).
-                                callback(sequence, data, 0);
-                            }
+                                });
+                            deliver_recovered(
+                                recovered,
+                                group_size,
+                                &fec_recovered,
+                                &audio_callback,
+                            );
                         }
                     }
                     PacketType::KeepAlive => {
