@@ -141,7 +141,7 @@ type Language = "ja" | "en";
 **テーマ選択は廃止した。** jamuru は現状ダーク専用ブランドであり（`tokens.css` の light は dark を複製）、`ui.pen` の一般タブも言語のみを持つ。このため `theme` / `onThemeChange` は SettingsPanel から削除した。
 
 タブは次の 5 つで、並びは使う頻度の順（よく触る設定 → 送信の判断 → 困ったとき → 情報）。各タブにアイコンを表示する。
-`ui.pen` の設定画面は旧構成（一般・プロフィール・デバイス・診断）のままで、更新が要る（[ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)）。
+`ui.pen` の設定画面（`Screens/Settings` の各フレーム）もこの 5 タブに合わせてある（[ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)）。
 初期表示タブは一覧の並び順とは独立に `オーディオ`（`initialTab` のデフォルト値。設定ウィンドウは `一般` で開く）。
 `legal`（規約などを開く関数）を渡さないとき、アプリについてのタブは出さない。
 
