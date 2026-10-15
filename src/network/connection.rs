@@ -180,6 +180,18 @@ impl Route {
         Some(left)
     }
 
+    /// Takes `from` up as one of the peer's addresses when the peer has not answered for
+    /// `after`, so that [`Route::follow`] can move to it
+    ///
+    /// This is for a network that changes the port or address the peer is seen from after
+    /// it offered its addresses. The caller must only pass an address a packet was opened
+    /// from by an encrypted link, which a forged or repeated packet does not get through.
+    fn learn_roamed(&mut self, from: SocketAddr, after: Duration) {
+        if !self.knows(from) && self.answered_at.elapsed() >= after {
+            self.others.push((from, true));
+        }
+    }
+
     /// Notes whether the last send to `addr` went out
     fn note_send(&mut self, addr: SocketAddr, sent: bool) {
         if let Some(entry) = self.others.iter_mut().find(|(other, _)| *other == addr) {
@@ -1764,6 +1776,15 @@ impl Connection {
                 // is there.
                 let follow_after =
                     reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
+                // The network may have changed the address the peer is seen from since it
+                // was offered. A packet that was opened by an encrypted link comes from the
+                // peer whatever its address, so it may be answered there. Without keys
+                // the source address could be anyone's.
+                if matches!(opened, Opened::Packet(_))
+                    && secure_link.security() == LinkSecurity::Encrypted
+                {
+                    route.lock().learn_roamed(addr, follow_after);
+                }
                 let followed = route.lock().follow(addr, follow_after);
                 if let Some(left) = followed {
                     info!(
@@ -2477,6 +2498,47 @@ mod tests {
         assert_eq!(route.follow(addr("203.0.113.9:5000"), Duration::ZERO), None);
 
         assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-136
+    #[test]
+    fn when_the_peer_has_not_answered_a_packet_from_an_unoffered_address_moves_the_route_there() {
+        let lan = addr("192.168.1.10:5000");
+        let moved = addr("192.168.1.10:6000");
+        let mut route = Route::new(lan, Vec::new());
+
+        route.learn_roamed(moved, Duration::ZERO);
+
+        assert_eq!(route.follow(moved, Duration::ZERO), Some(lan));
+        assert_eq!(route.current, moved);
+    }
+
+    /// Verifies: REQ-CON-136
+    #[test]
+    fn when_the_peer_answered_recently_an_unoffered_address_is_not_taken_up() {
+        let lan = addr("192.168.1.10:5000");
+        let moved = addr("192.168.1.10:6000");
+        let mut route = Route::new(lan, Vec::new());
+        route.answered();
+
+        route.learn_roamed(moved, Duration::from_secs(60));
+
+        assert!(!route.knows(moved));
+        assert_eq!(route.follow(moved, Duration::from_secs(60)), None);
+        assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-136
+    #[test]
+    fn when_the_address_is_already_known_learning_it_changes_nothing() {
+        let lan = addr("192.168.1.10:5000");
+        let vpn = addr("100.64.0.2:5000");
+        let mut route = Route::new(lan, vec![(vpn, false)]);
+
+        route.learn_roamed(vpn, Duration::ZERO);
+        route.learn_roamed(lan, Duration::ZERO);
+
+        assert_eq!(route.others, vec![(vpn, false)]);
     }
 
     /// Verifies: REQ-CON-114
