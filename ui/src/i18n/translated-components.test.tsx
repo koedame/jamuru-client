@@ -121,6 +121,7 @@ const diagnosticsProblems: DiagnosticProblem[] = [
   { severity: 'Info', category: 'network', code: { type: 'NoIpv6' } },
   { severity: 'Warning', category: 'network', code: { type: 'SymmetricNat' } },
   { severity: 'Warning', category: 'network', code: { type: 'UnstableConnection' } },
+  { severity: 'Warning', category: 'network', code: { type: 'WifiConnection' } },
   { severity: 'Warning', category: 'network', code: { type: 'HighJitter', data: { jitter_ms: 12.3 } } },
   {
     severity: 'Error',
@@ -325,6 +326,7 @@ describe('components without hard-coded text', () => {
   // Then the preset, the NAT type and the missing values read in that language
   //
   // Verifies: REQ-I18N-105
+  // Verifies: REQ-GUI-027
   it.each(languages)('shows the diagnostics result in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     const { container } = render(<DiagnosticsTab state="complete" result={diagnosticsResult} />);
@@ -338,6 +340,8 @@ describe('components without hard-coded text', () => {
     // interpolated data, to prove the code -> locale lookup actually ran.
     expect(screen.getByText(codes.symmetricNat.message)).toBeInTheDocument();
     expect(screen.getByText(fill(codes.highJitter.message, { jitter: '12.3' }))).toBeInTheDocument();
+    expect(screen.getByText(codes.wifiConnection.message)).toBeInTheDocument();
+    expect(screen.getByText(codes.wifiConnection.suggestion)).toBeInTheDocument();
     expect(screen.getByText(fill(codes.lowMemory.message, { mb: 256 }))).toBeInTheDocument();
     if (language === 'ja') {
       // ENODEV/wss/signal/test are raw backend error text and a URL, kept
