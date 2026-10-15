@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { VerticalTabs, Tab } from "./VerticalTabs";
-import { MicIcon, SlidersIcon, UserIcon, ActivityIcon } from "./icons";
+import { MicIcon, SlidersIcon, ShieldIcon, ActivityIcon, InfoIcon } from "./icons";
 
 const meta = {
   title: "Components/Settings/VerticalTabs",
@@ -23,16 +23,18 @@ type Story = StoryObj<typeof meta>;
 
 const defaultTabs: Tab[] = [
   { id: "general", label: "General", icon: <SlidersIcon /> },
-  { id: "devices", label: "Devices", icon: <MicIcon /> },
-  { id: "profile", label: "Profile", icon: <UserIcon /> },
-  { id: "diagnostics", label: "Diagnostics", icon: <ActivityIcon /> },
+  { id: "devices", label: "Audio", icon: <MicIcon /> },
+  { id: "privacy", label: "Privacy", icon: <ShieldIcon /> },
+  { id: "diagnostics", label: "Troubleshooting", icon: <ActivityIcon /> },
+  { id: "about", label: "About", icon: <InfoIcon /> },
 ];
 
 const japaneseTabs: Tab[] = [
   { id: "general", label: "一般", icon: <SlidersIcon /> },
-  { id: "devices", label: "デバイス", icon: <MicIcon /> },
-  { id: "profile", label: "プロフィール", icon: <UserIcon /> },
-  { id: "diagnostics", label: "診断", icon: <ActivityIcon /> },
+  { id: "devices", label: "オーディオ", icon: <MicIcon /> },
+  { id: "privacy", label: "プライバシー", icon: <ShieldIcon /> },
+  { id: "diagnostics", label: "診断とサポート", icon: <ActivityIcon /> },
+  { id: "about", label: "アプリについて", icon: <InfoIcon /> },
 ];
 
 export const Default: Story = {
@@ -43,10 +45,10 @@ export const Default: Story = {
   },
 };
 
-export const ProfileSelected: Story = {
+export const PrivacySelected: Story = {
   args: {
     tabs: defaultTabs,
-    selectedId: "profile",
+    selectedId: "privacy",
     onSelect: () => {},
   },
 };

@@ -189,12 +189,14 @@
     "title": "設定",
     "tabs": {
       "general": "一般",
-      "profile": "プロフィール",
-      "devices": "デバイス",
-      "diagnostics": "診断"
+      "devices": "オーディオ",
+      "privacy": "プライバシー",
+      "diagnostics": "診断とサポート",
+      "about": "アプリについて"
     },
     "general": {
-      "title": "一般設定",
+      "display": "表示",
+      "connection": "接続",
       "serverUrl": {
         "customHint": "独自のサーバーを使用中: {{url}}",
         "defaultHint": "既定のサーバーを使用中（{{url}}）"
@@ -209,8 +211,8 @@
       "namePlaceholder": "ユーザー"
     },
     "devices": {
-      "title": "オーディオデバイス",
-      "audioSettings": "オーディオ設定",
+      "title": "デバイス",
+      "audioSettings": "音質と遅延",
       "inputDevice": "入力デバイス",
       "outputDevice": "出力デバイス",
       "inputChannels": "入力チャンネル",
@@ -234,11 +236,7 @@
       "bufferOption": "{{samples}} サンプル ({{ms}}ms)",
       "channelOption": "チャンネル {{channel}}"
     },
-    "diagnostics": {
-      "title": "システム診断",
-      "logTitle": "ログファイル",
-      "logDescription": "うまく動かないときは、このフォルダにある jamuru.log を添えて連絡してください。",
-      "openLogFolder": "ログのフォルダを開く",
+    "privacy": {
       "previousHang": {
         "title": "前回について",
         "description": "前回、jamuru が正常に終了しませんでした（{{stage}}の途中で止まっていたようです）。原因を見つけて直すために、小さな報告を送りますか？（音声・チャット・ルームの内容は含まれません）",
@@ -261,7 +259,13 @@
       "usageIdNote": "オンにすると、報告をひとまとめにするための乱数のインストール ID を作ります。オフにすると、この ID と未送信の内容を捨てます。",
       "usageShow": "送る内容を見る",
       "usagePreviewEmpty": "送る予定の内容はまだありません。",
-      "usagePreviewOff": "オフです。何も集めず、何も送らず、インストール ID もありません。",
+      "usagePreviewOff": "オフです。何も集めず、何も送らず、インストール ID もありません。"
+    },
+    "diagnostics": {
+      "title": "システム診断",
+      "logTitle": "ログファイル",
+      "logDescription": "うまく動かないときは、このフォルダにある jamuru.log を添えて連絡してください。",
+      "openLogFolder": "ログのフォルダを開く",
       "reportProblem": {
         "title": "問題を報告",
         "description": "いま起きている問題を、jamuru.log と一言のコメントを添えて送ります。",
