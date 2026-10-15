@@ -114,6 +114,9 @@ pub enum EndReason {
     PeerStopped,
     /// The peer left the room.
     PeerLeft,
+    /// Nothing was done for as long as a help may sit idle, so this app (the
+    /// helped side) ended it.
+    TimedOut,
 }
 
 /// Something the UI shows.
@@ -333,6 +336,15 @@ impl Help {
     /// opened for it.
     pub fn is_asked_by(&self, peer: Uuid) -> bool {
         matches!(&self.receiving, Some(Receiving::Asked { peer: asking, .. }) if *asking == peer)
+    }
+
+    /// The name `peer` gave when they asked this app for help, while the help is
+    /// yet to begin.
+    pub fn asker_name(&self, peer: Uuid) -> Option<String> {
+        match &self.receiving {
+            Some(Receiving::Asked { peer: asking, name }) if *asking == peer => Some(name.clone()),
+            _ => None,
+        }
     }
 
     /// The relay could not be opened for `peer`, who said yes: no help starts.
@@ -589,6 +601,17 @@ impl Help {
     /// told as well, in case the relay could not, and the room is told when this
     /// app was the helped side, as it is when the help is stopped.
     pub fn link_closed(&mut self, role: Role, session: &str) -> Vec<Out> {
+        self.close_link(role, session, EndReason::PeerStopped)
+    }
+
+    /// The help numbered `session`, which this app received, sat idle too long
+    /// and this app ended it: like [`Help::link_closed`], but the UI is told
+    /// that it was this app that ended it, and why.
+    pub fn timed_out(&mut self, session: &str) -> Vec<Out> {
+        self.close_link(Role::Helped, session, EndReason::TimedOut)
+    }
+
+    fn close_link(&mut self, role: Role, session: &str, reason: EndReason) -> Vec<Out> {
         let peer = match (role, &self.giving, &self.receiving) {
             (
                 Role::Helper,
@@ -617,8 +640,8 @@ impl Help {
             },
         }];
         out.extend(match role {
-            Role::Helper => self.end_giving_with(peer, EndReason::PeerStopped),
-            Role::Helped => self.end_receiving_with(peer, EndReason::PeerStopped, true),
+            Role::Helper => self.end_giving_with(peer, reason),
+            Role::Helped => self.end_receiving_with(peer, reason, true),
         });
         out
     }
@@ -1346,6 +1369,44 @@ mod tests {
         );
         assert!(broadcast(&on_helper).is_empty());
         assert_eq!(helper.stop(Role::Helper), Err(HelpError::NotActive));
+    }
+
+    /// Verifies: REQ-RMT-036
+    #[test]
+    fn when_the_help_sits_idle_too_long_the_helped_side_ends_it_and_says_it_timed_out() {
+        let (_, mut helped, helper_id, _) = active();
+
+        let out = helped.timed_out(SESSION);
+
+        assert_eq!(
+            events(&out),
+            vec![HelpEvent::Ended {
+                role: Role::Helped,
+                peer: helper_id,
+                reason: EndReason::TimedOut
+            }]
+        );
+        assert_eq!(
+            broadcast(&out),
+            vec![notice(NoticeEvent::Ended, helper_id, None)],
+            "the room hears the help ended, as when it is stopped"
+        );
+        assert_eq!(
+            sent(&out),
+            vec![(
+                helper_id,
+                HelpMessage::Stop {
+                    role: Role::Helped,
+                    session: Some(SESSION.to_string())
+                }
+            )],
+            "the helper is told, so the window closes"
+        );
+        assert_eq!(helped.helper(), None);
+        assert!(
+            helped.timed_out(SESSION).is_empty(),
+            "there is no help left to end"
+        );
     }
 
     /// A connection that ends after its help did, and a help begun since, are

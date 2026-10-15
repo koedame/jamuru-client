@@ -4,3 +4,4 @@ export { SettingsHelpBar, type SettingsHelpBarProps, type SettingsHelpBarAction 
 export { SettingsHelpPanel, type SettingsHelpPanelProps } from "./SettingsHelpPanel";
 export { useSettingsHelp, type SettingsHelp } from "./useSettingsHelp";
 export { settingLabel } from "./settingText";
+export { SettingsHelpLog, type SettingsHelpLogProps, type SettingsHelpLogLine } from "./SettingsHelpLog";

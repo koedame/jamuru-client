@@ -33,6 +33,7 @@ use uuid::Uuid;
 
 use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
+use crate::help_record::{self, HelpRecord};
 use crate::rpc::help::HelpGuard;
 use crate::rpc::link::{self, Ended, Session};
 use crate::rpc::{Code, Portal, RpcError};
@@ -54,10 +55,14 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct HelpLinks {
     host: Mutex<Option<HostSlot>>,
     helper: Mutex<Option<HelperSlot>>,
+    /// What the help this app received did: the one going on, or the last one
+    /// until the person is done with it
+    record: Mutex<Option<Arc<HelpRecord>>>,
 }
 
 struct HostSlot {
     session: String,
+    record: Arc<HelpRecord>,
     task: JoinHandle<()>,
 }
 
@@ -78,6 +83,22 @@ impl HelpLinks {
 
     fn helper(&self) -> std::sync::MutexGuard<'_, Option<HelperSlot>> {
         self.helper.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn record_slot(&self) -> std::sync::MutexGuard<'_, Option<Arc<HelpRecord>>> {
+        self.record.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn record(&self) -> Option<Arc<HelpRecord>> {
+        self.record_slot().clone()
+    }
+
+    /// Forgets the record of a help that is over.
+    pub fn forget_record_if_over(&self) {
+        let mut slot = self.record_slot();
+        if slot.as_ref().is_some_and(|record| !record.view().active) {
+            *slot = None;
+        }
     }
 }
 
@@ -205,11 +226,19 @@ pub async fn open_host<R: Runtime>(app: &AppHandle<R>, session: &str) -> Result<
     connect(app, session, HelpEnd::Host).await
 }
 
-/// Serves the help of `helper` on `end`, the relay connection opened by
-/// [`open_host`] under `session`, until either end closes it.
-pub fn serve_host<R: Runtime>(app: AppHandle<R>, session: String, helper: Uuid, end: RelayEnd) {
+/// Serves the help of `helper` (whom the room knows as `helper_name`) on `end`,
+/// the relay connection opened by [`open_host`] under `session`, until either
+/// end closes it or nothing has been done for [`help_record::IDLE_LIMIT`].
+pub fn serve_host<R: Runtime>(
+    app: AppHandle<R>,
+    session: String,
+    helper: Uuid,
+    helper_name: String,
+    end: RelayEnd,
+) {
+    let record = Arc::new(HelpRecord::begin(helper_name));
     let announcing = app.clone();
-    let guard = Arc::new(HelpGuard::new(move |setting| {
+    let guard = Arc::new(HelpGuard::new(record.clone(), move |setting| {
         let app = announcing.clone();
         tauri::async_runtime::spawn(async move {
             crate::signaling::announce_change(&app, helper, setting).await;
@@ -226,23 +255,50 @@ pub fn serve_host<R: Runtime>(app: AppHandle<R>, session: String, helper: Uuid, 
     let mut slot = links.host();
     if let Some(earlier) = slot.take() {
         earlier.task.abort();
+        earlier.record.finish();
     }
+    *links.record_slot() = Some(record.clone());
     let task_app = app.clone();
     let task_session = session.clone();
+    let task_record = record.clone();
     let task = tauri::async_runtime::spawn(async move {
-        match link::serve_relay(task_app.clone(), served, end.reader, end.writer).await {
-            Ended::ByRelay => tracing::info!("Settings help: the relay connection ended"),
-            Ended::ReadFailed(e) => {
-                tracing::warn!("Settings help: the relay connection failed: {}", e)
-            }
-            Ended::SendFailed(e) => {
-                tracing::warn!("Settings help: sending to the relay failed: {}", e)
-            }
+        // Before the helper can do anything: how things were is what the
+        // person can put back afterwards.
+        match help_record::capture_baseline(&task_app).await {
+            Some(baseline) => task_record.set_baseline(baseline),
+            None => tracing::warn!("Settings help: the settings before the help were not read"),
         }
+        let idle = tokio::select! {
+            ended = link::serve_relay(task_app.clone(), served, end.reader, end.writer) => {
+                match ended {
+                    Ended::ByRelay => tracing::info!("Settings help: the relay connection ended"),
+                    Ended::ReadFailed(e) => {
+                        tracing::warn!("Settings help: the relay connection failed: {}", e)
+                    }
+                    Ended::SendFailed(e) => {
+                        tracing::warn!("Settings help: sending to the relay failed: {}", e)
+                    }
+                }
+                false
+            }
+            _ = help_record::watch_idle(&task_app, &task_record) => {
+                tracing::info!("Settings help: nothing was done for too long; ending it");
+                true
+            }
+        };
+        task_record.finish();
         forget_host(&task_app, &task_session);
-        crate::signaling::help_link_closed(&task_app, Role::Helped, &task_session).await;
+        if idle {
+            crate::signaling::help_timed_out(&task_app, &task_session).await;
+        } else {
+            crate::signaling::help_link_closed(&task_app, Role::Helped, &task_session).await;
+        }
     });
-    *slot = Some(HostSlot { session, task });
+    *slot = Some(HostSlot {
+        session,
+        record,
+        task,
+    });
 }
 
 fn forget_host<R: Runtime>(app: &AppHandle<R>, session: &str) {
@@ -402,6 +458,7 @@ pub fn end<R: Runtime>(app: &AppHandle<R>, role: Role) {
         Role::Helped => {
             if let Some(slot) = links.host().take() {
                 slot.task.abort();
+                slot.record.finish();
             }
         }
         Role::Helper => {

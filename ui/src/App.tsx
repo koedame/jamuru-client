@@ -10,13 +10,15 @@ import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { MainScreen } from "./screens/MainScreen";
 import { HelperScreen } from "./screens/HelperScreen";
+import { HelpLogScreen } from "./screens/HelpLogScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { windowOpenSettings, configGetLanguage } from "./lib/tauri";
 import { useWindowEvent } from "./hooks/useWindowEvents";
 import { HELP_HASH } from "./lib/helperBackend";
+import { HELP_LOG_HASH } from "./screens/HelpLogScreen";
 import { ConsentGate } from "./components/Terms";
 
-type Screen = "main" | "settings" | "help";
+type Screen = "main" | "settings" | "help" | "help-log";
 
 /**
  * The screen a Tauri window was opened for, from its URL hash. Read while
@@ -27,6 +29,7 @@ type Screen = "main" | "settings" | "help";
 function screenFromHash(): Screen {
   const hash = window.location.hash;
   if (hash === HELP_HASH) return "help";
+  if (hash === HELP_LOG_HASH) return "help-log";
   return hash === "#/settings" || hash === "#settings" ? "settings" : "main";
 }
 
@@ -77,6 +80,9 @@ function App() {
   }
   if (currentScreen === "help") {
     return <HelperScreen />;
+  }
+  if (currentScreen === "help-log") {
+    return <HelpLogScreen />;
   }
 
   return (

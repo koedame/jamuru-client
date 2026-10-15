@@ -265,7 +265,10 @@ mod tests {
             portal,
             build: "e2e",
             app_version: "0.0.0".to_string(),
-            guard: (portal == Portal::Help).then(|| Arc::new(HelpGuard::new(|_| {}))),
+            guard: (portal == Portal::Help).then(|| {
+                let record = Arc::new(crate::help_record::HelpRecord::begin("Aki".into()));
+                Arc::new(HelpGuard::new(record, |_| {}))
+            }),
         }
     }
 

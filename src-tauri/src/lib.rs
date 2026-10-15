@@ -14,6 +14,7 @@ mod diagnostics;
 #[cfg(feature = "e2e-control")]
 mod e2e_control;
 mod help_link;
+mod help_record;
 mod logging;
 mod mixer;
 mod report_problem;

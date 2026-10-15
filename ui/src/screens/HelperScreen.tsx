@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MainScreen } from "./MainScreen";
 import { SettingsHelpPanel } from "../components/SettingsHelp";
+import { formatRemaining, useHelpRemaining } from "../components/SettingsHelp/useHelpRemaining";
 import { SidePanel } from "../components/SidePanel";
 import { useAudioSettingsTab } from "../components/SettingsPanel/useAudioSettingsTab";
 import { useWindowEvent } from "../hooks/useWindowEvents";
@@ -42,6 +43,7 @@ export function HelperScreen() {
   const [audio, setAudio] = useState<AudioSettings | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
+  const { ms: remainingMs } = useHelpRemaining(true);
 
   useEffect(() => {
     helpWindowInfo()
@@ -84,6 +86,12 @@ export function HelperScreen() {
       <p className="helper-screen__banner" role="status" data-testid="settings-help-window-banner">
         {t("settingsHelp.window.banner", { name })}
       </p>
+      {remainingMs !== null && (
+        // Not a live region: a count that is read out every second is noise.
+        <p className="helper-screen__banner" data-testid="settings-help-window-remaining">
+          {t("settingsHelp.helper.remaining", { time: formatRemaining(remainingMs) })}
+        </p>
+      )}
       <div className="helper-screen__screen">
         <MainScreen helper={{ name }} onSettingsClick={() => setSettingsOpen(true)} />
       </div>
