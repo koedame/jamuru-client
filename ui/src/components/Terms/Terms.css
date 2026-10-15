@@ -177,7 +177,8 @@
 
 .legal__title {
   margin: 0 0 var(--space-xs);
-  font-size: var(--font-size-body);
+  font-family: var(--font-family-heading);
+  font-size: var(--font-size-h3);
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
 }

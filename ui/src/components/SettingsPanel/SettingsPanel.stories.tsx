@@ -95,17 +95,32 @@ export const GeneralTab: Story = {
   },
 };
 
-export const ProfileTab: Story = {
-  args: {
-    ...defaultArgs,
-    initialTab: "profile",
-  },
-};
-
 export const DevicesTab: Story = {
   args: {
     ...defaultArgs,
     initialTab: "devices",
+  },
+};
+
+export const PrivacyTab: Story = {
+  args: {
+    ...defaultArgs,
+    initialTab: "privacy",
+    usageReporting: false,
+    onUsageReportingChange: () => {},
+  },
+};
+
+export const AboutTab: Story = {
+  args: {
+    ...defaultArgs,
+    initialTab: "about",
+    legal: {
+      onOpenTerms: () => {},
+      onOpenLicense: () => {},
+      onOpenPrivacy: () => {},
+      onOpenAnnouncements: () => {},
+    },
   },
 };
 
@@ -314,7 +329,7 @@ export const DiagnosticsWithProblems: Story = {
 export const WithValidationError: Story = {
   args: {
     ...defaultArgs,
-    initialTab: "profile",
+    initialTab: "general",
     displayName: "",
     displayNameError: "Name is required",
   },

@@ -52,7 +52,7 @@ UI の文言の表記揺れを防ぐための正規語彙。新しい画面・�
 
 - 日本語のバッファ選択肢（`settings.devices.bufferOption`）は「64 サンプル (1.33ms)」。同じ値を出す `settings.audio.bufferValue` は「64 samples (1.33ms)」
 - 音声設定のフォールバック表示（`useAudioSettingsTab.ts`）は「48 kHz」（スペースあり）
-- 診断の「送らないもの」（`settings.diagnostics.usageNotSent`）だけ「部屋」を使っている
+- 診断の「送らないもの」（`settings.privacy.usageNotSent`）だけ「部屋」を使っている
 
 ## 空状態の文言
 

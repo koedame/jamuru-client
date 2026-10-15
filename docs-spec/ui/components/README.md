@@ -40,9 +40,10 @@ jamuru UI
 ├── SettingsPanel            # 設定画面
 │   ├── VerticalTabs
 │   ├── GeneralTab
-│   ├── ProfileTab
-│   ├── DevicesTab
-│   └── DiagnosticsTab
+│   ├── DevicesTab（オーディオ）
+│   ├── PrivacyTab
+│   ├── DiagnosticsTab（診断とサポート）
+│   └── AboutTab
 │
 ├── SettingsHelp             # 設定の手伝い（ADR-044 §5）
 │   ├── SettingsHelpQuestion

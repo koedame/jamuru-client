@@ -12,9 +12,11 @@ const ROOT: &str = "[data-testid='settings-panel']";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     General,
-    Profile,
+    /// The Audio tab. Its id stays `devices`.
     Devices,
+    Privacy,
     Diagnostics,
+    About,
 }
 
 impl SettingsTab {
@@ -22,18 +24,20 @@ impl SettingsTab {
     fn id(self) -> &'static str {
         match self {
             SettingsTab::General => "general",
-            SettingsTab::Profile => "profile",
             SettingsTab::Devices => "devices",
+            SettingsTab::Privacy => "privacy",
             SettingsTab::Diagnostics => "diagnostics",
+            SettingsTab::About => "about",
         }
     }
 
-    pub fn all() -> [SettingsTab; 4] {
+    pub fn all() -> [SettingsTab; 5] {
         [
             SettingsTab::General,
-            SettingsTab::Profile,
             SettingsTab::Devices,
+            SettingsTab::Privacy,
             SettingsTab::Diagnostics,
+            SettingsTab::About,
         ]
     }
 }
@@ -123,6 +127,11 @@ impl<'a> SettingsScreen<'a> {
         DevicesTab::new(self.driver)
     }
 
+    /// Controls of the Privacy tab. Select that tab before using them.
+    pub fn privacy_tab(&self) -> PrivacyTab<'a> {
+        PrivacyTab::new(self.driver)
+    }
+
     /// Controls of the Diagnostics tab. Select that tab before using them.
     pub fn diagnostics_tab(&self) -> DiagnosticsTab<'a> {
         DiagnosticsTab::new(self.driver)
@@ -155,10 +164,35 @@ impl<'a> DiagnosticsTab<'a> {
         )
     }
 
+    /// The button, the folder that was opened and the error if it could not be.
+    pub fn log_file_section(&self) -> Element<'a> {
+        self.element("[data-testid='diagnostics-log-file']", "log file section")
+    }
+}
+
+/// The Privacy tab's usage reporting section (ADR-037).
+pub struct PrivacyTab<'a> {
+    driver: &'a Driver,
+}
+
+impl<'a> PrivacyTab<'a> {
+    pub(crate) fn new(driver: &'a Driver) -> Self {
+        Self { driver }
+    }
+
+    fn element(&self, selector: &'static str, name: &'static str) -> Element<'a> {
+        Element::new(
+            self.driver,
+            selector,
+            Some(windows::SETTINGS.to_string()),
+            name,
+        )
+    }
+
     /// The usage reporting switch. `data-checked` says whether it is on.
     pub fn usage_reporting_switch(&self) -> Element<'a> {
         self.element(
-            "[data-testid='diagnostics-usage-toggle']",
+            "[data-testid='privacy-usage-toggle']",
             "usage reporting switch",
         )
     }
@@ -174,19 +208,14 @@ impl<'a> DiagnosticsTab<'a> {
     /// The button that reads what would be sent.
     pub fn show_usage_button(&self) -> Element<'a> {
         self.element(
-            "[data-testid='diagnostics-usage-show']",
+            "[data-testid='privacy-usage-show']",
             "show what is sent button",
         )
     }
 
     /// What the button revealed: the lines, or the note that there are none.
     pub fn usage_preview(&self) -> Element<'a> {
-        self.element("[data-testid='diagnostics-usage-preview']", "what is sent")
-    }
-
-    /// The button, the folder that was opened and the error if it could not be.
-    pub fn log_file_section(&self) -> Element<'a> {
-        self.element("[data-testid='diagnostics-log-file']", "log file section")
+        self.element("[data-testid='privacy-usage-preview']", "what is sent")
     }
 }
 
