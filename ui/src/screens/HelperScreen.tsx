@@ -12,37 +12,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MainScreen } from "./MainScreen";
-import { SettingsHelpPanel } from "../components/SettingsHelp";
+import { SettingsHelpPanel, useAudioSettingsPanel, useHelpPresence } from "../components/SettingsHelp";
 import { formatRemaining, useHelpRemaining } from "../components/SettingsHelp/useHelpRemaining";
 import { SidePanel } from "../components/SidePanel";
-import { useAudioSettingsTab } from "../components/SettingsPanel/useAudioSettingsTab";
-import { useWindowEvent } from "../hooks/useWindowEvents";
-import {
-  AUDIO_SETTINGS_CHANGED,
-  helpWindowInfo,
-  settingsChange,
-  settingsGet,
-  type AudioSettings,
-  type HelpRefusal,
-  type SettingChange,
-} from "../lib/tauri";
+import { helpWindowInfo, type HelpRefusal } from "../lib/tauri";
 import "./HelperScreen.css";
-
-const REFUSALS: readonly string[] = ["device_gone", "invalid_value", "unavailable"] satisfies HelpRefusal[];
-
-/** The reason the other app gave for not applying a change, if it gave one we know. */
-function refusalOf(error: unknown): HelpRefusal | null {
-  const message = typeof error === "object" && error !== null ? (error as { message?: unknown }).message : undefined;
-  return typeof message === "string" && REFUSALS.includes(message) ? (message as HelpRefusal) : null;
-}
 
 export function HelperScreen() {
   const { t } = useTranslation();
   const [name, setName] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [audio, setAudio] = useState<AudioSettings | null>(null);
-  const [note, setNote] = useState<string | null>(null);
-  const [changing, setChanging] = useState(false);
   const { ms: remainingMs } = useHelpRemaining(true);
 
   useEffect(() => {
@@ -51,40 +30,36 @@ export function HelperScreen() {
       .catch((e) => console.error("Could not tell who this window helps:", e));
   }, []);
 
-  // The other app's settings arrive in no fixed order (a read, the answer to a
-  // change, an announcement); the revision says which is newest.
-  const showSettings = useCallback((next: AudioSettings) => {
-    setAudio((shown) => (shown && shown.revision > next.revision ? shown : next));
-  }, []);
-  useEffect(() => {
-    settingsGet()
-      .then(showSettings)
-      .catch((e) => console.error("Could not read the settings of the app being helped:", e));
-  }, [showSettings]);
-  useWindowEvent<AudioSettings>(AUDIO_SETTINGS_CHANGED, showSettings);
-
-  const change = useCallback(
-    (settingChange: SettingChange) => {
-      setChanging(true);
-      setNote(null);
-      settingsChange(settingChange)
-        .then(showSettings)
-        .catch((e) => {
-          console.error(`Could not change ${settingChange.setting}:`, e);
-          const reason = refusalOf(e);
-          if (reason !== null) setNote(t(`settingsHelp.helper.refused.${reason}`, { name: name ?? "" }));
-        })
-        .finally(() => setChanging(false));
-    },
-    [name, showSettings, t]
+  // The other app's settings are read, changed and heard through the relay; what
+  // it refuses to apply is said here in the helper's language.
+  const describeRefusal = useCallback(
+    (reason: HelpRefusal) => t(`settingsHelp.helper.refused.${reason}`, { name: name ?? "" }),
+    [name, t]
   );
-  const devicesTab = useAudioSettingsTab(audio, change);
+  const { devicesTab, note, changing } = useAudioSettingsPanel(describeRefusal);
+
+  // Where this window's person points and focuses is shown to the helped person,
+  // and where they do is shown here.
+  const presence = useHelpPresence({
+    role: "helper",
+    enabled: name !== null,
+    panelOpen: settingsOpen,
+    peerName: name ?? "",
+  });
 
   if (name === null) return null;
   return (
     <div className="helper-screen" data-testid="settings-help-window">
       <p className="helper-screen__banner" role="status" data-testid="settings-help-window-banner">
         {t("settingsHelp.window.banner", { name })}
+      </p>
+      <p
+        className="helper-screen__presence"
+        data-testid="settings-help-window-presence"
+        data-delivered={presence.delivered}
+      >
+        <span className="helper-screen__presence-dot" aria-hidden="true" />
+        {t("settingsHelp.window.presence", { name })}
       </p>
       {remainingMs !== null && (
         // Not a live region: a count that is read out every second is noise.
@@ -102,6 +77,7 @@ export function HelperScreen() {
       >
         <SettingsHelpPanel devicesTab={devicesTab} status={note} waiting={changing} />
       </SidePanel>
+      {presence.marks}
     </div>
   );
 }

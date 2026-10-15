@@ -480,7 +480,7 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-RMT-034
+    /// Verifies: REQ-RMT-035
     #[test]
     fn a_new_record_starts_with_the_help_beginning_and_nothing_changed() {
         let view = record().view();
@@ -494,7 +494,7 @@ mod tests {
         assert!(view.active);
     }
 
-    /// Verifies: REQ-RMT-034
+    /// Verifies: REQ-RMT-035
     #[test]
     fn what_the_helper_does_is_written_in_the_order_it_was_done() {
         let record = record();
@@ -515,7 +515,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn a_setting_changed_twice_is_listed_once_in_the_order_it_was_first_changed() {
         let record = record();
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(record.view().changed, vec!["buffer_size", "input_device"]);
     }
 
-    /// Verifies: REQ-RMT-034
+    /// Verifies: REQ-RMT-035
     #[test]
     fn a_muting_is_written_down_but_is_not_a_setting_to_put_back() {
         let record = record();
@@ -537,7 +537,7 @@ mod tests {
         assert!(record.view().changed.is_empty());
     }
 
-    /// Verifies: REQ-RMT-034
+    /// Verifies: REQ-RMT-035
     #[test]
     fn a_line_of_the_record_says_what_it_is_and_when() {
         let line = serde_json::to_value(Entry {
@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(unmuted, json!({"at_ms": 1, "kind": "unmuted"}));
     }
 
-    /// Verifies: REQ-RMT-036
+    /// Verifies: REQ-RMT-037
     #[tokio::test(start_paused = true)]
     async fn the_time_left_runs_down_and_an_operation_sets_it_back_to_the_whole() {
         let record = record();
@@ -575,7 +575,7 @@ mod tests {
         assert_eq!(record.remaining(), IDLE_LIMIT, "writing it down counts too");
     }
 
-    /// Verifies: REQ-RMT-036
+    /// Verifies: REQ-RMT-037
     #[tokio::test(start_paused = true)]
     async fn nothing_is_left_after_the_limit_and_the_time_never_goes_below_nothing() {
         let record = record();
@@ -585,7 +585,7 @@ mod tests {
         assert_eq!(record.remaining(), Duration::ZERO);
     }
 
-    /// Verifies: REQ-RMT-036
+    /// Verifies: REQ-RMT-037
     #[tokio::test(start_paused = true)]
     async fn the_view_gives_the_time_left_only_while_the_help_goes_on() {
         let record = record();
@@ -600,7 +600,7 @@ mod tests {
     /// A method that changes something on the helped side is an operation:
     /// leaving one out would let a helper who is working still be cut off.
     ///
-    /// Verifies: REQ-RMT-036
+    /// Verifies: REQ-RMT-037
     #[test]
     fn every_method_a_helper_may_call_that_changes_something_counts_as_an_operation() {
         for method in APP_METHODS.iter().filter(|m| m.access.allows(Portal::Help)) {
@@ -611,7 +611,7 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-RMT-036
+    /// Verifies: REQ-RMT-037
     #[test]
     fn reading_the_meters_is_not_an_operation() {
         for method in [
@@ -639,7 +639,7 @@ mod tests {
         plan.iter().map(|(setting, _)| setting.as_str()).collect()
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn only_the_settings_the_help_changed_are_put_back_and_devices_come_before_what_depends_on_them(
     ) {
@@ -656,7 +656,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn each_setting_is_put_back_to_its_value_before_the_help() {
         let all: Vec<String> = RESTORE_ORDER.iter().map(|s| s.to_string()).collect();
@@ -705,7 +705,7 @@ mod tests {
     /// A preset also sets the buffer: put back first, so a buffer the helper
     /// changed after it is put back to the person's own and not overwritten.
     ///
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn a_preset_is_put_back_before_the_buffer() {
         let changed = vec!["buffer_size".to_string(), "preset".to_string()];
@@ -715,7 +715,7 @@ mod tests {
         assert_eq!(names(&plan), vec!["preset", "buffer_size"]);
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn a_mono_input_is_put_back_as_mono() {
         let mut before = baseline();
@@ -732,7 +732,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn a_device_that_was_the_systems_default_is_put_back_by_choosing_the_default_and_with_none_to_choose_it_says_so(
     ) {
@@ -753,7 +753,7 @@ mod tests {
         assert_eq!(plan[0].1, Err(Refusal::DeviceGone));
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn the_settings_can_be_put_back_only_once_the_help_is_over_and_how_they_were_is_known() {
         let record = record();
@@ -770,7 +770,7 @@ mod tests {
         assert_eq!(record.restoring().unwrap().len(), 1);
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn a_help_that_changed_nothing_has_nothing_to_put_back() {
         let record = record();
@@ -781,7 +781,7 @@ mod tests {
         assert!(!record.view().can_undo);
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[test]
     fn a_setting_put_back_is_no_longer_listed_and_one_that_failed_stays_to_try_again() {
         let record = record();
@@ -797,7 +797,7 @@ mod tests {
         assert!(view.can_undo);
     }
 
-    /// Verifies: REQ-RMT-035
+    /// Verifies: REQ-RMT-036
     #[tokio::test]
     async fn putting_back_while_the_help_goes_on_is_refused() {
         let record = record();

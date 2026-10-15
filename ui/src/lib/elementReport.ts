@@ -9,6 +9,7 @@
  * UI language is.
  */
 
+import { cssPath, isVisible } from "./domTarget";
 import { HELP_HASH } from "./helperBackend";
 import type { AppEnvironment, AudioSettings, SessionSnapshot } from "./tauri";
 
@@ -50,32 +51,6 @@ function squash(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max)}… (${flat.length} chars)` : flat;
 }
 
-/** A selector that finds this element again, ending at the nearest id. */
-export function cssPath(el: Element): string {
-  const parts: string[] = [];
-  let node: Element | null = el;
-  while (node && parts.length < 8) {
-    let part = node.nodeName.toLowerCase();
-    if (node.id) {
-      parts.unshift(`${part}#${node.id}`);
-      break;
-    }
-    const testId = node.getAttribute("data-testid");
-    if (testId) {
-      parts.unshift(`${part}[data-testid="${testId}"]`);
-      break;
-    }
-    const parent: Element | null = node.parentElement;
-    if (parent) {
-      const same = [...parent.children].filter((c) => c.nodeName === node!.nodeName);
-      if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`;
-    }
-    parts.unshift(part);
-    node = parent;
-  }
-  return parts.join(" > ");
-}
-
 /** `tag.class-a.class-b[data-testid=…][data-state=…]`: one element in a line. */
 function brief(el: Element): string {
   const classes = [...el.classList].map((c) => `.${c}`).join("");
@@ -87,13 +62,6 @@ function brief(el: Element): string {
     (testId ? `[data-testid="${testId}"]` : "") +
     (state ? `[data-state="${state}"]` : "")
   );
-}
-
-function isVisible(el: Element): boolean {
-  const rect = el.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) return false;
-  const style = getComputedStyle(el);
-  return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
 }
 
 function controlValue(el: Element): string | null {

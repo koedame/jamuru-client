@@ -38,6 +38,9 @@ impl Access {
     /// Every portal but settings help: the method would act outside the range
     /// a person who is helping has been trusted with (ADR-044 §3).
     pub const NO_HELP: Access = Access(7);
+    /// The app's own webview and settings help, for what the two ends of a
+    /// help say to each other.
+    pub const SCREEN_AND_HELP: Access = Access(9);
     /// Only the app's own webview.
     pub const SCREEN_ONLY: Access = Access(1);
     /// The two portals that exist to test and debug the app.
@@ -132,12 +135,17 @@ app_commands! {
     // this; a helped app's own help portal may not start a help of its own.
     [Access::NO_HELP] "手伝いの画面から、手伝っている相手のアプリの操作を呼ぶ" crate::help_link::help_call;
     [Access::NO_HELP] "手伝いの画面が、いま誰を手伝っているかを読む" crate::help_link::help_window_info;
-    // What a help did is the helped person's to read and to undo (REQ-RMT-034).
+    // What a help did is the helped person's to read and to undo (REQ-RMT-035).
     [Access::NO_HELP] "手伝いの記録を読む" crate::help_record::help_record_get;
     [Access::NO_HELP] "手伝いで変わった音声の設定を、手伝いの前に戻す" crate::help_record::help_undo;
     [Access::NO_HELP] "手伝いの記録を読み終えて、片付ける" crate::help_record::help_record_dismiss;
     [Access::NO_HELP] "手伝いの記録のウィンドウを開く" crate::help_record::help_log_window_open;
     [Access::NO_HELP] "手伝いの記録のウィンドウから、手伝いを止めるよう画面に頼む" crate::help_record::help_stop_request;
+    // What the two ends of a help tell each other of where they are looking:
+    // parts and places only, ten a second at most (REQ-RMT-034). Only a helper
+    // sends the first; only the person's own screen publishes the second.
+    [Access::HELP] "手伝う人が、いま指している部品とフォーカスしている部品を、相手の画面に伝える" crate::help_presence::help_presence;
+    [Access::NO_HELP] "手伝われる人の画面が、いま指している部品とフォーカスしている部品を、手伝う人の窓に伝える" crate::help_presence::help_presence_publish;
 
     [Access::ALL] "音声の設定を読む" crate::settings::settings_get;
     [Access::ALL] "音声の設定を変える" crate::settings::settings_change;
@@ -284,7 +292,7 @@ mod tests {
 
     /// Methods that only the app's own screens use to reach one another, which
     /// say nothing about what a helper may do to the person helped.
-    const INTERNAL: [&str; 8] = [
+    const INTERNAL: [&str; 9] = [
         "rpc_settle",
         "help_call",
         "help_window_info",
@@ -293,6 +301,7 @@ mod tests {
         "help_record_dismiss",
         "help_log_window_open",
         "help_stop_request",
+        "help_presence_publish",
     ];
 
     fn help_permissions_doc() -> String {
@@ -418,6 +427,7 @@ mod tests {
             "help_record_dismiss",
             "help_log_window_open",
             "help_stop_request",
+            "help_presence_publish",
             "window_open_settings",
             "log_open_dir",
             "rpc_settle",
@@ -460,6 +470,7 @@ mod tests {
             "diagnostics_run_cpu",
             "diagnostics_run_network",
             "greet",
+            "help_presence",
             "mixer_get",
             "mixer_set_local_pan",
             "mixer_set_local_volume",
