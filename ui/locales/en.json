@@ -777,6 +777,7 @@
       "decline": "Not now"
     },
     "helped": {
+      "panelTitle": "Audio settings {{name}} has open",
       "bar": "{{name}} is helping with your audio settings",
       "stop": "Stop"
     },
@@ -800,6 +801,7 @@
     },
     "window": {
       "banner": "You are looking at {{name}}'s jamuru settings together. What you change here changes theirs.",
+      "presence": "{{name}} can also see where you point and focus",
       "waiting": "Waiting for {{name}}'s app to be in the room"
     }
   },
