@@ -186,6 +186,14 @@ impl NetworkDiagnostics {
             });
         }
 
+        if crate::network::default_route_is_wifi() == Some(true) {
+            problems.push(DiagnosticProblem {
+                severity: ProblemSeverity::Warning,
+                category: "network".to_string(),
+                code: ProblemCode::WifiConnection,
+            });
+        }
+
         // Check NAT type
         let nat_type = Self::detect_nat_type(&ip_support).await;
 
