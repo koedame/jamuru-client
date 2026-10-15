@@ -9,8 +9,8 @@
 //! Only builds with `debug-tools` contain this module.
 
 use std::f32::consts::TAU;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use serde_json::{json, Value};
 
@@ -33,6 +33,12 @@ impl Point {
             "output" => Some(Self::Output),
             _ => None,
         }
+    }
+}
+
+impl Point {
+    fn index(self) -> usize {
+        self as usize
     }
 }
 
@@ -82,14 +88,20 @@ const FFT_WINDOW: usize = 1 << 16;
 
 static SAMPLE_RATE: AtomicU32 = AtomicU32::new(48_000);
 
-static TAP: Mutex<Tap> = Mutex::new(Tap {
-    recording: None,
-    tone: None,
-});
+/// What is armed at each point, one lock per point and kind. The points are
+/// called from different threads (the capture callback, the send thread, the
+/// output callback) on every frame; behind one shared lock a call that lost
+/// the race for it did nothing, so a frame went out with the captured audio in
+/// place of the tone, and what the far end heard was not what was armed.
+static RECORDINGS: [Mutex<Option<Recording>>; POINTS] = [const { Mutex::new(None) }; POINTS];
+static TONES: [Mutex<Option<Tone>>; POINTS] = [const { Mutex::new(None) }; POINTS];
+const POINTS: usize = 3;
 
-struct Tap {
-    recording: Option<Recording>,
-    tone: Option<Tone>,
+/// Set while a recording runs; only one at a time.
+static RECORDING: AtomicBool = AtomicBool::new(false);
+
+fn lock<T>(slot: &Mutex<T>) -> MutexGuard<'_, T> {
+    slot.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 struct Recording {
@@ -101,7 +113,6 @@ struct Recording {
 }
 
 struct Tone {
-    point: Point,
     frequency: f32,
     amplitude: f32,
     /// The 1-based channel the tone is on, the others being silent; `None`
@@ -121,15 +132,12 @@ pub fn set_sample_rate(rate: u32) {
 /// Records `samples` (interleaved, `channels` per frame) if a recording of
 /// `point` is armed.
 pub fn observe(point: Point, samples: &[f32], channels: usize) {
-    let Ok(mut tap) = TAP.try_lock() else {
+    let Ok(mut slot) = RECORDINGS[point.index()].try_lock() else {
         return;
     };
-    let Some(recording) = tap.recording.as_mut() else {
+    let Some(recording) = slot.as_mut() else {
         return;
     };
-    if recording.point != point {
-        return;
-    }
     if recording.channels == 0 {
         recording.channels = channels;
         recording.want_samples *= channels;
@@ -151,13 +159,13 @@ pub fn observe(point: Point, samples: &[f32], channels: usize) {
 /// Replaces `samples` (interleaved, `channels` per frame) with the armed tone
 /// if one is armed for `point`.
 pub fn inject(point: Point, samples: &mut [f32], channels: usize) {
-    let Ok(mut tap) = TAP.try_lock() else {
+    let Ok(mut slot) = TONES[point.index()].try_lock() else {
         return;
     };
-    let Some(tone) = tap.tone.as_mut() else {
+    let Some(tone) = slot.as_mut() else {
         return;
     };
-    if tone.point != point || channels == 0 {
+    if channels == 0 {
         return;
     }
     let step = TAU * tone.frequency / SAMPLE_RATE.load(Ordering::Relaxed) as f32;
@@ -177,7 +185,7 @@ pub fn inject(point: Point, samples: &mut [f32], channels: usize) {
         }
     }
     if tone.remaining == 0 {
-        tap.tone = None;
+        *slot = None;
     }
 }
 
@@ -185,9 +193,7 @@ pub fn inject(point: Point, samples: &mut [f32], channels: usize) {
 /// itself after `seconds`; a second call replaces it.
 pub fn arm_tone(point: Point, frequency: f32, amplitude: f32, channel: Option<u32>, seconds: f32) {
     let frames = (seconds * SAMPLE_RATE.load(Ordering::Relaxed) as f32) as u64;
-    let mut tap = TAP.lock().unwrap_or_else(|e| e.into_inner());
-    tap.tone = Some(Tone {
-        point,
+    *lock(&TONES[point.index()]) = Some(Tone {
         frequency,
         amplitude,
         channel,
@@ -200,26 +206,21 @@ pub fn arm_tone(point: Point, frequency: f32, amplitude: f32, channel: Option<u3
 /// first frame that arrives, so what comes back is `seconds` of a running path;
 /// a path that delivers nothing within the time is an error.
 pub async fn record(point: Point, seconds: f32, keep_wav: bool) -> Result<Value, String> {
-    {
-        let mut tap = TAP.lock().unwrap_or_else(|e| e.into_inner());
-        if tap.recording.is_some() {
-            return Err("another recording is running".into());
-        }
-        let rate = SAMPLE_RATE.load(Ordering::Relaxed);
-        tap.recording = Some(Recording {
-            point,
-            channels: 0,
-            sample_rate: rate,
-            // Frames until the first callback says how many channels there are.
-            want_samples: (seconds * rate as f32) as usize,
-            samples: Vec::with_capacity((seconds * rate as f32) as usize * 2),
-        });
+    if RECORDING.swap(true, Ordering::AcqRel) {
+        return Err("another recording is running".into());
     }
+    let _running = RecordingRuns;
+    let rate = SAMPLE_RATE.load(Ordering::Relaxed);
+    *lock(&RECORDINGS[point.index()]) = Some(Recording {
+        point,
+        channels: 0,
+        sample_rate: rate,
+        // Frames until the first callback says how many channels there are.
+        want_samples: (seconds * rate as f32) as usize,
+        samples: Vec::with_capacity((seconds * rate as f32) as usize * 2),
+    });
     tokio::time::sleep(std::time::Duration::from_secs_f32(seconds + 0.5)).await;
-    let recording = TAP
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .recording
+    let recording = lock(&RECORDINGS[point.index()])
         .take()
         .ok_or("the recording was lost")?;
     if recording.channels == 0 {
@@ -229,6 +230,15 @@ pub async fn record(point: Point, seconds: f32, keep_wav: bool) -> Result<Value,
         ));
     }
     Ok(analyze(&recording, keep_wav))
+}
+
+/// Ends the run of a recording, also when the call is dropped before it ends.
+struct RecordingRuns;
+
+impl Drop for RecordingRuns {
+    fn drop(&mut self) {
+        RECORDING.store(false, Ordering::Release);
+    }
 }
 
 fn analyze(recording: &Recording, keep_wav: bool) -> Value {
@@ -411,12 +421,17 @@ mod tests {
         assert!((found - 1000.0).abs() < 2.0, "{}", found);
     }
 
+    /// What is armed is shared by the whole process, so the tests that arm
+    /// anything take this first.
+    static ARMED: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     /// The tones armed here are shared by the whole process, so one test
     /// covers both shapes in turn.
     ///
     /// Verifies: REQ-RMT-027
     #[test]
     fn a_tone_on_one_channel_leaves_the_other_silent_and_a_tone_without_one_fills_both() {
+        let _armed = ARMED.blocking_lock();
         set_sample_rate(48_000);
         let mut frames = vec![0.5f32; 8];
 
@@ -441,6 +456,54 @@ mod tests {
         // A tone of no length ends at once and leaves nothing armed.
         arm_tone(Point::Sent, 1000.0, 0.5, None, 0.0);
         inject(Point::Sent, &mut frames, 2);
+    }
+
+    /// The bug this guards: the tone and the recordings of all three points
+    /// shared one lock, and a call that found it taken did nothing. A frame
+    /// whose tone was skipped went out as what the microphone had captured, and
+    /// where the microphone hears the speakers the far end heard the tone
+    /// grow to many times the full scale.
+    ///
+    /// Verifies: REQ-RMT-027
+    #[test]
+    fn a_tone_is_put_in_every_frame_while_other_points_are_being_recorded_or_injected() {
+        let _armed = ARMED.blocking_lock();
+        set_sample_rate(48_000);
+        arm_tone(Point::Sent, 1000.0, 0.5, None, 1.0);
+
+        for busy in [
+            &RECORDINGS[Point::Sent.index()],
+            &RECORDINGS[Point::Output.index()],
+        ] {
+            let _taken = lock(busy);
+            let mut frames = vec![9.0f32; 128];
+            inject(Point::Sent, &mut frames, 2);
+            assert!(frames.iter().all(|s| s.abs() <= 0.5), "{frames:?}");
+        }
+        let _taken = lock(&TONES[Point::Output.index()]);
+        let mut frames = vec![9.0f32; 128];
+        inject(Point::Sent, &mut frames, 2);
+        assert!(frames.iter().all(|s| s.abs() <= 0.5), "{frames:?}");
+
+        arm_tone(Point::Sent, 1000.0, 0.5, None, 0.0);
+        inject(Point::Sent, &mut frames, 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_second_recording_is_turned_away_while_one_runs_and_taken_again_once_it_has_gone() {
+        let _armed = ARMED.lock().await;
+        set_sample_rate(48_000);
+
+        let first = tokio::spawn(record(Point::Sent, 10.0, false));
+        tokio::task::yield_now().await;
+        let second = record(Point::Output, 0.1, false).await;
+        assert_eq!(second.unwrap_err(), "another recording is running");
+
+        // The call is dropped before its time is up, as a closed connection does.
+        first.abort();
+        let _ = first.await;
+        let third = record(Point::Output, 0.1, false).await;
+        assert!(third.unwrap_err().starts_with("nothing passed"));
     }
 
     #[test]
