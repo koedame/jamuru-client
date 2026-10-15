@@ -205,7 +205,9 @@ impl FecDecoder {
         group.packets.insert(packet_index, data.to_vec());
 
         // Try to recover if we have FEC and are missing exactly one packet
-        self.try_recover(group_sequence)
+        let recovered = self.try_recover(group_sequence);
+        self.cleanup();
+        recovered
     }
 
     /// Discard all partially received groups
@@ -235,7 +237,9 @@ impl FecDecoder {
         group.fec = Some(fec);
 
         // Try to recover
-        self.try_recover(group_sequence)
+        let recovered = self.try_recover(group_sequence);
+        self.cleanup();
+        recovered
     }
 
     /// Try to recover a lost packet in a group
@@ -285,9 +289,6 @@ impl FecDecoder {
 
         group.recovered = true;
 
-        // Cleanup old groups
-        self.cleanup();
-
         Some(RecoveredPacket {
             group_sequence,
             packet_index: missing_index,
@@ -296,8 +297,11 @@ impl FecDecoder {
     }
 
     /// Remove old groups to prevent memory growth
+    ///
+    /// Runs after every packet, not only after a recovery: without loss no
+    /// group ever recovers, and every group would be kept for the whole call.
     fn cleanup(&mut self) {
-        if self.groups.len() > self.max_groups {
+        while self.groups.len() > self.max_groups {
             // Find oldest group
             if let Some(&oldest) = self.groups.keys().min() {
                 self.groups.remove(&oldest);
@@ -428,6 +432,84 @@ mod tests {
         decoder.add_packet(0, 2, &packets[2]);
 
         let recovered = decoder.add_fec(fec).unwrap();
+        assert_eq!(recovered.packet_index, 1);
+        assert_eq!(recovered.data, packets[1]);
+    }
+
+    /// Verifies: REQ-AUD-040
+    #[test]
+    fn test_decoder_keeps_bounded_groups_without_loss() {
+        let group_size = 8;
+        let mut encoder = FecEncoder::with_group_size(group_size);
+        let mut decoder = FecDecoder::with_group_size(group_size);
+        let payload = [7u8; 64];
+
+        // Far more groups than the decoder may keep, none of them lossy
+        for seq in 0..(group_size * 1000) as u32 {
+            decoder.add_packet(
+                seq / group_size as u32,
+                (seq % group_size as u32) as usize,
+                &payload,
+            );
+            if let Some(fec) = encoder.add_packet(&payload) {
+                decoder.add_fec(fec);
+            }
+            assert!(decoder.groups.len() <= decoder.max_groups);
+        }
+    }
+
+    /// Verifies: REQ-AUD-040
+    #[test]
+    fn test_decoder_recovers_after_many_lossless_groups() {
+        let group_size = 8;
+        let mut encoder = FecEncoder::with_group_size(group_size);
+        let mut decoder = FecDecoder::with_group_size(group_size);
+        let packet = |seq: u32| vec![(seq % 251) as u8; 40 + (seq % 5) as usize];
+        let lost = group_size * 500 + 3;
+
+        let mut recovered = None;
+        for seq in 0..(group_size * 501) as u32 {
+            let data = packet(seq);
+            if seq as usize != lost {
+                decoder.add_packet(
+                    seq / group_size as u32,
+                    (seq % group_size as u32) as usize,
+                    &data,
+                );
+            }
+            if let Some(fec) = encoder.add_packet(&data) {
+                if let Some(r) = decoder.add_fec(fec) {
+                    recovered = Some(r);
+                }
+            }
+        }
+
+        let recovered = recovered.expect("the lost packet is recovered");
+        assert_eq!(recovered.group_sequence, 500);
+        assert_eq!(recovered.packet_index, 3);
+        assert_eq!(recovered.data, packet(lost as u32));
+    }
+
+    #[test]
+    fn test_decoder_recovers_with_fec_older_than_the_newest_group() {
+        let group_size = 4;
+        let mut encoder = FecEncoder::with_group_size(group_size);
+        let mut decoder = FecDecoder::with_group_size(group_size);
+        let packets: Vec<Vec<u8>> = (0..group_size as u8).map(|i| vec![i + 1; 16]).collect();
+        let mut fec = None;
+        for p in &packets {
+            fec = encoder.add_packet(p);
+        }
+
+        // Group 0 loses packet 1; its FEC arrives after the next group started
+        for (i, p) in packets.iter().enumerate() {
+            if i != 1 {
+                decoder.add_packet(0, i, p);
+            }
+        }
+        decoder.add_packet(1, 0, &[9; 16]);
+
+        let recovered = decoder.add_fec(fec.unwrap()).unwrap();
         assert_eq!(recovered.packet_index, 1);
         assert_eq!(recovered.data, packets[1]);
     }
