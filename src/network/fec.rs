@@ -436,6 +436,7 @@ mod tests {
         assert_eq!(recovered.data, packets[1]);
     }
 
+    /// Verifies: REQ-AUD-040
     #[test]
     fn test_decoder_keeps_bounded_groups_without_loss() {
         let group_size = 8;
@@ -457,6 +458,7 @@ mod tests {
         }
     }
 
+    /// Verifies: REQ-AUD-040
     #[test]
     fn test_decoder_recovers_after_many_lossless_groups() {
         let group_size = 8;
