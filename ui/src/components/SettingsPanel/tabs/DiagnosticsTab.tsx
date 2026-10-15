@@ -1,5 +1,5 @@
 /**
- * DiagnosticsTab - System diagnostics with results view
+ * DiagnosticsTab - System diagnostics with results view, plus the log file and "Report a problem"
  *
  * Design: jamuru brand (ui.pen Screens/Settings/Diagnostics + Running + Result).
  * Idle: description + primary run button. Running: loader, progress bar, steps,
@@ -14,8 +14,6 @@ import {
   DeviceSource,
   DiagnosticGrade,
   DiagnosticProblem,
-  Hang,
-  HangStage,
   ProblemCode,
   RecommendedPreset,
 } from "../../../lib/tauri";
@@ -55,24 +53,6 @@ export interface DiagnosticsTabProps {
   logFolder?: string | null;
   /** Why the folder could not be opened */
   logFolderError?: string | null;
-  /** A hang found at startup while usage reporting is off; `null`/undefined = nothing to ask about */
-  previousHang?: Hang | null;
-  /** Answers the pending hang report (renders the section while set, together with `previousHang`) */
-  onSendPreviousHang?: (send: boolean) => void;
-  /** Set once the pending hang report has been answered, to show a short confirmation instead */
-  previousHangAnswered?: boolean;
-  /** Whether "send" also attaches the current jamuru.log (ADR-059: true before the app's 1.0.0 release) */
-  previousHangAttachesLog?: boolean;
-  /** Whether usage reporting is on (off by default) */
-  usageReporting?: boolean;
-  /** Turn usage reporting on or off (renders the usage reporting section) */
-  onUsageReportingChange?: (enabled: boolean) => void;
-  /** The lines the next report will contain; null/undefined = not shown yet */
-  usagePreview?: string | null;
-  /** Show (or refresh) what would be sent */
-  onShowUsagePreview?: () => void;
-  /** Why what would be sent could not be read */
-  usagePreviewError?: string | null;
   /** "Report a problem" (ADR-058): a manual, one-off send of jamuru.log and a comment */
   reportProblemState?: ReportProblemState;
   /** The jamuru.log content that would be sent; null while not loaded yet */
@@ -320,185 +300,6 @@ function LogFileSection({
   );
 }
 
-function stageLabel(stage: HangStage, t: TFunction): string {
-  switch (stage) {
-    case "app_exit":
-      return t("settings.diagnostics.previousHang.stageAppExit", "closing");
-    case "restart":
-      return t("settings.diagnostics.previousHang.stageRestart", "restarting");
-    case "update_apply":
-      return t("settings.diagnostics.previousHang.stageUpdateApply", "installing an update");
-    case "device_open":
-      return t("settings.diagnostics.previousHang.stageDeviceOpen", "opening an audio device");
-    case "unknown":
-      return t("settings.diagnostics.previousHang.stageUnknown", "running");
-  }
-}
-
-function PreviousHangSection({
-  previousHang,
-  onSendPreviousHang,
-  previousHangAnswered,
-  previousHangAttachesLog,
-}: Pick<
-  DiagnosticsTabProps,
-  "previousHang" | "onSendPreviousHang" | "previousHangAnswered" | "previousHangAttachesLog"
->) {
-  const { t } = useTranslation();
-
-  if (!onSendPreviousHang || !previousHang) return null;
-
-  if (previousHangAnswered) {
-    return (
-      <div className="diagnostics-tab__usage" data-testid="diagnostics-previous-hang">
-        <p className="diagnostics-tab__description">
-          {t("settings.diagnostics.previousHang.thanks", "Okay.")}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="diagnostics-tab__usage" data-testid="diagnostics-previous-hang">
-      <span className="diagnostics-tab__problems-title">
-        {t("settings.diagnostics.previousHang.title", "Last time")}
-      </span>
-      <p className="diagnostics-tab__description">
-        {previousHangAttachesLog
-          ? t(
-              "settings.diagnostics.previousHang.descriptionWithLog",
-              "jamuru did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report, together with the current jamuru.log, so this can be found and fixed? The log can include the server address and your audio device names. The room ID and other participants' identifiers are cut down to their first characters, and their names are replaced by numbers.",
-              { stage: stageLabel(previousHang.stage, t) }
-            )
-          : t(
-              "settings.diagnostics.previousHang.description",
-              "jamuru did not close normally last time - it seems to have been stuck while {{stage}}. Send a small report (nothing about your audio, chat or rooms) so this can be found and fixed?",
-              { stage: stageLabel(previousHang.stage, t) }
-            )}
-      </p>
-      <div className="diagnostics-tab__usage-actions">
-        <button
-          className="diagnostics-tab__rerun-btn"
-          onClick={() => onSendPreviousHang(true)}
-          type="button"
-          data-testid="diagnostics-previous-hang-send"
-        >
-          {t("settings.diagnostics.previousHang.send", "Send report")}
-        </button>
-        <button
-          className="diagnostics-tab__rerun-btn"
-          onClick={() => onSendPreviousHang(false)}
-          type="button"
-          data-testid="diagnostics-previous-hang-dismiss"
-        >
-          {t("settings.diagnostics.previousHang.dismiss", "Don't send")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function UsageReportingSection({
-  usageReporting = false,
-  onUsageReportingChange,
-  usagePreview,
-  onShowUsagePreview,
-  usagePreviewError,
-}: Pick<
-  DiagnosticsTabProps,
-  | "usageReporting"
-  | "onUsageReportingChange"
-  | "usagePreview"
-  | "onShowUsagePreview"
-  | "usagePreviewError"
->) {
-  const { t } = useTranslation();
-
-  if (!onUsageReportingChange) return null;
-
-  const previewShown = usagePreview !== null && usagePreview !== undefined;
-
-  return (
-    <div className="diagnostics-tab__usage" data-testid="diagnostics-usage">
-      <span className="diagnostics-tab__problems-title">
-        {t("settings.diagnostics.usageTitle", "Usage data")}
-      </span>
-      <label className="diagnostics-tab__switch">
-        <input
-          type="checkbox"
-          role="switch"
-          checked={usageReporting}
-          onChange={(e) => onUsageReportingChange(e.target.checked)}
-          data-testid="diagnostics-usage-toggle"
-          data-checked={usageReporting}
-        />
-        <span>{t("settings.diagnostics.usageToggle", "Send usage data")}</span>
-      </label>
-      <p className="diagnostics-tab__description">
-        {t(
-          "settings.diagnostics.usageDescription",
-          "Off by default. When you turn it on, jamuru sends how it runs on your machine to the jamuru server, so that problems on particular machines and connections can be found and fixed."
-        )}
-      </p>
-      <p className="diagnostics-tab__description">
-        {t(
-          "settings.diagnostics.usageSent",
-          "Sent: app version, OS, CPU and memory, audio device names, IDs and what they support, your settings (a custom server URL only as far as its host and port), totals for each session (length, latency, packet loss, what kind of route the audio took and how long it took to connect), your own IP addresses (on your networks and the public one), the kind of each error, and where a crash happened."
-        )}
-      </p>
-      <p className="diagnostics-tab__description">
-        {t(
-          "settings.diagnostics.usageNotSent",
-          "Never sent: display name, room history, machine identifier, anything about the other people in the room (their IP addresses included), audio, chat."
-        )}
-      </p>
-      <p className="diagnostics-tab__description">
-        {t(
-          "settings.diagnostics.usageDeviceNames",
-          "Device names are sent as your system reports them. If a name contains your own name, such as \"Taro's AirPods\", it is sent too. Check the exact text with \"Show what is sent\"."
-        )}
-      </p>
-      <p className="diagnostics-tab__description">
-        {t(
-          "settings.diagnostics.usageIdNote",
-          "Turning it on creates a random install ID that ties your reports together. Turning it off discards the ID and anything not yet sent."
-        )}
-      </p>
-      <div>
-        <button
-          className="diagnostics-tab__rerun-btn"
-          onClick={onShowUsagePreview}
-          type="button"
-          data-testid="diagnostics-usage-show"
-        >
-          {t("settings.diagnostics.usageShow", "Show what is sent")}
-        </button>
-      </div>
-      {previewShown && (
-        <div data-testid="diagnostics-usage-preview">
-          {usagePreview.trim() === "" ? (
-            <p className="diagnostics-tab__description">
-              {usageReporting
-                ? t("settings.diagnostics.usagePreviewEmpty", "Nothing is waiting to be sent yet.")
-                : t(
-                    "settings.diagnostics.usagePreviewOff",
-                    "Off: nothing is collected or sent, and there is no install ID."
-                  )}
-            </p>
-          ) : (
-            <pre className="diagnostics-tab__usage-lines">{usagePreview}</pre>
-          )}
-        </div>
-      )}
-      {usagePreviewError && (
-        <p className="diagnostics-tab__log-error" role="alert">
-          {usagePreviewError}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function ReportProblemSection({
   reportProblemState = "idle",
   reportProblemPreview,
@@ -651,15 +452,6 @@ export function DiagnosticsTab({
   onOpenLogFolder,
   logFolder,
   logFolderError,
-  previousHang,
-  onSendPreviousHang,
-  previousHangAnswered,
-  previousHangAttachesLog,
-  usageReporting,
-  onUsageReportingChange,
-  usagePreview,
-  onShowUsagePreview,
-  usagePreviewError,
   reportProblemState,
   reportProblemPreview,
   reportProblemComment,
@@ -670,21 +462,8 @@ export function DiagnosticsTab({
   onCancelReportProblem,
 }: DiagnosticsTabProps) {
   const { t } = useTranslation();
-  const logFile = (
+  const support = (
     <>
-      <PreviousHangSection
-        previousHang={previousHang}
-        onSendPreviousHang={onSendPreviousHang}
-        previousHangAnswered={previousHangAnswered}
-        previousHangAttachesLog={previousHangAttachesLog}
-      />
-      <UsageReportingSection
-        usageReporting={usageReporting}
-        onUsageReportingChange={onUsageReportingChange}
-        usagePreview={usagePreview}
-        onShowUsagePreview={onShowUsagePreview}
-        usagePreviewError={usagePreviewError}
-      />
       <LogFileSection
         onOpenLogFolder={onOpenLogFolder}
         logFolder={logFolder}
@@ -722,7 +501,7 @@ export function DiagnosticsTab({
           <PlayIcon />
           {t("settings.diagnostics.run", "Run Diagnostics")}
         </button>
-        {logFile}
+        {support}
       </div>
     );
   }
@@ -926,7 +705,7 @@ export function DiagnosticsTab({
         </Card>
 
         <ProblemsSection problems={problems} />
-        {logFile}
+        {support}
       </div>
     );
   }

@@ -13,13 +13,15 @@ export { Input, type InputProps } from "./Input";
 // Tab contents
 export {
   GeneralTab,
-  ProfileTab,
   DevicesTab,
+  PrivacyTab,
   DiagnosticsTab,
+  AboutTab,
   type GeneralTabProps,
-  type ProfileTabProps,
   type DevicesTabProps,
+  type PrivacyTabProps,
   type DiagnosticsTabProps,
+  type AboutTabProps,
   type Language,
   type DeviceInfo,
 } from "./tabs";

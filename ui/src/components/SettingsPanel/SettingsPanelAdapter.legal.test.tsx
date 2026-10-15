@@ -45,9 +45,9 @@ describe('the terms rows in the settings screen', () => {
   });
 
   // Verifies: REQ-TRM-004
-  it('the general tab is shown, rows for the terms, the license, the privacy page and the announcements are there', async () => {
+  it('the about tab is shown, rows for the terms, the license, the privacy page and the announcements are there', async () => {
     fakeBackend();
-    render(<SettingsPanelAdapter initialTab="general" />);
+    render(<SettingsPanelAdapter initialTab="about" />);
 
     expect(await screen.findByTestId('settings-legal-terms')).toHaveTextContent('Terms of Use');
     expect(screen.getByTestId('settings-legal-license')).toHaveTextContent('License');
@@ -58,7 +58,7 @@ describe('the terms rows in the settings screen', () => {
   // Verifies: REQ-TRM-004
   it('the terms row is pressed, the bundled text is read from the app and shown in a dialog that closes', async () => {
     fakeBackend();
-    render(<SettingsPanelAdapter initialTab="general" />);
+    render(<SettingsPanelAdapter initialTab="about" />);
 
     fireEvent.click(await screen.findByTestId('settings-legal-terms'));
 
@@ -71,7 +71,7 @@ describe('the terms rows in the settings screen', () => {
   // Verifies: REQ-TRM-004
   it('the license row is pressed, the license is shown as it is written', async () => {
     fakeBackend();
-    render(<SettingsPanelAdapter initialTab="general" />);
+    render(<SettingsPanelAdapter initialTab="about" />);
 
     fireEvent.click(await screen.findByTestId('settings-legal-license'));
 
@@ -82,7 +82,7 @@ describe('the terms rows in the settings screen', () => {
   // Verifies: REQ-TRM-004
   it('the privacy and announcements rows are pressed, the app is asked to open each named page and nothing else', async () => {
     const calls = fakeBackend();
-    render(<SettingsPanelAdapter initialTab="general" />);
+    render(<SettingsPanelAdapter initialTab="about" />);
 
     fireEvent.click(await screen.findByTestId('settings-legal-privacy'));
     fireEvent.click(screen.getByTestId('settings-legal-announcements'));

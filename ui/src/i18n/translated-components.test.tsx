@@ -20,6 +20,7 @@ import { SessionStats } from '../components/SessionStats';
 import { DeviceSelector } from '../components/DeviceSelector';
 import { MixerPanel, type Channel } from '../components/MixerPanel';
 import { DiagnosticsTab } from '../components/SettingsPanel/tabs/DiagnosticsTab';
+import { PrivacyTab } from '../components/SettingsPanel/tabs/PrivacyTab';
 import { SettingsPanelAdapter } from '../components/SettingsPanel';
 import { audioSettings } from '../components/SettingsPanel/audioSettingsFixture';
 import type {
@@ -296,27 +297,22 @@ describe('components without hard-coded text', () => {
     expect(screen.getByTestId('mixer-loud-notice')).toHaveTextContent(bundle.mixer.loudNotice);
   });
 
-  // Given a diagnostics result is shown
+  // Given the privacy tab is shown
   // When the language is English or Japanese
-  // Then the usage reporting switch below it, with its description, reads in that language
+  // Then the usage reporting switch, with its description, reads in that language
   //
   // Verifies: REQ-TEL-011
-  it.each(languages)('shows the usage reporting section under a diagnostics result in %s', async (language, bundle: Bundle) => {
+  it.each(languages)('shows the usage reporting section in the privacy tab in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     const { container } = render(
-      <DiagnosticsTab
-        state="complete"
-        result={diagnosticsResult}
-        onUsageReportingChange={() => {}}
-        usagePreview=""
-      />
+      <PrivacyTab onUsageReportingChange={() => {}} usagePreview="" />
     );
 
-    expect(screen.getByRole('switch', { name: bundle.settings.diagnostics.usageToggle })).not.toBeChecked();
-    expect(screen.getByText(bundle.settings.diagnostics.usageDescription)).toBeInTheDocument();
-    expect(screen.getByText(bundle.settings.diagnostics.usagePreviewOff)).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: bundle.settings.privacy.usageToggle })).not.toBeChecked();
+    expect(screen.getByText(bundle.settings.privacy.usageDescription)).toBeInTheDocument();
+    expect(screen.getByText(bundle.settings.privacy.usagePreviewOff)).toBeInTheDocument();
     if (language === 'ja') {
-      const section = container.querySelector<HTMLElement>('[data-testid="diagnostics-usage"]')!;
+      const section = container.querySelector<HTMLElement>('[data-testid="privacy-usage"]')!;
       expect(latinWords(section, ['OS', 'CPU', 'ID', 'IP', 'URL', 'AirPods', 'jamuru'])).toEqual([]);
     }
   });
@@ -403,14 +399,14 @@ describe('components without hard-coded text', () => {
     }
   });
 
-  // Given the display name field in the profile tab
+  // Given the display name field in the general tab
   // When the name is emptied or too long
   // Then the error reads in the current language, and the placeholder does too
   //
   // Verifies: REQ-I18N-105
   it.each(languages)('validates the display name in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
-    render(<SettingsPanelAdapter initialTab="profile" />);
+    render(<SettingsPanelAdapter initialTab="general" />);
 
     const input = await screen.findByPlaceholderText(bundle.settings.profile.namePlaceholder);
     await waitFor(() => expect(input).toHaveValue('Taro'));

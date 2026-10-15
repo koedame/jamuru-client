@@ -238,7 +238,7 @@ DAWスタイルのミキシングコンソール。
 
 - `SettingsPanel` - ルートコンポーネント
 - `VerticalTabs` - タブナビゲーション
-- `GeneralTab`, `ProfileTab`, `DevicesTab`, `DiagnosticsTab`
+- `GeneralTab`, `DevicesTab`, `PrivacyTab`, `DiagnosticsTab`, `AboutTab`
 
 ---
 
