@@ -84,6 +84,7 @@
 | `settings_help_begin` | 設定の手伝いを始める |
 | `settings_help_stop` | 設定の手伝いを止める |
 | `streaming_reconnect` | 音声の接続を張り直す |
+| `streaming_hold_mute` | 確認を出している間、マイクをミュートに保つ・保つのをやめて元に戻す |
 | `app_environment` | アプリの版・ビルドの種類・OS・メモリ・音声ホストを読む |
 | `config_load` | 設定ファイルの全体を読む |
 | `config_set_usage_reporting` | 利用状況の送信をオン・オフする |

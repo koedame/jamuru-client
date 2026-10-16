@@ -418,6 +418,14 @@ pub fn close_requested(app: &AppHandle, label: &str, api: &tauri::CloseRequestAp
         return;
     }
     api.prevent_close();
+    // Before the screen is asked: whether or not it answers, nothing of the
+    // person's room goes out while the question stands (REQ-CON-138).
+    let held = app.clone();
+    tauri::async_runtime::spawn(async move {
+        held.state::<crate::streaming::StreamingState>()
+            .hold_mute(true)
+            .await;
+    });
     if let Err(e) = crate::menu::hand_to_screen(app, crate::menu::QUIT_ACTION) {
         warn!("Could not ask the screen to confirm leaving: {}", e);
         app.exit(0);

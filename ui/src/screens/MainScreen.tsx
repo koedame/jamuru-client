@@ -45,6 +45,7 @@ import {
   type AudioSettings,
   streamingReconnect,
   streamingStatus,
+  streamingHoldMute,
   streamingSetMute,
   streamingSetMonitoring,
   mixerGet,
@@ -132,6 +133,25 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // The leave dialog is up because the window was closed (or Quit chosen) in
   // the room: leaving is then followed by quitting.
   const [quitAfterLeave, setQuitAfterLeave] = useState(false);
+  const quitAfterLeaveRef = useRef(quitAfterLeave);
+  quitAfterLeaveRef.current = quitAfterLeave;
+
+  // While the leave dialog stands the microphone is held muted: the person
+  // may have thought the window closed and walked away, and nothing of their
+  // room should go out meanwhile (REQ-CON-138). The mute goes back to what it
+  // was when the dialog is cancelled or the leave is over. Quitting keeps the
+  // hold until the app ends.
+  useEffect(() => {
+    if (!showLeaveDialog) return;
+    streamingHoldMute(true).catch((e) => console.error("Failed to hold the mute:", e));
+    return () => {
+      if (quitAfterLeaveRef.current) return;
+      streamingHoldMute(false)
+        .then(() => streamingStatus())
+        .then((status) => setIsLocalMuted(status.is_muted))
+        .catch((e) => console.error("Failed to lift the mute hold:", e));
+    };
+  }, [showLeaveDialog]);
 
   // Where the faders stand, as the backend has them (null until it has
   // answered). The microphone's mute is the audio's, read with its status.
@@ -636,8 +656,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     // Quitting follows even if leaving failed (the server dropped the
     // connection first, say): the person asked to be out of the room and of
     // the app, and the app ending drops the connection anyway.
-    if (quitAfterLeave) void windowQuitApp();
-    setQuitAfterLeave(false);
+    if (quitAfterLeave) {
+      windowQuitApp().catch(() => setQuitAfterLeave(false));
+    }
   };
 
   const handleCancelLeave = () => {
