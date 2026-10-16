@@ -98,6 +98,7 @@
 | `update_status` | 実行中の版と、このビルドで更新について何ができるかを読む |
 | `update_check` | 新しい版が出ているかを、いま確かめる |
 | `update_install` | 新しい版を入れて再起動する（セッション中は断る） |
+| `window_quit_app` | 退室したあとに、アプリを終了する |
 | `window_open_settings` | 設定ウィンドウを開く |
 | `window_close_settings` | 設定ウィンドウを閉じる |
 | `window_toggle_chat` | チャットウィンドウを開閉する |

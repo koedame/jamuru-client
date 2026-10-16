@@ -1407,6 +1407,14 @@ export async function windowOpenSettings(): Promise<void> {
 }
 
 /**
+ * End the app. For after leaving the room, when the person closed the window
+ * (or chose Quit) while in it and confirmed.
+ */
+export async function windowQuitApp(): Promise<void> {
+  return invoke("window_quit_app");
+}
+
+/**
  * Close the settings window
  */
 export async function windowCloseSettings(): Promise<void> {

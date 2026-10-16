@@ -211,6 +211,7 @@ app_commands! {
     [Access::SCREEN_ONLY] "新しい版を入れて再起動する（セッション中は断る）" crate::updater::update_install;
 
     // The person's own windows: a helper's screen has its own.
+    [Access::SCREEN_ONLY] "退室したあとに、アプリを終了する" crate::windows::window_quit_app;
     [Access::NO_HELP] "設定ウィンドウを開く" crate::windows::window_open_settings;
     [Access::NO_HELP] "設定ウィンドウを閉じる" crate::windows::window_close_settings;
     [Access::NO_HELP] "チャットウィンドウを開閉する" crate::windows::window_toggle_chat;

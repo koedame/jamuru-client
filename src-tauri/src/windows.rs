@@ -404,9 +404,57 @@ pub fn window_resize_main(
     }
 }
 
+/// Whether closing the window `label` must first be confirmed: the main
+/// window while in a room, since closing it ends the app and drops the person
+/// out of the room unasked (REQ-CON-137).
+fn close_needs_leave_confirmation(label: &str, in_room: bool) -> bool {
+    label == labels::MAIN && in_room
+}
+
+/// The window `label` is being closed. In a room, the main window stays and
+/// its screen is asked to confirm leaving; the screen quits once it has left.
+pub fn close_requested(app: &AppHandle, label: &str, api: &tauri::CloseRequestApi) {
+    if !close_needs_leave_confirmation(label, crate::menu::in_room(app)) {
+        return;
+    }
+    api.prevent_close();
+    if let Err(e) = crate::menu::hand_to_screen(app, crate::menu::QUIT_ACTION) {
+        warn!("Could not ask the screen to confirm leaving: {}", e);
+        app.exit(0);
+    }
+}
+
+/// Ends the app. The screen asks for it once the person has left the room and
+/// confirmed that they want to quit.
+#[tauri::command]
+pub fn window_quit_app(app: AppHandle) {
+    info!("Quitting at the screen's request");
+    app.exit(0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Verifies: REQ-CON-137
+    #[test]
+    fn when_the_main_window_is_closed_in_a_room_the_close_is_confirmed_first() {
+        assert!(close_needs_leave_confirmation(labels::MAIN, true));
+    }
+
+    /// Verifies: REQ-CON-137
+    #[test]
+    fn when_the_main_window_is_closed_outside_a_room_it_closes_without_asking() {
+        assert!(!close_needs_leave_confirmation(labels::MAIN, false));
+    }
+
+    /// Verifies: REQ-CON-137
+    #[test]
+    fn when_another_window_is_closed_in_a_room_it_closes_without_asking() {
+        for label in [labels::SETTINGS, labels::CHAT, "help-1"] {
+            assert!(!close_needs_leave_confirmation(label, true), "{}", label);
+        }
+    }
 
     /// Verifies: REQ-MNU-010
     #[test]

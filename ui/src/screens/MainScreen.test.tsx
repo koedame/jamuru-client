@@ -922,6 +922,112 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(callsTo('session_leave')).toHaveLength(0);
   });
 
+  // Verifies: REQ-CON-137
+  it('ルームの中でウィンドウを閉じようとしたとき、退室の確認を出し、まだ退室も終了もしないこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('quit_requested');
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(callsTo('session_leave')).toHaveLength(0);
+    expect(callsTo('window_quit_app')).toHaveLength(0);
+  });
+
+  // Verifies: REQ-CON-137
+  it('ウィンドウを閉じようとして出た確認で退室を選んだとき、session_leave のあとで window_quit_app を呼ぶこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('quit_requested');
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('session.leave.quitButton') }));
+
+    await waitFor(() => expect(callsTo('window_quit_app')).toHaveLength(1));
+    expect(calls.map((c) => c.cmd).filter((c) => c === 'session_leave' || c === 'window_quit_app')).toEqual([
+      'session_leave',
+      'window_quit_app',
+    ]);
+  });
+
+  // Verifies: REQ-CON-137
+  it('ウィンドウを閉じようとして出た確認をキャンセルしたとき、退室も終了もしないこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('quit_requested');
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('common.button.cancel') }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(callsTo('session_leave')).toHaveLength(0);
+    expect(callsTo('window_quit_app')).toHaveLength(0);
+  });
+
+  // Verifies: REQ-CON-137
+  it('キャンセルしたあとに退室ボタンから退室したとき、アプリを終了しないこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('quit_requested');
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: i18n.t('common.button.cancel') })
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('leave-room'));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: i18n.t('session.leave.confirmButton') })
+    );
+
+    await waitFor(() => expect(callsTo('session_leave')).toHaveLength(1));
+    expect(callsTo('window_quit_app')).toHaveLength(0);
+  });
+
+  // Verifies: REQ-CON-137
+  it('終了のための退室に失敗したとき、それでもアプリを終了すること', async () => {
+    current = inRoom();
+    const base = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'session_leave') {
+        calls.push({ cmd, args });
+        throw new Error('leave failed');
+      }
+      return base(cmd, args);
+    });
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('quit_requested');
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: i18n.t('session.leave.quitButton') })
+    );
+
+    await waitFor(() => expect(callsTo('session_leave')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('window_quit_app')).toHaveLength(1));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  // Verifies: REQ-CON-137
+  it('ルームの外で終了の確認が届いたとき(すでに退室していたとき)、確認なしで window_quit_app を呼ぶこと', async () => {
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-create-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('quit_requested');
+
+    expect(callsTo('window_quit_app')).toHaveLength(1);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   // Verifies: REQ-MNU-005
   it('ルームの中でメニューの「招待コードをコピー」を選んだとき、そのルームの招待コードをクリップボードに入れること', async () => {
     const writeText = vi.fn(() => Promise.resolve());
