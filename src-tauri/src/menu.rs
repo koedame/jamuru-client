@@ -117,6 +117,7 @@ pub enum Item {
     LeaveRoom,
     AskForHelp,
     Settings,
+    CheckForUpdates,
     /// Quit, where the OS has no entry that does it (Windows / Linux).
     Quit,
     Guide,
@@ -137,13 +138,16 @@ pub enum Route {
     Screen(&'static str),
     /// Opens the settings window, on a tab.
     Settings(Option<&'static str>),
+    /// Opens the settings window on the About tab and has it look for a
+    /// newer release.
+    UpdateCheck,
     Browser(&'static str),
     LogFolder,
     Exit,
 }
 
 impl Item {
-    pub const ALL: [Item; 17] = [
+    pub const ALL: [Item; 18] = [
         Item::CreateRoom,
         Item::JoinRoom,
         Item::TestRoom,
@@ -151,6 +155,7 @@ impl Item {
         Item::LeaveRoom,
         Item::AskForHelp,
         Item::Settings,
+        Item::CheckForUpdates,
         Item::Quit,
         Item::Guide,
         Item::Troubleshooting,
@@ -172,6 +177,7 @@ impl Item {
             Item::LeaveRoom => "menu.leave_room",
             Item::AskForHelp => "menu.ask_for_help",
             Item::Settings => "menu.settings",
+            Item::CheckForUpdates => "menu.check_for_updates",
             Item::Quit => "menu.quit",
             Item::Guide => "menu.guide",
             Item::Troubleshooting => "menu.troubleshooting",
@@ -198,6 +204,7 @@ impl Item {
             Item::LeaveRoom => Route::Screen("leave_room"),
             Item::AskForHelp => Route::Screen("ask_for_help"),
             Item::Settings => Route::Settings(None),
+            Item::CheckForUpdates => Route::UpdateCheck,
             Item::Quit => Route::Exit,
             Item::Guide => Route::Browser(GUIDE_URL),
             Item::Troubleshooting => Route::Browser(TROUBLESHOOTING_URL),
@@ -226,6 +233,7 @@ impl Item {
             }
             Item::CopyInviteCode | Item::LeaveRoom | Item::AskForHelp => main && context.in_room,
             Item::Settings
+            | Item::CheckForUpdates
             | Item::Diagnostics
             | Item::ReportProblem
             | Item::Terms
@@ -248,6 +256,7 @@ impl Item {
             Item::LeaveRoom => ("退室…", "Leave Room…"),
             Item::AskForHelp => ("設定依頼をする…", "Ask for Help with Settings…"),
             Item::Settings => ("設定…", "Settings…"),
+            Item::CheckForUpdates => ("アップデートを確認…", "Check for Updates…"),
             Item::Quit => ("終了", "Exit"),
             Item::Guide => ("jamuru の使い方", "jamuru Guide"),
             Item::Troubleshooting => ("うまくいかないとき", "Troubleshooting"),
@@ -406,6 +415,7 @@ pub fn layout(os: Os) -> Vec<Section> {
                 title: Title::App,
                 nodes: vec![
                     N(Native::About),
+                    I(Item::CheckForUpdates),
                     S,
                     I(Item::Settings),
                     S,
@@ -474,7 +484,10 @@ pub fn layout(os: Os) -> Vec<Section> {
             },
             Section {
                 title: Title::Help,
-                nodes: help.into_iter().chain([S, N(Native::About)]).collect(),
+                nodes: help
+                    .into_iter()
+                    .chain([S, I(Item::CheckForUpdates), N(Native::About)])
+                    .collect(),
             },
         ],
     }
@@ -691,6 +704,14 @@ pub fn handle_event(app: &AppHandle, id: &str) {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = windows::create_settings_window_at(&app, tab) {
+                    tracing::warn!("Could not open the settings window: {}", e);
+                }
+            });
+        }
+        Route::UpdateCheck => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = windows::open_settings_to_check_update(&app) {
                     tracing::warn!("Could not open the settings window: {}", e);
                 }
             });
@@ -963,6 +984,7 @@ mod tests {
         };
         for item in [
             Item::Settings,
+            Item::CheckForUpdates,
             Item::Diagnostics,
             Item::ReportProblem,
             Item::Terms,
@@ -1004,6 +1026,42 @@ mod tests {
         assert_eq!(Item::Terms.route(), Route::Settings(Some("about")));
     }
 
+    /// Verifies: REQ-MNU-009
+    #[test]
+    fn the_update_check_opens_settings_on_the_about_tab_and_checks() {
+        assert_eq!(Item::CheckForUpdates.route(), Route::UpdateCheck);
+        assert!(windows::SETTINGS_TABS.contains(&"about"));
+    }
+
+    /// Verifies: REQ-MNU-009
+    #[test]
+    fn on_macos_the_update_check_follows_about_in_the_app_menu() {
+        let app_menu = &layout(Os::Mac)[0];
+        assert_eq!(app_menu.title, Title::App);
+        assert_eq!(
+            app_menu.nodes[..2],
+            [
+                Node::Native(Native::About),
+                Node::Item(Item::CheckForUpdates)
+            ]
+        );
+    }
+
+    /// Verifies: REQ-MNU-009
+    #[test]
+    fn on_windows_and_linux_the_update_check_sits_just_before_about_in_the_help_menu() {
+        let sections = layout(Os::Other);
+        let help = sections.last().unwrap();
+        assert_eq!(help.title, Title::Help);
+        assert_eq!(
+            help.nodes[help.nodes.len() - 2..],
+            [
+                Node::Item(Item::CheckForUpdates),
+                Node::Native(Native::About)
+            ]
+        );
+    }
+
     /// Verifies: REQ-MNU-007
     #[test]
     fn entries_that_work_on_the_screen_each_name_a_different_action() {
@@ -1021,7 +1079,12 @@ mod tests {
     fn entries_that_open_the_browser_open_https_pages() {
         for item in Item::ALL {
             if let Route::Browser(url) = item.route() {
-                assert_eq!(url.split_once("://").map(|(scheme, _)| scheme), Some("https"), "{:?}", item);
+                assert_eq!(
+                    url.split_once("://").map(|(scheme, _)| scheme),
+                    Some("https"),
+                    "{:?}",
+                    item
+                );
             }
         }
     }
