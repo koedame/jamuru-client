@@ -353,6 +353,13 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const handleJoinRoom = useCallback((code: string) => {
     sessionJoin(code).catch(() => undefined);
   }, []);
+  // A link from another app opens the room with the microphone muted: nothing
+  // the person pressed in this app started it, and they may not be looking at
+  // it. They unmute when they mean to speak (REQ-CON-139).
+  const handleJoinRoomFromLink = useCallback((code: string) => {
+    setIsLocalMuted(true);
+    sessionJoin(code, { muted: true }).catch(() => undefined);
+  }, []);
   const handleReconnectSignaling = useCallback(() => {
     sessionReconnect().catch(() => undefined);
   }, []);
@@ -364,8 +371,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // Depends on there being a connection, because joining needs one: a link
   // clicked before the app finished connecting is handled once it has.
   const hasConnection = connectionId !== null;
-  const handleJoinRoomRef = useRef(handleJoinRoom);
-  handleJoinRoomRef.current = handleJoinRoom;
+  const handleJoinRoomFromLinkRef = useRef(handleJoinRoomFromLink);
+  handleJoinRoomFromLinkRef.current = handleJoinRoomFromLink;
   useEffect(() => {
     // A link opened on the helper's machine is not for the helped app to join.
     if (!hasConnection || helping) {
@@ -377,7 +384,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
     registerInviteLinkHandler(
       (code) => {
-        handleJoinRoomRef.current(code);
+        handleJoinRoomFromLinkRef.current(code);
       },
       () => {
         if (phaseRef.current !== "connected") {

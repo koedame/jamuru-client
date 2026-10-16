@@ -107,6 +107,9 @@ pub struct Shared {
     pub is_active: Arc<AtomicBool>,
     /// Whether the microphone is muted
     pub is_muted: Arc<AtomicBool>,
+    /// The mute the next session starts with: what the room was entered with, or what the
+    /// person chose since while no session ran
+    pub muted_at_start: Arc<AtomicBool>,
     /// Whether local monitoring is on (ADR-033)
     pub is_monitoring: Arc<AtomicBool>,
     /// Current input audio level (0-100, RMS normalized)
@@ -155,6 +158,7 @@ impl Shared {
         Self {
             is_active: Arc::new(AtomicBool::new(false)),
             is_muted: Arc::new(AtomicBool::new(false)),
+            muted_at_start: Arc::new(AtomicBool::new(false)),
             is_monitoring: Arc::new(AtomicBool::new(false)),
             input_level: Arc::new(AtomicU32::new(0)),
             output_level: Arc::new(AtomicU32::new(0)),
@@ -177,7 +181,8 @@ impl Shared {
     /// Puts the readings and the controls of a session back to where a new one starts. The
     /// faders of the participants are the mixer's, which sets them as they change.
     pub fn start_over(&self) {
-        self.is_muted.store(false, Ordering::SeqCst);
+        self.is_muted
+            .store(self.muted_at_start.load(Ordering::SeqCst), Ordering::SeqCst);
         // Off at the start of every session: with speakers, a monitored microphone can feed
         // back, so hearing yourself is something the user asks for.
         self.is_monitoring.store(false, Ordering::SeqCst);
