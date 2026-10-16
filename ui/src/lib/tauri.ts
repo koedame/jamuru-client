@@ -701,6 +701,14 @@ export async function streamingStatus(): Promise<StreamingStatus> {
 }
 
 /**
+ * Hold the microphone muted while a question is on the screen the person may
+ * walk away from, or lift the hold (the mute goes back to what it was).
+ */
+export async function streamingHoldMute(hold: boolean): Promise<void> {
+  return invoke("streaming_hold_mute", { hold });
+}
+
+/**
  * Set mute state
  * @param muted Whether to mute the microphone
  */
