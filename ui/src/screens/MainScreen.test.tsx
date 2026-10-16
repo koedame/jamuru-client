@@ -1016,6 +1016,61 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  /** The `hold` arguments `streaming_hold_mute` was called with, in order. */
+  const holds = () => callsTo('streaming_hold_mute').map((c) => c.args?.hold);
+
+  // Verifies: REQ-CON-138
+  it('退室の確認を出している間、マイクのミュートを保つこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+
+    fireEvent.click(screen.getByTestId('leave-room'));
+    await screen.findByRole('dialog');
+
+    await waitFor(() => expect(holds()).toEqual([true]));
+  });
+
+  // Verifies: REQ-CON-138
+  it('退室の確認をキャンセルしたとき、ミュートの保持をやめて元に戻すこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    fireEvent.click(await screen.findByTestId('leave-room'));
+    const dialog = await screen.findByRole('dialog');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('common.button.cancel') }));
+
+    await waitFor(() => expect(holds()).toEqual([true, false]));
+  });
+
+  // Verifies: REQ-CON-138
+  it('退室したとき、ミュートの保持をやめて元に戻すこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    fireEvent.click(await screen.findByTestId('leave-room'));
+    const dialog = await screen.findByRole('dialog');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('session.leave.confirmButton') }));
+
+    await waitFor(() => expect(holds()).toEqual([true, false]));
+  });
+
+  // Verifies: REQ-CON-138
+  it('ウィンドウを閉じようとして出た確認から終了するとき、終了までミュートの保持をやめないこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('quit_requested');
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: i18n.t('session.leave.quitButton') })
+    );
+
+    await waitFor(() => expect(callsTo('window_quit_app')).toHaveLength(1));
+    expect(holds()).toEqual([true]);
+  });
+
   // Verifies: REQ-CON-137
   it('ルームの外で終了の確認が届いたとき(すでに退室していたとき)、確認なしで window_quit_app を呼ぶこと', async () => {
     render(<MainScreen />);

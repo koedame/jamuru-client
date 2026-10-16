@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 298 |
-| うち must | 282 |
+| 要求 総数 | 299 |
+| うち must | 283 |
 | うち should | 16 |
-| 検証済み | 272 |
+| 検証済み | 273 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 3 |
 
@@ -114,6 +114,7 @@
 | REQ-CON-135 | must | ルームを作る・入る要求の組み立てと、その返事の読み方は、コアに 1 つだけある（アプリと CLI が同じものを使う）。返事は、作った部屋（自分だけ・招待コードあり）、入った部屋（すでにいる全員・招待コードは無いこともある）、サーバーの拒否（言われた文のまま）、それ以外（想定外）に分かれる | `docs-spec/requirements.md` | `src/network/room_entry.rs`::a_refusal_carries_what_the_server_said_and_any_other_reply_is_unexpected<br/>`src/network/room_entry.rs`::a_request_to_create_asks_for_a_room_with_the_name_the_features_and_the_key<br/>`src/network/room_entry.rs`::a_request_to_join_asks_for_the_room_by_what_was_given_with_the_features_and_the_key<br/>`src/network/room_entry.rs`::a_room_joined_has_those_already_in_it_and_the_code_when_the_server_gives_one<br/>`src/network/room_entry.rs`::a_room_just_made_has_its_code_and_nobody_else_in_it<br/>`tests/enter_room_test.rs`::when_a_room_is_made_the_one_who_made_it_is_alone_in_it_and_others_join_by_its_code<br/>`tests/enter_room_test.rs`::when_the_room_does_not_exist_the_servers_refusal_comes_back_as_it_was_said |
 | REQ-CON-136 | must | 相手の外から見えるアドレスが変わったら、暗号化したリンクで届いたパケットの送り元へ送り先を移す | `docs-spec/behavior/connection.feature` | `src/network/connection.rs`::when_the_address_is_already_known_learning_it_changes_nothing<br/>`src/network/connection.rs`::when_the_peer_answered_recently_an_unoffered_address_is_not_taken_up<br/>`src/network/connection.rs`::when_the_peer_has_not_answered_a_packet_from_an_unoffered_address_moves_the_route_there<br/>`tests/address_change_test.rs`::when_a_stranger_sends_from_another_address_the_connection_keeps_sending_to_the_peer<br/>`tests/address_change_test.rs`::when_the_peer_is_seen_from_a_new_port_after_an_outage_both_ends_hear_each_other_again |
 | REQ-CON-137 | must | 入室中にメインウィンドウを閉じるときは、退室の確認をしてから終了する | `docs-spec/behavior/connection.feature` | `src-tauri/src/windows.rs`::when_another_window_is_closed_in_a_room_it_closes_without_asking<br/>`src-tauri/src/windows.rs`::when_the_main_window_is_closed_in_a_room_the_close_is_confirmed_first<br/>`src-tauri/src/windows.rs`::when_the_main_window_is_closed_outside_a_room_it_closes_without_asking<br/>`ui/src/screens/MainScreen.test.tsx`::ウィンドウを閉じようとして出た確認で退室を選んだとき、session_leave のあとで window_quit_app を呼ぶこと<br/>`ui/src/screens/MainScreen.test.tsx`::ウィンドウを閉じようとして出た確認をキャンセルしたとき、退室も終了もしないこと<br/>`ui/src/screens/MainScreen.test.tsx`::キャンセルしたあとに退室ボタンから退室したとき、アプリを終了しないこと<br/>`ui/src/screens/MainScreen.test.tsx`::ルームの中でウィンドウを閉じようとしたとき、退室の確認を出し、まだ退室も終了もしないこと<br/>`ui/src/screens/MainScreen.test.tsx`::ルームの外で終了の確認が届いたとき(すでに退室していたとき)、確認なしで window_quit_app を呼ぶこと<br/>`ui/src/screens/MainScreen.test.tsx`::終了のための退室に失敗したとき、それでもアプリを終了すること |
+| REQ-CON-138 | must | 退室の確認が出ているあいだは、マイクをミュートに保つ | `docs-spec/behavior/connection.feature` | `src-tauri/src/streaming.rs`::when_nothing_is_held_lifting_the_hold_leaves_the_mute_as_it_is<br/>`src-tauri/src/streaming.rs`::when_the_microphone_was_muted_before_the_hold_lifting_it_keeps_it_muted<br/>`src-tauri/src/streaming.rs`::when_the_mute_is_held_the_microphone_is_muted_until_the_hold_is_lifted<br/>`src-tauri/src/streaming.rs`::when_the_mute_is_held_twice_lifting_it_goes_back_to_what_it_was_before_the_first<br/>`ui/src/screens/MainScreen.test.tsx`::ウィンドウを閉じようとして出た確認から終了するとき、終了までミュートの保持をやめないこと<br/>`ui/src/screens/MainScreen.test.tsx`::退室したとき、ミュートの保持をやめて元に戻すこと<br/>`ui/src/screens/MainScreen.test.tsx`::退室の確認をキャンセルしたとき、ミュートの保持をやめて元に戻すこと<br/>`ui/src/screens/MainScreen.test.tsx`::退室の確認を出している間、マイクのミュートを保つこと |
 | REQ-CORE-001 | must | `zero-latency` プリセットのアプリ起因片道遅延が 2.0ms 以下である | `docs-spec/requirements.md` | `tests/latency_test.rs`::zero_latency_preset_stays_within_two_milliseconds |
 | REQ-CORE-002 | must | 既定コーデックは非圧縮 PCM 32-bit float であり、コーデック起因の遅延が 0ms である | `docs-spec/requirements.md` | `tests/audio_quality_test.rs`::test_pcm_codec_is_uncompressed |
 | REQ-CORE-003 | must | 音声処理（AEC / NS / AGC）を一切適用せず、入力サンプルをビット単位で保存する | `docs-spec/requirements.md` | `tests/audio_quality_test.rs`::test_audio_is_transmitted_without_processing |

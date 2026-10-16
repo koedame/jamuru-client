@@ -42,6 +42,10 @@ pub struct StreamingState {
     /// Address `prepared_socket` is bound to, kept so repeated prepares report
     /// the same one.
     prepared_addr: Mutex<Option<SocketAddr>>,
+    /// While the microphone is held muted behind a question put to the person
+    /// (REQ-CON-138), whether it was muted before: what lifting the hold goes
+    /// back to. `None` when nothing holds it.
+    mute_hold: std::sync::Mutex<Option<bool>>,
 }
 
 impl StreamingState {
@@ -54,7 +58,43 @@ impl StreamingState {
             sample_rate: Arc::new(AtomicU32::new(jamjam::config::DEFAULT_SAMPLE_RATE)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
+            mute_hold: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Mutes the microphone, with the session running or not.
+    async fn set_mute(&self, muted: bool) {
+        self.shared.is_muted.store(muted, Ordering::SeqCst);
+        if self.shared.is_active.load(Ordering::SeqCst) {
+            let tx = self.cmd_tx.lock().await;
+            if let Some(ref sender) = *tx {
+                let _ = sender.send(StreamingCommand::SetMute(muted));
+            }
+        }
+    }
+
+    /// Holds the microphone muted while the person is asked something that
+    /// they may walk away from, so that nothing of their room is sent while
+    /// the question stands (REQ-CON-138). Lifting the hold puts the mute back
+    /// as it was before. Holding twice, or lifting what is not held, does
+    /// nothing.
+    pub async fn hold_mute(&self, hold: bool) {
+        let muted = {
+            let mut held = self.mute_hold.lock().unwrap_or_else(|e| e.into_inner());
+            if hold {
+                if held.is_some() {
+                    return;
+                }
+                *held = Some(self.shared.is_muted.load(Ordering::SeqCst));
+                true
+            } else {
+                match held.take() {
+                    Some(before) => before,
+                    None => return,
+                }
+            }
+        };
+        self.set_mute(muted).await;
     }
 
     /// Sets the volume `peer` is played at, in percent of unity gain (0-200).
@@ -966,16 +1006,18 @@ pub async fn streaming_set_mute(
     state: tauri::State<'_, StreamingState>,
 ) -> Result<(), String> {
     // Can set mute state even when not streaming
-    state.shared.is_muted.store(muted, Ordering::SeqCst);
+    state.set_mute(muted).await;
+    Ok(())
+}
 
-    // If streaming, also send command to audio thread
-    if state.shared.is_active.load(Ordering::SeqCst) {
-        let tx = state.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetMute(muted));
-        }
-    }
-
+/// Holds the microphone muted while a question is on the screen, or lifts the
+/// hold and puts the mute back as it was (REQ-CON-138).
+#[tauri::command]
+pub async fn streaming_hold_mute(
+    hold: bool,
+    state: tauri::State<'_, StreamingState>,
+) -> Result<(), String> {
+    state.hold_mute(hold).await;
     Ok(())
 }
 
@@ -1046,6 +1088,62 @@ mod tests {
     use super::*;
     use jamjam::audio::{AudioPreset, PlayoutConfig};
     use tauri::Manager;
+
+    /// Verifies: REQ-CON-138
+    #[tokio::test]
+    async fn when_the_mute_is_held_the_microphone_is_muted_until_the_hold_is_lifted() {
+        let state = StreamingState::new();
+        let sent = state.attach_session_for_test().await;
+
+        state.hold_mute(true).await;
+        assert!(state.shared.is_muted.load(Ordering::SeqCst));
+        assert!(matches!(
+            sent.try_recv(),
+            Ok(StreamingCommand::SetMute(true))
+        ));
+
+        state.hold_mute(false).await;
+        assert!(!state.shared.is_muted.load(Ordering::SeqCst));
+        assert!(matches!(
+            sent.try_recv(),
+            Ok(StreamingCommand::SetMute(false))
+        ));
+    }
+
+    /// Verifies: REQ-CON-138
+    #[tokio::test]
+    async fn when_the_microphone_was_muted_before_the_hold_lifting_it_keeps_it_muted() {
+        let state = StreamingState::new();
+        state.set_mute(true).await;
+
+        state.hold_mute(true).await;
+        state.hold_mute(false).await;
+
+        assert!(state.shared.is_muted.load(Ordering::SeqCst));
+    }
+
+    /// Verifies: REQ-CON-138
+    #[tokio::test]
+    async fn when_the_mute_is_held_twice_lifting_it_goes_back_to_what_it_was_before_the_first() {
+        let state = StreamingState::new();
+
+        state.hold_mute(true).await;
+        state.hold_mute(true).await;
+        state.hold_mute(false).await;
+
+        assert!(!state.shared.is_muted.load(Ordering::SeqCst));
+    }
+
+    /// Verifies: REQ-CON-138
+    #[tokio::test]
+    async fn when_nothing_is_held_lifting_the_hold_leaves_the_mute_as_it_is() {
+        let state = StreamingState::new();
+        state.set_mute(true).await;
+
+        state.hold_mute(false).await;
+
+        assert!(state.shared.is_muted.load(Ordering::SeqCst));
+    }
 
     /// The bug this guards: stopping waited a fixed 100 ms, and a thread that
     /// took longer to end cleared `is_active` after the next session had set
