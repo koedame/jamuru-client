@@ -44,6 +44,8 @@ import { TermsViewer } from "../Terms/TermsViewer";
 export interface SettingsPanelAdapterProps {
   /** Initial tab to show */
   initialTab?: SettingsTabId;
+  /** A tab to switch to now (see `SettingsPanel`) */
+  tabRequest?: { tab: SettingsTabId } | null;
   /** Callback when settings change */
   onSettingsChange?: () => void;
 }
@@ -59,6 +61,7 @@ const PRESET_OF_RECOMMENDATION: Record<RecommendedPreset, AudioPresetId> = {
 
 export function SettingsPanelAdapter({
   initialTab = "general",
+  tabRequest,
   onSettingsChange,
 }: SettingsPanelAdapterProps) {
   const { i18n, t } = useTranslation();
@@ -424,6 +427,7 @@ export function SettingsPanelAdapter({
     <>
     <SettingsPanel
       initialTab={initialTab}
+      tabRequest={tabRequest}
       language={language}
       serverUrl={serverUrl}
       effectiveServerUrl={effectiveServerUrl}

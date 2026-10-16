@@ -17,6 +17,7 @@ mod help_link;
 mod help_presence;
 mod help_record;
 mod logging;
+mod menu;
 mod mixer;
 mod report_problem;
 mod restart;
@@ -103,7 +104,15 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         // Hands `jamuru://join/<code>` links from the OS to the app (REQ-CON-103).
         // The scheme is declared in tauri.conf.json under plugins.deep-link.
-        .plugin(tauri_plugin_deep_link::init());
+        .plugin(tauri_plugin_deep_link::init())
+        // The menu is made in `menu::install`, in the app's language.
+        .enable_macos_default_menu(false)
+        .on_menu_event(|app, event| menu::handle_event(app, event.id().as_ref()))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(true) = event {
+                menu::window_focused(window.app_handle(), window.label());
+            }
+        });
     if self_updating {
         // Driven only from `updater.rs`, never the webview.
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
@@ -177,6 +186,11 @@ pub fn run() {
     rpc::events::install(app.handle());
 
     logging::log_startup(app.handle(), &log_spec);
+
+    // After the state above is managed: the menu reads it.
+    if let Err(e) = menu::install(app.handle()) {
+        tracing::warn!("Could not set up the menu: {}", e);
+    }
 
     if self_updating {
         updater::spawn(app.handle().clone());
