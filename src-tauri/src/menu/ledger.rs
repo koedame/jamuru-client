@@ -86,6 +86,13 @@ pub const DIFFERENCES: &[Difference] = &[
         reason: "macOS はアプリ名のメニューの先頭に「jamuru について」を置く決まり。Windows / Linux はヘルプの末尾に置く習慣",
     },
     Difference {
+        key: Key::Item(Item::CheckForUpdates),
+        mac: Some(Title::App),
+        other: Some(Title::Help),
+        same_name: true,
+        reason: "macOS はアプリ名のメニューの「jamuru について」の直下に更新の確認を置く決まり。Windows / Linux はヘルプの末尾、「jamuru について」の直前に置く習慣",
+    },
+    Difference {
         key: Key::Native(Native::Services),
         mac: Some(Title::App),
         other: None,

@@ -8,7 +8,7 @@ import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 
 import i18n from '../i18n';
-import { SettingsScreen, settingsTabFromHash } from './SettingsScreen';
+import { SettingsScreen, settingsChecksUpdateFromHash, settingsTabFromHash } from './SettingsScreen';
 import { audioSettings } from '../components/SettingsPanel/audioSettingsFixture';
 
 const invoke = vi.hoisted(() => vi.fn());
@@ -38,6 +38,12 @@ beforeEach(() => {
         return audioSettings();
       case 'config_get_peer_name':
         return 'Taro';
+      case 'update_status':
+        return { current: '0.1.0-128', support: 'install' };
+      case 'update_check':
+        return { kind: 'up_to_date' };
+      case 'window_is_in_session':
+        return false;
       default:
         return undefined;
     }
@@ -90,5 +96,57 @@ describe('SettingsScreen のタブの選び方', () => {
     act(() => listeners.get('settings:select-tab')!({ payload: 'nowhere' }));
 
     expect(screen.queryByTestId('settings-legal-terms')).not.toBeInTheDocument();
+  });
+});
+
+describe('settingsChecksUpdateFromHash', () => {
+  // Verifies: REQ-MNU-010
+  it('アドレスが更新の確認を求めているとき、true を返すこと', () => {
+    expect(settingsChecksUpdateFromHash('#/settings/about/check-update')).toBe(true);
+  });
+
+  // Verifies: REQ-MNU-010
+  it('アドレスが更新の確認を求めていないとき、false を返すこと', () => {
+    expect(settingsChecksUpdateFromHash('#/settings/about')).toBe(false);
+    expect(settingsChecksUpdateFromHash('#/settings')).toBe(false);
+    expect(settingsChecksUpdateFromHash('#/settings/about/other')).toBe(false);
+  });
+
+  // Verifies: REQ-MNU-010
+  it('更新の確認を求めるアドレスでも、タブは「アプリについて」と読めること', () => {
+    expect(settingsTabFromHash('#/settings/about/check-update')).toBe('about');
+  });
+});
+
+describe('SettingsScreen の更新の確認', () => {
+  // Verifies: REQ-MNU-010
+  it('アドレスが更新の確認を求めているとき、開いてすぐ確認して結果を出すこと', async () => {
+    window.location.hash = '#/settings/about/check-update';
+
+    render(<SettingsScreen />);
+
+    expect(await screen.findByText('You are on the latest version.')).toBeInTheDocument();
+    expect(invoke.mock.calls.map((call) => call[0])).toContain('update_check');
+  });
+
+  // Verifies: REQ-MNU-010
+  it('アドレスが更新の確認を求めていないとき、開いただけでは確認しないこと', async () => {
+    window.location.hash = '#/settings/about';
+
+    render(<SettingsScreen />);
+
+    expect(await screen.findByTestId('settings-update-version')).toHaveTextContent('0.1.0-128');
+    expect(invoke.mock.calls.map((call) => call[0])).not.toContain('update_check');
+  });
+
+  // Verifies: REQ-MNU-010
+  it('開いているときにアプリから更新の確認を伝えられたとき、確認して結果を出すこと', async () => {
+    window.location.hash = '#/settings/about';
+    render(<SettingsScreen />);
+    await screen.findByTestId('settings-update-version');
+
+    act(() => listeners.get('settings:check-update')!({ payload: null }));
+
+    expect(await screen.findByText('You are on the latest version.')).toBeInTheDocument();
   });
 });

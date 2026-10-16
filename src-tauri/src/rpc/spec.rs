@@ -204,6 +204,11 @@ app_commands! {
     // Only a version number, and only for the person's own screen: a helper's
     // screen is the helped app's, and a newer release is not theirs to act on.
     [Access::NO_HELP] "自分で入れ替えられない配布形態に、新しい版が出ているかを読む" crate::updater::update_notice_get;
+    // Looking is the person's own, like the notice above. Installing is too,
+    // and only from the app's own screen (ADR-082): it restarts the app.
+    [Access::NO_HELP] "実行中の版と、このビルドで更新について何ができるかを読む" crate::updater::update_status;
+    [Access::NO_HELP] "新しい版が出ているかを、いま確かめる" crate::updater::update_check;
+    [Access::SCREEN_ONLY] "新しい版を入れて再起動する（セッション中は断る）" crate::updater::update_install;
 
     // The person's own windows: a helper's screen has its own.
     [Access::NO_HELP] "設定ウィンドウを開く" crate::windows::window_open_settings;
@@ -447,6 +452,31 @@ mod tests {
     /// helper that power over every person they help.
     ///
     /// Verifies: REQ-RMT-025
+    /// Verifies: REQ-UPD-023
+    #[test]
+    fn a_helper_may_neither_look_for_an_update_nor_install_one() {
+        for name in ["update_status", "update_check", "update_install"] {
+            let method = find(name).unwrap_or_else(|| panic!("{} has no row", name));
+            assert!(
+                !method.access.allows(Portal::Help),
+                "{} is open to a helper",
+                name
+            );
+        }
+    }
+
+    /// Installing restarts the app, so only the person's own screen asks.
+    ///
+    /// Verifies: REQ-UPD-023
+    #[test]
+    fn only_the_apps_own_screen_may_install_an_update() {
+        let method = find("update_install").unwrap();
+        assert!(method.access.allows(Portal::Screen));
+        for portal in [Portal::Loopback, Portal::Debug, Portal::Help] {
+            assert!(!method.access.allows(portal), "{:?} may install", portal);
+        }
+    }
+
     #[test]
     fn a_helper_may_call_exactly_these_methods() {
         let mut open: Vec<&str> = all_methods()

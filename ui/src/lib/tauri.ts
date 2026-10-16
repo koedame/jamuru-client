@@ -768,6 +768,48 @@ export async function updateNoticeGet(): Promise<string | null> {
   return (await invoke<string | null | undefined>("update_notice_get")) ?? null;
 }
 
+/** What this build can do about a newer release: nothing (a development or self-built build), tell the person (a package that cannot replace itself), or install it (ADR-082) */
+export type UpdateSupport = "none" | "notice" | "install";
+
+export interface UpdateStatus {
+  /** The running version */
+  current: string;
+  support: UpdateSupport;
+}
+
+/** The running version, and what this build can do about a newer release. Asks nothing of the network. */
+export async function updateStatus(): Promise<UpdateStatus> {
+  return invoke("update_status");
+}
+
+/** What a check the person asked for found */
+export type UpdateChecked =
+  | { kind: "unsupported" }
+  | { kind: "up_to_date" }
+  | { kind: "available"; version: string };
+
+/** Looks for a newer release now, whatever the `auto_update` setting says. Nothing is downloaded. */
+export async function updateCheck(): Promise<UpdateChecked> {
+  return invoke("update_check");
+}
+
+/** What an install the person asked for came to (a failure is a rejection instead) */
+export type UpdateInstalled =
+  | { kind: "unsupported" }
+  | { kind: "in_session" }
+  | { kind: "busy" }
+  | { kind: "up_to_date" }
+  | { kind: "restarting"; version: string };
+
+/**
+ * Downloads and installs the newer release, then restarts the app. Refused
+ * (`in_session`) while the person is in a session. When it works the app
+ * restarts, so the promise normally never settles.
+ */
+export async function updateInstall(): Promise<UpdateInstalled> {
+  return invoke("update_install");
+}
+
 /** Where the faders stand */
 export async function mixerGet(): Promise<MixerSnapshot> {
   return invoke("mixer_get");

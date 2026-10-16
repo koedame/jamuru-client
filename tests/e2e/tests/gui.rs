@@ -353,6 +353,41 @@ fn every_settings_tab_can_be_selected() {
     }
 }
 
+/// The About tab shows the running version. The E2E build is a development
+/// build, which never looks for a release, so the section says so and offers
+/// no check.
+///
+/// Verifies: REQ-UPD-022
+#[test]
+fn the_about_tab_shows_the_version_and_says_a_development_build_does_not_check() {
+    let (_guard, app) = launch();
+
+    app.connection_screen().settings_button().click().unwrap();
+    let settings = app.settings_screen();
+    settings.wait_until_open(UI_TIMEOUT).unwrap();
+    settings.select_tab(SettingsTab::About).unwrap();
+
+    let update = settings.update_section();
+    update.version().wait_until_visible(UI_TIMEOUT).unwrap();
+    assert!(
+        update
+            .version()
+            .text()
+            .unwrap()
+            .chars()
+            .any(|c| c.is_ascii_digit()),
+        "the running version should be shown"
+    );
+    assert!(
+        update.message().exists().unwrap(),
+        "the section should say the build does not check"
+    );
+    assert!(
+        !update.check_button().exists().unwrap(),
+        "a development build should not offer the check"
+    );
+}
+
 /// The settings window must not expose the device identifier either.
 ///
 /// Verifies: REQ-GUI-002
