@@ -859,6 +859,70 @@ fn in_a_room_with_two_peers_the_app_hears_both_and_sends_its_audio_to_both() {
         });
 }
 
+/// The bug this guards: a link opened from another app entered the room with
+/// the microphone open, and the person, who was not looking at this app, was
+/// heard by the room at once.
+///
+/// The app joins a room the way a link does (muted) with a peer in it. It
+/// must send that peer no audio - at most the one silent frame the sender
+/// starts with - while the link is up, and send it as soon as the person
+/// unmutes.
+///
+/// Verifies: REQ-CON-139
+#[test]
+fn a_room_entered_by_a_link_is_entered_muted_and_sends_no_audio_until_unmuted() {
+    let _guard = exclusive();
+    let peer = common::Peer::bind();
+    let server = FakeSignaling::start_with_residents_at(&[("friend", peer.local_addr())]);
+    let peer = PlayingPeer::start(peer, 750.0, 0.2);
+
+    let app = App::launch_with_server_url(server.url()).expect("the app should launch");
+    app.connection_screen()
+        .wait_until_interactive(UI_TIMEOUT)
+        .unwrap_or_else(|e| panic!("{}\nThe log holds:\n{}", e, app.log_text()));
+    app.invoke(
+        "session_join",
+        serde_json::json!({ "code": "echo", "muted": true }),
+    )
+    .expect("the control channel should answer")
+    .expect("joining the room should succeed");
+
+    let status = || {
+        app.invoke("streaming_status", serde_json::json!({}))
+            .expect("the control channel should answer")
+            .expect("the status should be read")
+    };
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        let status = status();
+        status["is_active"] == true && status["peers"][0]["connection_state"] == "connected"
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "the link to the peer does not come up. The status is:\n{:#}\nThe log holds:\n{}",
+            status(),
+            app.log_text()
+        )
+    });
+
+    assert_eq!(status()["is_muted"], true, "the session starts muted");
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        peer.heard() <= 2,
+        "the app sent {} audio packets while muted",
+        peer.heard()
+    );
+
+    app.invoke("streaming_set_mute", serde_json::json!({ "muted": false }))
+        .expect("the control channel should answer")
+        .expect("unmuting should succeed");
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || peer.heard() > 100).unwrap_or_else(|_| {
+        panic!(
+            "the app sent {} audio packets after the person unmuted",
+            peer.heard()
+        )
+    });
+}
+
 /// Reads how many peers the app takes in a room before it falls behind, on
 /// the build and the machine the test runs on. It measures; it asserts
 /// nothing, so it is ignored by default and run by hand:
