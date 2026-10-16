@@ -62,6 +62,7 @@
       "button": "退出",
       "confirmMessage": "本当に退室しますか？",
       "confirmButton": "退室する",
+      "quitButton": "退室して終了",
       "pending": "退室処理中..."
     },
     "room": {
