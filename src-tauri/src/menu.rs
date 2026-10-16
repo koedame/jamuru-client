@@ -689,12 +689,7 @@ pub fn handle_event(app: &AppHandle, id: &str) {
     };
     match item.route() {
         Route::Screen(action) => {
-            // The screen that does it is the main window's; it may be behind.
-            if let Some(main) = app.get_webview_window(windows::labels::MAIN) {
-                let _ = main.unminimize();
-                let _ = main.set_focus();
-            }
-            if let Err(e) = app.emit_to(windows::labels::MAIN, ACTION_EVENT, action) {
+            if let Err(e) = hand_to_screen(app, action) {
                 tracing::warn!("Could not hand {} to the screen: {}", id, e);
             }
         }
@@ -726,8 +721,36 @@ pub fn handle_event(app: &AppHandle, id: &str) {
                 tracing::warn!("Could not open the log folder: {}", e);
             }
         }
-        Route::Exit => app.exit(0),
+        Route::Exit => {
+            if in_room(app) {
+                if let Err(e) = hand_to_screen(app, QUIT_ACTION) {
+                    tracing::warn!("Could not ask the screen to confirm leaving: {}", e);
+                    app.exit(0);
+                }
+            } else {
+                app.exit(0);
+            }
+        }
     }
+}
+
+/// What the main window's screen is asked when the app is to end while in a
+/// room: it confirms leaving, leaves, and then quits (REQ-CON-137).
+pub const QUIT_ACTION: &str = "quit_requested";
+
+/// Whether the session is in a room.
+pub fn in_room(app: &AppHandle) -> bool {
+    Context::from_app(app, WindowKind::Main).in_room
+}
+
+/// Asks the main window's screen to do `action`, bringing the window to the
+/// front first: it may be behind, or minimized.
+pub fn hand_to_screen(app: &AppHandle, action: &str) -> tauri::Result<()> {
+    if let Some(main) = app.get_webview_window(windows::labels::MAIN) {
+        let _ = main.unminimize();
+        let _ = main.set_focus();
+    }
+    app.emit_to(windows::labels::MAIN, ACTION_EVENT, action)
 }
 
 #[cfg(test)]
