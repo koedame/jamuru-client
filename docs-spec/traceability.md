@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 292 |
-| うち must | 277 |
+| 要求 総数 | 293 |
+| うち must | 278 |
 | うち should | 15 |
-| 検証済み | 266 |
+| 検証済み | 267 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 3 |
 
@@ -213,6 +213,7 @@
 | REQ-MNU-006 | must | 規約に同意するまでは、ブラウザで開く項目・ログフォルダ・終了だけが使える（REQ-TRM-003）。手伝う側のウィンドウからも同じ項目だけが使える。設定ウィンドウからは、設定に関する項目が使え、ルームの項目は使えない | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::before_the_terms_are_agreed_to_only_what_stays_on_the_machine_or_in_the_browser_works<br/>`src-tauri/src/menu.rs`::from_a_helpers_window_only_the_browser_and_the_log_folder_entries_work<br/>`src-tauri/src/menu.rs`::from_the_settings_window_the_settings_entries_work_and_the_room_ones_do_not |
 | REQ-MNU-007 | must | 診断・問題を報告は設定の「診断とサポート」タブを、利用規約・ライセンスは「アプリについて」タブを開く。設定ウィンドウが開いていればそのウィンドウを前面に出してタブを切り替え、閉じていればそのタブで開く。知らないタブの名前では切り替えない | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::a_window_is_told_apart_by_its_label<br/>`src-tauri/src/menu.rs`::entries_that_open_settings_name_a_tab_the_settings_window_has<br/>`src-tauri/src/menu.rs`::entries_that_open_the_browser_open_https_pages<br/>`src-tauri/src/menu.rs`::entries_that_work_on_the_screen_each_name_a_different_action<br/>`ui/src/screens/SettingsScreen.test.tsx`::アドレスが「アプリについて」を名指ししているとき、そのタブで開くこと<br/>`ui/src/screens/SettingsScreen.test.tsx`::アドレスがタブを名指ししているとき、そのタブを返すこと<br/>`ui/src/screens/SettingsScreen.test.tsx`::タブを名指ししていないか、知らない名前のとき、null を返すこと<br/>`ui/src/screens/SettingsScreen.test.tsx`::知らないタブの名前を伝えられたとき、今のタブのままであること<br/>`ui/src/screens/SettingsScreen.test.tsx`::開いているときにアプリからタブを替えるよう伝えられたとき、そのタブに替わること |
 | REQ-MNU-008 | should | メニューの項目には、このアプリ独自のキーボードショートカットを割り当てない（アプリ全体のショートカットを決めるときにまとめて決める）。OS 標準の項目が持つ OS 標準のキーは残る | `docs-spec/requirements.md` | **未検証** |
+| REQ-MNU-009 | must | メニューの構成は OS のあいだで同じにし、差は理由を書いた台帳（`src-tauri/src/menu/ledger.rs`）にあるものだけにする。属するメニューか名前が OS で違う項目、一方の OS にしか無い項目は、台帳に理由つきの行が要る。台帳の行は実際の差と一致し、差が無くなった行は残さない。共通の項目は、どの OS でも同じ順に並ぶ | `docs-spec/requirements.md` | `src-tauri/src/menu/ledger.rs`::a_difference_between_the_systems_is_in_the_ledger_with_a_reason<br/>`src-tauri/src/menu/ledger.rs`::a_row_of_the_ledger_says_where_the_entry_is_and_whether_the_name_differs<br/>`src-tauri/src/menu/ledger.rs`::entries_on_both_systems_come_in_the_same_order<br/>`src-tauri/src/menu/ledger.rs`::every_entry_is_in_the_menu_bar_of_at_least_one_system<br/>`src-tauri/src/menu/ledger.rs`::the_ledger_has_one_row_for_an_entry |
 | REQ-NET-020 | must | PCM の必要帯域がサンプルレートとビット幅から算出され、1ch あたり約1.5Mbpsを下回らない | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::pcm_requirement_matches_the_documented_figure |
 | REQ-NET-021 | must | FEC の帯域コストがプリセットの冗長度と一致する | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::fec_costs_its_redundancy_in_bandwidth |
 | REQ-NET-022 | must | フレームが小さいほどヘッダ overhead により必要帯域が増える | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::smaller_frames_cost_more_in_overhead |
