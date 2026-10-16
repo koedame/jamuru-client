@@ -6,7 +6,7 @@
  * + content area.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { VerticalTabs, Tab } from "./VerticalTabs";
 import { GeneralTab, Language } from "./tabs/GeneralTab";
@@ -26,6 +26,8 @@ export type SettingsTabId = "general" | "devices" | "privacy" | "diagnostics" | 
 export interface SettingsPanelProps {
   /** Initial tab */
   initialTab?: SettingsTabId;
+  /** A tab to switch to now. A new object each time, so asking for the tab already shown again still counts. */
+  tabRequest?: { tab: SettingsTabId } | null;
   /** Header title (defaults to i18n settings.title) */
   title?: string;
   /** Language */
@@ -168,6 +170,7 @@ const DEFAULT_BUFFER_SIZE_OPTIONS: SelectOption[] = [
 
 export function SettingsPanel({
   initialTab = "devices",
+  tabRequest = null,
   title,
   language,
   serverUrl = "",
@@ -234,6 +237,9 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const { t } = useTranslation();
   const [selectedTab, setSelectedTab] = useState<SettingsTabId>(initialTab);
+  useEffect(() => {
+    if (tabRequest) setSelectedTab(tabRequest.tab);
+  }, [tabRequest]);
 
   const tabs: Tab[] = [
     { id: "general", label: t("settings.tabs.general", "General"), icon: <SlidersIcon /> },

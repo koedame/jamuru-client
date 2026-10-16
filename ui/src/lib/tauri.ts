@@ -455,6 +455,9 @@ export type SettingChange =
 /** Event every window hears after an audio setting changed */
 export const AUDIO_SETTINGS_CHANGED = "audio:config-changed";
 
+/** The menu bar asks the main window's screen to do something; the payload names it (`src-tauri/src/menu.rs`). */
+export const MENU_ACTION = "menu:action";
+
 /**
  * Get the audio settings in effect, with the devices and values on offer
  */

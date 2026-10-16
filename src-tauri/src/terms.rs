@@ -24,12 +24,12 @@ const LICENSE: &str = include_str!("../../LICENSE");
 ///
 /// The links say `HEAD`, the repository's default branch, not `main`: `main`
 /// only moves at a stable release, so the pages are not there until then.
-const PRIVACY_URL: &str =
+pub(crate) const PRIVACY_URL: &str =
     "https://github.com/koedame/jamuru-client/blob/HEAD/docs/getting-started/privacy.md";
 
 /// Where notices about ending or interrupting the service are posted, opened
 /// in the browser.
-const ANNOUNCEMENTS_URL: &str =
+pub(crate) const ANNOUNCEMENTS_URL: &str =
     "https://github.com/koedame/jamuru-client/blob/HEAD/docs/announcements.md";
 
 /// Tauri-managed state: whether the user has agreed to the terms in force.
@@ -157,6 +157,12 @@ impl Page {
 #[tauri::command]
 pub fn terms_open_page(page: Page) -> Result<(), String> {
     open_with(crate::logging::desktop_opener(), page.url())
+}
+
+/// Opens one of the app's fixed pages in the browser. For the menu, which names
+/// its pages itself; the screen still goes through [`terms_open_page`].
+pub(crate) fn open_url(url: &str) -> Result<(), String> {
+    open_with(crate::logging::desktop_opener(), url)
 }
 
 fn open_with(opener: &str, url: &str) -> Result<(), String> {
