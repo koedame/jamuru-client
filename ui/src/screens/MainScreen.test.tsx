@@ -868,3 +868,106 @@ describe('MainScreen の手伝われているあいだの動きの表示', () =>
     await waitFor(() => expect(panelOf()).not.toHaveClass('side-panel--open'));
   });
 });
+
+describe('MainScreen のメニューバーからの操作', () => {
+  /** The menu bar asks the screen to do `action`. */
+  function chooseFromMenu(action: string) {
+    act(() => listeners.get('menu:action')!({ payload: action }));
+  }
+
+  // Verifies: REQ-MNU-005
+  it('メニューで「ルームを作成」を選んだとき、session_create を呼ぶこと', async () => {
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-create-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('create_room');
+
+    expect(callsTo('session_create')).toHaveLength(1);
+  });
+
+  // Verifies: REQ-MNU-005
+  it('メニューで「招待コードで参加」を選んだとき、招待コードの入力欄にカーソルが移ること', async () => {
+    render(<MainScreen />);
+    const input = await screen.findByTestId('connection-panel-invite-code');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('join_room');
+
+    expect(input).toHaveFocus();
+  });
+
+  // Verifies: REQ-MNU-005
+  it('メニューで「テストルームに入る」を選んだとき、サーバーが示したコードで session_join を呼ぶこと', async () => {
+    current = snapshot({ test_room_invite_code: 'HJK567MNP' });
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-test-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('test_room');
+
+    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'HJK567MNP' }]);
+  });
+
+  // Verifies: REQ-MNU-005
+  it('ルームの中でメニューの「退室」を選んだとき、退室の確認を出し、まだ退室しないこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('leave_room');
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(callsTo('session_leave')).toHaveLength(0);
+  });
+
+  // Verifies: REQ-MNU-005
+  it('ルームの中でメニューの「招待コードをコピー」を選んだとき、そのルームの招待コードをクリップボードに入れること', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.assign(navigator, { clipboard: { writeText } });
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('copy_invite_code');
+
+    expect(writeText).toHaveBeenCalledWith('ABC234XYZ');
+  });
+
+  // Verifies: REQ-MNU-005
+  it('ルームの中でメニューの「設定依頼をする」を選んだとき、依頼の画面を開くこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('ask_for_help');
+
+    expect(await screen.findByTestId('settings-help-ask')).toBeInTheDocument();
+  });
+
+  // Verifies: REQ-MNU-005
+  it('ルームの中にいないのにメニューから退室が届いたとき、何もしないこと', async () => {
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-create-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('leave_room');
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  // Verifies: REQ-MNU-005
+  it('ルームの中にいるのにメニューからルームの作成が届いたとき、作らないこと', async () => {
+    current = inRoom();
+    render(<MainScreen />);
+    await screen.findByTestId('leave-room');
+    await waitFor(() => expect(listeners.has('menu:action')).toBe(true));
+
+    chooseFromMenu('create_room');
+
+    expect(callsTo('session_create')).toHaveLength(0);
+  });
+});

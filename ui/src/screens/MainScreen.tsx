@@ -38,6 +38,7 @@ import {
   sessionReconnect,
   SESSION_CHANGED,
   SESSION_SETTINGS_HELP,
+  MENU_ACTION,
   type SessionSnapshot,
   AUDIO_SETTINGS_CHANGED,
   type AudioSettings,
@@ -561,6 +562,40 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       console.error("Failed to copy invite code:", e)
     );
   }, []);
+
+  // What the menu bar asks of this screen (`src-tauri/src/menu.rs`). The menu
+  // only offers each of these when it can be done, and the checks here keep a
+  // late or stray request from doing it anyway. A helper's window is the helped
+  // app's screen, which the helper's own menu has no say over.
+  const testRoomCode = session?.test_room_invite_code ?? null;
+  const menuActionRef = useRef<(action: string) => void>(() => undefined);
+  menuActionRef.current = (action: string) => {
+    if (helping) return;
+    const canEnterRoom = connectionId !== null && (phase === "server_connected" || phase === "error");
+    switch (action) {
+      case "create_room":
+        if (canEnterRoom) handleCreateRoom();
+        break;
+      case "join_room":
+        if (canEnterRoom) document.getElementById("invite-code")?.focus();
+        break;
+      case "test_room":
+        if (canEnterRoom && testRoomCode) handleJoinRoom(testRoomCode);
+        break;
+      case "copy_invite_code":
+        if (room?.invite_code) handleCopyCode(room.invite_code);
+        break;
+      case "leave_room":
+        if (phase === "connected") setShowLeaveDialog(true);
+        break;
+      case "ask_for_help":
+        if (phase === "connected" && settingsHelp.canAsk) settingsHelp.openAsk();
+        break;
+    }
+  };
+  // Stable, so the listener is not taken down and put up again on every render.
+  const handleMenuAction = useCallback((action: string) => menuActionRef.current(action), []);
+  useWindowEvent<string>(MENU_ACTION, handleMenuAction);
 
   // Confirm leaving from the leave dialog. Keeps the dialog open in its
   // "pending" (ui.pen Dialog/LeaveConfirm Loading) state until the leave

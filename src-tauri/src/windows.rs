@@ -115,31 +115,49 @@ pub fn create_chat_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The settings tabs a caller may ask for (`SettingsTabId` in the UI).
+pub const SETTINGS_TABS: &[&str] = &["general", "devices", "privacy", "diagnostics", "about"];
+
+/// Tells an open settings window to show another tab.
+pub const SETTINGS_SELECT_TAB_EVENT: &str = "settings:select-tab";
+
 /// Create the settings window
 ///
 /// Settings window for audio devices, presets, and display options.
 /// Non-modal, can be opened alongside other windows.
 pub fn create_settings_window(app: &AppHandle) -> tauri::Result<()> {
-    // Check if window already exists
+    create_settings_window_at(app, None)
+}
+
+/// Create the settings window on `tab`, or bring the open one forward and
+/// switch it to `tab`. `None` leaves an open window on the tab it shows and a
+/// new one on the first.
+pub fn create_settings_window_at(app: &AppHandle, tab: Option<&str>) -> tauri::Result<()> {
+    let tab = tab.filter(|tab| SETTINGS_TABS.contains(tab));
+
     if let Some(window) = app.get_webview_window(labels::SETTINGS) {
         // Focus existing window
         debug!("Settings window already exists, focusing");
+        let _ = window.unminimize();
         let _ = window.set_focus();
+        if let Some(tab) = tab {
+            app.emit_to(labels::SETTINGS, SETTINGS_SELECT_TAB_EVENT, tab)?;
+        }
         return Ok(());
     }
 
     info!("Creating settings window");
 
-    WebviewWindowBuilder::new(
-        app,
-        labels::SETTINGS,
-        WebviewUrl::App("index.html#/settings".into()),
-    )
-    .title("jamuru - Settings")
-    .inner_size(720.0, 560.0)
-    .resizable(false)
-    .center()
-    .build()?;
+    let url = match tab {
+        Some(tab) => format!("index.html#/settings/{}", tab),
+        None => "index.html#/settings".to_string(),
+    };
+    WebviewWindowBuilder::new(app, labels::SETTINGS, WebviewUrl::App(url.into()))
+        .title("jamuru - Settings")
+        .inner_size(720.0, 560.0)
+        .resizable(false)
+        .center()
+        .build()?;
 
     Ok(())
 }

@@ -30,7 +30,7 @@ function screenFromHash(): Screen {
   const hash = window.location.hash;
   if (hash === HELP_HASH) return "help";
   if (hash === HELP_LOG_HASH) return "help-log";
-  return hash === "#/settings" || hash === "#settings" ? "settings" : "main";
+  return hash === "#settings" || hash.startsWith("#/settings") ? "settings" : "main";
 }
 
 function App() {
