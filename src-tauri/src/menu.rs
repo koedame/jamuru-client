@@ -731,6 +731,9 @@ pub fn handle_event(app: &AppHandle, id: &str) {
 }
 
 #[cfg(test)]
+mod ledger;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1026,14 +1029,14 @@ mod tests {
         assert_eq!(Item::Terms.route(), Route::Settings(Some("about")));
     }
 
-    /// Verifies: REQ-MNU-009
+    /// Verifies: REQ-MNU-010
     #[test]
     fn the_update_check_opens_settings_on_the_about_tab_and_checks() {
         assert_eq!(Item::CheckForUpdates.route(), Route::UpdateCheck);
         assert!(windows::SETTINGS_TABS.contains(&"about"));
     }
 
-    /// Verifies: REQ-MNU-009
+    /// Verifies: REQ-MNU-010
     #[test]
     fn on_macos_the_update_check_follows_about_in_the_app_menu() {
         let app_menu = &layout(Os::Mac)[0];
@@ -1047,7 +1050,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-MNU-009
+    /// Verifies: REQ-MNU-010
     #[test]
     fn on_windows_and_linux_the_update_check_sits_just_before_about_in_the_help_menu() {
         let sections = layout(Os::Other);
