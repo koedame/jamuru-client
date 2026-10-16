@@ -239,6 +239,33 @@ pub enum SessionSetting {
 }
 
 impl StreamingState {
+    /// Mutes the microphone for a room entered by an invite link from another
+    /// app, and for the session that starts in it: the person pressed nothing
+    /// in this app, so nothing of theirs is sent until they unmute
+    /// (REQ-CON-139).
+    pub(crate) async fn mute_on_entry(&self) {
+        self.shared.muted_at_start.store(true, Ordering::SeqCst);
+        self.apply_mute(true).await;
+    }
+
+    /// The next session starts unmuted again: the room it was muted for was
+    /// not entered, or has been left.
+    pub(crate) fn forget_mute_at_start(&self) {
+        self.shared.muted_at_start.store(false, Ordering::SeqCst);
+    }
+
+    async fn apply_mute(&self, muted: bool) {
+        self.shared.is_muted.store(muted, Ordering::SeqCst);
+
+        // If streaming, also send command to audio thread
+        if self.shared.is_active.load(Ordering::SeqCst) {
+            let tx = self.cmd_tx.lock().await;
+            if let Some(ref sender) = *tx {
+                let _ = sender.send(StreamingCommand::SetMute(muted));
+            }
+        }
+    }
+
     /// The latest reading of every link that is up, for the usage totals:
     /// the round-trip time (`None` before the first sample), the packet loss
     /// rate (0.0 to 1.0) and the packets FEC has rebuilt so far (`None` when
@@ -965,17 +992,12 @@ pub async fn streaming_set_mute(
     muted: bool,
     state: tauri::State<'_, StreamingState>,
 ) -> Result<(), String> {
-    // Can set mute state even when not streaming
-    state.shared.is_muted.store(muted, Ordering::SeqCst);
-
-    // If streaming, also send command to audio thread
-    if state.shared.is_active.load(Ordering::SeqCst) {
-        let tx = state.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetMute(muted));
-        }
+    // Can set mute state even when not streaming. A session that starts later
+    // starts with it: the person's choice before anyone is linked stands.
+    if !state.shared.is_active.load(Ordering::SeqCst) {
+        state.shared.muted_at_start.store(muted, Ordering::SeqCst);
     }
-
+    state.apply_mute(muted).await;
     Ok(())
 }
 
@@ -1151,6 +1173,70 @@ mod tests {
 
         assert_eq!(status.connection_state.as_deref(), Some("connected"));
         assert_eq!(status.network.unwrap().rtt_ms, Some(8.0));
+    }
+
+    /// A room entered by a link from another app is entered muted, and the
+    /// audio session that starts in it starts muted too: the reset a new
+    /// session makes must not unmute the person.
+    ///
+    /// Verifies: REQ-CON-139
+    #[tokio::test]
+    async fn a_room_is_entered_by_a_link_mutes_the_microphone_and_the_session_that_starts_in_it() {
+        let state = StreamingState::new();
+
+        state.mute_on_entry().await;
+        assert!(state.shared.is_muted.load(Ordering::SeqCst));
+        state.shared.start_over();
+
+        assert!(state.shared.is_muted.load(Ordering::SeqCst));
+    }
+
+    /// Verifies: REQ-CON-139
+    #[tokio::test]
+    async fn the_person_unmutes_before_the_session_starts_the_session_starts_unmuted() {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+        let state = app.state::<StreamingState>();
+        state.mute_on_entry().await;
+
+        streaming_set_mute(false, app.state()).await.unwrap();
+        state.shared.start_over();
+
+        assert!(!state.shared.is_muted.load(Ordering::SeqCst));
+    }
+
+    /// The room that was muted for was not entered, or has been left: the next
+    /// one, entered by typing a code, is not muted for it.
+    ///
+    /// Verifies: REQ-CON-139
+    #[tokio::test]
+    async fn the_room_muted_for_is_not_entered_the_next_session_starts_unmuted() {
+        let state = StreamingState::new();
+        state.mute_on_entry().await;
+
+        state.forget_mute_at_start();
+        state.shared.start_over();
+
+        assert!(!state.shared.is_muted.load(Ordering::SeqCst));
+    }
+
+    /// A session that is running keeps the mute the person gave it: choosing
+    /// while it runs is not a choice for the next one.
+    ///
+    /// Verifies: REQ-CON-139
+    #[tokio::test]
+    async fn the_person_mutes_while_a_session_runs_the_next_session_starts_unmuted() {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+        let state = app.state::<StreamingState>();
+        state.shared.is_active.store(true, Ordering::SeqCst);
+
+        streaming_set_mute(true, app.state()).await.unwrap();
+        assert!(state.shared.is_muted.load(Ordering::SeqCst));
+        state.shared.is_active.store(false, Ordering::SeqCst);
+        state.shared.start_over();
+
+        assert!(!state.shared.is_muted.load(Ordering::SeqCst));
     }
 
     #[tokio::test]

@@ -110,10 +110,25 @@ pub async fn session_create(app: AppHandle) -> Result<Snapshot, String> {
 }
 
 /// Joins the room `code` names (an invite code, or a room id from a link).
+/// With `muted`, the microphone is muted from the moment of entering, until the
+/// person unmutes it: a room entered by a link from another app is entered so.
 #[tauri::command]
-pub async fn session_join(code: String, app: AppHandle) -> Result<Snapshot, String> {
+pub async fn session_join(
+    code: String,
+    muted: Option<bool>,
+    app: AppHandle,
+) -> Result<Snapshot, String> {
     crate::terms::require_accepted(&app)?;
-    driver(&app).join(code).await
+    let muted = muted.unwrap_or(false);
+    let streaming = app.state::<streaming::StreamingState>();
+    if muted {
+        streaming.mute_on_entry().await;
+    }
+    let entered = driver(&app).join(code).await;
+    if muted && entered.is_err() {
+        streaming.forget_mute_at_start();
+    }
+    entered
 }
 
 /// Leaves the room and goes back to the room list. With no connection to the
@@ -121,6 +136,8 @@ pub async fn session_join(code: String, app: AppHandle) -> Result<Snapshot, Stri
 /// scratch instead.
 #[tauri::command]
 pub async fn session_leave(app: AppHandle) -> Result<Snapshot, String> {
+    app.state::<streaming::StreamingState>()
+        .forget_mute_at_start();
     driver(&app).leave().await
 }
 

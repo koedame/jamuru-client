@@ -237,7 +237,8 @@ describe('MainScreen の接続の表示', () => {
     expect(callsTo('session_create')).toHaveLength(1);
   });
 
-  it('招待コードを入れて参加するとき、そのコードで session_join を呼ぶこと', async () => {
+  // Verifies: REQ-CON-139
+  it('招待コードを入れて参加するとき、ミュートの指定を付けずに session_join を呼ぶこと', async () => {
     render(<MainScreen />);
 
     fireEvent.change(await screen.findByTestId('connection-panel-invite-code'), {
@@ -749,12 +750,16 @@ describe('MainScreen の招待リンク', () => {
     await waitFor(() => expect(openUrl.handler).not.toBeNull());
   }
 
-  it('招待リンクが届いたとき、そのコードで session_join を呼ぶこと', async () => {
+  // Verifies: REQ-CON-103
+  // Verifies: REQ-CON-139
+  it('招待リンクが届いたとき、そのコードをミュートで入る指定を付けて session_join を呼ぶこと', async () => {
     await withConnection();
 
     act(() => openUrl.handler!(['jamuru://join/abc234xyz']));
 
-    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ' }]);
+    expect(callsTo('session_join').map((c) => c.args)).toEqual([
+      { code: 'ABC234XYZ', muted: true },
+    ]);
   });
 
   it('コードが壊れた招待リンクが届いたとき、エラーを出して参加しないこと', async () => {
