@@ -9,12 +9,12 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 284 |
-| うち must | 272 |
-| うち should | 12 |
-| 検証済み | 259 |
+| 要求 総数 | 292 |
+| うち must | 277 |
+| うち should | 15 |
+| 検証済み | 266 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
-| 未検証（should のみ許容） | 2 |
+| 未検証（should のみ許容） | 3 |
 
 ## 対応表
 
@@ -205,6 +205,14 @@
 | REQ-LAT-129 | must | 帯域不足の警告は複数区間続けて確認してから表示する | `docs-spec/behavior/latency.feature` | `src/network/bandwidth.rs`::verdict_passes_no_signal_through_unconfirmed_and_resets_the_streak<br/>`src/network/bandwidth.rs`::verdict_requires_consecutive_confirmation_before_reporting_insufficient |
 | REQ-LAT-130 | must | RTTを測定するまで接続品質を判定しない | `docs-spec/behavior/latency.feature` | `src/network/connection.rs`::connection_stats_quality_waits_for_the_first_rtt_sample<br/>`src/network/connection.rs`::rtt_measurement_starts_unmeasured_and_records_the_first_sample<br/>`ui/src/components/SessionStats.test.tsx`::shows a measuring state rather than 0ms before the first RTT sample<br/>`ui/src/lib/links.test.ts`::a link with no round trip measured yet has no latency to show |
 | REQ-LAT-131 | must | 相手が音声を送っていない間は帯域不足にしない | `docs-spec/behavior/latency.feature` | `src/network/bandwidth.rs`::a_peer_that_sends_no_audio_is_not_a_narrow_link |
+| REQ-MNU-001 | must | メニューバーを macOS・Windows・Linux に出す。アプリが作る項目（ルーム・設定・終了・ヘルプ類）は、どの OS のメニューにもちょうど 1 回ずつある（macOS の「終了」は OS 標準の項目）。Windows / Linux のメニューには、その OS が持たない OS 標準の項目（フルスクリーン・やり直し・ウィンドウ一覧など）を入れない | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::on_macos_every_entry_but_quit_is_in_the_menu_once<br/>`src-tauri/src/menu.rs`::on_windows_and_linux_every_entry_is_in_the_menu_once<br/>`src-tauri/src/menu.rs`::on_windows_and_linux_the_menu_holds_only_what_those_systems_provide |
+| REQ-MNU-002 | should | 構成は OS の作法に合わせる。macOS はアプリ名のメニューを先頭に、ヘルプを末尾に置き、ウィンドウメニューに「すべてを手前に移動」を持つ。Windows / Linux は設定をファイルメニューに、「jamuru について」をヘルプメニューに置く | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::on_macos_the_app_name_menu_comes_first_and_help_comes_last<br/>`src-tauri/src/menu.rs`::on_windows_and_linux_settings_is_in_file_and_about_is_in_help |
+| REQ-MNU-003 | should | ヘルプメニューから、使い方・うまくいかないとき・システム診断・ログフォルダ・問題を報告・利用規約・プライバシーとセキュリティ・ライセンス・お知らせに届く | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::the_help_menu_reaches_the_guide_the_support_tools_and_the_notices |
+| REQ-MNU-004 | must | メニューの文言は、アプリの言語設定（日本語・英語）に従う。設定が無いときは OS の言語、それが日本語でなければ英語。OS 標準の項目の文言も同じ表から出す。言語が変わったらメニューを作り直す | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::every_entry_has_an_id_that_finds_it_and_text_in_both_languages<br/>`src-tauri/src/menu.rs`::every_native_entry_has_text_in_both_languages<br/>`src-tauri/src/menu.rs`::the_chosen_language_decides_the_menu_language_before_the_system_does<br/>`src-tauri/src/menu.rs`::with_no_chosen_language_the_system_language_decides_and_english_is_the_last_resort |
+| REQ-MNU-005 | must | 項目は状態で有効・無効になる。ルームに入れる状態のとき、ルームの作成・招待コードで参加（テストルームはサーバーが示したときだけ）が使え、退室・招待コードのコピー・設定依頼は使えない。ルームの中ではその逆。画面は、頼まれた時点でその操作ができる状態でなければ何もしない。選んだ項目は、メインウィンドウの画面が同じ操作として実行する（作成・参加の入力欄へのカーソル移動・テストルーム・コピー・退室の確認・設定依頼） | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::before_a_room_is_entered_a_room_can_be_made_or_joined_and_not_left<br/>`src-tauri/src/menu.rs`::in_a_room_the_room_can_be_left_and_not_made<br/>`src-tauri/src/menu.rs`::without_a_test_room_from_the_server_the_test_room_is_not_offered<br/>`ui/src/screens/MainScreen.test.tsx`::メニューで「テストルームに入る」を選んだとき、サーバーが示したコードで session_join を呼ぶこと<br/>`ui/src/screens/MainScreen.test.tsx`::メニューで「ルームを作成」を選んだとき、session_create を呼ぶこと<br/>`ui/src/screens/MainScreen.test.tsx`::メニューで「招待コードで参加」を選んだとき、招待コードの入力欄にカーソルが移ること<br/>`ui/src/screens/MainScreen.test.tsx`::ルームの中でメニューの「招待コードをコピー」を選んだとき、そのルームの招待コードをクリップボードに入れること<br/>`ui/src/screens/MainScreen.test.tsx`::ルームの中でメニューの「設定依頼をする」を選んだとき、依頼の画面を開くこと<br/>`ui/src/screens/MainScreen.test.tsx`::ルームの中でメニューの「退室」を選んだとき、退室の確認を出し、まだ退室しないこと<br/>`ui/src/screens/MainScreen.test.tsx`::ルームの中にいないのにメニューから退室が届いたとき、何もしないこと<br/>`ui/src/screens/MainScreen.test.tsx`::ルームの中にいるのにメニューからルームの作成が届いたとき、作らないこと |
+| REQ-MNU-006 | must | 規約に同意するまでは、ブラウザで開く項目・ログフォルダ・終了だけが使える（REQ-TRM-003）。手伝う側のウィンドウからも同じ項目だけが使える。設定ウィンドウからは、設定に関する項目が使え、ルームの項目は使えない | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::before_the_terms_are_agreed_to_only_what_stays_on_the_machine_or_in_the_browser_works<br/>`src-tauri/src/menu.rs`::from_a_helpers_window_only_the_browser_and_the_log_folder_entries_work<br/>`src-tauri/src/menu.rs`::from_the_settings_window_the_settings_entries_work_and_the_room_ones_do_not |
+| REQ-MNU-007 | must | 診断・問題を報告は設定の「診断とサポート」タブを、利用規約・ライセンスは「アプリについて」タブを開く。設定ウィンドウが開いていればそのウィンドウを前面に出してタブを切り替え、閉じていればそのタブで開く。知らないタブの名前では切り替えない | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::a_window_is_told_apart_by_its_label<br/>`src-tauri/src/menu.rs`::entries_that_open_settings_name_a_tab_the_settings_window_has<br/>`src-tauri/src/menu.rs`::entries_that_open_the_browser_open_https_pages<br/>`src-tauri/src/menu.rs`::entries_that_work_on_the_screen_each_name_a_different_action<br/>`ui/src/screens/SettingsScreen.test.tsx`::アドレスが「アプリについて」を名指ししているとき、そのタブで開くこと<br/>`ui/src/screens/SettingsScreen.test.tsx`::アドレスがタブを名指ししているとき、そのタブを返すこと<br/>`ui/src/screens/SettingsScreen.test.tsx`::タブを名指ししていないか、知らない名前のとき、null を返すこと<br/>`ui/src/screens/SettingsScreen.test.tsx`::知らないタブの名前を伝えられたとき、今のタブのままであること<br/>`ui/src/screens/SettingsScreen.test.tsx`::開いているときにアプリからタブを替えるよう伝えられたとき、そのタブに替わること |
+| REQ-MNU-008 | should | メニューの項目には、このアプリ独自のキーボードショートカットを割り当てない（アプリ全体のショートカットを決めるときにまとめて決める）。OS 標準の項目が持つ OS 標準のキーは残る | `docs-spec/requirements.md` | **未検証** |
 | REQ-NET-020 | must | PCM の必要帯域がサンプルレートとビット幅から算出され、1ch あたり約1.5Mbpsを下回らない | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::pcm_requirement_matches_the_documented_figure |
 | REQ-NET-021 | must | FEC の帯域コストがプリセットの冗長度と一致する | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::fec_costs_its_redundancy_in_bandwidth |
 | REQ-NET-022 | must | フレームが小さいほどヘッダ overhead により必要帯域が増える | `docs-spec/requirements.md` | `src/network/bandwidth.rs`::smaller_frames_cost_more_in_overhead |
@@ -314,3 +322,4 @@
 |---------|------|--------|
 | REQ-CORE-004 | 日本国内光回線（RTT 20ms）で総片道遅延が 12ms 以下になる | `docs-spec/requirements.md` |
 | REQ-LAT-123 | ASIO使用時の低遅延 | `docs-spec/behavior/latency.feature` |
+| REQ-MNU-008 | メニューの項目には、このアプリ独自のキーボードショートカットを割り当てない（アプリ全体のショートカットを決めるときにまとめて決める）。OS 標準の項目が持つ OS 標準のキーは残る | `docs-spec/requirements.md` |
