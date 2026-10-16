@@ -14,6 +14,7 @@ import { DevicesTab, DeviceInfo } from "./tabs/DevicesTab";
 import { PrivacyTab } from "./tabs/PrivacyTab";
 import { DiagnosticsTab, DiagnosticsState, ReportProblemState } from "./tabs/DiagnosticsTab";
 import { AboutTab } from "./tabs/AboutTab";
+import type { UpdateSectionProps } from "./tabs/UpdateSection";
 import { SelectOption } from "./Select";
 import type { LegalSectionProps } from "../Terms/LegalSection";
 import { MicIcon, SlidersIcon, ShieldIcon, ActivityIcon, InfoIcon } from "./icons";
@@ -88,6 +89,8 @@ export interface SettingsPanelProps {
   onServerUrlChange?: (url: string) => void;
   /** Opens the terms of use, the license and the published pages (About tab, left out when absent) */
   legal?: LegalSectionProps;
+  /** The update check shown on the About tab (ADR-082); not shown when absent */
+  update?: UpdateSectionProps;
   /** Display name change handler */
   onDisplayNameChange: (name: string) => void;
   /** Input device change handler */
@@ -201,6 +204,7 @@ export function SettingsPanel({
   onLanguageChange,
   onServerUrlChange = () => {},
   legal,
+  update,
   onDisplayNameChange,
   onInputDeviceChange,
   onOutputDeviceChange,
@@ -337,7 +341,7 @@ export function SettingsPanel({
           />
         );
       case "about":
-        return legal ? <AboutTab {...legal} /> : null;
+        return legal ? <AboutTab {...legal} update={update} /> : null;
       default:
         return null;
     }

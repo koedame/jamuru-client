@@ -136,6 +136,52 @@ impl<'a> SettingsScreen<'a> {
     pub fn diagnostics_tab(&self) -> DiagnosticsTab<'a> {
         DiagnosticsTab::new(self.driver)
     }
+
+    /// The update section of the About tab. Select that tab before using it.
+    pub fn update_section(&self) -> UpdateSection<'a> {
+        UpdateSection::new(self.driver)
+    }
+}
+
+/// The About tab's update section (ADR-082).
+pub struct UpdateSection<'a> {
+    driver: &'a Driver,
+}
+
+impl<'a> UpdateSection<'a> {
+    pub(crate) fn new(driver: &'a Driver) -> Self {
+        Self { driver }
+    }
+
+    fn element(&self, selector: &'static str, name: &'static str) -> Element<'a> {
+        Element::new(
+            self.driver,
+            selector,
+            Some(windows::SETTINGS.to_string()),
+            name,
+        )
+    }
+
+    pub fn section(&self) -> Element<'a> {
+        self.element("[data-testid='settings-update']", "update section")
+    }
+
+    /// "Version X".
+    pub fn version(&self) -> Element<'a> {
+        self.element("[data-testid='settings-update-version']", "running version")
+    }
+
+    /// The line that says what the check found, or that the build does not check.
+    pub fn message(&self) -> Element<'a> {
+        self.element("[data-testid='settings-update-message']", "update message")
+    }
+
+    pub fn check_button(&self) -> Element<'a> {
+        self.element(
+            "[data-testid='settings-update-check']",
+            "check for updates button",
+        )
+    }
 }
 
 /// The Diagnostics tab's log file section (ADR-036).

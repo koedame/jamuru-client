@@ -1,18 +1,24 @@
 /**
- * AboutTab - The terms of use, the license and the pages published for users
+ * AboutTab - The update check, and the terms of use, the license and the pages published for users
  *
- * The rows themselves live in LegalSection (ADR-072).
+ * The legal rows themselves live in LegalSection (ADR-072); the update check
+ * in UpdateSection (ADR-082), shown when it is given.
  */
 
 import { LegalSection, type LegalSectionProps } from "../../Terms/LegalSection";
+import { UpdateSection, type UpdateSectionProps } from "./UpdateSection";
 import "./TabContent.css";
 
-export type AboutTabProps = LegalSectionProps;
+export interface AboutTabProps extends LegalSectionProps {
+  /** The update section; not shown when absent */
+  update?: UpdateSectionProps;
+}
 
-export function AboutTab(props: AboutTabProps) {
+export function AboutTab({ update, ...legal }: AboutTabProps) {
   return (
     <div className="tab-content">
-      <LegalSection {...props} />
+      {update && <UpdateSection {...update} />}
+      <LegalSection {...legal} />
     </div>
   );
 }

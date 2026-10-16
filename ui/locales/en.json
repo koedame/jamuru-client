@@ -464,6 +464,20 @@
       "license": "License",
       "privacy": "Privacy and security (opens in the browser)",
       "announcements": "Announcements (opens in the browser)"
+    },
+    "update": {
+      "title": "Updates",
+      "current": "Version {{version}}",
+      "unsupported": "This build does not check for updates (a development build, or one built from source).",
+      "check": "Check for Updates",
+      "checking": "Checking…",
+      "upToDate": "You are on the latest version.",
+      "available": "A new version, {{version}}, is out.",
+      "install": "Update and Restart",
+      "installing": "Installing {{version}}. jamuru restarts when it is done.",
+      "inSession": "You are in a room, and the restart would cut the audio. Leave the room, then update.",
+      "busy": "Another update is in progress. Try again in a little while.",
+      "failed": "Could not update: {{message}}"
     }
   },
   "status": {

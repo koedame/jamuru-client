@@ -95,6 +95,9 @@
 | `terms_accept` | 利用規約に同意する |
 | `terms_open_page` | プライバシーの説明・お知らせのページをブラウザで開く |
 | `update_notice_get` | 自分で入れ替えられない配布形態に、新しい版が出ているかを読む |
+| `update_status` | 実行中の版と、このビルドで更新について何ができるかを読む |
+| `update_check` | 新しい版が出ているかを、いま確かめる |
+| `update_install` | 新しい版を入れて再起動する（セッション中は断る） |
 | `window_open_settings` | 設定ウィンドウを開く |
 | `window_close_settings` | 設定ウィンドウを閉じる |
 | `window_toggle_chat` | チャットウィンドウを開閉する |
