@@ -108,10 +108,14 @@ pub fn run() {
         // The menu is made in `menu::install`, in the app's language.
         .enable_macos_default_menu(false)
         .on_menu_event(|app, event| menu::handle_event(app, event.id().as_ref()))
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Focused(true) = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Focused(true) => {
                 menu::window_focused(window.app_handle(), window.label());
             }
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                windows::close_requested(window.app_handle(), window.label(), api);
+            }
+            _ => {}
         });
     if self_updating {
         // Driven only from `updater.rs`, never the webview.
