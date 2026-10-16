@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -46,6 +47,8 @@ pub(crate) enum UpdateError {
     Busy,
     /// An update is installed and the app is about to restart into it.
     Restarting,
+    /// The user is in a session, and this update would cut the audio.
+    InSession,
     /// A step did not finish within its time limit.
     TimedOut(&'static str),
     Failed(tauri_plugin_updater::Error),
@@ -62,6 +65,7 @@ impl fmt::Display for UpdateError {
         match self {
             Self::Busy => write!(f, "another update is already running"),
             Self::Restarting => write!(f, "an update is installed and the app is restarting"),
+            Self::InSession => write!(f, "the user is in a session"),
             Self::TimedOut(step) => write!(f, "{} did not finish in time", step),
             Self::Failed(error) => write!(f, "{}", error),
         }
@@ -216,7 +220,7 @@ pub(crate) fn spawn(app: AppHandle) {
 }
 
 async fn update_once(app: &AppHandle) -> Result<(), UpdateError> {
-    if let Some(version) = install_newer(app, true).await? {
+    if let Some(version) = install_newer(app, InSession::Wait).await? {
         tracing::info!("Installed {}; restarting", version);
         // Windows: the installer has already ended this process. Elsewhere the
         // new version runs from the next start.
@@ -233,15 +237,25 @@ fn notice_target() -> Option<&'static str> {
     (std::env::consts::OS == "linux").then_some("linux-x86_64-appimage")
 }
 
-/// Looks whether a release newer than the running one exists, and tells the
-/// screen. Nothing is downloaded or installed.
-async fn notify_once<R: Runtime>(app: &AppHandle<R>) -> Result<(), UpdateError> {
+/// Looks for a release newer than the running one. Nothing is downloaded.
+/// `notice_only` is for a package that cannot replace itself, which reads the
+/// update information as [`notice_target`] does.
+async fn find_newer<R: Runtime>(
+    app: &AppHandle<R>,
+    notice_only: bool,
+) -> Result<Option<Update>, UpdateError> {
     let mut builder = app.updater_builder();
-    if let Some(target) = notice_target() {
+    if let Some(target) = notice_target().filter(|_| notice_only) {
         builder = builder.target(target);
     }
     let updater = builder.build()?;
-    let Some(update) = within("checking for a release", CHECK_LIMIT, updater.check()).await? else {
+    within("checking for a release", CHECK_LIMIT, updater.check()).await
+}
+
+/// Looks whether a release newer than the running one exists, and tells the
+/// screen. Nothing is downloaded or installed.
+async fn notify_once<R: Runtime>(app: &AppHandle<R>) -> Result<(), UpdateError> {
+    let Some(update) = find_newer(app, true).await? else {
         tracing::debug!("No newer release");
         return Ok(());
     };
@@ -252,6 +266,129 @@ async fn notify_once<R: Runtime>(app: &AppHandle<R>) -> Result<(), UpdateError> 
     );
     announce(app, update.version);
     Ok(())
+}
+
+/// What the app can do about a newer release, as far as this build goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Support {
+    /// A development build, or one made from source: it never looks for a
+    /// release (ADR-041).
+    None,
+    /// A package that cannot replace itself (ADR-076): it can say that a newer
+    /// release exists, and the person installs it by hand.
+    Notice,
+    /// Downloads, installs and restarts into the newer release.
+    Install,
+}
+
+fn support(development_build: bool, configured: bool, package_updates_itself: bool) -> Support {
+    if development_build || !configured {
+        Support::None
+    } else if package_updates_itself {
+        Support::Install
+    } else {
+        Support::Notice
+    }
+}
+
+fn support_of<R: Runtime>(app: &AppHandle<R>) -> Support {
+    support(
+        is_development_build(),
+        app.config().plugins.0.contains_key("updater"),
+        package_updates_itself(),
+    )
+}
+
+/// What the settings screen shows before anything is checked.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct UpdateStatus {
+    /// The running version.
+    pub current: String,
+    pub support: Support,
+}
+
+#[tauri::command]
+pub fn update_status<R: Runtime>(app: AppHandle<R>) -> UpdateStatus {
+    UpdateStatus {
+        current: app.package_info().version.to_string(),
+        support: support_of(&app),
+    }
+}
+
+/// What a check the person asked for found.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Checked {
+    Unsupported,
+    UpToDate,
+    Available { version: String },
+}
+
+/// Looks for a newer release now, whatever `auto_update` says: the person
+/// asked. Nothing is downloaded. A package that cannot install it by itself
+/// also tells the top of the screen, as its background check does (ADR-076).
+#[tauri::command]
+pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Result<Checked, String> {
+    let support = support_of(&app);
+    if support == Support::None {
+        return Ok(Checked::Unsupported);
+    }
+    let found = find_newer(&app, support == Support::Notice)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(match found {
+        None => Checked::UpToDate,
+        Some(update) => {
+            if support == Support::Notice {
+                announce(&app, update.version.clone());
+            }
+            Checked::Available {
+                version: update.version,
+            }
+        }
+    })
+}
+
+/// What an install the person asked for came to. Anything that went wrong is
+/// an `Err` instead.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Installed {
+    /// This build or package cannot install a release by itself.
+    Unsupported,
+    /// The user is in a session: the install ends in a restart, which would
+    /// cut the audio.
+    InSession,
+    /// Another update is running, or one is installed and about to restart.
+    Busy,
+    UpToDate,
+    /// Installed; the app is restarting into it.
+    Restarting {
+        version: String,
+    },
+}
+
+/// Downloads and installs the newer release, then restarts the app. Never
+/// during a session, whatever `auto_update` says. Only the app's own screen
+/// can ask (ADR-082); the restart ends the call, so an answer means it did not
+/// happen.
+#[tauri::command]
+pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<Installed, String> {
+    if support_of(&app) != Support::Install {
+        return Ok(Installed::Unsupported);
+    }
+    match install_newer(&app, InSession::Refuse).await {
+        Ok(None) => Ok(Installed::UpToDate),
+        Ok(Some(version)) => {
+            tracing::info!("Installed {}; restarting", version);
+            crate::restart::restart(&app).await;
+            Ok(Installed::Restarting { version })
+        }
+        Err(UpdateError::InSession) => Ok(Installed::InSession),
+        Err(UpdateError::Busy | UpdateError::Restarting) => Ok(Installed::Busy),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Keeps the version for a screen that opens later, and tells the screens
@@ -273,18 +410,41 @@ fn announce<R: Runtime>(app: &AppHandle<R>, version: String) {
 pub(crate) async fn install_now<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Option<String>, UpdateError> {
-    install_newer(app, false).await
+    install_newer(app, InSession::Install).await
+}
+
+/// What an install does when the user is in a session, since the install ends
+/// in a restart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InSession {
+    /// Installs anyway: someone debugging the app remotely asked for it.
+    #[cfg_attr(not(feature = "debug-tools"), allow(dead_code))]
+    Install,
+    /// Downloads, then holds back the install until the user is out. The wait
+    /// is spent without holding the gate, so an update asked for by hand is not
+    /// refused for as long as the user stays in the session.
+    Wait,
+    /// Gives up with [`UpdateError::InSession`], before the download and again
+    /// before the install: the person asked for it by hand, and can ask again
+    /// once out of the session.
+    Refuse,
+}
+
+impl InSession {
+    fn refuses(self, in_session_now: bool) -> bool {
+        self == InSession::Refuse && in_session_now
+    }
 }
 
 /// Downloads and installs a release newer than the running one, and returns
-/// its version. With `wait_for_session` it holds back the install until the
-/// user is out of a session, since the install ends in a restart. The wait is
-/// spent without holding the gate, so an update asked for by hand is not
-/// refused for as long as the user stays in the session.
+/// its version.
 async fn install_newer<R: Runtime>(
     app: &AppHandle<R>,
-    wait_for_session: bool,
+    in_session: InSession,
 ) -> Result<Option<String>, UpdateError> {
+    if in_session.refuses(windows::is_in_session()) {
+        return Err(UpdateError::InSession);
+    }
     let turn = GATE.begin()?;
     // The Windows updater ends the process itself once the installer has
     // started, without `RunEvent::Exit`; without this the next launch would
@@ -317,16 +477,22 @@ async fn install_newer<R: Runtime>(
     )
     .await?;
 
-    let turn = if wait_for_session {
-        drop(turn);
-        wait_until_no_session(windows::is_in_session, SESSION_POLL_INTERVAL).await;
-        if !config::load_config().unwrap_or_default().auto_update {
-            tracing::info!("Self-update was turned off while downloading; not installing");
-            return Ok(None);
+    let turn = match in_session {
+        InSession::Wait => {
+            drop(turn);
+            wait_until_no_session(windows::is_in_session, SESSION_POLL_INTERVAL).await;
+            if !config::load_config().unwrap_or_default().auto_update {
+                tracing::info!("Self-update was turned off while downloading; not installing");
+                return Ok(None);
+            }
+            GATE.begin()?
         }
-        GATE.begin()?
-    } else {
-        turn
+        InSession::Install | InSession::Refuse => {
+            if in_session.refuses(windows::is_in_session()) {
+                return Err(UpdateError::InSession);
+            }
+            turn
+        }
     };
 
     let version = update.version.clone();
@@ -468,6 +634,100 @@ mod tests {
         announce(app.handle(), "1.2.3".to_string());
 
         assert_eq!(*heard.lock().unwrap(), vec!["\"1.2.3\"".to_string()]);
+    }
+
+    /// Verifies: REQ-UPD-022
+    #[test]
+    fn when_it_is_a_release_build_that_updates_itself_the_person_can_install_by_hand() {
+        assert_eq!(support(false, true, true), Support::Install);
+    }
+
+    /// Verifies: REQ-UPD-022
+    #[test]
+    fn when_the_package_cannot_replace_itself_the_person_is_only_told_of_a_newer_release() {
+        assert_eq!(support(false, true, false), Support::Notice);
+    }
+
+    /// Verifies: REQ-UPD-022
+    #[test]
+    fn when_it_is_a_development_or_self_built_build_there_is_nothing_to_check() {
+        assert_eq!(support(true, true, true), Support::None);
+        assert_eq!(support(false, false, true), Support::None);
+        assert_eq!(support(false, false, false), Support::None);
+    }
+
+    /// Verifies: REQ-UPD-022
+    #[test]
+    fn when_the_screen_asks_for_the_status_it_gets_the_running_version_and_the_support() {
+        let app = tauri::test::mock_app();
+
+        let status = update_status(app.handle().clone());
+
+        assert_eq!(status.current, app.package_info().version.to_string());
+        assert_eq!(status.support, Support::None);
+        assert_eq!(
+            serde_json::to_value(&status).unwrap(),
+            serde_json::json!({ "current": status.current, "support": "none" })
+        );
+    }
+
+    /// The screen reads these shapes (`ui/src/lib/tauri.ts`).
+    ///
+    /// Verifies: REQ-UPD-022
+    #[test]
+    fn when_a_check_or_an_install_is_answered_the_screen_reads_a_kind_and_a_version() {
+        use serde_json::json;
+        assert_eq!(
+            serde_json::to_value(&Checked::UpToDate).unwrap(),
+            json!({ "kind": "up_to_date" })
+        );
+        assert_eq!(
+            serde_json::to_value(&Checked::Available {
+                version: "1.2.3".into()
+            })
+            .unwrap(),
+            json!({ "kind": "available", "version": "1.2.3" })
+        );
+        assert_eq!(
+            serde_json::to_value(&Installed::InSession).unwrap(),
+            json!({ "kind": "in_session" })
+        );
+        assert_eq!(
+            serde_json::to_value(&Installed::Restarting {
+                version: "1.2.3".into()
+            })
+            .unwrap(),
+            json!({ "kind": "restarting", "version": "1.2.3" })
+        );
+    }
+
+    /// Verifies: REQ-UPD-022
+    #[tokio::test]
+    async fn when_the_build_cannot_check_a_check_by_hand_says_so_without_the_network() {
+        let app = tauri::test::mock_app();
+
+        assert_eq!(
+            update_check(app.handle().clone()).await,
+            Ok(Checked::Unsupported)
+        );
+        assert_eq!(
+            update_install(app.handle().clone()).await,
+            Ok(Installed::Unsupported)
+        );
+    }
+
+    /// Verifies: REQ-UPD-024
+    #[test]
+    fn when_the_person_asked_by_hand_and_is_in_a_session_the_install_is_refused() {
+        assert!(InSession::Refuse.refuses(true));
+        assert!(!InSession::Refuse.refuses(false));
+    }
+
+    /// Verifies: REQ-UPD-024
+    #[test]
+    fn when_the_update_is_automatic_or_remote_it_is_not_refused_for_a_session_here() {
+        assert!(!InSession::Wait.refuses(true));
+        assert!(!InSession::Install.refuses(true));
     }
 
     /// Verifies: REQ-UPD-005
