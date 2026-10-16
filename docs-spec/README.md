@@ -80,6 +80,7 @@
 | [ADR-078](./adr/ADR-078-remove-the-unused-session.md) | 使い手のない複数人用の部品 `Session` を消す。相手ごとの `Connection` で足りる |
 | [ADR-079](./adr/ADR-079-follow-the-peer-to-an-address-it-was-not-offered-from.md) | 暗号化したリンクでは、公開されていないアドレスから届いた（復号と重複の検査を通った）パケットの送り元へ、返事が無いときに送り先を移す |
 | [ADR-080](./adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md) | 設定のタブは「利用者がしたいこと」で分ける（一般・オーディオ・プライバシー・診断とサポート・アプリについて）。項目は減らさず置き場所だけを変える |
+| [ADR-081](./adr/ADR-081-native-menu-bar.md) | メニューバーは OS ごとの作法に合わせて作り、状態に応じて項目を有効・無効にする。ヘルプを充実させ、ショートカットはまだ付けない |
 
 ---
 
