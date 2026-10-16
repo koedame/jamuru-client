@@ -37,6 +37,7 @@ import {
 } from "../../lib/tauri";
 import { useWindowEvent } from "../../hooks/useWindowEvents";
 import { useAudioSettingsTab } from "./useAudioSettingsTab";
+import { useAppUpdate } from "./useAppUpdate";
 import { SettingsPanel, type SettingsTabId, type Language } from "./index";
 import type { ReportProblemState } from "./tabs/DiagnosticsTab";
 import { TermsViewer } from "../Terms/TermsViewer";
@@ -46,6 +47,8 @@ export interface SettingsPanelAdapterProps {
   initialTab?: SettingsTabId;
   /** A tab to switch to now (see `SettingsPanel`) */
   tabRequest?: { tab: SettingsTabId } | null;
+  /** Looks for a newer release each time it changes to a number above 0 (the menu's "Check for Updates") */
+  updateCheckRequest?: number;
   /** Callback when settings change */
   onSettingsChange?: () => void;
 }
@@ -62,9 +65,11 @@ const PRESET_OF_RECOMMENDATION: Record<RecommendedPreset, AudioPresetId> = {
 export function SettingsPanelAdapter({
   initialTab = "general",
   tabRequest,
+  updateCheckRequest,
   onSettingsChange,
 }: SettingsPanelAdapterProps) {
   const { i18n, t } = useTranslation();
+  const update = useAppUpdate(updateCheckRequest);
 
   // State
   // Audio settings as the backend has them in effect (ADR-043). Replaced
@@ -443,6 +448,7 @@ export function SettingsPanelAdapter({
         onOpenPrivacy: () => handleOpenPage("privacy"),
         onOpenAnnouncements: () => handleOpenPage("announcements"),
       }}
+      update={update}
       onDisplayNameChange={handleDisplayNameChange}
       diagnosticsState={diagnosticsState}
       diagnosticsProgress={diagnosticsProgress}

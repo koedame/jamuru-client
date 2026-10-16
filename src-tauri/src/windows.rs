@@ -133,6 +133,31 @@ pub fn create_settings_window(app: &AppHandle) -> tauri::Result<()> {
 /// switch it to `tab`. `None` leaves an open window on the tab it shows and a
 /// new one on the first.
 pub fn create_settings_window_at(app: &AppHandle, tab: Option<&str>) -> tauri::Result<()> {
+    open_settings(app, tab, false)
+}
+
+/// Tells an open settings window to look for a newer release.
+pub const SETTINGS_CHECK_UPDATE_EVENT: &str = "settings:check-update";
+
+/// The segment after the tab in a settings URL that has the window look for a
+/// newer release as it opens (`ui/src/screens/SettingsScreen.tsx`).
+const CHECK_UPDATE_SEGMENT: &str = "check-update";
+
+/// Open the settings window on the About tab and have it look for a newer
+/// release, as the menu's "Check for Updates" asks.
+pub fn open_settings_to_check_update(app: &AppHandle) -> tauri::Result<()> {
+    open_settings(app, Some("about"), true)
+}
+
+fn settings_url(tab: Option<&str>, check_update: bool) -> String {
+    match (tab, check_update) {
+        (Some(tab), true) => format!("index.html#/settings/{}/{}", tab, CHECK_UPDATE_SEGMENT),
+        (Some(tab), false) => format!("index.html#/settings/{}", tab),
+        (None, _) => "index.html#/settings".to_string(),
+    }
+}
+
+fn open_settings(app: &AppHandle, tab: Option<&str>, check_update: bool) -> tauri::Result<()> {
     let tab = tab.filter(|tab| SETTINGS_TABS.contains(tab));
 
     if let Some(window) = app.get_webview_window(labels::SETTINGS) {
@@ -143,15 +168,15 @@ pub fn create_settings_window_at(app: &AppHandle, tab: Option<&str>) -> tauri::R
         if let Some(tab) = tab {
             app.emit_to(labels::SETTINGS, SETTINGS_SELECT_TAB_EVENT, tab)?;
         }
+        if check_update {
+            app.emit_to(labels::SETTINGS, SETTINGS_CHECK_UPDATE_EVENT, ())?;
+        }
         return Ok(());
     }
 
     info!("Creating settings window");
 
-    let url = match tab {
-        Some(tab) => format!("index.html#/settings/{}", tab),
-        None => "index.html#/settings".to_string(),
-    };
+    let url = settings_url(tab, check_update);
     WebviewWindowBuilder::new(app, labels::SETTINGS, WebviewUrl::App(url.into()))
         .title("jamuru - Settings")
         .inner_size(720.0, 560.0)
@@ -382,6 +407,20 @@ pub fn window_resize_main(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Verifies: REQ-MNU-009
+    #[test]
+    fn when_the_settings_window_is_opened_to_check_for_updates_its_address_says_so() {
+        assert_eq!(
+            settings_url(Some("about"), true),
+            "index.html#/settings/about/check-update"
+        );
+        assert_eq!(
+            settings_url(Some("about"), false),
+            "index.html#/settings/about"
+        );
+        assert_eq!(settings_url(None, false), "index.html#/settings");
+    }
 
     #[test]
     fn test_session_state() {
