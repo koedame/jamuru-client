@@ -321,10 +321,14 @@ export async function sessionCreate(): Promise<SessionSnapshot> {
 
 /**
  * Join the room `code` names: an invite code, or a room id from a link.
- * The name is the one in the settings.
+ * The name is the one in the settings. With `muted`, the microphone is
+ * muted from the moment of entering, until the person unmutes it.
  */
-export async function sessionJoin(code: string): Promise<SessionSnapshot> {
-  return invoke("session_join", { code });
+export async function sessionJoin(
+  code: string,
+  options: { muted?: boolean } = {}
+): Promise<SessionSnapshot> {
+  return invoke("session_join", { code, ...options });
 }
 
 /** Leave the room and go back to the room list */
