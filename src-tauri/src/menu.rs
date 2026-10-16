@@ -710,6 +710,9 @@ pub fn handle_event(app: &AppHandle, id: &str) {
 }
 
 #[cfg(test)]
+mod ledger;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1021,7 +1024,12 @@ mod tests {
     fn entries_that_open_the_browser_open_https_pages() {
         for item in Item::ALL {
             if let Route::Browser(url) = item.route() {
-                assert_eq!(url.split_once("://").map(|(scheme, _)| scheme), Some("https"), "{:?}", item);
+                assert_eq!(
+                    url.split_once("://").map(|(scheme, _)| scheme),
+                    Some("https"),
+                    "{:?}",
+                    item
+                );
             }
         }
     }
