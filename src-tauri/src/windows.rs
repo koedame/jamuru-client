@@ -408,7 +408,7 @@ pub fn window_resize_main(
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-MNU-009
+    /// Verifies: REQ-MNU-010
     #[test]
     fn when_the_settings_window_is_opened_to_check_for_updates_its_address_says_so() {
         assert_eq!(

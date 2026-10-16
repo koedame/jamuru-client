@@ -277,7 +277,7 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 - `support = none`（開発ビルド・自前のビルド）は、確認しない旨だけを出し、ボタンを出さない
 - セッション中（`inSession`）は「更新して再起動」を押せなくし、「退室してから更新してください」を添える（REQ-UPD-024）
-- メニューの「アップデートを確認…」から開いたときは、開いてすぐ確認を始める（`updateCheckRequest`、REQ-MNU-009）
+- メニューの「アップデートを確認…」から開いたときは、開いてすぐ確認を始める（`updateCheckRequest`、REQ-MNU-010）
 
 続いて、見出し「規約など」＋ 「利用規約」「ライセンス」「プライバシーとセキュリティ」「お知らせ」の行（`LegalSection`。`legal` を渡したときだけタブごと出る）。「利用規約」「ライセンス」はアプリに同梱した本文をダイアログ（`TermsViewer`）で読む。「プライバシーとセキュリティ」「お知らせ」はブラウザで開く（開けるのはこの 2 ページだけ。[ADR-072](../../adr/ADR-072-terms-of-use-and-first-launch-consent.md)）
 
