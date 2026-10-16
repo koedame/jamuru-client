@@ -13,7 +13,9 @@ pub use connection::{ConnectionScreen, ConnectionState};
 pub use consent::ConsentScreen;
 pub use helper::HelperScreen;
 pub use session::SessionScreen;
-pub use settings::{DevicesTab, DiagnosticsTab, PrivacyTab, SettingsScreen, SettingsTab};
+pub use settings::{
+    DevicesTab, DiagnosticsTab, PrivacyTab, SettingsScreen, SettingsTab, UpdateSection,
+};
 
 /// Tauri window labels, mirroring `src-tauri/src/windows.rs`'s `labels`.
 pub(crate) mod windows {

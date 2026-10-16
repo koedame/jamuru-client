@@ -151,7 +151,7 @@ type Language = "ja" | "en";
 | オーディオ | `devices` | `mic` | デバイス／音質と遅延 |
 | プライバシー | `privacy` | `shield` | 前回について／利用状況の送信 |
 | 診断とサポート | `diagnostics` | `activity` | システム診断／ログファイル／問題を報告 |
-| アプリについて | `about` | `info` | 規約など |
+| アプリについて | `about` | `info` | アップデート／規約など |
 
 `devices` の id は DOM の id・E2E・設定の手伝い（ADR-044）が参照しているため、題を「オーディオ」に変えても変えない。
 
@@ -262,7 +262,24 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 ### アプリについてタブ（AboutTab）
 
-見出し「規約など」＋ 「利用規約」「ライセンス」「プライバシーとセキュリティ」「お知らせ」の行（`LegalSection`。`legal` を渡したときだけタブごと出る）。「利用規約」「ライセンス」はアプリに同梱した本文をダイアログ（`TermsViewer`）で読む。「プライバシーとセキュリティ」「お知らせ」はブラウザで開く（開けるのはこの 2 ページだけ。[ADR-072](../../adr/ADR-072-terms-of-use-and-first-launch-consent.md)）
+先頭に**アップデートの節**（`update` を渡したときだけ。`UpdateSection`、i18n キーは `settings.update.*`、[ADR-082](../../adr/ADR-082-check-and-install-updates-by-hand.md)）。実行中の版、「アップデートを確認」のボタン、結果の 1 行、新しい版があるときの「更新して再起動」のボタンを持つ。
+
+| 状態（`phase`） | 結果の行 | ボタン |
+|---|---|---|
+| `idle` | なし | 確認 |
+| `checking` | 確認しています… | 確認（押せない） |
+| `up_to_date` | 最新の版です | 確認 |
+| `available`（入れ替えられる） | 新しい版 X が出ています | 確認・更新して再起動 |
+| `available`（`support = notice`。`.deb` / `.msi`） | 新しい版 X が出ています。入れ直してください | 確認だけ |
+| `installing` | X を入れています。入れ終えると再起動します | どちらも押せない |
+| `busy` | ほかの更新が進んでいます | 確認・更新して再起動 |
+| `error` | 更新できませんでした: 理由 | 確認（入れる版が分かっていれば更新して再起動も） |
+
+- `support = none`（開発ビルド・自前のビルド）は、確認しない旨だけを出し、ボタンを出さない
+- セッション中（`inSession`）は「更新して再起動」を押せなくし、「退室してから更新してください」を添える（REQ-UPD-024）
+- メニューの「アップデートを確認…」から開いたときは、開いてすぐ確認を始める（`updateCheckRequest`、REQ-MNU-010）
+
+続いて、見出し「規約など」＋ 「利用規約」「ライセンス」「プライバシーとセキュリティ」「お知らせ」の行（`LegalSection`。`legal` を渡したときだけタブごと出る）。「利用規約」「ライセンス」はアプリに同梱した本文をダイアログ（`TermsViewer`）で読む。「プライバシーとセキュリティ」「お知らせ」はブラウザで開く（開けるのはこの 2 ページだけ。[ADR-072](../../adr/ADR-072-terms-of-use-and-first-launch-consent.md)）
 
 ### 診断とサポートタブ（DiagnosticsTab）
 
@@ -348,6 +365,7 @@ settings.general.{display,connection,serverUrl.*}
 settings.profile.{title,name,nameHint,namePlaceholder,nameRequired,nameTooLong}
 settings.privacy.{previousHang.*,usageTitle,usageToggle,usageDescription,usageSent,usageNotSent,usageDeviceNames,usageIdNote,usageShow,usagePreviewEmpty,usagePreviewOff}
 settings.legal.{title,terms,license,privacy,announcements}
+settings.update.{title,current,unsupported,check,checking,upToDate,available,install,installing,inSession,busy,failed}
 settings.devices.{title,audioSettings,inputDevice,outputDevice,
   inputChannels,outputChannels,channelL,channelR,selectDevice,
   transmitChannels,transmitChannelsDesc,mono,stereo,
