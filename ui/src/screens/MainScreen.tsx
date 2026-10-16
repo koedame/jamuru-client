@@ -36,6 +36,7 @@ import {
   sessionJoin,
   sessionLeave,
   sessionReconnect,
+  windowQuitApp,
   SESSION_CHANGED,
   SESSION_SETTINGS_HELP,
   MENU_ACTION,
@@ -128,6 +129,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const [localChannelCount, setLocalChannelCount] = useState<number>(2);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [leavePending, setLeavePending] = useState(false);
+  // The leave dialog is up because the window was closed (or Quit chosen) in
+  // the room: leaving is then followed by quitting.
+  const [quitAfterLeave, setQuitAfterLeave] = useState(false);
 
   // Where the faders stand, as the backend has them (null until it has
   // answered). The microphone's mute is the audio's, read with its status.
@@ -591,6 +595,16 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       case "ask_for_help":
         if (phase === "connected" && settingsHelp.canAsk) settingsHelp.openAsk();
         break;
+      case "quit_requested":
+        // The backend held the close back because we were in a room. If we
+        // have left since, there is nothing to confirm.
+        if (phase === "connected") {
+          setQuitAfterLeave(true);
+          setShowLeaveDialog(true);
+        } else {
+          void windowQuitApp();
+        }
+        break;
     }
   };
   // Stable, so the listener is not taken down and put up again on every render.
@@ -612,6 +626,16 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       setLeavePending(false);
       setShowLeaveDialog(false);
     }
+    // Quitting follows even if leaving failed (the server dropped the
+    // connection first, say): the person asked to be out of the room and of
+    // the app, and the app ending drops the connection anyway.
+    if (quitAfterLeave) void windowQuitApp();
+    setQuitAfterLeave(false);
+  };
+
+  const handleCancelLeave = () => {
+    setShowLeaveDialog(false);
+    setQuitAfterLeave(false);
   };
 
   // Handle channel volume change from MixerPanel. The fader moves at once; the
@@ -1075,10 +1099,10 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
           open={showLeaveDialog}
           pending={leavePending}
           onConfirm={handleConfirmLeave}
-          onCancel={() => setShowLeaveDialog(false)}
+          onCancel={handleCancelLeave}
           title={t("session.leave.confirmMessage")}
           pendingTitle={t("session.leave.pending")}
-          confirmLabel={t("session.leave.confirmButton")}
+          confirmLabel={quitAfterLeave ? t("session.leave.quitButton") : t("session.leave.confirmButton")}
           cancelLabel={t("common.button.cancel")}
         />
       </>

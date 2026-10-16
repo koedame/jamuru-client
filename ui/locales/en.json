@@ -62,6 +62,7 @@
       "button": "Leave",
       "confirmMessage": "Are you sure you want to leave?",
       "confirmButton": "Leave",
+      "quitButton": "Leave and quit",
       "pending": "Leaving..."
     },
     "room": {
