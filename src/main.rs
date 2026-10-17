@@ -1271,6 +1271,12 @@ impl Backend for CliBackend {
             .map_err(|e| e.to_string())
     }
 
+    /// The session was started with the process, before any room, so the microphone is heard
+    /// already.
+    async fn open_audio(&self) -> Result<(), String> {
+        Ok(())
+    }
+
     async fn link(
         &self,
         _conn: u32,
