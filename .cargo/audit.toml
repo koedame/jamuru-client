@@ -1,0 +1,20 @@
+# cargo-audit settings, read from the directory `cargo audit` runs in (the
+# repository root, see .github/workflows/audit.yml). It applies to all three
+# lock files.
+
+[advisories]
+ignore = [
+    # zip 4.6.1 reaches the app only through tauri-plugin-updater, which uses it
+    # on Windows to unpack an update that is a `.zip`. Our Windows update
+    # artifacts are the NSIS `-setup.exe` and the `.msi` themselves, never a
+    # `.zip` (scripts/make-update-manifest.sh), and the updater checks the
+    # minisign signature against our public key before it unpacks anything, so
+    # an archive we did not sign never reaches `ZipArchive::extract`.
+    # tauri-plugin-updater 2.14.0 and 3.0.0-alpha.3 still depend on zip 4, and
+    # the `zip` feature cannot be switched off because it also covers the
+    # macOS/Linux `.tar.gz` updates. Drop these three when the updater moves to
+    # zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]
