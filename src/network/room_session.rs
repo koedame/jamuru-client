@@ -406,6 +406,20 @@ impl State {
             .collect()
     }
 
+    /// Whether the session is in a room over the connection `conn`.
+    pub fn is_in_room_of(&self, conn: u32) -> bool {
+        self.is_the_room_of(conn)
+    }
+
+    /// The audio session was ended to start over on new settings, with the room as it is:
+    /// returns the audio steps that bring it back (the new address, the session, the links).
+    pub fn audio_restarting(&mut self, conn: u32) -> Vec<Audio> {
+        if !self.is_the_room_of(conn) {
+            return Vec::new();
+        }
+        self.roster.audio_restarting()
+    }
+
     /// A participant joined the room of `conn`.
     pub fn peer_joined(&mut self, conn: u32, peer: PeerInfo) {
         if self.is_the_room_of(conn) {
