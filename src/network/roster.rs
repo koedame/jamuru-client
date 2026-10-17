@@ -46,15 +46,17 @@ impl LinkHealth {
 /// One thing to do to the audio, in the order given.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Audio {
-    /// End the audio session: every link, the devices and the socket.
-    Stop,
     /// Bind the audio socket and tell the room where to send audio.
     ///
     /// Nothing can send this app audio until it does: the port is chosen when
     /// the socket is bound, and peers learn it only from this (ADR-026).
     Advertise,
-    /// Open an audio link to `peer`, racing `candidates` (best first). The
-    /// first link of a room starts the audio session.
+    /// Start the audio session on the devices, with no link yet, if none
+    /// runs. Done on entering the room, so the microphone is heard (the meter
+    /// moves) while the participant is alone in it; the links are opened on
+    /// the session that is there.
+    Open,
+    /// Open an audio link to `peer`, racing `candidates` (best first).
     Start {
         peer: Uuid,
         candidates: Vec<SocketAddr>,
@@ -139,7 +141,7 @@ impl Roster {
             .into_iter()
             .filter(|p| !self.own_ids.contains(&p.id))
             .collect();
-        let mut audio = vec![Audio::Advertise];
+        let mut audio = vec![Audio::Advertise, Audio::Open];
         audio.extend(self.open_links());
         audio
     }
@@ -205,20 +207,15 @@ impl Roster {
     }
 
     /// A peer left: the link to them ends, and whoever had no link for want of
-    /// room gets one. When that was the last link the audio session ends with
-    /// it, which gives up the advertised socket, so a fresh one is advertised
-    /// for whoever is still here or joins next.
+    /// room gets one. When that was the last link the audio session goes on
+    /// with none, on the address the room has, so the microphone is still heard
+    /// and whoever joins next finds the audio where it was.
     pub fn left(&mut self, peer_id: Uuid) -> Vec<Audio> {
         self.peers.retain(|p| p.id != peer_id);
         let Some(at) = self.links.iter().position(|link| link.peer == peer_id) else {
             return Vec::new();
         };
         self.links.remove(at);
-        if self.links.is_empty() {
-            let mut audio = vec![Audio::Stop, Audio::Advertise];
-            audio.extend(self.open_links());
-            return audio;
-        }
         let mut audio = vec![Audio::End { peer: peer_id }];
         let opened = self.open_links();
         if opened.is_empty() {
@@ -431,7 +428,10 @@ mod tests {
 
         let audio = roster.entered(me(), vec![peer(2, Some("192.0.2.2:5000"))]);
 
-        assert_eq!(audio, vec![Audio::Advertise, start(2, "192.0.2.2:5000")]);
+        assert_eq!(
+            audio,
+            vec![Audio::Advertise, Audio::Open, start(2, "192.0.2.2:5000")]
+        );
         assert_eq!(roster.linked(), vec![id(2)]);
     }
 
@@ -456,6 +456,7 @@ mod tests {
             audio,
             vec![
                 Audio::Advertise,
+                Audio::Open,
                 start(2, "192.0.2.2:5000"),
                 start(3, "192.0.2.3:6000")
             ]
@@ -463,13 +464,14 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(2), id(3)]);
     }
 
+    /// Verifies: REQ-CON-140
     #[test]
-    fn nobody_has_published_an_address_when_entering_only_advertises_ours() {
+    fn nobody_has_published_an_address_when_entering_advertises_ours_and_opens_the_audio_alone() {
         let mut roster = Roster::default();
 
         let audio = roster.entered(me(), vec![peer(2, None)]);
 
-        assert_eq!(audio, vec![Audio::Advertise]);
+        assert_eq!(audio, vec![Audio::Advertise, Audio::Open]);
         assert_eq!(roster.linked(), Vec::<Uuid>::new());
     }
 
@@ -534,7 +536,7 @@ mod tests {
 
         let audio = roster.entered(me(), others);
 
-        assert_eq!(audio.len(), 1 + 9);
+        assert_eq!(audio.len(), 2 + 9);
         assert_eq!(roster.linked().len(), 9);
     }
 
@@ -559,16 +561,18 @@ mod tests {
         assert_eq!(roster.linked().len(), 9);
     }
 
-    /// The bug this guards: after B left, the app kept its audio session to B
-    /// (which then reported the connection as lost) and, because it still
-    /// counted as streaming, never started audio to the next person.
+    /// The microphone is heard in a room with no one else in it, so the audio
+    /// session does not end with the last link: the meter keeps moving, and
+    /// whoever joins next gets a link on the session that is there.
+    ///
+    /// Verifies: REQ-CON-140
     #[test]
-    fn the_only_peer_there_is_a_link_to_leaves_stops_the_audio_and_advertises_a_fresh_address() {
+    fn the_only_peer_there_is_a_link_to_leaves_ends_the_link_and_keeps_the_audio_session() {
         let mut roster = hearing(&[2]);
 
         let audio = roster.left(id(2));
 
-        assert_eq!(audio, vec![Audio::Stop, Audio::Advertise]);
+        assert_eq!(audio, vec![end(2)]);
         assert_eq!(roster.linked(), Vec::<Uuid>::new());
     }
 
@@ -639,7 +643,10 @@ mod tests {
 
         let audio = roster.entered(me(), vec![peer(3, Some("192.0.2.3:6000"))]);
 
-        assert_eq!(audio, vec![Audio::Advertise, start(3, "192.0.2.3:6000")]);
+        assert_eq!(
+            audio,
+            vec![Audio::Advertise, Audio::Open, start(3, "192.0.2.3:6000")]
+        );
         assert_eq!(roster.linked(), vec![id(3)]);
     }
 
@@ -661,7 +668,10 @@ mod tests {
             ],
         );
 
-        assert_eq!(audio, vec![Audio::Advertise, start(2, "192.0.2.2:5000")]);
+        assert_eq!(
+            audio,
+            vec![Audio::Advertise, Audio::Open, start(2, "192.0.2.2:5000")]
+        );
         assert_eq!(roster.peers().len(), 1);
         assert_eq!(roster.peers()[0].id, Uuid::from_u128(2));
     }
@@ -891,7 +901,7 @@ mod tests {
 
     fn started_with(roster: &mut Roster, peer: PeerInfo) -> Vec<SocketAddr> {
         match roster.entered(me(), vec![peer]).as_slice() {
-            [Audio::Advertise, Audio::Start { candidates, .. }] => candidates.clone(),
+            [Audio::Advertise, Audio::Open, Audio::Start { candidates, .. }] => candidates.clone(),
             other => panic!("expected the audio to start, got {other:?}"),
         }
     }

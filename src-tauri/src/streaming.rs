@@ -46,6 +46,11 @@ pub struct StreamingState {
     /// (REQ-CON-138), whether it was muted before: what lifting the hold goes
     /// back to. `None` when nothing holds it.
     mute_hold: std::sync::Mutex<Option<bool>>,
+    /// What a session started by a test captures and plays in place of the
+    /// devices: the machine the tests run on may have none, and a test must
+    /// not open the microphone of the one that has.
+    #[cfg(test)]
+    stand_ins: std::sync::Mutex<Option<(jamjam::audio_session::InputSignal, std::path::PathBuf)>>,
 }
 
 impl StreamingState {
@@ -59,6 +64,8 @@ impl StreamingState {
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
             mute_hold: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            stand_ins: std::sync::Mutex::new(None),
         }
     }
 
@@ -256,6 +263,18 @@ impl StreamingState {
     }
 }
 
+/// A session a test started does not outlive the state it was started for.
+#[cfg(test)]
+impl Drop for StreamingState {
+    fn drop(&mut self) {
+        if let Ok(tx) = self.cmd_tx.try_lock() {
+            if let Some(tx) = tx.as_ref() {
+                let _ = tx.send(StreamingCommand::Stop);
+            }
+        }
+    }
+}
+
 impl Default for StreamingState {
     fn default() -> Self {
         Self::new()
@@ -379,6 +398,17 @@ impl StreamingState {
     #[cfg(test)]
     pub(crate) fn add_silence_giveup_for_test(&self) {
         self.shared.silence_giveups.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Sessions this starts capture `signal` and play into `played`, as the
+    /// devices would.
+    #[cfg(test)]
+    pub(crate) fn stand_in_devices_for_test(
+        &self,
+        signal: jamjam::audio_session::InputSignal,
+        played: std::path::PathBuf,
+    ) {
+        *self.stand_ins.lock().unwrap() = Some((signal, played));
     }
 
     /// Stands in for a running session: what it is told arrives on the
@@ -598,6 +628,21 @@ pub async fn streaming_prepare(state: tauri::State<'_, StreamingState>) -> Resul
     state.prepare_socket().await.map(|addr| addr.to_string())
 }
 
+/// Starts the audio session - the devices and the socket the room was told -
+/// if none is running, with no link. Done on entering a room, so the
+/// microphone is heard (the meter moves) while the person is alone in it.
+pub async fn streaming_open(
+    state: &StreamingState,
+    config_state: &crate::config::ConfigState,
+    settings_state: &crate::settings::SettingsState,
+    usage: &crate::usage::UsageState,
+) -> Result<(), String> {
+    if state.is_active() {
+        return Ok(());
+    }
+    start_session(state, config_state, settings_state, usage).await
+}
+
 /// Opens an audio link to `target`, starting the audio session - the devices
 /// and the socket the room was told - if none is running.
 ///
@@ -622,9 +667,7 @@ pub async fn streaming_link(
     if target.candidates.is_empty() {
         return Err("The participant has published no address".to_string());
     }
-    if !state.is_active() {
-        start_session(&state, &config_state, &settings_state, &usage).await?;
-    }
+    streaming_open(&state, &config_state, &settings_state, &usage).await?;
     tracing::info!(
         "Audio link to {} asked for ({} address candidate(s))",
         target.peer,
@@ -733,6 +776,14 @@ async fn start_session(
     #[cfg(feature = "debug-tools")]
     crate::audio_tap::set_sample_rate(sample_rate);
 
+    #[cfg(test)]
+    let (input_signal, output_file) = match state.stand_ins.lock().ok().and_then(|s| s.clone()) {
+        Some((signal, file)) => (Some(signal), Some(file)),
+        None => (None, None),
+    };
+    #[cfg(not(test))]
+    let (input_signal, output_file) = (None, None);
+
     // Becomes active as the audio thread is spawned, before changes are let through again
     let session = audio_session::start(
         Params {
@@ -745,8 +796,8 @@ async fn start_session(
             transmit_channels,
             input_channels,
             output_channels,
-            input_signal: None,
-            output_file: None,
+            input_signal,
+            output_file,
             probe: None,
         },
         &state.shared,
