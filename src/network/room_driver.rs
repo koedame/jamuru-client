@@ -289,6 +289,19 @@ impl<B: Backend> Driver<B> {
         listed.map(|_| self.snapshot())
     }
 
+    /// Enters the room again over a new connection, when in one, so that the audio session
+    /// which starts there takes the settings as saved now. For a setting the running session
+    /// cannot take on (the frame size, the sample rate). A no-op outside a room.
+    pub fn enter_room_again(&self) {
+        let conn = {
+            let state = self.lock();
+            state.in_room().then(|| state.connection_id()).flatten()
+        };
+        if let Some(conn) = conn {
+            self.get_connection_back(conn);
+        }
+    }
+
     /// Tries again to get the connection back and rejoin the room, after every attempt failed.
     pub async fn retry_reconnect(&self) -> Result<Snapshot, String> {
         if self.lock().rejoin_code().is_none() {

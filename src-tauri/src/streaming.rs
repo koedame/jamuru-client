@@ -422,6 +422,12 @@ impl StreamingState {
 
     /// A receiver for commands while no session is running, to show that
     /// nothing is sent to one.
+    /// The frame size the running (or last) session was started with.
+    #[cfg(test)]
+    pub(crate) async fn frame_size_for_test(&self) -> u32 {
+        *self.buffer_size.lock().await
+    }
+
     #[cfg(test)]
     pub(crate) async fn detached_session_for_test(&self) -> std_mpsc::Receiver<StreamingCommand> {
         let (tx, rx) = std_mpsc::channel();
@@ -433,9 +439,9 @@ impl StreamingState {
     /// the change straight away. A no-op when no session is active: the next
     /// session starts from the saved settings.
     ///
-    /// Only what can change live is here. The frame size is fixed for the
-    /// lifetime of the audio engines, so a new buffer size (or a preset's new
-    /// frame size) takes effect on the next connect (REQ-LAT-106).
+    /// Only what can change live is here. The frame size and the sample rate
+    /// are fixed for the lifetime of the audio engines, so a new one replaces
+    /// the session instead (`Plan::new_session`, REQ-GUI-024).
     pub async fn apply_setting(&self, setting: SessionSetting) {
         if !self.shared.is_active.load(Ordering::SeqCst) {
             return;
