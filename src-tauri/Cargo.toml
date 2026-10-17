@@ -48,8 +48,11 @@ tauri-plugin-log = "2"
 
 tauri-plugin-deep-link = "2.4.9"
 
-# Installs a new release by itself (ADR-041).
-tauri-plugin-updater = "2"
+# Installs a new release by itself (ADR-041). The default `zip` feature is off:
+# it only unpacks zip-compressed Windows bundles and gzip-compressed AppImages
+# (Tauri v1 style), which this project never ships (the installers are released
+# as they are), and it pulls in the `zip` crate (RUSTSEC-2026-0368, -0369).
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 
 # "Report a problem" (ADR-057): sends jamuru.log and a comment separately
 # from usage reporting's transport.
