@@ -313,6 +313,11 @@ impl<R: Runtime> Backend for AppBackend<R> {
         Ok(())
     }
 
+    async fn open_audio(&self) -> Result<(), String> {
+        let app = &self.app;
+        streaming::streaming_open(&app.state(), &app.state(), &app.state(), &app.state()).await
+    }
+
     async fn link(
         &self,
         conn: u32,
@@ -647,7 +652,12 @@ mod tests {
         app.manage(ConfigState::at(dir.path().join("config.toml"), config));
         app.manage(DeviceIdentityState::generated());
         app.manage(SignalingState::new());
-        app.manage(StreamingState::new());
+        let streaming = StreamingState::new();
+        streaming.stand_in_devices_for_test(
+            jamjam::audio_session::InputSignal::Tone(440.0),
+            dir.path().join("played.f32"),
+        );
+        app.manage(streaming);
         app.manage(SettingsState::new());
         app.manage(UsageState::with_reporter(
             jamjam::telemetry::UsageReporter::new(
@@ -882,6 +892,38 @@ mod tests {
         assert_eq!(room.participants, vec![]);
     }
 
+    /// The bug this guards: the audio session started with the first link, so
+    /// in a room with no one else in it nothing captured the microphone, the
+    /// meter stood still, and the macOS microphone permission was asked for
+    /// only when someone joined.
+    ///
+    /// Verifies: REQ-CON-140
+    #[tokio::test]
+    async fn a_room_is_created_with_no_one_else_in_it_the_microphone_is_heard_and_the_meter_moves()
+    {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = connected_to_the_server(&server, &dir).await;
+        assert!(!app.state::<StreamingState>().is_active());
+
+        driver(app.handle()).create().await.unwrap();
+
+        assert!(app.state::<StreamingState>().is_active());
+        let mut level = 0;
+        for _ in 0..100 {
+            level = streaming::streaming_get_input_level(app.state())
+                .await
+                .unwrap();
+            if level > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(level > 0, "the meter stayed at {level} with the room empty");
+        driver(app.handle()).leave().await.unwrap();
+        assert!(!app.state::<StreamingState>().is_active());
+    }
+
     /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn a_room_is_joined_lists_who_is_in_it() {
@@ -1065,11 +1107,16 @@ mod tests {
     ) {
         use crate::streaming::StreamingCommand;
 
-        let app = in_a_room(server, dir).await;
+        let app = connected_to_the_server(server, dir).await;
+        // Before entering: a room entered starts a session of its own
         let commands = app
             .state::<StreamingState>()
             .attach_session_for_test()
             .await;
+        driver(app.handle())
+            .join("ABC234XYZ".to_string())
+            .await
+            .unwrap();
         server.say(
             0,
             format!(

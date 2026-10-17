@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted。§4（セッションの始まりと終わり）は [ADR-083](./ADR-083-audio-session-runs-from-entering-the-room.md) が置き換えた
 
 ## Context
 
