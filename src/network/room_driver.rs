@@ -109,6 +109,9 @@ pub trait Backend: Send + Sync + 'static {
     fn audio_state(&self) -> (bool, Vec<(Uuid, LinkHealth)>);
     /// Tells the room where to send audio
     fn advertise(&self, conn: u32) -> impl Future<Output = Result<(), String>> + Send;
+    /// Starts the audio session on the devices if none runs, with no link, so the microphone is
+    /// heard while the participant is alone in the room
+    fn open_audio(&self) -> impl Future<Output = Result<(), String>> + Send;
     /// Opens an audio link to `peer`, racing `candidates` (best first), starting the audio
     /// session if none runs. `link_key` is the key the server gave for `peer`.
     fn link(
@@ -643,8 +646,12 @@ impl<B: Backend> Driver<B> {
     async fn run_audio(&self, conn: u32, audio: Vec<Audio>) {
         for step in audio {
             match step {
-                Audio::Stop => self.backend().stop_audio().await,
                 Audio::Advertise => self.advertise(conn).await,
+                Audio::Open => {
+                    if let Err(e) = self.backend().open_audio().await {
+                        tracing::error!("Failed to start the audio session: {}", e);
+                    }
+                }
                 Audio::Rejoin => {
                     tracing::warn!(
                         "An audio link gave up and nobody is heard: entering the room again"
@@ -808,6 +815,11 @@ mod tests {
             Ok(())
         }
 
+        async fn open_audio(&self) -> Result<(), String> {
+            self.ask("open_audio");
+            Ok(())
+        }
+
         async fn link(
             &self,
             _conn: u32,
@@ -850,6 +862,7 @@ mod tests {
         );
     }
 
+    /// Verifies: REQ-CON-140
     /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn a_room_is_created_after_connecting_lists_the_rooms_first_and_puts_the_participant_in_it(
@@ -865,7 +878,16 @@ mod tests {
             Some("ABC234XYZ".to_string())
         );
         let asked = driver.backend().asked.lock().unwrap().clone();
-        assert_eq!(asked, ["connect", "list_rooms", "create_room", "advertise"]);
+        assert_eq!(
+            asked,
+            [
+                "connect",
+                "list_rooms",
+                "create_room",
+                "advertise",
+                "open_audio"
+            ]
+        );
     }
 
     /// Verifies: REQ-RMT-028
