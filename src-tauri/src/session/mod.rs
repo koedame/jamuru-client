@@ -83,6 +83,12 @@ fn driver<R: Runtime>(app: &AppHandle<R>) -> Driver<AppBackend<R>> {
     )
 }
 
+/// Enters the room again, so the audio session that starts there takes the
+/// audio settings as saved now. A no-op outside a room.
+pub fn enter_room_again<R: Runtime>(app: &AppHandle<R>) {
+    driver(app).enter_room_again();
+}
+
 // =============================================================================
 // Commands
 // =============================================================================
@@ -1296,6 +1302,64 @@ mod tests {
 
         assert_eq!(snapshot.room.unwrap().invite_code, "ABC234XYZ");
         assert_eq!(server.count("JoinRoom"), 2);
+    }
+
+    /// The frame size is fixed for the life of a session's audio engines, so
+    /// a new buffer size reaches a room by entering it again: the new session
+    /// starts from the saved settings and tells the room its new address.
+    ///
+    /// Verifies: REQ-GUI-024
+    #[tokio::test]
+    async fn the_buffer_size_is_changed_in_a_room_enters_the_room_again_with_the_new_size() {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = in_a_room(&server, &dir).await;
+        let streaming = app.state::<StreamingState>();
+        let first = app.state::<SessionState>().snapshot().connection_id;
+        let before = streaming.frame_size_for_test().await;
+        let new_size = if before == 64 { 128 } else { 64 };
+
+        crate::settings::apply(
+            app.handle(),
+            &crate::settings::SettingChange::BufferSize { samples: new_size },
+        )
+        .await
+        .unwrap();
+
+        let snapshot = until(&app, |s| {
+            s.phase == Phase::Connected
+                && s.connection_id.is_some()
+                && s.connection_id != first
+                && s.signaling_reconnect == Reconnect::Idle
+        })
+        .await;
+        assert_eq!(snapshot.room.unwrap().invite_code, "ABC234XYZ");
+        assert_eq!(server.count("JoinRoom"), 2);
+        assert!(streaming.is_active());
+        assert_eq!(streaming.frame_size_for_test().await, new_size);
+    }
+
+    /// Verifies: REQ-GUI-024
+    #[tokio::test]
+    async fn the_buffer_size_is_changed_outside_a_room_does_not_connect_again() {
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = connected_to_the_server(&server, &dir).await;
+        let connections = server.connections();
+
+        crate::settings::apply(
+            app.handle(),
+            &crate::settings::SettingChange::BufferSize { samples: 256 },
+        )
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(server.connections(), connections);
+        assert_eq!(
+            app.state::<SessionState>().snapshot().phase,
+            Phase::ServerConnected
+        );
     }
 
     /// Verifies: REQ-RMT-028
