@@ -289,6 +289,32 @@ impl<B: Backend> Driver<B> {
         listed.map(|_| self.snapshot())
     }
 
+    /// Starts the audio session over in the room the participant is in, on the settings as saved
+    /// now: the session ends, a new socket is bound and its address told to the room, and the
+    /// links are opened again. For a setting the running session cannot take on (the frame size,
+    /// the sample rate). The participant stays in the room, on the same connection - leaving it
+    /// would end a room with nobody else in it. A no-op outside a room, and while the connection
+    /// is being got back (the entry that follows starts from the saved settings).
+    pub async fn restart_audio(&self) {
+        let _flow = self.session.flow.lock().await;
+        let conn = {
+            let state = self.lock();
+            if state.reconnect() != Reconnect::Idle {
+                return;
+            }
+            state.connection_id()
+        };
+        let Some(conn) = conn else {
+            return;
+        };
+        if !self.lock().is_in_room_of(conn) {
+            return;
+        }
+        self.backend().stop_audio().await;
+        let audio = self.change(|session| session.audio_restarting(conn));
+        self.run_audio(conn, audio).await;
+    }
+
     /// Tries again to get the connection back and rejoin the room, after every attempt failed.
     pub async fn retry_reconnect(&self) -> Result<Snapshot, String> {
         if self.lock().rejoin_code().is_none() {

@@ -22,6 +22,7 @@ use jamjam::config::{
 
 use crate::config::{self, ConfigState, SampleRateInfo};
 use crate::logging::{redact_device_id, redaction_enabled};
+use crate::session;
 use crate::streaming::{SessionSetting, StreamingState};
 use crate::usage::UsageState;
 
@@ -71,11 +72,11 @@ pub enum SettingChange {
     TransmitChannels {
         count: u32,
     },
-    /// Frame size in samples. Takes effect on the next connect.
+    /// Frame size in samples. A running session starts over to take it.
     BufferSize {
         samples: u32,
     },
-    /// Takes effect on the next connect.
+    /// A running session starts over to take it.
     SampleRate {
         hz: u32,
     },
@@ -214,6 +215,10 @@ impl From<SettingsError> for String {
 pub struct Plan {
     pub config: AppConfig,
     pub session: Vec<SessionSetting>,
+    /// The change is one a running session cannot take on (the frame size and
+    /// the sample rate are fixed for the life of its audio engines): it has to
+    /// be replaced by one that starts from the saved settings.
+    pub new_session: bool,
 }
 
 /// Decides what `change` does to `config`, given the devices on offer.
@@ -305,9 +310,12 @@ pub fn plan(
             ));
         }
     }
+    let new_session =
+        next.buffer_size != config.buffer_size || next.sample_rate != config.sample_rate;
     Ok(Plan {
         config: next,
         session,
+        new_session,
     })
 }
 
@@ -447,14 +455,20 @@ pub async fn apply<R: Runtime>(
     let settings_state = app.state::<SettingsState>();
     let _changing = settings_state.changing.lock().await;
 
-    let (config, session) = app.state::<ConfigState>().update_with(|current| {
-        plan(current, &devices, change).map(|plan| (plan.config, plan.session))
+    let (config, (session, new_session)) = app.state::<ConfigState>().update_with(|current| {
+        plan(current, &devices, change).map(|plan| (plan.config, (plan.session, plan.new_session)))
     })?;
     let revision = settings_state.revision.fetch_add(1, Ordering::SeqCst) + 1;
 
     let streaming = app.state::<StreamingState>();
     for setting in session {
         streaming.apply_setting(setting).await;
+    }
+    if new_session && streaming.is_active() {
+        // Not awaited: the new session reads the settings once this change
+        // lets go of them
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move { session::restart_audio(&app).await });
     }
     if matches!(
         change,
@@ -977,24 +991,101 @@ mod tests {
         assert_eq!(result, Err(SettingsError::InvalidTransmitChannels(3)));
     }
 
-    /// The frame size is fixed for the life of a session's audio engines, so a
-    /// new buffer size is saved for the next connect and the session is left
-    /// alone - restarting it would drop the peer.
+    /// The frame size and the sample rate are fixed for the life of a session's
+    /// audio engines, so a new one cannot be told to the running session: it is
+    /// saved, and the session is to be replaced by one that starts from it.
     ///
     /// Verifies: REQ-GUI-024
     #[test]
-    fn a_new_buffer_size_is_planned_for_the_next_connect_and_the_session_is_left_alone() {
+    fn a_new_buffer_size_or_sample_rate_is_saved_and_plans_a_new_session() {
+        let (config, devices) = setup();
+
+        let buffer = plan(
+            &config,
+            &devices,
+            &SettingChange::BufferSize { samples: 256 },
+        )
+        .unwrap();
+        let rate = plan(&config, &devices, &SettingChange::SampleRate { hz: 44100 }).unwrap();
+
+        assert_eq!(buffer.config.buffer_size, 256);
+        assert!(buffer.session.is_empty());
+        assert!(buffer.new_session);
+        assert_eq!(rate.config.sample_rate, 44100);
+        assert!(rate.new_session);
+    }
+
+    /// Choosing what is already in use must not cost the room a reconnect.
+    ///
+    /// Verifies: REQ-GUI-024
+    #[test]
+    fn a_buffer_size_or_sample_rate_already_in_use_plans_no_new_session() {
+        let (config, devices) = setup();
+
+        let buffer = plan(
+            &config,
+            &devices,
+            &SettingChange::BufferSize {
+                samples: config.buffer_size,
+            },
+        )
+        .unwrap();
+        let rate = plan(
+            &config,
+            &devices,
+            &SettingChange::SampleRate {
+                hz: config.sample_rate,
+            },
+        )
+        .unwrap();
+
+        assert!(!buffer.new_session);
+        assert!(!rate.new_session);
+    }
+
+    /// A preset is a jitter depth the session takes live and a frame size it
+    /// cannot: only a preset with another frame size replaces the session.
+    ///
+    /// Verifies: REQ-GUI-024
+    #[test]
+    fn a_preset_plans_a_new_session_only_when_its_frame_size_differs() {
+        let (mut config, devices) = setup();
+        let preset = AudioPreset::all()
+            .into_iter()
+            .find(|p| {
+                p.frame_size() != config.buffer_size
+                    && offered_buffer_sizes().contains(&p.frame_size())
+            })
+            .unwrap();
+
+        let other = plan(
+            &config,
+            &devices,
+            &SettingChange::Preset {
+                preset: preset.clone(),
+            },
+        )
+        .unwrap();
+        config.buffer_size = preset.frame_size();
+        let same = plan(&config, &devices, &SettingChange::Preset { preset }).unwrap();
+
+        assert!(other.new_session);
+        assert!(!same.new_session);
+    }
+
+    /// Verifies: REQ-GUI-024
+    #[test]
+    fn a_change_a_running_session_takes_on_plans_no_new_session() {
         let (config, devices) = setup();
 
         let plan = plan(
             &config,
             &devices,
-            &SettingChange::BufferSize { samples: 64 },
+            &SettingChange::TransmitChannels { count: 1 },
         )
         .unwrap();
 
-        assert_eq!(plan.config.buffer_size, 64);
-        assert!(plan.session.is_empty());
+        assert!(!plan.new_session);
     }
 
     /// The app once offered 8 and 16 samples, which the config then refused to
