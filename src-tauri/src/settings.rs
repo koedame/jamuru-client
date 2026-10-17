@@ -72,11 +72,11 @@ pub enum SettingChange {
     TransmitChannels {
         count: u32,
     },
-    /// Frame size in samples. A running session enters its room again to take it.
+    /// Frame size in samples. A running session starts over to take it.
     BufferSize {
         samples: u32,
     },
-    /// A running session enters its room again to take it.
+    /// A running session starts over to take it.
     SampleRate {
         hz: u32,
     },
@@ -465,7 +465,10 @@ pub async fn apply<R: Runtime>(
         streaming.apply_setting(setting).await;
     }
     if new_session && streaming.is_active() {
-        session::enter_room_again(app);
+        // Not awaited: the new session reads the settings once this change
+        // lets go of them
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move { session::restart_audio(&app).await });
     }
     if matches!(
         change,

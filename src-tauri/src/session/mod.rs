@@ -83,10 +83,10 @@ fn driver<R: Runtime>(app: &AppHandle<R>) -> Driver<AppBackend<R>> {
     )
 }
 
-/// Enters the room again, so the audio session that starts there takes the
-/// audio settings as saved now. A no-op outside a room.
-pub fn enter_room_again<R: Runtime>(app: &AppHandle<R>) {
-    driver(app).enter_room_again();
+/// Starts the audio session over in the room the person is in, so it takes
+/// the audio settings as saved now. A no-op outside a room.
+pub async fn restart_audio<R: Runtime>(app: &AppHandle<R>) {
+    driver(app).restart_audio().await;
 }
 
 // =============================================================================
@@ -1304,20 +1304,22 @@ mod tests {
         assert_eq!(server.count("JoinRoom"), 2);
     }
 
-    /// The frame size is fixed for the life of a session's audio engines, so
-    /// a new buffer size reaches a room by entering it again: the new session
-    /// starts from the saved settings and tells the room its new address.
+    /// The frame size is fixed for the life of a session's audio engines, so a
+    /// new buffer size reaches a room by starting the audio over in it: the
+    /// room, and the connection to the server, stay. Leaving the room would
+    /// end it for a person who is alone in it.
     ///
     /// Verifies: REQ-GUI-024
     #[tokio::test]
-    async fn the_buffer_size_is_changed_in_a_room_enters_the_room_again_with_the_new_size() {
+    async fn the_buffer_size_is_changed_in_a_room_restarts_the_audio_there_and_keeps_the_room() {
         let server = FakeServer::start().await;
         let dir = tempfile::tempdir().unwrap();
         let app = in_a_room(&server, &dir).await;
         let streaming = app.state::<StreamingState>();
-        let first = app.state::<SessionState>().snapshot().connection_id;
         let before = streaming.frame_size_for_test().await;
         let new_size = if before == 64 { 128 } else { 64 };
+        let first = app.state::<SessionState>().snapshot().connection_id;
+        let published = server.count("UpdatePeerInfo");
 
         crate::settings::apply(
             app.handle(),
@@ -1326,22 +1328,29 @@ mod tests {
         .await
         .unwrap();
 
-        let snapshot = until(&app, |s| {
-            s.phase == Phase::Connected
-                && s.connection_id.is_some()
-                && s.connection_id != first
-                && s.signaling_reconnect == Reconnect::Idle
-        })
-        .await;
-        assert_eq!(snapshot.room.unwrap().invite_code, "ABC234XYZ");
-        assert_eq!(server.count("JoinRoom"), 2);
+        for _ in 0..1200 {
+            if streaming.is_active() && streaming.frame_size_for_test().await == new_size {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
         assert!(streaming.is_active());
         assert_eq!(streaming.frame_size_for_test().await, new_size);
+        let snapshot = app.state::<SessionState>().snapshot();
+        assert_eq!(snapshot.phase, Phase::Connected);
+        assert_eq!(snapshot.connection_id, first, "the same connection");
+        assert_eq!(snapshot.room.unwrap().invite_code, "ABC234XYZ");
+        assert_eq!(server.count("JoinRoom"), 1, "the room is not entered again");
+        assert_eq!(server.count("LeaveRoom"), 0, "the room is not left");
+        assert!(
+            server.count("UpdatePeerInfo") > published,
+            "the new audio address is told to the room"
+        );
     }
 
     /// Verifies: REQ-GUI-024
     #[tokio::test]
-    async fn the_buffer_size_is_changed_outside_a_room_does_not_connect_again() {
+    async fn the_buffer_size_is_changed_outside_a_room_leaves_the_session_alone() {
         let server = FakeServer::start().await;
         let dir = tempfile::tempdir().unwrap();
         let app = connected_to_the_server(&server, &dir).await;
