@@ -238,6 +238,17 @@ impl Roster {
         self.links.clear();
     }
 
+    /// The audio session was ended to start over (new settings) while the room stays as it is.
+    /// The links are gone with it; the others' addresses are still the ones they published, so
+    /// they are linked again once this app has told the room its new address.
+    pub fn audio_restarting(&mut self) -> Vec<Audio> {
+        self.links.clear();
+        self.rejoining = false;
+        let mut audio = vec![Audio::Advertise, Audio::Open];
+        audio.extend(self.open_links());
+        audio
+    }
+
     /// The room is gone.
     pub fn clear(&mut self) {
         *self = Self::default();
@@ -635,6 +646,25 @@ mod tests {
             audio,
             vec![start(2, "192.0.2.2:5000"), start(3, "192.0.2.3:5000")]
         );
+    }
+
+    /// Verifies: REQ-GUI-024
+    #[test]
+    fn the_audio_restarts_in_the_same_room_tells_the_new_address_and_links_everyone_again() {
+        let mut roster = hearing(&[2, 3]);
+
+        let audio = roster.audio_restarting();
+
+        assert_eq!(
+            audio,
+            vec![
+                Audio::Advertise,
+                Audio::Open,
+                start(2, "192.0.2.2:5000"),
+                start(3, "192.0.2.3:5000")
+            ]
+        );
+        assert_eq!(roster.linked(), vec![id(2), id(3)]);
     }
 
     #[test]
