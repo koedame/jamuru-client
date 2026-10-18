@@ -24,6 +24,7 @@ import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
 import { Toast, ToastStack } from "../components/Toast";
 import { LeaveDialog } from "../components/LeaveDialog";
+import { EntryNameDialog } from "../components/EntryNameDialog";
 import { SettingsHelpMirror, useHelpPresence, useSettingsHelp } from "../components/SettingsHelp";
 import { formatErrorForDisplay } from "../lib/errorMessages";
 import { registerInviteLinkHandler } from "../lib/deepLink";
@@ -36,6 +37,9 @@ import {
   sessionJoin,
   sessionLeave,
   sessionReconnect,
+  configLoad,
+  configSetPeerName,
+  configSetAskNameOnEntry,
   windowQuitApp,
   SESSION_CHANGED,
   SESSION_SETTINGS_HELP,
@@ -86,6 +90,12 @@ export interface MainScreenProps {
   /** Set in the window of someone helping: who they are helping */
   helper?: { name: string };
 }
+
+/** The name the core gives someone who has not set one. */
+const DEFAULT_PEER_NAME = "User";
+
+/** What a person asked for when they pressed create or join. */
+type Entry = { kind: "create" } | { kind: "join"; code: string; muted?: boolean };
 
 /** A participant's strip until the backend has told of it. */
 const DEFAULT_PEER_STRIP: MixerPeerStrip = { volume: 80, pan: 0, muted: false };
@@ -347,19 +357,79 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
   // The failure of any of these is the session's `error` phase, which is drawn,
   // and the failed call is in the log; there is nothing more for the screen to do.
-  const handleCreateRoom = useCallback(() => {
-    sessionCreate().catch(() => undefined);
+  const enterRoom = useCallback((entry: Entry) => {
+    if (entry.kind === "create") {
+      sessionCreate().catch(() => undefined);
+      return;
+    }
+    if (entry.muted) setIsLocalMuted(true);
+    sessionJoin(entry.code, entry.muted ? { muted: true } : {}).catch(() => undefined);
   }, []);
-  const handleJoinRoom = useCallback((code: string) => {
-    sessionJoin(code).catch(() => undefined);
-  }, []);
+
+  // Every way into a room - create, a code, the test room, a link - asks which
+  // name to use first, unless the person turned that off (REQ-CON-141). When
+  // the settings cannot be read the room is entered with the saved name rather
+  // than keeping the person out.
+  const [namePrompt, setNamePrompt] = useState<{ entry: Entry; initialName: string } | null>(null);
+  const [namePending, setNamePending] = useState(false);
+  const [nameError, setNameError] = useState<string | undefined>();
+  const requestEntry = useCallback(
+    (entry: Entry) => {
+      configLoad()
+        .then((config) => {
+          if (config?.ask_name_on_entry !== true) {
+            enterRoom(entry);
+            return;
+          }
+          setNameError(undefined);
+          setNamePrompt({
+            entry,
+            initialName: config.peer_name === DEFAULT_PEER_NAME ? t("session.entryName.guest") : config.peer_name,
+          });
+        })
+        .catch((e) => {
+          console.error("Failed to read whether to ask the name:", e);
+          enterRoom(entry);
+        });
+    },
+    [enterRoom, t]
+  );
+  const handleConfirmName = useCallback(
+    async (name: string, remember: boolean) => {
+      if (!namePrompt) return;
+      setNamePending(true);
+      try {
+        await configSetPeerName(name);
+        if (remember) await configSetAskNameOnEntry(false);
+      } catch (e) {
+        console.error("Failed to save the name:", e);
+        setNameError(t("session.entryName.failed"));
+        setNamePending(false);
+        return;
+      }
+      setNamePending(false);
+      setNamePrompt(null);
+      enterRoom(namePrompt.entry);
+    },
+    [namePrompt, enterRoom, t]
+  );
+  const handleCancelName = useCallback(() => setNamePrompt(null), []);
+  useEffect(() => {
+    if (phase === "connected") setNamePrompt(null);
+  }, [phase]);
+
+  const handleCreateRoom = useCallback(() => requestEntry({ kind: "create" }), [requestEntry]);
+  const handleJoinRoom = useCallback(
+    (code: string) => requestEntry({ kind: "join", code }),
+    [requestEntry]
+  );
   // A link from another app opens the room with the microphone muted: nothing
   // the person pressed in this app started it, and they may not be looking at
   // it. They unmute when they mean to speak (REQ-CON-139).
-  const handleJoinRoomFromLink = useCallback((code: string) => {
-    setIsLocalMuted(true);
-    sessionJoin(code, { muted: true }).catch(() => undefined);
-  }, []);
+  const handleJoinRoomFromLink = useCallback(
+    (code: string) => requestEntry({ kind: "join", code, muted: true }),
+    [requestEntry]
+  );
   const handleReconnectSignaling = useCallback(() => {
     sessionReconnect().catch(() => undefined);
   }, []);
@@ -1150,6 +1220,15 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       {showConnectionPanel ? (
         <main className="main-content main-content--flush">
           {renderConnectionPanel()}
+          <EntryNameDialog
+            open={namePrompt !== null}
+            initialName={namePrompt?.initialName ?? ""}
+            confirmLabel={namePrompt?.entry.kind === "create" ? t("session.create.button") : t("session.join.button")}
+            pending={namePending}
+            error={nameError}
+            onConfirm={handleConfirmName}
+            onCancel={handleCancelName}
+          />
         </main>
       ) : (
         renderConnectedState()

@@ -58,6 +58,14 @@
       "placeholder": "ABC234XYZ",
       "loading": "Connecting..."
     },
+    "entryName": {
+      "title": "Enter your name",
+      "label": "Display name",
+      "hint": "This name is shown to other participants (1-32 characters)",
+      "guest": "Guest",
+      "remember": "Use this name from now on",
+      "failed": "Could not save the name"
+    },
     "leave": {
       "button": "Leave",
       "confirmMessage": "Are you sure you want to leave?",
@@ -211,6 +219,8 @@
       "nameHint": "This name is shown to other participants (1-32 characters)",
       "nameRequired": "Display name is required",
       "nameTooLong": "Display name must be 32 characters or less",
+      "askOnEntry": "Confirm my name before entering a room",
+      "askOnEntryHint": "Asks which name to use each time you create or join a room",
       "namePlaceholder": "User"
     },
     "devices": {
