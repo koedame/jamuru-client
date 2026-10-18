@@ -153,7 +153,7 @@ app_commands! {
     [Access::ALL] "音声の状態（レベル・遅延・統計）を読む" crate::streaming::streaming_status;
     [Access::NO_HELP] "音声の接続を張り直す" crate::streaming::streaming_reconnect;
     [Access::ALL] "自分のマイクをミュートする・戻す" crate::streaming::streaming_set_mute;
-    [Access::SCREEN_ONLY] "確認を出している間、マイクをミュートに保つ・保つのをやめて元に戻す" crate::streaming::streaming_hold_mute;
+    [Access::SCREEN_ONLY] "確認を出している間、マイクをミュートし相手の音を止めておく・やめて元に戻す" crate::streaming::streaming_hold_mute;
     [Access::ALL] "自分のマイクのミュートの状態を読む" crate::streaming::streaming_get_mute;
     [Access::ALL] "自分の音のモニターを切り替える" crate::streaming::streaming_set_monitoring;
     [Access::ALL] "入力のレベルを読む" crate::streaming::streaming_get_input_level;
