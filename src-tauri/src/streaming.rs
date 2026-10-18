@@ -43,14 +43,23 @@ pub struct StreamingState {
     /// the same one.
     prepared_addr: Mutex<Option<SocketAddr>>,
     /// While the microphone is held muted behind a question put to the person
-    /// (REQ-CON-138), whether it was muted before: what lifting the hold goes
-    /// back to. `None` when nothing holds it.
-    mute_hold: std::sync::Mutex<Option<bool>>,
+    /// (REQ-CON-138), what lifting the hold goes back to. `None` when nothing
+    /// holds it.
+    mute_hold: std::sync::Mutex<Option<MuteHold>>,
     /// What a session started by a test captures and plays in place of the
     /// devices: the machine the tests run on may have none, and a test must
     /// not open the microphone of the one that has.
     #[cfg(test)]
     stand_ins: std::sync::Mutex<Option<(jamjam::audio_session::InputSignal, std::path::PathBuf)>>,
+}
+
+/// What the person had before a question silenced their room (REQ-CON-138).
+struct MuteHold {
+    /// Whether the microphone was muted
+    microphone_muted: bool,
+    /// The master volume, in percent. A change made while the hold stands
+    /// lands here and is heard when the hold is lifted.
+    master_volume: u32,
 }
 
 impl StreamingState {
@@ -80,28 +89,58 @@ impl StreamingState {
         }
     }
 
-    /// Holds the microphone muted while the person is asked something that
-    /// they may walk away from, so that nothing of their room is sent while
-    /// the question stands (REQ-CON-138). Lifting the hold puts the mute back
-    /// as it was before. Holding twice, or lifting what is not held, does
-    /// nothing.
+    /// Sets the master volume, in percent of unity gain, with the session
+    /// running or not. While a hold stands the room stays silent and the new
+    /// volume is heard when the hold is lifted.
+    async fn set_master_volume(&self, percent: u32) {
+        {
+            let mut held = self.mute_hold.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(hold) = held.as_mut() {
+                hold.master_volume = percent;
+                return;
+            }
+        }
+        self.apply_master_volume(percent).await;
+    }
+
+    async fn apply_master_volume(&self, percent: u32) {
+        self.shared.master_volume.store(percent, Ordering::SeqCst);
+        if self.shared.is_active.load(Ordering::SeqCst) {
+            let tx = self.cmd_tx.lock().await;
+            if let Some(ref sender) = *tx {
+                let _ = sender.send(StreamingCommand::SetMasterVolume(percent as f32 / 100.0));
+            }
+        }
+    }
+
+    /// Holds the microphone muted, and the room silent, while the person is
+    /// asked something that they may walk away from: nothing of their room is
+    /// sent while the question stands, and since a muted microphone looks the
+    /// same as an open one to the person, hearing nothing of the others
+    /// keeps them from talking on as if they were heard (REQ-CON-138).
+    /// Lifting the hold puts both back as they were before. Holding twice, or
+    /// lifting what is not held, does nothing.
     pub async fn hold_mute(&self, hold: bool) {
-        let muted = {
+        let (muted, master_volume) = {
             let mut held = self.mute_hold.lock().unwrap_or_else(|e| e.into_inner());
             if hold {
                 if held.is_some() {
                     return;
                 }
-                *held = Some(self.shared.is_muted.load(Ordering::SeqCst));
-                true
+                *held = Some(MuteHold {
+                    microphone_muted: self.shared.is_muted.load(Ordering::SeqCst),
+                    master_volume: self.shared.master_volume.load(Ordering::SeqCst),
+                });
+                (true, 0)
             } else {
                 match held.take() {
-                    Some(before) => before,
+                    Some(before) => (before.microphone_muted, before.master_volume),
                     None => return,
                 }
             }
         };
         self.set_mute(muted).await;
+        self.apply_master_volume(master_volume).await;
     }
 
     /// Sets the volume `peer` is played at, in percent of unity gain (0-200).
@@ -1095,8 +1134,8 @@ pub async fn streaming_set_mute(
     Ok(())
 }
 
-/// Holds the microphone muted while a question is on the screen, or lifts the
-/// hold and puts the mute back as it was (REQ-CON-138).
+/// Holds the microphone muted and the room silent while a question is on the
+/// screen, or lifts the hold and puts both back as they were (REQ-CON-138).
 #[tauri::command]
 pub async fn streaming_hold_mute(
     hold: bool,
@@ -1146,17 +1185,7 @@ pub async fn streaming_set_master_volume(
     volume: u32,
     state: tauri::State<'_, StreamingState>,
 ) -> Result<(), String> {
-    let clamped = volume.min(200);
-    state.shared.master_volume.store(clamped, Ordering::SeqCst);
-
-    // If streaming, also send command to audio thread
-    if state.shared.is_active.load(Ordering::SeqCst) {
-        let tx = state.cmd_tx.lock().await;
-        if let Some(ref sender) = *tx {
-            let _ = sender.send(StreamingCommand::SetMasterVolume(clamped as f32 / 100.0));
-        }
-    }
-
+    state.set_master_volume(volume.min(200)).await;
     Ok(())
 }
 
@@ -1189,10 +1218,56 @@ mod tests {
 
         state.hold_mute(false).await;
         assert!(!state.shared.is_muted.load(Ordering::SeqCst));
-        assert!(matches!(
-            sent.try_recv(),
-            Ok(StreamingCommand::SetMute(false))
-        ));
+        assert!(sent
+            .try_iter()
+            .any(|c| matches!(c, StreamingCommand::SetMute(false))));
+    }
+
+    /// Verifies: REQ-CON-138
+    #[tokio::test]
+    async fn when_the_mute_is_held_the_room_is_silent_until_the_hold_is_lifted() {
+        let state = StreamingState::new();
+        let sent = state.attach_session_for_test().await;
+        state.set_master_volume(80).await;
+        sent.try_iter().for_each(drop);
+
+        state.hold_mute(true).await;
+        assert_eq!(state.shared.master_volume.load(Ordering::SeqCst), 0);
+        assert!(sent
+            .try_iter()
+            .any(|c| matches!(c, StreamingCommand::SetMasterVolume(v) if v == 0.0)));
+
+        state.hold_mute(false).await;
+        assert_eq!(state.shared.master_volume.load(Ordering::SeqCst), 80);
+        assert!(sent
+            .try_iter()
+            .any(|c| matches!(c, StreamingCommand::SetMasterVolume(v) if v == 0.8)));
+    }
+
+    /// Verifies: REQ-CON-138
+    #[tokio::test]
+    async fn when_the_volume_is_changed_during_the_hold_the_room_stays_silent_until_it_is_lifted() {
+        let state = StreamingState::new();
+        state.hold_mute(true).await;
+
+        state.set_master_volume(150).await;
+        assert_eq!(state.shared.master_volume.load(Ordering::SeqCst), 0);
+
+        state.hold_mute(false).await;
+        assert_eq!(state.shared.master_volume.load(Ordering::SeqCst), 150);
+    }
+
+    /// Verifies: REQ-CON-138
+    #[tokio::test]
+    async fn when_the_mute_is_held_twice_the_room_goes_back_to_the_volume_before_the_first() {
+        let state = StreamingState::new();
+        state.set_master_volume(60).await;
+
+        state.hold_mute(true).await;
+        state.hold_mute(true).await;
+        state.hold_mute(false).await;
+
+        assert_eq!(state.shared.master_volume.load(Ordering::SeqCst), 60);
     }
 
     /// Verifies: REQ-CON-138
