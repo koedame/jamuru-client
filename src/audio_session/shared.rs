@@ -130,6 +130,9 @@ pub struct Shared {
     pub underrun_count: Arc<AtomicU64>,
     /// How many times adaptation has moved the play-out delay this session
     pub delay_adjustments: Arc<AtomicU64>,
+    /// The play-out delay, in microseconds, that the latest adaptation left the
+    /// adjusted link with
+    pub adjusted_delay_us: Arc<AtomicU32>,
     /// How many times a link dropped and began to reconnect, over every link
     pub reconnect_count: Arc<AtomicU64>,
     /// How many times an established link was given up for silence, over every link
@@ -168,6 +171,7 @@ impl Shared {
             device_problems: Arc::new(RwLock::new(Vec::new())),
             underrun_count: Arc::new(AtomicU64::new(0)),
             delay_adjustments: Arc::new(AtomicU64::new(0)),
+            adjusted_delay_us: Arc::new(AtomicU32::new(0)),
             reconnect_count: Arc::new(AtomicU64::new(0)),
             silence_giveups: Arc::new(AtomicU64::new(0)),
             link_facts: Arc::new(RwLock::new(None)),
@@ -190,6 +194,7 @@ impl Shared {
         self.output_level.store(0, Ordering::SeqCst);
         self.underrun_count.store(0, Ordering::SeqCst);
         self.delay_adjustments.store(0, Ordering::SeqCst);
+        self.adjusted_delay_us.store(0, Ordering::SeqCst);
         self.reconnect_count.store(0, Ordering::SeqCst);
         self.silence_giveups.store(0, Ordering::SeqCst);
         if let Ok(mut facts) = self.link_facts.write() {

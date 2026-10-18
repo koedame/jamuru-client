@@ -646,7 +646,7 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "bandwidthRecovered": "Bandwidth recovered",
-    "delayAdjusted": "Buffer size adjusted",
+    "delayAdjusted": "Network buffer adjusted to {{ms}} ms",
     "newerRelease": "A new version, {{version}}, is out. Please reinstall to update",
     "deviceProblem": {
       "named": " ({{device}})",
