@@ -268,7 +268,7 @@ export function DevicesTab({
 
       <FormField
         label={t("settings.devices.sampleRate", "Sample Rate")}
-        description={t("settings.devices.sampleRateDesc", "Higher improves quality and uses more bandwidth")}
+        description={t("settings.devices.sampleRateDesc", "Higher gives better quality but uses more bandwidth")}
         orientation="row"
         htmlFor="sample-rate"
       >

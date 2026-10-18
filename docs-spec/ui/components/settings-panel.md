@@ -268,7 +268,7 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 |---|---|---|
 | `idle` | なし | 確認 |
 | `checking` | 確認しています… | 確認（押せない） |
-| `up_to_date` | 最新の版です | 確認 |
+| `up_to_date` | 最新版です | 確認 |
 | `available`（入れ替えられる） | 新しい版 X が出ています | 確認・更新して再起動 |
 | `available`（`support = notice`。`.deb` / `.msi`） | 新しい版 X が出ています。入れ直してください | 確認だけ |
 | `installing` | X を入れています。入れ終えると再起動します | どちらも押せない |
