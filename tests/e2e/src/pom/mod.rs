@@ -288,14 +288,7 @@ impl App {
     /// The app's log file inside the throwaway `$HOME`. The path mirrors what
     /// Tauri derives for the log directory of the app identifier on each platform.
     pub fn log_file_path(&self) -> PathBuf {
-        let home = self._home.path();
-        if cfg!(target_os = "macos") {
-            home.join("Library/Logs/me.koeda.jamuru/jamuru.log")
-        } else if cfg!(target_os = "windows") {
-            home.join("AppData/Local/me.koeda.jamuru/logs/jamuru.log")
-        } else {
-            home.join(".local/share/me.koeda.jamuru/logs/jamuru.log")
-        }
+        self._home.path().join(log_file_relative_path())
     }
 
     /// Where the app keeps the install ID and the record of a crash, inside the
@@ -400,6 +393,75 @@ impl Drop for App {
     }
 }
 
+/// Two copies of the app started the way a person starts them: with no
+/// control channel, which is also what switches the one-copy hand-over off
+/// (`src-tauri/src/single_instance.rs`). The second gets `args`, an invite link
+/// as the OS passes it.
+pub struct TwoCopies {
+    first: Child,
+    second: Child,
+    _home: tempfile::TempDir,
+}
+
+impl TwoCopies {
+    /// Starts the first copy and, once its log says it is up, the second.
+    pub fn launch(second_args: &[&str]) -> DriverResult<Self> {
+        let binary = default_binary_path();
+        if !binary.exists() {
+            return Err(format!("app binary not found at {}", binary.display()));
+        }
+        let home =
+            tempfile::tempdir().map_err(|e| format!("could not create a temp HOME: {}", e))?;
+        seed_config(home.path(), None, None, "", Terms::Agreed)?;
+        let start = |args: &[&str]| {
+            Command::new(&binary)
+                .args(args)
+                .env("HOME", home.path())
+                .env_remove("XDG_DATA_HOME")
+                .env_remove("JAMJAM_E2E_CONTROL_PORT")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("could not start {}: {}", binary.display(), e))
+        };
+        let mut first = start(&[])?;
+        let log = home.path().join(log_file_relative_path());
+        let up = wait_for(LAUNCH_TIMEOUT, || {
+            std::fs::read_to_string(&log).is_ok_and(|text| text.contains("config:"))
+        });
+        if up.is_err() {
+            let _ = first.kill();
+            let _ = first.wait();
+            return Err("the first copy did not write its start-up log".to_string());
+        }
+        let second = start(second_args)?;
+        Ok(Self {
+            first,
+            second,
+            _home: home,
+        })
+    }
+
+    /// Whether the second copy ended within `timeout`.
+    pub fn second_ended_within(&mut self, timeout: Duration) -> bool {
+        wait_for(timeout, || matches!(self.second.try_wait(), Ok(Some(_)))).is_ok()
+    }
+
+    /// Whether the first copy is still running.
+    pub fn first_is_running(&mut self) -> bool {
+        matches!(self.first.try_wait(), Ok(None))
+    }
+}
+
+impl Drop for TwoCopies {
+    fn drop(&mut self) {
+        for process in [&mut self.first, &mut self.second] {
+            let _ = process.kill();
+            let _ = process.wait();
+        }
+    }
+}
+
 /// Whether the throwaway `$HOME` starts with the terms of use agreed to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Terms {
@@ -484,6 +546,17 @@ fn config_dir(home: &Path) -> DriverResult<PathBuf> {
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("could not create {}: {}", dir.display(), e))?;
     Ok(dir)
+}
+
+/// Where the app writes its log, relative to `$HOME`.
+fn log_file_relative_path() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Library/Logs/me.koeda.jamuru/jamuru.log"
+    } else if cfg!(target_os = "windows") {
+        "AppData/Local/me.koeda.jamuru/logs/jamuru.log"
+    } else {
+        ".local/share/me.koeda.jamuru/logs/jamuru.log"
+    }
 }
 
 /// Path the app binary lands at, relative to this crate.

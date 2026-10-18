@@ -25,6 +25,7 @@ mod rpc;
 mod session;
 mod settings;
 mod signaling;
+mod single_instance;
 mod software_render;
 mod streaming;
 mod terms;
@@ -98,8 +99,13 @@ pub fn run() {
     // ADR-041), so a build made from source never replaces itself with a release.
     let self_updating = context.config().plugins.0.contains_key("updater");
 
-    let mut builder = tauri::Builder::default()
-        // First: the logger exists before anything below can log (ADR-036).
+    let mut builder = tauri::Builder::default();
+    // Before every other plugin: a second copy exits while they start (ADR-085).
+    if let Some(plugin) = single_instance::plugin() {
+        builder = builder.plugin(plugin);
+    }
+    let mut builder = builder
+        // The logger exists before anything below can log (ADR-036).
         .plugin(logging::init(log_spec.clone()))
         .plugin(tauri_plugin_shell::init())
         // Hands `jamuru://join/<code>` links from the OS to the app (REQ-CON-103).

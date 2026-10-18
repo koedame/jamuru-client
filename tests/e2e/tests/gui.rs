@@ -23,7 +23,7 @@ use common::fake_signaling::FakeSignaling;
 use jamjam_e2e_tests::pom::fake_relay::{FakeRelay, Target};
 use jamjam_e2e_tests::pom::loopback_audio;
 use jamjam_e2e_tests::pom::screens::{ConnectionState, SettingsTab};
-use jamjam_e2e_tests::pom::{App, UI_TIMEOUT};
+use jamjam_e2e_tests::pom::{App, TwoCopies, UI_TIMEOUT};
 
 #[path = "../../common/mod.rs"]
 mod common;
@@ -2194,4 +2194,25 @@ fn the_8ch_loopback_device_returns_each_channel_where_it_was_played() {
             }
         }
     }
+}
+
+/// An invite link opened while the app runs starts the program again. The
+/// second copy has to hand the link to the first and end, or the two share one
+/// config file and each joins rooms with its own idea of the settings.
+///
+/// Verifies: REQ-CON-143
+#[test]
+fn a_second_copy_started_while_the_app_runs_ends_and_leaves_the_first_running() {
+    let _guard = exclusive();
+    let mut copies =
+        TwoCopies::launch(&["jamuru://join/ABCDEFGHJ"]).expect("the two copies should start");
+
+    assert!(
+        copies.second_ended_within(Duration::from_secs(15)),
+        "the second copy should have ended"
+    );
+    assert!(
+        copies.first_is_running(),
+        "the first copy should still be running"
+    );
 }
