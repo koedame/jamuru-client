@@ -30,11 +30,11 @@ const EXIT_LIMIT: Duration = Duration::from_secs(3);
 /// Restarts the app; does not return.
 pub(crate) async fn restart<R: Runtime>(app: &AppHandle<R>) {
     stop_audio(app).await;
-    let env = app.env();
+    let handle = app.clone();
     let reporter = app
         .try_state::<UsageState>()
         .map(|usage| usage.reporter().clone());
-    after(GRACE, move || start_new_instance(&env, reporter));
+    after(GRACE, move || start_new_instance(&handle, reporter));
     tracing::info!("Restarting");
     app.restart()
 }
@@ -62,7 +62,7 @@ fn after(delay: Duration, action: impl FnOnce() + Send + 'static) {
     });
 }
 
-fn start_new_instance(env: &tauri::Env, reporter: Option<UsageReporter>) -> ! {
+fn start_new_instance<R: Runtime>(app: &AppHandle<R>, reporter: Option<UsageReporter>) -> ! {
     tracing::error!(
         "The restart did not happen within {:?}; starting the new instance and ending this one",
         GRACE
@@ -73,11 +73,15 @@ fn start_new_instance(env: &tauri::Env, reporter: Option<UsageReporter>) -> ! {
         let stalled_ms = u32::try_from(GRACE.as_millis()).unwrap_or(u32::MAX);
         reporter.write_hang(HangStage::Restart, Some(stalled_ms));
     }
+    // The exit that would let go of the one-copy lock (ADR-085) is the one
+    // that is stuck: without this the new instance finds the old one still
+    // holding it, hands over to it and ends, and nothing runs.
+    tauri_plugin_single_instance::destroy(app);
     // Ending the process runs exit handlers, which can wait on the same thing
     // the main thread does.
     #[cfg(unix)]
     after(EXIT_LIMIT, || unsafe { libc::_exit(0) });
-    tauri::process::restart(env)
+    tauri::process::restart(&app.env())
 }
 
 #[cfg(test)]
