@@ -22,6 +22,7 @@ import { ConnectionPanel, type ConnectionState, type ConnectionErrorKind } from 
 import { MixerPanel, MasterSection, type Channel } from "../components/MixerPanel";
 import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
+import { PeerLinkDetail } from "../components/PeerLinkDetail";
 import { Toast, ToastStack } from "../components/Toast";
 import { LeaveDialog } from "../components/LeaveDialog";
 import { EntryNameDialog } from "../components/EntryNameDialog";
@@ -126,6 +127,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // The audio link to each participant there is one to. Everything the screen
   // shows of a connection - its state, latency, quality - is one of these.
   const [links, setLinks] = useState<PeerLinkStatus[]>([]);
+  // The participant whose latency breakdown is open. The footer says how the
+  // room is doing; what each link is made of is said here, per participant.
+  const [detailPeerId, setDetailPeerId] = useState<string | null>(null);
   const [deviceProblems, setDeviceProblems] = useState<DeviceProblem[]>([]);
   // Last bandwidth band we warned about, so the toast appears on the edge rather
   // than on every 100ms poll.
@@ -505,6 +509,22 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // worst link. The quality band comes from the core library (REQ-LAT-121);
   // nothing here re-derives it from RTT and loss.
   const overall = useMemo(() => overallLink(links), [links]);
+
+  // A participant who left has no breakdown to keep open: one who comes back
+  // starts closed.
+  useEffect(() => {
+    setDetailPeerId((open) =>
+      open !== null && participants.some((p) => p.id === open) ? open : null
+    );
+  }, [participants]);
+
+  // The sidebar list scrolls, so an opened breakdown can be below its edge.
+  useEffect(() => {
+    if (detailPeerId === null) return;
+    document
+      .getElementById(`participant-detail-${detailPeerId}`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [detailPeerId]);
   const indicatorStatus: ConnectionStatus = useMemo(() => {
     if (overall.trouble !== null) return overall.trouble;
     if (phase === "connected") return "connected";
@@ -521,17 +541,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         .join(t("session.names.separator")),
     [participants, t]
   );
-
-  // Device input/output latency, taken from the breakdown rather than recomputed
-  // (REQ-LAT-122). They are this machine's, so any link's breakdown has them.
-  const deviceLatency = useMemo(() => {
-    const breakdown = links.find((link) => link.latency !== null)?.latency;
-    if (!breakdown) return null;
-    const capture = breakdown.upstream.find((c) => c.name.includes("Capture"));
-    const playback = breakdown.downstream.find((c) => c.name.includes("Playback"));
-    if (!capture || !playback) return null;
-    return { input: capture.ms, output: playback.ms };
-  }, [links]);
 
   // Bandwidth warning. Bitrate adaptation is out of scope (ADR-022), so a narrow
   // link is reported rather than worked around.
@@ -604,6 +613,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   useEffect(() => {
     if (phase !== "connected") {
       setLinks([]);
+      setDetailPeerId(null);
       setDeviceProblems([]);
       setWarnedBandwidth(null);
       setDelayAdjustments(0);
@@ -1001,11 +1011,13 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
               </span>
               <ul className="room-sidebar__participant-list" data-testid="participant-list">
                 <li className="participant participant--self">
-                  <span className="participant__info">
-                    <span className="participant__icon participant__icon--self">
-                      <UserIcon />
+                  <span className="participant__summary">
+                    <span className="participant__info">
+                      <span className="participant__icon participant__icon--self">
+                        <UserIcon />
+                      </span>
+                      <span className="participant__name">{peerName}</span>
                     </span>
-                    <span className="participant__name">{peerName}</span>
                   </span>
                 </li>
                 {participants.map((participant) => {
@@ -1015,6 +1027,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                   const trouble = linkTrouble(link);
                   const latency = measuredLatency(link);
                   const isSlowest = slowest === participant.id;
+                  const detailOpen = detailPeerId === participant.id;
+                  const detailId = `participant-detail-${participant.id}`;
                   return (
                   <li
                     key={participant.id}
@@ -1023,39 +1037,56 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                     data-peer-id={participant.id}
                     data-link={trouble ?? "connected"}
                   >
-                    <span className="participant__info">
-                      <span className="participant__icon">
-                        <UserIcon />
-                      </span>
-                      <span className="participant__name">{participant.name}</span>
-                    </span>
-                    {trouble !== null && (
-                      <span
-                        className={`participant__link participant__link--${trouble}`}
-                        data-testid="participant-link"
-                      >
-                        {t(`status.${trouble}`)}
-                      </span>
-                    )}
-                    {latency && (
-                      <span
-                        className={
-                          isSlowest
-                            ? "participant__latency participant__latency--highest"
-                            : "participant__latency"
-                        }
-                        data-testid="participant-latency"
-                        title={isSlowest ? t("session.participant.highestLatency") : undefined}
-                      >
-                        <span className="participant__latency-item">
-                          <span className="participant__latency-arrow">↑</span>
-                          {Math.round(latency.upstream_total_ms)}ms
+                    <button
+                      type="button"
+                      className="participant__summary"
+                      data-testid="participant-toggle"
+                      aria-expanded={detailOpen}
+                      aria-controls={detailOpen ? detailId : undefined}
+                      onClick={() => setDetailPeerId(detailOpen ? null : participant.id)}
+                    >
+                      <span className="participant__info">
+                        <span className="participant__icon">
+                          <UserIcon />
                         </span>
-                        <span className="participant__latency-item">
-                          <span className="participant__latency-arrow">↓</span>
-                          {Math.round(latency.downstream_total_ms)}ms
-                        </span>
+                        <span className="participant__name">{participant.name}</span>
                       </span>
+                      {trouble !== null && (
+                        <span
+                          className={`participant__link participant__link--${trouble}`}
+                          data-testid="participant-link"
+                        >
+                          {t(`status.${trouble}`)}
+                        </span>
+                      )}
+                      {latency && (
+                        <span
+                          className={
+                            isSlowest
+                              ? "participant__latency participant__latency--highest"
+                              : "participant__latency"
+                          }
+                          data-testid="participant-latency"
+                          title={isSlowest ? t("session.participant.highestLatency") : undefined}
+                        >
+                          <span className="participant__latency-item">
+                            <span className="participant__latency-arrow">↑</span>
+                            {Math.round(latency.upstream_total_ms)}ms
+                          </span>
+                          <span className="participant__latency-item">
+                            <span className="participant__latency-arrow">↓</span>
+                            {Math.round(latency.downstream_total_ms)}ms
+                          </span>
+                        </span>
+                      )}
+                    </button>
+                    {detailOpen && (
+                      <PeerLinkDetail
+                        id={detailId}
+                        peerName={participant.name}
+                        link={link}
+                        localSampleRate={localSampleRate}
+                      />
                     )}
                   </li>
                   );
@@ -1116,9 +1147,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
             <ConnectionIndicator
               status={indicatorStatus}
               quality={overall.quality}
-              latencyMs={overall.rttMs}
-              inputLatencyMs={deviceLatency?.input}
-              outputLatencyMs={deviceLatency?.output}
+              showLatency={false}
             />
           </div>
         </footer>

@@ -607,6 +607,12 @@ export interface PeerAudioInfo {
   needs_resampling: boolean;
   /** Peer's transmit channel count (1 = mono, 2 = stereo) */
   channel_count: number;
+  /** Peer's capture buffer latency in milliseconds */
+  capture_buffer_ms: number;
+  /** Peer's playback buffer latency in milliseconds */
+  playback_buffer_ms: number;
+  /** Peer's current jitter buffer delay in milliseconds */
+  jitter_buffer_ms: number;
 }
 
 /** The audio link to one participant */

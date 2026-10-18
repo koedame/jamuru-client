@@ -89,7 +89,22 @@
       "title": "参加者 ({{count}})",
       "joined": "{{name}}さんが参加しました",
       "left": "{{name}}さんが退出しました",
-      "highestLatency": "遅延がいちばん大きい参加者"
+      "highestLatency": "遅延がいちばん大きい参加者",
+      "detail": {
+        "you": "自分",
+        "network": "ネットワーク",
+        "input": "入力",
+        "output": "出力",
+        "jitterBuffer": "ジッターバッファ",
+        "rtt": "往復",
+        "jitter": "ジッター",
+        "packetLoss": "パケットロス",
+        "format": "音声",
+        "formatValue": "{{rate}}kHz・{{frames}}サンプル・{{codec}}・{{channels}}",
+        "mono": "モノラル",
+        "stereo": "ステレオ",
+        "measuring": "測定中..."
+      }
     },
     "testRoom": {
       "title": "テストルーム",

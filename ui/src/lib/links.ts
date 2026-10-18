@@ -41,6 +41,31 @@ export function measuredLatency(link: PeerLinkStatus | undefined): DetailedLaten
   return link.latency;
 }
 
+/** This machine's side of a link, as the latency breakdown has it (REQ-LAT-122) */
+export interface LocalBuffers {
+  /** Capture (microphone side) delay in ms */
+  input: number;
+  /** Playback (headphone side) delay in ms */
+  output: number;
+  /** The delay held against jitter, in ms */
+  jitter: number;
+}
+
+/**
+ * This machine's input, output and jitter buffer delays, taken from the
+ * breakdown rather than recomputed. Input and output are the machine's own;
+ * the jitter buffer is that of the link the breakdown belongs to. Null while
+ * the breakdown has no such components.
+ */
+export function localBuffers(latency: DetailedLatency | null | undefined): LocalBuffers | null {
+  if (!latency) return null;
+  const capture = latency.upstream.find((c) => c.name.includes("Capture"));
+  const playback = latency.downstream.find((c) => c.name.includes("Playback"));
+  const jitter = latency.downstream.find((c) => c.name.includes("Jitter"));
+  if (!capture || !playback || !jitter) return null;
+  return { input: capture.ms, output: playback.ms, jitter: jitter.ms };
+}
+
 const QUALITY_ORDER: ConnectionQualityBand[] = ["good", "fair", "poor"];
 
 /** The links as one: what the footer shows of the room */
@@ -49,8 +74,6 @@ export interface OverallLink {
   trouble: "error" | "unstable" | null;
   /** The worst quality band among the links that have one */
   quality: ConnectionQualityBand | undefined;
-  /** The longest round trip among the links that have measured one, in ms */
-  rttMs: number | undefined;
 }
 
 /**
@@ -65,18 +88,13 @@ export function overallLink(links: PeerLinkStatus[]): OverallLink {
       ? "unstable"
       : null;
   let quality: ConnectionQualityBand | undefined;
-  let rttMs: number | undefined;
   for (const link of links) {
     const band = link.network?.quality;
     if (band && (!quality || QUALITY_ORDER.indexOf(band) > QUALITY_ORDER.indexOf(quality))) {
       quality = band;
     }
-    const rtt = link.network?.rtt_ms;
-    if (rtt != null && (rttMs === undefined || rtt > rttMs)) {
-      rttMs = rtt;
-    }
   }
-  return { trouble, quality, rttMs };
+  return { trouble, quality };
 }
 
 /**
