@@ -53,8 +53,9 @@ export interface LocalBuffers {
 
 /**
  * This machine's input, output and jitter buffer delays, taken from the
- * breakdown rather than recomputed. They are the machine's own, so any link's
- * breakdown has them. Null while the breakdown has no such components.
+ * breakdown rather than recomputed. Input and output are the machine's own;
+ * the jitter buffer is that of the link the breakdown belongs to. Null while
+ * the breakdown has no such components.
  */
 export function localBuffers(latency: DetailedLatency | null | undefined): LocalBuffers | null {
   if (!latency) return null;

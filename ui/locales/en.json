@@ -96,8 +96,6 @@
         "formatValue": "{{rate}}kHz, {{frames}} samples, {{codec}}, {{channels}}",
         "mono": "Mono",
         "stereo": "Stereo",
-        "upstream": "You → them",
-        "downstream": "Them → you",
         "measuring": "Measuring..."
       }
     },
