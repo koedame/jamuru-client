@@ -79,6 +79,8 @@ export interface SettingsHelp {
   helpedBy: string | null;
   /** The bars for help going on, for the session screen */
   bars: ReactNode;
+  /** The passing notice about help, to be shown in the app's toast stack */
+  toast: ReactNode;
   /** The asking and the question of whether to help, drawn over the screen */
   overlays: ReactNode;
 }
@@ -348,9 +350,7 @@ export function useSettingsHelp(connId: number | null, participants: Participant
       />
     );
   }
-  if (notice) {
-    bars.push(<Toast key="notice" type="info" message={notice} />);
-  }
+  const toast = notice ? <Toast type="info" message={notice} /> : null;
 
   // Each question is mounted afresh (and keyed), so Allow is held back from
   // its first frame and focus returns when it goes.
@@ -391,6 +391,7 @@ export function useSettingsHelp(connId: number | null, participants: Participant
     openAsk: () => setAsking(true),
     helpedBy: receiving?.status === "active" ? receiving.name : null,
     bars: bars.length > 0 ? <div className="settings-help-bars">{bars}</div> : null,
+    toast,
     overlays,
   };
 }

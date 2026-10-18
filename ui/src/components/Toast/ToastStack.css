@@ -1,0 +1,38 @@
+/**
+ * Notifications drop in from the top centre of the window. The stack ignores
+ * the pointer except on the toasts and their buttons, so it never blocks the
+ * screen under it.
+ */
+
+.toast-stack {
+  position: fixed;
+  top: var(--space-md);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  max-width: calc(100vw - 2 * var(--space-md));
+  pointer-events: none;
+}
+
+.toast-stack > * {
+  pointer-events: auto;
+  animation: toast-drop var(--duration-normal) var(--ease-out);
+}
+
+/* A toast with an action beside it (retry) */
+.toast-stack__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+@keyframes toast-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
