@@ -82,7 +82,7 @@
       "copied": "Copied",
       "copy": "Copy",
       "joinByCode": "Join by Invite Code",
-      "shareHint": "Share this code with others to join"
+      "shareHint": "Share this code to invite others"
     },
     "participant": {
       "count_one": "{{count}} participant",
@@ -109,7 +109,7 @@
     },
     "testRoom": {
       "title": "Test Room",
-      "description": "Connect to a standing room for testing"
+      "description": "Connect to a room for testing"
     },
     "unencrypted": "Audio with this peer is not encrypted (their app is an older version)",
     "unencryptedWith": "Audio with {{names}} is not encrypted (their app is an older version)",
@@ -255,7 +255,7 @@
       "mono": "Mono",
       "stereo": "Stereo",
       "sampleRate": "Sample Rate",
-      "sampleRateDesc": "Higher improves quality and uses more bandwidth (recommended: 48kHz)",
+      "sampleRateDesc": "Higher gives better quality but uses more bandwidth (recommended: 48kHz)",
       "buffer": "Buffer Size",
       "bufferDesc": "Smaller = lower latency, higher CPU usage",
       "latencyInput": "Input Latency",
@@ -360,7 +360,7 @@
         },
         "noIpv6": {
           "message": "IPv6 is not available",
-          "suggestion": "IPv4 will be used. This is usually fine for most connections."
+          "suggestion": "IPv4 will be used instead. This is fine for most connections."
         },
         "symmetricNat": {
           "message": "Symmetric NAT detected",
@@ -383,11 +383,11 @@
           "suggestion": "Check if {{url}} is accessible. Error: {{error}}"
         },
         "inputEnumerationFailed": {
-          "message": "Failed to enumerate input devices",
+          "message": "Failed to get the list of input devices",
           "suggestion": "Error: {{error}}. Try restarting your audio interface."
         },
         "outputEnumerationFailed": {
-          "message": "Failed to enumerate output devices",
+          "message": "Failed to get the list of output devices",
           "suggestion": "Error: {{error}}. Try restarting your audio interface."
         },
         "inputDeviceUnresponsive": {
@@ -555,7 +555,7 @@
       },
       "timeout": {
         "title": "Connection Failed",
-        "message": "Could not find the other party. Please check the invite code."
+        "message": "Could not find the other person. Please check the invite code."
       },
       "refused": {
         "title": "Connection Refused",
@@ -621,7 +621,7 @@
     },
     "bandwidth": {
       "title": "Audio Quality Reduced Due to Low Bandwidth",
-      "message": "Quality will automatically restore when network improves."
+      "message": "Quality will be restored automatically when the network recovers."
     }
   },
   "onboarding": {
@@ -703,7 +703,7 @@
     "recommendedPreset": "Recommended Preset",
     "zeroLatencyMode": "Zero Latency Mode",
     "compatible": "Compatible",
-    "incompatible": "Not Recommended",
+    "incompatible": "Not Compatible",
     "detectedProblems": "Detected Problems",
     "noProblems": "No problems detected",
     "rerunAll": "Re-run All Diagnostics",
@@ -812,7 +812,7 @@
       "busy": "{{name}} is helping someone else right now",
       "noAnswer": "No answer from {{name}}. You can ask someone else.",
       "withdrawn": "{{name}} cancelled the request",
-      "couldNotStart": "The help with {{name}} couldn't start"
+      "couldNotStart": "Couldn't start helping {{name}}"
     },
     "request": {
       "message": "{{name}} has asked for help with settings",
@@ -850,7 +850,7 @@
     "window": {
       "banner": "You are looking at {{name}}'s jamuru settings together. What you change here changes theirs.",
       "presence": "{{name}} can also see where you point and focus",
-      "waiting": "Waiting for {{name}}'s app to be in the room"
+      "waiting": "Waiting for {{name}}'s app to join the room"
     },
     "log": {
       "heading": "{{name}} is helping",
