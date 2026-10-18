@@ -78,7 +78,7 @@ jamuru UI
 | ChatPanel | P0 | 仕様作成済 | [chat-panel.md](./chat-panel.md) |
 | SettingsPanel | P0 | 仕様作成済 | [settings-panel.md](./settings-panel.md) |
 | SessionStats | P1 | 仕様作成済 | [session-stats.md](./session-stats.md) |
-| PeerLinkDetail | P1 | 仕様作成済 | [peer-link-detail.md](./peer-link-detail.md) |
+| PeerLinkDetail / PeerLinkDialog | P1 | 仕様作成済 | [peer-link-detail.md](./peer-link-detail.md) |
 | SettingsHelp | P1 | 仕様作成済 | [settings-help.md](./settings-help.md) |
 
 ### 共通コンポーネント
@@ -234,8 +234,9 @@ interface ComponentProps {
 
 **用途**: オーバーレイダイアログ
 
-**注意**: 演奏中（セッションアクティブ時）はモーダル表示禁止。唯一の例外が退室確認ダイアログ
-（`LeaveDialog`、下記）— 退室操作自体が意図的な確認を要するため。
+**注意**: 演奏中（セッションアクティブ時）は、システムが勝手にモーダルを出すことを禁止する。
+利用者の操作で開くものだけが例外: 退室確認ダイアログ（`LeaveDialog`、下記）— 退室操作自体が意図的な確認を要するため。
+参加者の遅延の内訳（`PeerLinkDialog`）— 利用者が行を押して開き、いつでも閉じられ、開いていても音声は止まらないため。
 
 **構造**:
 ```

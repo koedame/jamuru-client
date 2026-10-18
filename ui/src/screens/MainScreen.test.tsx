@@ -502,7 +502,7 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
   }
 
   // Verifies: REQ-LAT-102
-  it('3 人のルームで一方の行を開いたとき、その人との内訳だけを出し、もう一方の人の値は出さないこと', async () => {
+  it('3 人のルームで一方の行を押したとき、その人との内訳だけをダイアログに出し、もう一方の人の値は出さないこと', async () => {
     current = roomOfThree();
     statusLinks = [
       withBuffers(link('b', 'connected', { up: 4, down: 6 }), {
@@ -515,45 +515,66 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
 
     render(<MainScreen />);
     await waitFor(() => expect(row('Ben')).toHaveTextContent('↑21ms↓23ms'));
-    expect(screen.queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('peer-link-dialog')).not.toBeInTheDocument();
 
     fireEvent.click(within(row('Ben')).getByTestId('participant-toggle'));
 
-    expect(within(row('Ben')).getByTestId('detail-peer-input')).toHaveTextContent('9.0ms');
-    expect(within(row('Ben')).getByTestId('detail-network-rtt')).toHaveTextContent('44ms');
-    expect(within(row('Aki')).queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+    const dialog = screen.getByTestId('peer-link-dialog');
+    expect(dialog).toHaveAccessibleName('Ben');
+    expect(within(dialog).getByTestId('detail-peer-input')).toHaveTextContent('9.0ms');
+    expect(within(dialog).getByTestId('detail-network-rtt')).toHaveTextContent('44ms');
     expect(screen.getAllByTestId('peer-link-detail')).toHaveLength(1);
   });
 
-  it('別の人の行を開いたとき、先に開いていた内訳は閉じること', async () => {
-    current = roomOfThree();
-    statusLinks = [
-      link('b', 'connected', { up: 4, down: 6 }),
-      link('c', 'connected', { up: 21, down: 23 }),
-    ];
-
-    render(<MainScreen />);
-    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
-    fireEvent.click(within(row('Aki')).getByTestId('participant-toggle'));
-    fireEvent.click(within(row('Ben')).getByTestId('participant-toggle'));
-
-    expect(within(row('Aki')).queryByTestId('peer-link-detail')).not.toBeInTheDocument();
-    expect(within(row('Ben')).getByTestId('peer-link-detail')).toBeInTheDocument();
-    expect(within(row('Ben')).getByTestId('participant-toggle')).toHaveAttribute('aria-expanded', 'true');
-  });
-
-  it('開いている行をもう一度押したとき、内訳を閉じること', async () => {
+  it('内訳を開いたとき、参加者の行の中には内訳を出さないこと', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 4, down: 6 })];
 
     render(<MainScreen />);
     await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
-    const toggle = within(row('Aki')).getByTestId('participant-toggle');
-    fireEvent.click(toggle);
-    fireEvent.click(toggle);
+    fireEvent.click(within(row('Aki')).getByTestId('participant-toggle'));
 
-    expect(screen.queryByTestId('peer-link-detail')).not.toBeInTheDocument();
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('peer-link-dialog')).toBeInTheDocument();
+    expect(within(row('Aki')).queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+  });
+
+  it('内訳を開いたとき、閉じるボタンで閉じられること', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 4, down: 6 })];
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
+    fireEvent.click(within(row('Aki')).getByTestId('participant-toggle'));
+    fireEvent.click(screen.getByTestId('peer-link-dialog-close'));
+
+    expect(screen.queryByTestId('peer-link-dialog')).not.toBeInTheDocument();
+  });
+
+  it('内訳を開いたとき、Escape で閉じられること', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 4, down: 6 })];
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
+    fireEvent.click(within(row('Aki')).getByTestId('participant-toggle'));
+    fireEvent.keyDown(screen.getByTestId('peer-link-dialog'), { key: 'Escape' });
+
+    expect(screen.queryByTestId('peer-link-dialog')).not.toBeInTheDocument();
+  });
+
+  it('内訳を開いたとき、ダイアログの外を押すと閉じ、ダイアログの中を押しても閉じないこと', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 4, down: 6 })];
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
+    fireEvent.click(within(row('Aki')).getByTestId('participant-toggle'));
+    fireEvent.click(screen.getByTestId('peer-link-detail'));
+    expect(screen.getByTestId('peer-link-dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('peer-link-dialog-overlay'));
+
+    expect(screen.queryByTestId('peer-link-dialog')).not.toBeInTheDocument();
   });
 
   it('内訳を開いていた人が退出して戻ってきたとき、閉じた状態で戻ること', async () => {
@@ -569,10 +590,11 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     fireEvent.click(within(row('Ben')).getByTestId('participant-toggle'));
     announce(inRoom({ revision: 5, room: { ...room, participants: [room.participants[0]] } }));
     await waitFor(() => expect(screen.queryByText('Ben', { selector: '.participant__name' })).toBeNull());
+    expect(screen.queryByTestId('peer-link-dialog')).not.toBeInTheDocument();
     announce(inRoom({ revision: 6, room }));
 
     await waitFor(() => expect(row('Ben')).toBeInTheDocument());
-    expect(screen.queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('peer-link-dialog')).not.toBeInTheDocument();
   });
 
   it('自分の行は、押しても開く内訳を持たないこと', async () => {
