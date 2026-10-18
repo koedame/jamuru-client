@@ -21,6 +21,10 @@ export interface GeneralTabProps {
   displayNameError?: string;
   /** Display name change handler */
   onDisplayNameChange: (name: string) => void;
+  /** Whether the name is confirmed before creating or entering a room */
+  askNameOnEntry?: boolean;
+  /** Called when the person turns the name confirmation on or off; the switch is left out when absent */
+  onAskNameOnEntryChange?: (enabled: boolean) => void;
   /** Current language */
   language: Language;
   /** Language change handler */
@@ -37,6 +41,8 @@ export function GeneralTab({
   displayName,
   displayNameError,
   onDisplayNameChange,
+  askNameOnEntry = true,
+  onAskNameOnEntryChange,
   language,
   onLanguageChange,
   serverUrl,
@@ -72,6 +78,27 @@ export function GeneralTab({
           hasError={!!displayNameError}
         />
       </FormField>
+
+      {onAskNameOnEntryChange && (
+        <label className="tab-content__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={askNameOnEntry}
+            onChange={(e) => onAskNameOnEntryChange(e.target.checked)}
+            data-testid="general-ask-name-toggle"
+          />
+          <span>
+            {t("settings.profile.askOnEntry", "Confirm my name before entering a room")}
+            <span className="tab-content__switch-hint">
+              {t(
+                "settings.profile.askOnEntryHint",
+                "Asks which name to use each time you create or join a room"
+              )}
+            </span>
+          </span>
+        </label>
+      )}
 
       <div className="tab-content__divider" />
 

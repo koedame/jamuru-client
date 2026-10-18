@@ -58,6 +58,14 @@
       "placeholder": "ABC234XYZ",
       "loading": "接続中..."
     },
+    "entryName": {
+      "title": "名前を入力してください",
+      "label": "表示名",
+      "hint": "他の参加者に表示される名前です（1〜32文字）",
+      "guest": "ゲスト",
+      "remember": "次からこの名前を使用する",
+      "failed": "名前を保存できませんでした"
+    },
     "leave": {
       "button": "退出",
       "confirmMessage": "本当に退室しますか？",
@@ -224,6 +232,8 @@
       "nameHint": "他の参加者に表示される名前です（1〜32文字）",
       "nameRequired": "表示名は必須です",
       "nameTooLong": "表示名は32文字以内で入力してください",
+      "askOnEntry": "入室前に名前を確認する",
+      "askOnEntryHint": "ルームを作る・入るたびに、使う名前を確かめます",
       "namePlaceholder": "ユーザー"
     },
     "devices": {
