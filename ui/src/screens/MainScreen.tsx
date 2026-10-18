@@ -22,7 +22,7 @@ import { ConnectionPanel, type ConnectionState, type ConnectionErrorKind } from 
 import { MixerPanel, MasterSection, type Channel } from "../components/MixerPanel";
 import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
-import { PeerLinkDetail } from "../components/PeerLinkDetail";
+import { PeerLinkDialog } from "../components/PeerLinkDialog";
 import { Toast, ToastStack } from "../components/Toast";
 import { LeaveDialog } from "../components/LeaveDialog";
 import { EntryNameDialog } from "../components/EntryNameDialog";
@@ -127,8 +127,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // The audio link to each participant there is one to. Everything the screen
   // shows of a connection - its state, latency, quality - is one of these.
   const [links, setLinks] = useState<PeerLinkStatus[]>([]);
-  // The participant whose latency breakdown is open. The footer says how the
-  // room is doing; what each link is made of is said here, per participant.
+  // The participant whose latency breakdown is open, in a dialog. The footer
+  // says how the room is doing; what each link is made of is said there, per
+  // participant.
   const [detailPeerId, setDetailPeerId] = useState<string | null>(null);
   const [deviceProblems, setDeviceProblems] = useState<DeviceProblem[]>([]);
   // Last bandwidth band we warned about, so the toast appears on the edge rather
@@ -519,14 +520,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
       open !== null && participants.some((p) => p.id === open) ? open : null
     );
   }, [participants]);
-
-  // The sidebar list scrolls, so an opened breakdown can be below its edge.
-  useEffect(() => {
-    if (detailPeerId === null) return;
-    document
-      .getElementById(`participant-detail-${detailPeerId}`)
-      ?.scrollIntoView?.({ block: "nearest" });
-  }, [detailPeerId]);
+  const detailParticipant = participants.find((p) => p.id === detailPeerId);
   const indicatorStatus: ConnectionStatus = useMemo(() => {
     if (overall.trouble !== null) return overall.trouble;
     if (phase === "connected") return "connected";
@@ -1030,8 +1024,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                   const trouble = linkTrouble(link);
                   const latency = measuredLatency(link);
                   const isSlowest = slowest === participant.id;
-                  const detailOpen = detailPeerId === participant.id;
-                  const detailId = `participant-detail-${participant.id}`;
                   return (
                   <li
                     key={participant.id}
@@ -1044,9 +1036,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                       type="button"
                       className="participant__summary"
                       data-testid="participant-toggle"
-                      aria-expanded={detailOpen}
-                      aria-controls={detailOpen ? detailId : undefined}
-                      onClick={() => setDetailPeerId(detailOpen ? null : participant.id)}
+                      aria-haspopup="dialog"
+                      onClick={() => setDetailPeerId(participant.id)}
                     >
                       <span className="participant__info">
                         <span className="participant__icon">
@@ -1083,14 +1074,6 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                         </span>
                       )}
                     </button>
-                    {detailOpen && (
-                      <PeerLinkDetail
-                        id={detailId}
-                        peerName={participant.name}
-                        link={link}
-                        localSampleRate={localSampleRate}
-                      />
-                    )}
                   </li>
                   );
                 })}
@@ -1210,6 +1193,15 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         {settingsHelp.overlays}
         {helpedBy !== null && <SettingsHelpMirror name={helpedBy} open={presence.remotePanelOpen} />}
         {presence.marks}
+
+        {detailParticipant && (
+          <PeerLinkDialog
+            peerName={detailParticipant.name}
+            link={links.find((l) => l.peer_id === detailParticipant.id)}
+            localSampleRate={localSampleRate}
+            onClose={() => setDetailPeerId(null)}
+          />
+        )}
 
         <LeaveDialog
           open={showLeaveDialog}
