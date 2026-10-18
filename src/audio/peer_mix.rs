@@ -347,6 +347,38 @@ mod tests {
         );
     }
 
+    /// The room is silenced for the person by taking the master to zero
+    /// (REQ-CON-138): every participant must go silent, however loud their
+    /// own fader is, while the dry frame still carries what they sent.
+    ///
+    /// Verifies: REQ-CON-138
+    #[test]
+    fn the_master_at_zero_silences_every_participant_whatever_their_faders_are() {
+        const FRAME: u32 = 4;
+        let mix = mix(9, FRAME);
+        let (ben, cho) = (participant(FRAME), participant(FRAME));
+        let ben_heard = add(&mix, &ben);
+        let cho_heard = add(&mix, &cho);
+        ben_heard.gain.set_volume(100);
+        cho_heard.gain.set_volume(200);
+        assert!(ben.receive(0, &pcm(&frame_of(FRAME, 0.4, 0.4))));
+        assert!(cho.receive(0, &pcm(&frame_of(FRAME, 0.1, 0.1))));
+
+        let mut out = vec![9.0; mix.frame_samples()];
+        let mut dry = vec![9.0; mix.frame_samples()];
+        let samples = mix.mix_into(&mut out, 0, Some(&mut dry));
+
+        assert!(
+            close(&out[..samples], &frame_of(FRAME, 0.0, 0.0)),
+            "{:?}",
+            &out[..samples]
+        );
+        assert!(
+            close(&dry[..samples], &frame_of(FRAME, 0.5, 0.5)),
+            "{dry:?}"
+        );
+    }
+
     /// `B` (recording/streaming output) must carry what the others sent, not
     /// what the listener's faders and pans turned it into.
     #[test]
