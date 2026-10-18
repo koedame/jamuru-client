@@ -12,7 +12,7 @@ import { act, render, screen, waitFor, fireEvent, within } from '@testing-librar
 
 import i18n from '../i18n';
 import { MainScreen } from './MainScreen';
-import type { AudioEncryption, DeviceProblem, MixerSnapshot, PeerLinkStatus, SessionSnapshot } from '../lib/tauri';
+import type { AudioEncryption, AudioQuality, DeviceProblem, MixerSnapshot, PeerLinkStatus, SessionSnapshot } from '../lib/tauri';
 
 const invoke = vi.hoisted(() => vi.fn());
 /** What the screen listens for, by event name. */
@@ -78,6 +78,8 @@ let statusDeviceProblems: DeviceProblem[];
 let statusEncryption: AudioEncryption | null;
 /** The audio links the backend says there are, for `streaming_status`; `null` while no session runs. */
 let statusLinks: PeerLinkStatus[] | null;
+/** The audio quality the backend says, for `streaming_status`. */
+let statusAudioQuality: AudioQuality | null;
 
 /** The audio link to participant `peerId`, in `state`, as `streaming_status` lists it */
 function link(
@@ -168,6 +170,7 @@ beforeEach(() => {
   statusDeviceProblems = [];
   statusEncryption = null;
   statusLinks = null;
+  statusAudioQuality = null;
   newerRelease = null;
   savedConfig = undefined;
   current = snapshot();
@@ -199,7 +202,7 @@ beforeEach(() => {
             device_problems: statusDeviceProblems,
             network: peers[0]?.network ?? null,
             latency: peers[0]?.latency ?? null,
-            audio_quality: null,
+            audio_quality: statusAudioQuality,
             peer_audio: null,
             connection_state: peers[0]?.connection_state ?? null,
             connection_error: null,
@@ -376,6 +379,19 @@ describe('MainScreen のルームの表示', () => {
 
     expect(callsTo('session_reconnect')).toHaveLength(1);
     expect(screen.getByText(/no route to host/)).toBeInTheDocument();
+  });
+});
+
+describe('MainScreen の受信バッファ調整の知らせ', () => {
+  /** Verifies: REQ-LAT-108 */
+  it('受信バッファが自動で調整されたとき、設定のバッファサイズと取り違えない言い方で、調整後の ms を知らせること', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
+    statusAudioQuality = { underrun_count: 0, delay_adjustments: 1, adjusted_delay_ms: 5.33 };
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText('Network buffer adjusted to 5.3 ms')).toBeInTheDocument();
   });
 });
 

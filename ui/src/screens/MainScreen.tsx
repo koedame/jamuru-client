@@ -134,9 +134,11 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // Last bandwidth band we warned about, so the toast appears on the edge rather
   // than on every 100ms poll.
   const [warnedBandwidth, setWarnedBandwidth] = useState<string | null>(null);
-  // The buffer size is adjusted automatically (REQ-LAT-108); the user is told
-  // for a few seconds each time.
+  // The receive buffer (not the audio device's buffer size in the settings) is
+  // adjusted automatically (REQ-LAT-108); the user is told, with the delay it
+  // now holds, for a few seconds each time.
   const [delayAdjustments, setDelayAdjustments] = useState(0);
+  const [adjustedDelayMs, setAdjustedDelayMs] = useState(0);
   const [delayNoticeVisible, setDelayNoticeVisible] = useState(false);
   const [inputLevel, setInputLevel] = useState(0);
   const [outputLevel, setOutputLevel] = useState(0);
@@ -641,6 +643,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         setLinks(status.is_active ? status.peers : []);
         if (status.is_active) {
           setDelayAdjustments(status.audio_quality?.delay_adjustments ?? 0);
+          setAdjustedDelayMs(status.audio_quality?.adjusted_delay_ms ?? 0);
           setIsLocalMuted(status.is_muted);
           setIsMonitoring(status.is_monitoring);
           setInputLevel(status.input_level);
@@ -1154,7 +1157,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
         <ToastStack>
           {settingsHelp.toast}
-          {delayNoticeVisible && <Toast type="success" message={t("notification.delayAdjusted")} />}
+          {delayNoticeVisible && <Toast type="success" message={t("notification.delayAdjusted", { ms: Number(adjustedDelayMs.toFixed(1)) })} />}
           {encryptionWarning && <Toast type="warning" message={encryptionWarning} />}
           {bandwidthWarning && <Toast type="warning" message={bandwidthWarning} />}
           {deviceProblems.map((problem) => (

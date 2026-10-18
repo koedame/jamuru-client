@@ -558,6 +558,9 @@ pub struct AudioQuality {
     /// Number of times the play-out delay was adjusted automatically. The UI
     /// tells the user when this goes up (REQ-LAT-108).
     pub delay_adjustments: u64,
+    /// The play-out delay, in milliseconds, the latest of those adjustments
+    /// left the adjusted link with
+    pub adjusted_delay_ms: f32,
 }
 
 /// Latency component breakdown for IPC
@@ -989,6 +992,8 @@ pub async fn streaming_status(
         Some(AudioQuality {
             underrun_count: state.shared.underrun_count.load(Ordering::Relaxed),
             delay_adjustments: state.shared.delay_adjustments.load(Ordering::Relaxed),
+            adjusted_delay_ms: state.shared.adjusted_delay_us.load(Ordering::Relaxed) as f32
+                / 1000.0,
         })
     } else {
         None

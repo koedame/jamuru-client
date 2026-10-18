@@ -70,6 +70,7 @@ pub(super) async fn run(
         device_problems,
         underrun_count,
         delay_adjustments,
+        adjusted_delay_us,
         ..
     } = shared;
 
@@ -868,6 +869,7 @@ pub(super) async fn run(
                         link.peer,
                         frames
                     );
+                    adjusted_delay_us.store(link.delay_us(packet_duration_ms), Ordering::Relaxed);
                     delay_adjustments.fetch_add(1, Ordering::Relaxed);
                 }
             }
