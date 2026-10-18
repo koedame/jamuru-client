@@ -216,6 +216,24 @@
   overflow-y: auto;
 }
 
+/* Same minimal scrollbar as the chat list: the platform's light one stands out
+   on the dark sidebar once an opened breakdown makes the list scroll. */
+.room-sidebar__participant-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.room-sidebar__participant-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.room-sidebar__participant-list::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+}
+
+.room-sidebar__participant-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
 .participant {
   display: flex;
   flex-direction: column;
