@@ -153,4 +153,15 @@ describe('PeerLinkDetail', () => {
 
     expect(text('detail-network-rtt')).toBe('10ms');
   });
+
+  it('相手の知らせた遅延が数値でないとき、落ちずに測定中と出すこと', () => {
+    // A NaN the participant's app sent arrives as null
+    const told = { ...PEER_AUDIO, capture_buffer_ms: null, playback_buffer_ms: Infinity } as unknown as PeerAudioInfo;
+
+    render(<PeerLinkDetail peerName="Aki" link={upLink({ peer_audio: told })} localSampleRate={48000} />);
+
+    expect(text('detail-peer-input')).toBe('Measuring...');
+    expect(text('detail-peer-output')).toBe('Measuring...');
+    expect(text('detail-peer-jitter')).toBe('5.0ms');
+  });
 });
