@@ -457,6 +457,138 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(screen.getByTestId('participant-latency').className).not.toContain('highest');
   });
 
+  /** `link` with this machine's buffers and the peer's, as the backend reports them */
+  function withBuffers(
+    base: PeerLinkStatus,
+    buffers: { capture: number; playback: number; jitter: number; peerCapture: number }
+  ): PeerLinkStatus {
+    return {
+      ...base,
+      latency: {
+        ...base.latency!,
+        upstream: [{ name: 'Capture buffer', ms: buffers.capture, info: null }],
+        downstream: [
+          { name: 'Jitter buffer', ms: buffers.jitter, info: null },
+          { name: 'Playback buffer', ms: buffers.playback, info: null },
+        ],
+      },
+      peer_audio: {
+        sample_rate: 48000,
+        frame_size: 32,
+        codec: 'pcm',
+        needs_resampling: false,
+        channel_count: 2,
+        capture_buffer_ms: buffers.peerCapture,
+        playback_buffer_ms: 1,
+        jitter_buffer_ms: 2,
+      },
+    };
+  }
+
+  // Verifies: REQ-LAT-102
+  it('3 人のルームで一方の行を開いたとき、その人との内訳だけを出し、もう一方の人の値は出さないこと', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      withBuffers(link('b', 'connected', { up: 4, down: 6 }), {
+        capture: 0.5, playback: 0.6, jitter: 3, peerCapture: 7,
+      }),
+      withBuffers(link('c', 'connected', { up: 21, down: 23 }), {
+        capture: 0.5, playback: 0.6, jitter: 3, peerCapture: 9,
+      }),
+    ];
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Ben')).toHaveTextContent('↑21ms↓23ms'));
+    expect(screen.queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+
+    fireEvent.click(within(row('Ben')).getByTestId('participant-toggle'));
+
+    expect(within(row('Ben')).getByTestId('detail-peer-input')).toHaveTextContent('9.0ms');
+    expect(within(row('Ben')).getByTestId('detail-network-rtt')).toHaveTextContent('44ms');
+    expect(within(row('Aki')).queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('peer-link-detail')).toHaveLength(1);
+  });
+
+  it('別の人の行を開いたとき、先に開いていた内訳は閉じること', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      link('b', 'connected', { up: 4, down: 6 }),
+      link('c', 'connected', { up: 21, down: 23 }),
+    ];
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
+    fireEvent.click(within(row('Aki')).getByTestId('participant-toggle'));
+    fireEvent.click(within(row('Ben')).getByTestId('participant-toggle'));
+
+    expect(within(row('Aki')).queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+    expect(within(row('Ben')).getByTestId('peer-link-detail')).toBeInTheDocument();
+    expect(within(row('Ben')).getByTestId('participant-toggle')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('開いている行をもう一度押したとき、内訳を閉じること', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 4, down: 6 })];
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
+    const toggle = within(row('Aki')).getByTestId('participant-toggle');
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+
+    expect(screen.queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('内訳を開いていた人が退出して戻ってきたとき、閉じた状態で戻ること', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      link('b', 'connected', { up: 4, down: 6 }),
+      link('c', 'connected', { up: 21, down: 23 }),
+    ];
+    const room = current.room!;
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Ben')).toHaveTextContent('↑21ms↓23ms'));
+    fireEvent.click(within(row('Ben')).getByTestId('participant-toggle'));
+    announce(inRoom({ revision: 5, room: { ...room, participants: [room.participants[0]] } }));
+    await waitFor(() => expect(screen.queryByText('Ben', { selector: '.participant__name' })).toBeNull());
+    announce(inRoom({ revision: 6, room }));
+
+    await waitFor(() => expect(row('Ben')).toBeInTheDocument());
+    expect(screen.queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+  });
+
+  it('自分の行は、押しても開く内訳を持たないこと', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 4, down: 6 })];
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(row('Aki')).toHaveTextContent('↑4ms↓6ms'));
+    expect(screen.getAllByTestId('participant-toggle')).toHaveLength(1);
+  });
+
+  // Verifies: REQ-LAT-102
+  it('3 人のルームで遅延が違うとき、足もとの接続表示には誰のものか分からない遅延を出さないこと', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      withBuffers(link('b', 'connected', { up: 4, down: 6 }), {
+        capture: 0.5, playback: 0.6, jitter: 3, peerCapture: 7,
+      }),
+      withBuffers(link('c', 'connected', { up: 21, down: 23 }), {
+        capture: 0.5, playback: 0.6, jitter: 3, peerCapture: 9,
+      }),
+    ];
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Ben')).toHaveTextContent('↑21ms↓23ms'));
+
+    const footer = screen.getByRole('status');
+    expect(footer).toHaveTextContent('Connected');
+    expect(footer).not.toHaveTextContent(/\d+ms/);
+  });
+
   // Verifies: REQ-CON-134
   it('3 人のルームで 1 人との接続が諦められたとき、その人の行に切断と出し、誰との接続かを添えて再接続を尋ねること', async () => {
     current = roomOfThree();
