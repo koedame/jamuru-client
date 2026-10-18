@@ -25,8 +25,13 @@ export interface PeerLinkDetailProps {
   id?: string;
 }
 
-/** Latency as the screen words it: one decimal below 10ms, where a rounded 0ms would say nothing */
-function formatMs(ms: number): string {
+/**
+ * Latency as the screen words it: one decimal below 10ms, where a rounded 0ms
+ * would say nothing. Null for a value that is not a number: a participant's
+ * app reports its own, and one that sends nonsense has no value to show.
+ */
+function formatMs(ms: number | null | undefined): string | null {
+  if (ms == null || !Number.isFinite(ms)) return null;
   const tenths = Math.round(ms * 10) / 10;
   return tenths < 10 ? `${tenths.toFixed(1)}ms` : `${Math.round(ms)}ms`;
 }
@@ -52,17 +57,17 @@ export function PeerLinkDetail({ peerName, link, localSampleRate, id }: PeerLink
       <section className="peer-link-detail__layer" aria-label={t('session.participant.detail.you')}>
         <h4 className="peer-link-detail__title">{t('session.participant.detail.you')}</h4>
         <dl>
-          {row(t('session.participant.detail.input'), local && formatMs(local.input), 'detail-you-input')}
-          {row(t('session.participant.detail.output'), local && formatMs(local.output), 'detail-you-output')}
-          {row(t('session.participant.detail.jitterBuffer'), local && formatMs(local.jitter), 'detail-you-jitter')}
+          {row(t('session.participant.detail.input'), formatMs(local?.input), 'detail-you-input')}
+          {row(t('session.participant.detail.output'), formatMs(local?.output), 'detail-you-output')}
+          {row(t('session.participant.detail.jitterBuffer'), formatMs(local?.jitter), 'detail-you-jitter')}
         </dl>
       </section>
 
       <section className="peer-link-detail__layer" aria-label={t('session.participant.detail.network')}>
         <h4 className="peer-link-detail__title">{t('session.participant.detail.network')}</h4>
         <dl>
-          {row(t('session.participant.detail.rtt'), rtt !== null ? formatMs(rtt) : null, 'detail-network-rtt')}
-          {row(t('session.participant.detail.jitter'), network && formatMs(network.jitter_ms), 'detail-network-jitter')}
+          {row(t('session.participant.detail.rtt'), formatMs(rtt), 'detail-network-rtt')}
+          {row(t('session.participant.detail.jitter'), formatMs(network?.jitter_ms), 'detail-network-jitter')}
           {row(
             t('session.participant.detail.packetLoss'),
             network && `${network.packet_loss_percent.toFixed(1)}%`,
@@ -74,9 +79,9 @@ export function PeerLinkDetail({ peerName, link, localSampleRate, id }: PeerLink
       <section className="peer-link-detail__layer" aria-label={peerName}>
         <h4 className="peer-link-detail__title">{peerName}</h4>
         <dl>
-          {row(t('session.participant.detail.input'), peer && formatMs(peer.capture_buffer_ms), 'detail-peer-input')}
-          {row(t('session.participant.detail.output'), peer && formatMs(peer.playback_buffer_ms), 'detail-peer-output')}
-          {row(t('session.participant.detail.jitterBuffer'), peer && formatMs(peer.jitter_buffer_ms), 'detail-peer-jitter')}
+          {row(t('session.participant.detail.input'), formatMs(peer?.capture_buffer_ms), 'detail-peer-input')}
+          {row(t('session.participant.detail.output'), formatMs(peer?.playback_buffer_ms), 'detail-peer-output')}
+          {row(t('session.participant.detail.jitterBuffer'), formatMs(peer?.jitter_buffer_ms), 'detail-peer-jitter')}
           {row(
             t('session.participant.detail.format'),
             peer &&

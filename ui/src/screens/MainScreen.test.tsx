@@ -524,6 +524,25 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('内訳を開いていた人が退出して戻ってきたとき、閉じた状態で戻ること', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      link('b', 'connected', { up: 4, down: 6 }),
+      link('c', 'connected', { up: 21, down: 23 }),
+    ];
+    const room = current.room!;
+
+    render(<MainScreen />);
+    await waitFor(() => expect(row('Ben')).toHaveTextContent('↑21ms↓23ms'));
+    fireEvent.click(within(row('Ben')).getByTestId('participant-toggle'));
+    announce(inRoom({ revision: 5, room: { ...room, participants: [room.participants[0]] } }));
+    await waitFor(() => expect(screen.queryByText('Ben', { selector: '.participant__name' })).toBeNull());
+    announce(inRoom({ revision: 6, room }));
+
+    await waitFor(() => expect(row('Ben')).toBeInTheDocument());
+    expect(screen.queryByTestId('peer-link-detail')).not.toBeInTheDocument();
+  });
+
   it('自分の行は、押しても開く内訳を持たないこと', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 4, down: 6 })];

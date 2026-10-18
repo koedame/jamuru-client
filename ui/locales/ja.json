@@ -95,8 +95,6 @@
         "formatValue": "{{rate}}kHz・{{frames}}サンプル・{{codec}}・{{channels}}",
         "mono": "モノラル",
         "stereo": "ステレオ",
-        "upstream": "自分 → 相手",
-        "downstream": "相手 → 自分",
         "measuring": "測定中..."
       }
     },

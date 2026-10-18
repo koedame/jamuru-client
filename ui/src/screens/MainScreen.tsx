@@ -440,6 +440,14 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // nothing here re-derives it from RTT and loss.
   const overall = useMemo(() => overallLink(links), [links]);
 
+  // A participant who left has no breakdown to keep open: one who comes back
+  // starts closed.
+  useEffect(() => {
+    setDetailPeerId((open) =>
+      open !== null && participants.some((p) => p.id === open) ? open : null
+    );
+  }, [participants]);
+
   // The sidebar list scrolls, so an opened breakdown can be below its edge.
   useEffect(() => {
     if (detailPeerId === null) return;
@@ -535,6 +543,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   useEffect(() => {
     if (phase !== "connected") {
       setLinks([]);
+      setDetailPeerId(null);
       setDeviceProblems([]);
       setWarnedBandwidth(null);
       setDelayAdjustments(0);
@@ -963,7 +972,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                       className="participant__summary"
                       data-testid="participant-toggle"
                       aria-expanded={detailOpen}
-                      aria-controls={detailId}
+                      aria-controls={detailOpen ? detailId : undefined}
                       onClick={() => setDetailPeerId(detailOpen ? null : participant.id)}
                     >
                       <span className="participant__info">
