@@ -863,14 +863,21 @@ pub(super) async fn run(
         if std::time::Instant::now() >= next_adapt_at {
             next_adapt_at = std::time::Instant::now() + ADAPT_INTERVAL;
             for link in &links {
+                let before = link.receive.delay_frames();
                 if let Some(frames) = link.receive.adapt() {
                     tracing::info!(
                         "Play-out delay of {} adjusted to {} frame(s)",
                         link.peer,
                         frames
                     );
-                    adjusted_delay_us.store(link.delay_us(packet_duration_ms), Ordering::Relaxed);
-                    delay_adjustments.fetch_add(1, Ordering::Relaxed);
+                    // Only a delay that grew is told to the user: giving back
+                    // the preset's spare frames on a clean link happens on
+                    // every join and says nothing about the link
+                    if frames > before {
+                        adjusted_delay_us
+                            .store(link.delay_us(packet_duration_ms), Ordering::Relaxed);
+                        delay_adjustments.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             }
         }
