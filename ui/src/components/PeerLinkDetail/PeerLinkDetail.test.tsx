@@ -144,4 +144,13 @@ describe('PeerLinkDetail', () => {
 
     expect(text('detail-network-rtt')).toBe('24ms');
   });
+
+  it('9.95ms のとき、10.0ms ではなく 10ms と出すこと', () => {
+    const link = upLink();
+    link.network!.rtt_ms = 9.96;
+
+    render(<PeerLinkDetail peerName="Aki" link={link} localSampleRate={48000} />);
+
+    expect(text('detail-network-rtt')).toBe('10ms');
+  });
 });
