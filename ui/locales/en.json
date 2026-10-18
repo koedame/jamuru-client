@@ -82,7 +82,24 @@
       "title": "Participants ({{count}})",
       "joined": "{{name}} joined",
       "left": "{{name}} left",
-      "highestLatency": "Highest latency"
+      "highestLatency": "Highest latency",
+      "detail": {
+        "you": "You",
+        "network": "Network",
+        "input": "Input",
+        "output": "Output",
+        "jitterBuffer": "Jitter buffer",
+        "rtt": "Round trip",
+        "jitter": "Jitter",
+        "packetLoss": "Packet loss",
+        "format": "Audio",
+        "formatValue": "{{rate}}kHz, {{frames}} samples, {{codec}}, {{channels}}",
+        "mono": "Mono",
+        "stereo": "Stereo",
+        "upstream": "You → them",
+        "downstream": "Them → you",
+        "measuring": "Measuring..."
+      }
     },
     "testRoom": {
       "title": "Test Room",
