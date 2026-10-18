@@ -49,6 +49,7 @@ function mountWith(participantsNow: () => Participant[]) {
       <>
         {h.canAsk && <button onClick={h.openAsk}>ask for help</button>}
         {h.bars}
+        {h.toast}
         {h.overlays}
       </>
     );
