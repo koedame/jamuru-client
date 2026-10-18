@@ -48,6 +48,10 @@ tauri-plugin-log = "2"
 
 tauri-plugin-deep-link = "2.4.9"
 
+# A second copy (started by an invite link) hands over to the one running
+# instead of running beside it (ADR-085). `deep-link` passes the link on.
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
 # Installs a new release by itself (ADR-041). The default `zip` feature is off:
 # it only unpacks zip-compressed Windows bundles and gzip-compressed AppImages
 # (Tauri v1 style), which this project never ships (the installers are released
