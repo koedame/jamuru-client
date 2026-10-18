@@ -58,6 +58,7 @@ function mount() {
     return (
       <>
         {h.bars}
+        {h.toast}
         {h.overlays}
       </>
     );

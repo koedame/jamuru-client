@@ -385,6 +385,17 @@ describe('MainScreen の暗号化の表示', () => {
     expect(await screen.findByText(/Audio with this peer is not encrypted/)).toBeInTheDocument();
   });
 
+  it('知らせが出るとき、フッターの外の上中央の置き場に出て、フッターの接続表示を動かさないこと', async () => {
+    current = inRoom();
+    statusEncryption = 'unencrypted';
+
+    const { container } = render(<MainScreen />);
+
+    const toast = (await screen.findByText(/Audio with this peer is not encrypted/)).closest('.toast');
+    expect(toast?.closest('.toast-stack')).not.toBeNull();
+    expect(container.querySelector('.main-footer')?.querySelector('.toast')).toBeNull();
+  });
+
   it('相手との音声が暗号化されているとき、暗号化についての知らせは出さないこと', async () => {
     current = inRoom();
     statusEncryption = 'encrypted';
