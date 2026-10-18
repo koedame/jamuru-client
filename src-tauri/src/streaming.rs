@@ -599,6 +599,12 @@ pub struct PeerAudioInfo {
     pub needs_resampling: bool,
     /// Peer's transmit channel count (1 = mono, 2 = stereo)
     pub channel_count: u32,
+    /// Peer's capture buffer latency (ms)
+    pub capture_buffer_ms: f32,
+    /// Peer's playback buffer latency (ms)
+    pub playback_buffer_ms: f32,
+    /// Peer's current jitter buffer delay (ms)
+    pub jitter_buffer_ms: f32,
 }
 
 /// The audio link to one participant, for IPC
@@ -961,6 +967,9 @@ pub async fn streaming_status(
                     codec: p.codec.clone(),
                     needs_resampling: p.sample_rate != local_sample_rate,
                     channel_count: p.channel_count as u32,
+                    capture_buffer_ms: p.capture_buffer_ms,
+                    playback_buffer_ms: p.playback_buffer_ms,
+                    jitter_buffer_ms: p.jitter_buffer_ms,
                 })
             });
             PeerLinkStatus {
@@ -1383,6 +1392,48 @@ mod tests {
             Some("checkingconnectivity")
         );
         assert!(of(4).network.is_none() && of(4).latency.is_none());
+    }
+
+    /// The status says what each participant told of their own audio side, so
+    /// the screen can show the layers beyond the network per participant.
+    ///
+    /// Verifies: REQ-LAT-102
+    #[tokio::test]
+    async fn the_status_has_the_buffers_each_participant_told_of_their_own_side() {
+        let app = tauri::test::mock_app();
+        app.manage(StreamingState::new());
+        let state = app.state::<StreamingState>();
+        state.set_link_for_test(peer(2), "connected", Some((100, 8.0)));
+        state.set_link_for_test(peer(3), "connected", Some((100, 8.0)));
+        for (n, capture_ms) in [(2, 0.67_f32), (3, 2.67_f32)] {
+            let links = state.shared.links.read().unwrap();
+            let (_, report) = links.iter().find(|(p, _)| *p == peer(n)).unwrap();
+            *report.latency_info.write().unwrap() = Some(jamjam::network::PeerLatencyInfo {
+                capture_buffer_ms: capture_ms,
+                playback_buffer_ms: 1.0,
+                jitter_buffer_ms: 4.0,
+                sample_rate: 48000,
+                frame_size: 32,
+                codec: "pcm".to_string(),
+                channel_count: 2,
+                ..Default::default()
+            });
+        }
+
+        let status = streaming_status(app.state()).await.unwrap();
+
+        let told = |n: u128| {
+            status
+                .peers
+                .iter()
+                .find(|p| p.peer_id == peer(n).to_string())
+                .and_then(|p| p.peer_audio.clone())
+                .expect("they told of their audio")
+        };
+        assert_eq!(told(2).capture_buffer_ms, 0.67);
+        assert_eq!(told(3).capture_buffer_ms, 2.67);
+        assert_eq!(told(3).playback_buffer_ms, 1.0);
+        assert_eq!(told(3).jitter_buffer_ms, 4.0);
     }
 
     /// What a reader written for a room of two reads beside `peers`.

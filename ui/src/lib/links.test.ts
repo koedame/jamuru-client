@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   linkTrouble,
+  localBuffers,
   measuredLatency,
   overallLink,
   slowestPeerId,
@@ -103,18 +104,18 @@ describe("measuredLatency", () => {
 
 describe("overallLink", () => {
   it("with no link there is no trouble and nothing measured", () => {
-    expect(overallLink([])).toEqual({ trouble: null, quality: undefined, rttMs: undefined });
+    expect(overallLink([])).toEqual({ trouble: null, quality: undefined });
   });
 
   // Verifies: REQ-LAT-102
-  it("when every link is up, shows the worst quality and the longest round trip among them", () => {
+  it("when every link is up, shows the worst quality among them", () => {
     const overall = overallLink([
       link("a", "connected", { rtt: 8, quality: "good" }),
       link("b", "connected", { rtt: 42, quality: "fair" }),
       link("c", "connected", { rtt: 15, quality: "good" }),
     ]);
 
-    expect(overall).toEqual({ trouble: null, quality: "fair", rttMs: 42 });
+    expect(overall).toEqual({ trouble: null, quality: "fair" });
   });
 
   it("when one link is reconnecting while the others are up, the room is unstable", () => {
@@ -181,5 +182,40 @@ describe("worstBandwidthLink", () => {
     ]);
 
     expect(worst?.peer_id).toBe("b");
+  });
+});
+
+describe("localBuffers", () => {
+  // Verifies: REQ-LAT-122
+  it("when the breakdown has capture, playback and jitter buffers, gives this machine's input, output and jitter delay", () => {
+    const latency = {
+      upstream: [
+        { name: "Capture buffer", ms: 0.67, info: null },
+        { name: "Network", ms: 5, info: null },
+      ],
+      upstream_total_ms: 5.67,
+      downstream: [
+        { name: "Network", ms: 5, info: null },
+        { name: "Jitter buffer", ms: 2, info: null },
+        { name: "Playback buffer", ms: 1.33, info: null },
+      ],
+      downstream_total_ms: 8.33,
+      roundtrip_total_ms: 14,
+    };
+
+    expect(localBuffers(latency)).toEqual({ input: 0.67, output: 1.33, jitter: 2 });
+  });
+
+  it("when the breakdown lacks a buffer, or there is none, gives nothing rather than a guess", () => {
+    expect(localBuffers(null)).toBeNull();
+    expect(
+      localBuffers({
+        upstream: [],
+        upstream_total_ms: 0,
+        downstream: [],
+        downstream_total_ms: 0,
+        roundtrip_total_ms: 0,
+      })
+    ).toBeNull();
   });
 });
