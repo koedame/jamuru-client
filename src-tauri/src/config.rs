@@ -255,6 +255,18 @@ pub fn config_set_peer_name(
     Ok(())
 }
 
+/// Turn the name check before creating or entering a room on or off
+///
+/// Off is what ticking "use this name from now on" in that check does.
+#[tauri::command]
+pub fn config_set_ask_name_on_entry(
+    enabled: bool,
+    state: tauri::State<'_, ConfigState>,
+) -> Result<(), String> {
+    state.modify(|config| config.ask_name_on_entry = enabled)?;
+    Ok(())
+}
+
 // =============================================================================
 // Language Commands
 // =============================================================================
