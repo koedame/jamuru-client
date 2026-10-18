@@ -270,7 +270,7 @@ export const WithTestRoomEnglish: Story = {
     codePlaceholder: "Enter code",
     joinText: "Join",
     testRoomTitle: "Test Room",
-    testRoomDescription: "Connect to a standing room for testing",
+    testRoomDescription: "Connect to a room for testing",
   },
 };
 
