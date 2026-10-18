@@ -160,6 +160,12 @@ pub struct AppConfig {
     #[serde(default = "default_peer_name")]
     pub peer_name: String,
 
+    /// Whether the app asks for the name before the person creates or enters
+    /// a room. On until they tick "use this name from now on" there, or turn
+    /// it off in Settings.
+    #[serde(default = "default_ask_name_on_entry")]
+    pub ask_name_on_entry: bool,
+
     /// Audio sample rate in Hz (44100, 48000, or 96000)
     /// Default: 48000 (recommended per ADR-013)
     #[serde(default = "default_sample_rate")]
@@ -220,6 +226,10 @@ fn default_auto_update() -> bool {
     true
 }
 
+fn default_ask_name_on_entry() -> bool {
+    true
+}
+
 fn default_buffer_size() -> u32 {
     DEFAULT_BUFFER_SIZE
 }
@@ -233,6 +243,7 @@ impl Default for AppConfig {
             server_url: None,
             preset: AudioPreset::default(),
             peer_name: DEFAULT_PEER_NAME.to_string(),
+            ask_name_on_entry: true,
             sample_rate: DEFAULT_SAMPLE_RATE,
             input_channel_l: 1,
             input_channel_r: Some(2),
@@ -457,6 +468,21 @@ mod tests {
     fn when_the_setting_is_off_in_the_file_the_app_does_not_update_itself() {
         let config: AppConfig = toml::from_str("auto_update = false").unwrap();
         assert!(!config.auto_update);
+    }
+
+    /// Verifies: REQ-CON-142
+    #[test]
+    fn when_the_setting_is_absent_the_name_is_asked_before_entering_a_room() {
+        assert!(AppConfig::default().ask_name_on_entry);
+        let config: AppConfig = toml::from_str("peer_name = \"Aki\"").unwrap();
+        assert!(config.ask_name_on_entry);
+    }
+
+    /// Verifies: REQ-CON-142
+    #[test]
+    fn when_the_setting_is_off_in_the_file_the_name_is_not_asked() {
+        let config: AppConfig = toml::from_str("ask_name_on_entry = false").unwrap();
+        assert!(!config.ask_name_on_entry);
     }
 
     #[test]

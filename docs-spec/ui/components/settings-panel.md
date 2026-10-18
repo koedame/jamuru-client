@@ -249,7 +249,7 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 アプリ全体と利用者自身についての設定。節の間は区切り線で分ける。
 
-1. 見出し「プロフィール」: 表示名（`stacked` + Input、hint「他の参加者に表示される名前です（1〜32文字）」、最大32文字、空は error）
+1. 見出し「プロフィール」: 表示名（`stacked` + Input、hint「他の参加者に表示される名前です（1〜32文字）」、最大32文字、空は error）と、その下のスイッチ「入室前に名前を確認する」（hint「ルームを作る・入るたびに、使う名前を確かめます」。既定はオン。オフにするのは入室前の名前の確認の「次からこの名前を使用する」と同じ設定で、オンに戻すとまた確認が出る。`config_set_ask_name_on_entry` でその 1 項目だけを変える。REQ-CON-142）
 2. 見出し「表示」: 言語（`stacked` + `block` Select: 日本語 / English）
 3. 見出し「接続」: サーバー（`stacked` + Input。空なら既定のサーバーを使い、hint に実際の接続先を出す）
 

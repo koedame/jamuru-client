@@ -41,6 +41,8 @@ export interface SettingsPanelProps {
   displayName: string;
   /** Display name error */
   displayNameError?: string;
+  /** Whether the name is confirmed before creating or entering a room (General tab) */
+  askNameOnEntry?: boolean;
   /** Input devices */
   inputDevices: DeviceInfo[];
   /** Output devices */
@@ -93,6 +95,8 @@ export interface SettingsPanelProps {
   update?: UpdateSectionProps;
   /** Display name change handler */
   onDisplayNameChange: (name: string) => void;
+  /** Turns the name confirmation before entering a room on or off (General tab, left out when absent) */
+  onAskNameOnEntryChange?: (enabled: boolean) => void;
   /** Input device change handler */
   onInputDeviceChange: (id: string) => void;
   /** Output device change handler */
@@ -180,6 +184,7 @@ export function SettingsPanel({
   effectiveServerUrl = "",
   displayName,
   displayNameError,
+  askNameOnEntry,
   inputDevices,
   outputDevices,
   selectedInputId,
@@ -206,6 +211,7 @@ export function SettingsPanel({
   legal,
   update,
   onDisplayNameChange,
+  onAskNameOnEntryChange,
   onInputDeviceChange,
   onOutputDeviceChange,
   onInputChannelLChange = () => {},
@@ -265,6 +271,8 @@ export function SettingsPanel({
             displayName={displayName}
             displayNameError={displayNameError}
             onDisplayNameChange={onDisplayNameChange}
+            askNameOnEntry={askNameOnEntry}
+            onAskNameOnEntryChange={onAskNameOnEntryChange}
             language={language}
             onLanguageChange={onLanguageChange}
             serverUrl={serverUrl}

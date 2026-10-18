@@ -24,6 +24,38 @@
   background: var(--color-border);
 }
 
+/* On/off switch with a hint under its label (Profile: confirm the name before entering a room). */
+.tab-content__switch {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.tab-content__switch input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.tab-content__switch input:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.tab-content__switch-hint {
+  display: block;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-tertiary);
+}
+
 /* Primary (accent) button, e.g. Run Diagnostics. */
 .tab-content__primary-button {
   display: inline-flex;
