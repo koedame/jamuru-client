@@ -128,10 +128,12 @@ pub struct Shared {
     pub device_problems: Arc<RwLock<Vec<DeviceProblem>>>,
     /// Buffer underrun count (audio glitches due to CPU/scheduling)
     pub underrun_count: Arc<AtomicU64>,
-    /// How many times adaptation has moved the play-out delay this session
+    /// How many times adaptation has grown the play-out delay this session. A
+    /// delay given back on a clean link is not counted: the user is told of
+    /// the link getting worse, not of it settling
     pub delay_adjustments: Arc<AtomicU64>,
-    /// The play-out delay, in microseconds, that the latest adaptation left the
-    /// adjusted link with
+    /// The play-out delay, in microseconds, that the latest growth left the
+    /// grown link with
     pub adjusted_delay_us: Arc<AtomicU32>,
     /// How many times a link dropped and began to reconnect, over every link
     pub reconnect_count: Arc<AtomicU64>,
