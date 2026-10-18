@@ -23,7 +23,7 @@ import { MixerPanel, MasterSection, type Channel } from "../components/MixerPane
 import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
 import { PeerLinkDetail } from "../components/PeerLinkDetail";
-import { Toast } from "../components/Toast";
+import { Toast, ToastStack } from "../components/Toast";
 import { LeaveDialog } from "../components/LeaveDialog";
 import { SettingsHelpMirror, useHelpPresence, useSettingsHelp } from "../components/SettingsHelp";
 import { formatErrorForDisplay } from "../lib/errorMessages";
@@ -1080,39 +1080,27 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
               showLatency={false}
             />
           </div>
-          {delayNoticeVisible && (
-            <div className="main-footer__warning">
-              <Toast
-                type="success"
-                message={t("notification.delayAdjusted")}
-              />
-            </div>
-          )}
-          {encryptionWarning && (
-            <div className="main-footer__warning">
-              <Toast type="warning" message={encryptionWarning} />
-            </div>
-          )}
-          {bandwidthWarning && (
-            <div className="main-footer__warning">
-              <Toast type="warning" message={bandwidthWarning} />
-            </div>
-          )}
+        </footer>
+
+        <ToastStack>
+          {settingsHelp.toast}
+          {delayNoticeVisible && <Toast type="success" message={t("notification.delayAdjusted")} />}
+          {encryptionWarning && <Toast type="warning" message={encryptionWarning} />}
+          {bandwidthWarning && <Toast type="warning" message={bandwidthWarning} />}
           {deviceProblems.map((problem) => (
-            <div key={problem.side} className="main-footer__warning">
-              <Toast
-                type="error"
-                message={t(`notification.deviceProblem.${problem.trouble}.${problem.side}`, {
-                  name: problem.device
-                    ? t("notification.deviceProblem.named", { device: problem.device })
-                    : "",
-                  rate: problem.sample_rate,
-                })}
-              />
-            </div>
+            <Toast
+              key={problem.side}
+              type="error"
+              message={t(`notification.deviceProblem.${problem.trouble}.${problem.side}`, {
+                name: problem.device
+                  ? t("notification.deviceProblem.named", { device: problem.device })
+                  : "",
+                rate: problem.sample_rate,
+              })}
+            />
           ))}
           {reconnectPrompt && (
-            <div className="main-footer__warning">
+            <div className="toast-stack__row">
               <Toast type="error" message={reconnectPrompt} />
               <button
                 type="button"
@@ -1125,12 +1113,10 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
             </div>
           )}
           {session?.signaling_reconnect === "reconnecting" && (
-            <div className="main-footer__warning">
-              <Toast type="warning" message={t("session.signalingReconnect.inProgress")} />
-            </div>
+            <Toast type="warning" message={t("session.signalingReconnect.inProgress")} />
           )}
           {session?.signaling_reconnect === "failed" && (
-            <div className="main-footer__warning">
+            <div className="toast-stack__row">
               <Toast
                 type="error"
                 message={t("session.signalingReconnect.failed", {
@@ -1146,7 +1132,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
               </button>
             </div>
           )}
-        </footer>
+        </ToastStack>
 
         {settingsHelp.overlays}
         {helpedBy !== null && <SettingsHelpMirror name={helpedBy} open={presence.remotePanelOpen} />}
