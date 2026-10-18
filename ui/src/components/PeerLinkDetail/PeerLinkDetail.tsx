@@ -27,7 +27,8 @@ export interface PeerLinkDetailProps {
 
 /** Latency as the screen words it: one decimal below 10ms, where a rounded 0ms would say nothing */
 function formatMs(ms: number): string {
-  return ms < 10 ? `${ms.toFixed(1)}ms` : `${Math.round(ms)}ms`;
+  const tenths = Math.round(ms * 10) / 10;
+  return tenths < 10 ? `${tenths.toFixed(1)}ms` : `${Math.round(ms)}ms`;
 }
 
 export function PeerLinkDetail({ peerName, link, localSampleRate, id }: PeerLinkDetailProps) {
