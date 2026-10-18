@@ -20,9 +20,6 @@ export interface PeerLinkDetailProps {
 
   /** This machine's sample rate in Hz, to tell whether their audio is resampled */
   localSampleRate: number;
-
-  /** Id for the element, so the control that opens it can point at it */
-  id?: string;
 }
 
 /**
@@ -36,7 +33,7 @@ function formatMs(ms: number | null | undefined): string | null {
   return tenths < 10 ? `${tenths.toFixed(1)}ms` : `${Math.round(ms)}ms`;
 }
 
-export function PeerLinkDetail({ peerName, link, localSampleRate, id }: PeerLinkDetailProps) {
+export function PeerLinkDetail({ peerName, link, localSampleRate }: PeerLinkDetailProps) {
   const { t } = useTranslation();
 
   const local = localBuffers(link?.latency);
@@ -53,7 +50,7 @@ export function PeerLinkDetail({ peerName, link, localSampleRate, id }: PeerLink
   );
 
   return (
-    <div className="peer-link-detail" id={id} data-testid="peer-link-detail">
+    <div className="peer-link-detail" data-testid="peer-link-detail">
       <section className="peer-link-detail__layer" aria-label={t('session.participant.detail.you')}>
         <h4 className="peer-link-detail__title">{t('session.participant.detail.you')}</h4>
         <dl>
