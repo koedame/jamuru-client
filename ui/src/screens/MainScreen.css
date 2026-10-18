@@ -399,15 +399,8 @@
 
 /* Leave-confirm dialog: extracted to components/LeaveDialog (own CSS). */
 
-/* Bandwidth and reconnection notices, shown next to the connection indicator */
-.main-footer__warning {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-}
-
+/* Retry button beside a reconnect notice in the toast stack */
 .main-footer__reconnect {
-  margin-left: var(--space-2, 8px);
   padding: var(--space-1, 4px) var(--space-3, 12px);
   border: 1px solid var(--color-border, #444);
   border-radius: var(--radius-sm, 4px);
