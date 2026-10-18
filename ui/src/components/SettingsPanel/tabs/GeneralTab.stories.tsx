@@ -24,6 +24,8 @@ export const Japanese: Story = {
   args: {
     displayName: "ユーザー",
     onDisplayNameChange: () => {},
+    askNameOnEntry: true,
+    onAskNameOnEntryChange: () => {},
     language: "ja",
     onLanguageChange: () => {},
     serverUrl: "",
@@ -62,6 +64,21 @@ export const DisplayNameError: Story = {
     displayName: "",
     displayNameError: "Display name is required",
     onDisplayNameChange: () => {},
+    language: "en",
+    onLanguageChange: () => {},
+    serverUrl: "",
+    effectiveServerUrl: "signaling.example.com",
+    onServerUrlChange: () => {},
+  },
+};
+
+/** The name check before entering a room is turned off. */
+export const NameNotAsked: Story = {
+  args: {
+    displayName: "User",
+    onDisplayNameChange: () => {},
+    askNameOnEntry: false,
+    onAskNameOnEntryChange: () => {},
     language: "en",
     onLanguageChange: () => {},
     serverUrl: "",

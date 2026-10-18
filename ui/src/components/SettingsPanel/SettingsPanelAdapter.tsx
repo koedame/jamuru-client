@@ -10,6 +10,7 @@ import {
   settingsChange,
   configLoad,
   configSetUsageReporting,
+  configSetAskNameOnEntry,
   configGetPeerName,
   configSetPeerName,
   configGetServerUrl,
@@ -111,6 +112,9 @@ export function SettingsPanelAdapter({
   const [logFolder, setLogFolder] = useState<string | null>(null);
   const [logFolderError, setLogFolderError] = useState<string | null>(null);
 
+  // Whether the name is confirmed before entering a room (on until turned off)
+  const [askNameOnEntry, setAskNameOnEntry] = useState(true);
+
   // Usage reporting (off unless the user turns it on)
   const [usageReporting, setUsageReporting] = useState(false);
   const [usagePreview, setUsagePreview] = useState<string | null>(null);
@@ -191,7 +195,10 @@ export function SettingsPanelAdapter({
 
   useEffect(() => {
     configLoad()
-      .then((config) => setUsageReporting(config?.usage_reporting === true))
+      .then((config) => {
+        setUsageReporting(config?.usage_reporting === true);
+        setAskNameOnEntry(config?.ask_name_on_entry !== false);
+      })
       .catch((err) => console.error("Failed to read the usage reporting setting:", err));
   }, []);
 
@@ -353,6 +360,16 @@ export function SettingsPanelAdapter({
     }
   }, []);
 
+  const handleAskNameOnEntryChange = useCallback(async (enabled: boolean) => {
+    setAskNameOnEntry(enabled);
+    try {
+      await configSetAskNameOnEntry(enabled);
+    } catch (err) {
+      console.error("Failed to save whether to ask the name:", err);
+      setAskNameOnEntry(!enabled);
+    }
+  }, []);
+
   const handleUsageReportingChange = useCallback(
     async (enabled: boolean) => {
       setUsageReporting(enabled);
@@ -450,6 +467,8 @@ export function SettingsPanelAdapter({
       }}
       update={update}
       onDisplayNameChange={handleDisplayNameChange}
+      askNameOnEntry={askNameOnEntry}
+      onAskNameOnEntryChange={handleAskNameOnEntryChange}
       diagnosticsState={diagnosticsState}
       diagnosticsProgress={diagnosticsProgress}
       diagnosticsProgressMessage={diagnosticsProgressMessage}
