@@ -555,11 +555,11 @@ pub struct NetworkStats {
 pub struct AudioQuality {
     /// Number of buffer underruns (audio glitches due to CPU/scheduling)
     pub underrun_count: u64,
-    /// Number of times the play-out delay was adjusted automatically. The UI
+    /// Number of times the play-out delay was grown automatically. The UI
     /// tells the user when this goes up (REQ-LAT-108).
     pub delay_adjustments: u64,
-    /// The play-out delay, in milliseconds, the latest of those adjustments
-    /// left the adjusted link with
+    /// The play-out delay, in milliseconds, the latest of those growths
+    /// left the grown link with
     pub adjusted_delay_ms: f32,
 }
 
