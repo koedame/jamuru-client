@@ -876,6 +876,10 @@ export interface AppConfig {
   server_url: string | null;
   /** Selected audio preset */
   preset: AudioPresetId;
+  /** The name shown to the other people in a room */
+  peer_name: string;
+  /** Whether the person is asked which name to use before creating or entering a room (on until they turn it off) */
+  ask_name_on_entry: boolean;
   /** Audio sample rate in Hz. Valid values: 44100, 48000, 96000 (ADR-013) */
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
@@ -924,6 +928,13 @@ export async function configLoad(): Promise<AppConfig> {
  */
 export async function configSetUsageReporting(enabled: boolean): Promise<void> {
   return invoke("config_set_usage_reporting", { enabled });
+}
+
+/**
+ * Turn the name check before creating or entering a room on or off
+ */
+export async function configSetAskNameOnEntry(enabled: boolean): Promise<void> {
+  return invoke("config_set_ask_name_on_entry", { enabled });
 }
 
 /**

@@ -134,6 +134,8 @@ function roomOfThree(): SessionSnapshot {
     },
   });
 }
+/** What the backend says the saved config is, for `config_load`; `undefined` leaves the name unasked. */
+let savedConfig: { peer_name: string; ask_name_on_entry: boolean } | undefined;
 /** The newer release the backend says it found, for `update_notice_get`. */
 let newerRelease: string | null;
 /** Commands the screen sent to the backend, in order, with their arguments. */
@@ -167,6 +169,7 @@ beforeEach(() => {
   statusEncryption = null;
   statusLinks = null;
   newerRelease = null;
+  savedConfig = undefined;
   current = snapshot();
   mixerNow = faders();
   openUrl.handler = null;
@@ -181,6 +184,8 @@ beforeEach(() => {
         return mixerNow;
       case 'update_notice_get':
         return newerRelease;
+      case 'config_load':
+        return savedConfig;
       case 'streaming_status': {
         const peers =
           statusLinks ??
@@ -234,7 +239,7 @@ describe('MainScreen の接続の表示', () => {
 
     fireEvent.click(await screen.findByTestId('connection-panel-create-room'));
 
-    expect(callsTo('session_create')).toHaveLength(1);
+    await waitFor(() => expect(callsTo('session_create')).toHaveLength(1));
   });
 
   // Verifies: REQ-CON-139
@@ -246,7 +251,7 @@ describe('MainScreen の接続の表示', () => {
     });
     fireEvent.click(screen.getByTestId('connection-panel-join'));
 
-    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ' }]);
+    await waitFor(() => expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ' }]));
   });
 
   it('サーバーがテストルームを示しているとき、そのコードへのショートカットを出すこと', async () => {
@@ -900,9 +905,11 @@ describe('MainScreen の招待リンク', () => {
 
     act(() => openUrl.handler!(['jamuru://join/abc234xyz']));
 
-    expect(callsTo('session_join').map((c) => c.args)).toEqual([
-      { code: 'ABC234XYZ', muted: true },
-    ]);
+    await waitFor(() =>
+      expect(callsTo('session_join').map((c) => c.args)).toEqual([
+        { code: 'ABC234XYZ', muted: true },
+      ])
+    );
   });
 
   it('コードが壊れた招待リンクが届いたとき、エラーを出して参加しないこと', async () => {
@@ -922,6 +929,143 @@ describe('MainScreen の招待リンク', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(openUrl.handler).toBeNull();
+  });
+});
+
+describe('MainScreen の入室前の名前の確認', () => {
+  async function pressCreate() {
+    fireEvent.click(await screen.findByTestId('connection-panel-create-room'));
+    return screen.findByRole('dialog', { name: 'Enter your name' });
+  }
+
+  // Verifies: REQ-CON-141
+  it('名前を確認する設定のとき、ルームを作る前に名前を聞き、答えるまで session_create を呼ばないこと', async () => {
+    savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
+    render(<MainScreen />);
+
+    await pressCreate();
+
+    expect(screen.getByLabelText('Display name')).toHaveValue('Aki');
+    expect(callsTo('session_create')).toHaveLength(0);
+  });
+
+  // Verifies: REQ-CON-141
+  it('名前をまだ決めていないとき、初期値は「ゲスト」であること', async () => {
+    savedConfig = { peer_name: 'User', ask_name_on_entry: true };
+    render(<MainScreen />);
+
+    await pressCreate();
+
+    expect(screen.getByLabelText('Display name')).toHaveValue('Guest');
+  });
+
+  // Verifies: REQ-CON-141
+  it('名前を入れて決めたとき、その名前を保存してから session_create を呼ぶこと', async () => {
+    savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
+    render(<MainScreen />);
+    await pressCreate();
+
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Taro' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create Room' }));
+
+    await waitFor(() => expect(callsTo('session_create')).toHaveLength(1));
+    expect(calls.map((c) => c.cmd).filter((cmd) => cmd.startsWith('config_set') || cmd === 'session_create')).toEqual([
+      'config_set_peer_name',
+      'session_create',
+    ]);
+    expect(callsTo('config_set_peer_name').map((c) => c.args)).toEqual([{ name: 'Taro' }]);
+    expect(callsTo('config_set_ask_name_on_entry')).toHaveLength(0);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  // Verifies: REQ-CON-142
+  it('「次からこの名前を使用する」を選んで決めたとき、確認を止める設定も保存すること', async () => {
+    savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
+    render(<MainScreen />);
+    await pressCreate();
+
+    fireEvent.click(screen.getByLabelText('Use this name from now on'));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create Room' }));
+
+    await waitFor(() => expect(callsTo('session_create')).toHaveLength(1));
+    expect(callsTo('config_set_ask_name_on_entry').map((c) => c.args)).toEqual([{ enabled: false }]);
+  });
+
+  // Verifies: REQ-CON-142
+  it('名前を確認しない設定のとき、聞かずにそのまま session_create を呼ぶこと', async () => {
+    savedConfig = { peer_name: 'Aki', ask_name_on_entry: false };
+    render(<MainScreen />);
+
+    fireEvent.click(await screen.findByTestId('connection-panel-create-room'));
+
+    await waitFor(() => expect(callsTo('session_create')).toHaveLength(1));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  // Verifies: REQ-CON-141
+  it('キャンセルしたとき、ルームを作らず名前も変えないこと', async () => {
+    savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
+    render(<MainScreen />);
+    await pressCreate();
+
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Taro' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(callsTo('session_create')).toHaveLength(0);
+    expect(callsTo('config_set_peer_name')).toHaveLength(0);
+  });
+
+  // Verifies: REQ-CON-141
+  it('招待コードで参加するとき、名前を聞いてから、ミュートの指定を付けずに session_join を呼ぶこと', async () => {
+    savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
+    render(<MainScreen />);
+    fireEvent.change(await screen.findByTestId('connection-panel-invite-code'), {
+      target: { value: 'ABC234XYZ' },
+    });
+    fireEvent.click(screen.getByTestId('connection-panel-join'));
+    await screen.findByRole('dialog', { name: 'Enter your name' });
+    expect(callsTo('session_join')).toHaveLength(0);
+
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Join' }));
+
+    await waitFor(() => expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ' }]));
+  });
+
+  // Verifies: REQ-CON-141
+  // Verifies: REQ-CON-139
+  it('招待リンクが届いたとき、名前を聞いてから、ミュートの指定を付けて session_join を呼ぶこと', async () => {
+    savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
+    render(<MainScreen />);
+    await screen.findByTestId('connection-panel-create-room');
+    await waitFor(() => expect(openUrl.handler).not.toBeNull());
+
+    act(() => openUrl.handler!(['jamuru://join/abc234xyz']));
+    await screen.findByRole('dialog', { name: 'Enter your name' });
+    expect(callsTo('session_join')).toHaveLength(0);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Join' }));
+
+    await waitFor(() =>
+      expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ', muted: true }])
+    );
+  });
+
+  // Verifies: REQ-CON-141
+  it('名前を保存できなかったとき、ルームを作らず、理由を出して聞き直せること', async () => {
+    savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
+    const answer = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'config_set_peer_name') throw new Error('disk full');
+      return answer(cmd, args);
+    });
+    render(<MainScreen />);
+    await pressCreate();
+
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create Room' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not save the name');
+    expect(callsTo('session_create')).toHaveLength(0);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });
 
@@ -1031,7 +1175,7 @@ describe('MainScreen のメニューバーからの操作', () => {
 
     chooseFromMenu('create_room');
 
-    expect(callsTo('session_create')).toHaveLength(1);
+    await waitFor(() => expect(callsTo('session_create')).toHaveLength(1));
   });
 
   // Verifies: REQ-MNU-005
@@ -1054,7 +1198,7 @@ describe('MainScreen のメニューバーからの操作', () => {
 
     chooseFromMenu('test_room');
 
-    expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'HJK567MNP' }]);
+    await waitFor(() => expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'HJK567MNP' }]));
   });
 
   // Verifies: REQ-MNU-005

@@ -1,0 +1,134 @@
+/**
+ * EntryNameDialog styles: the LeaveDialog's card, wide enough for a name field.
+ */
+
+.entry-name-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-overlay);
+}
+
+.entry-name-dialog {
+  width: 320px;
+  max-width: calc(100vw - 2 * var(--space-md));
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-modal);
+}
+
+.entry-name-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.entry-name-dialog__title {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  text-align: center;
+}
+
+.entry-name-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.entry-name-dialog__label {
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}
+
+.entry-name-dialog__hint {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-tertiary);
+}
+
+.entry-name-dialog__error {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-danger);
+}
+
+.entry-name-dialog__remember {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.entry-name-dialog__remember input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.entry-name-dialog__remember input:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.entry-name-dialog__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.entry-name-dialog__confirm,
+.entry-name-dialog__cancel {
+  height: 36px;
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.entry-name-dialog__confirm {
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  color: var(--color-text-inverse);
+  font-weight: var(--font-weight-bold);
+  box-shadow: var(--shadow-button);
+}
+
+.entry-name-dialog__confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.entry-name-dialog__cancel {
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.entry-name-dialog__cancel:hover:not(:disabled) {
+  border-color: var(--color-text-primary);
+}
+
+.entry-name-dialog__cancel:disabled {
+  color: var(--color-text-tertiary);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.entry-name-dialog__confirm:focus-visible,
+.entry-name-dialog__cancel:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
