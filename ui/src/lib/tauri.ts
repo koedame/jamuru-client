@@ -591,6 +591,8 @@ export interface AudioQuality {
   underrun_count: number;
   /** Times the play-out delay was adjusted automatically (REQ-LAT-108) */
   delay_adjustments: number;
+  /** The play-out delay in ms that the latest adjustment left the adjusted link with */
+  adjusted_delay_ms: number;
 }
 
 /**
