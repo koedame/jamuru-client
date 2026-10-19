@@ -10,6 +10,7 @@ import type { Reaction as ChatPanelReaction } from "./ReactionBar";
 import {
   signalingToggleReaction,
   signalingAddReaction,
+  chatOpenLink,
   type ChatMessage as TauriChatMessage,
   type Reaction as TauriReaction,
 } from "../../lib/tauri";
@@ -177,9 +178,18 @@ export function ChatPanelAdapter({
     []
   );
 
+  const handleOpenLink = useCallback(async (url: string) => {
+    try {
+      await chatOpenLink(url);
+    } catch (err) {
+      console.error("Failed to open link:", err);
+    }
+  }, []);
+
   return (
     <ChatPanel
       messages={messages}
+      onOpenLink={handleOpenLink}
       onSend={handleSend}
       onReactionClick={handleReactionClick}
       onAddReaction={handleAddReaction}
