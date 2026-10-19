@@ -2,7 +2,7 @@
  * ChatPanelAdapter - Docks the Props-based ChatPanel as the connected screen's
  * right-hand column and wires it to the Tauri backend for real-time chat.
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "../../lib/invoke";
 import { ChatPanel } from "./ChatPanel";
 import type { ChatMessageData } from "./ChatMessageList";
@@ -104,20 +104,29 @@ export function ChatPanelAdapter({
   myPeerId,
 }: ChatPanelAdapterProps) {
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
-  const [isSending, setIsSending] = useState(false);
   const [recentEmojis, setRecentEmojis] = useState<string[]>(loadRecentEmojis);
+  // The last snapshot from the backend, as text. A poll that brings the same
+  // snapshot leaves the state alone so the list is not rebuilt every 500ms.
+  const lastSnapshotRef = useRef<string | null>(null);
+
+  const fetchMessages = useCallback(async () => {
+    const fetched = await invoke<TauriChatMessage[]>("signaling_get_chat_messages", {
+      sinceTimestamp: null,
+    });
+    const snapshot = JSON.stringify(fetched);
+    if (snapshot === lastSnapshotRef.current) return;
+    lastSnapshotRef.current = snapshot;
+    setMessages(fetched.map((msg) => convertMessage(msg, myPeerId)));
+  }, [myPeerId]);
 
   // Poll for new messages while connected (the chat is a permanent column).
   useEffect(() => {
     if (connId === null) return;
 
+    lastSnapshotRef.current = null;
     const pollMessages = async () => {
       try {
-        const newMessages = await invoke<TauriChatMessage[]>(
-          "signaling_get_chat_messages",
-          { sinceTimestamp: null }
-        );
-        setMessages(newMessages.map((msg) => convertMessage(msg, myPeerId)));
+        await fetchMessages();
       } catch {
         // Silently ignore errors during polling
       }
@@ -129,13 +138,14 @@ export function ChatPanelAdapter({
     // Poll every 500ms
     const interval = setInterval(pollMessages, 500);
     return () => clearInterval(interval);
-  }, [connId, myPeerId]);
+  }, [connId, fetchMessages]);
 
+  // Rejects when the message could not be sent, so the input keeps the text
+  // and tells the reader.
   const handleSend = useCallback(
     async (content: string) => {
-      if (!content.trim() || connId === null || isSending) return;
+      if (!content.trim() || connId === null) return;
 
-      setIsSending(true);
       try {
         await invoke("signaling_send_chat", {
           connId,
@@ -143,11 +153,17 @@ export function ChatPanelAdapter({
         });
       } catch (err) {
         console.error("Failed to send chat message:", err);
-      } finally {
-        setIsSending(false);
+        throw err;
+      }
+      // The backend already holds the sent message; show it now instead of
+      // at the next poll.
+      try {
+        await fetchMessages();
+      } catch {
+        // The next poll shows it
       }
     },
-    [connId, isSending]
+    [connId, fetchMessages]
   );
 
   // Handle clicking on an existing reaction (toggle)
@@ -194,7 +210,7 @@ export function ChatPanelAdapter({
       onReactionClick={handleReactionClick}
       onAddReaction={handleAddReaction}
       recentEmojis={recentEmojis}
-      disabled={isSending || connId === null}
+      disabled={connId === null}
     />
   );
 }
