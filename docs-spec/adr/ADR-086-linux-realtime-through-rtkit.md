@@ -48,5 +48,6 @@ Linux の音声スレッドは、`pthread_setschedparam(SCHED_FIFO, 90)` を直�
 
 ## Verification
 
-- `audio::priority::rtkit` の単体テストで、`RLIMIT_RTTIME` を rtkit の上限にそろえること・すでに低ければ変えないこと・システムバスが無いときに理由つきで失敗することを確かめる。
+- `audio::priority::rtkit` の単体テストで、`RLIMIT_RTTIME` を rtkit の上限にそろえること・すでに低ければ変えないことを確かめる。
+  rtkit と同じ名前・型の D-Bus の口を持つ代役を専用のバス（`dbus-daemon`）に立て、呼び出し（メソッド・スレッド番号・優先度）と、rtkit の上限に合わせた優先度の決め方（上限が 0 なら頼まない）を確かめる。
 - 2 コアの Linux 機（rtkit あり・上限 0 の入れ物）で、直す前後の無音区間・xrun・開き直しを 2 分ずつ測って並べる（`jamjam-soak.py`）。
