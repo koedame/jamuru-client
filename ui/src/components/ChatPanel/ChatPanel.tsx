@@ -30,6 +30,8 @@ export interface ChatPanelProps {
   emptyMessage?: string;
   /** Locale for time formatting */
   locale?: string;
+  /** Callback when a link in a message is clicked */
+  onOpenLink?: (url: string) => void;
 }
 
 export function ChatPanel({
@@ -43,6 +45,7 @@ export function ChatPanel({
   placeholder,
   emptyMessage,
   locale,
+  onOpenLink,
 }: ChatPanelProps) {
   const { t, i18n } = useTranslation();
   const titleText = title ?? t("chat.title");
@@ -66,6 +69,7 @@ export function ChatPanel({
         systemKind={message.systemKind}
         helperName={message.helperName}
         setting={message.setting}
+        onOpenLink={onOpenLink}
         onReactionClick={
           onReactionClick
             ? (emoji) => onReactionClick(message.id, emoji)
@@ -79,7 +83,7 @@ export function ChatPanel({
         recentEmojis={recentEmojis}
       />
     ),
-    [timeLocale, onReactionClick, onAddReaction, recentEmojis]
+    [timeLocale, onReactionClick, onAddReaction, recentEmojis, onOpenLink]
   );
 
   return (
