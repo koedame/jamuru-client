@@ -1,10 +1,17 @@
 //! RealtimeKit (rtkit): the system service that hands out real-time priority to ordinary
 //! users on a desktop, over the system D-Bus.
 
+use std::time::Duration;
+
+use zbus::blocking::connection::Builder;
 use zbus::blocking::{Connection, Proxy};
 
 const DESTINATION: &str = "org.freedesktop.RealtimeKit1";
 const PATH: &str = "/org/freedesktop/RealtimeKit1";
+
+/// How long a call to rtkit may take. It answers in a millisecond or two; polkit, which it asks,
+/// is the slow part.
+const CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(super) struct RealtimeKit {
     proxy: Proxy<'static>,
@@ -14,7 +21,13 @@ impl RealtimeKit {
     /// # Errors
     /// Why there is no rtkit to ask: no system bus, or nothing on it by that name.
     pub(super) fn connect() -> Result<Self, String> {
-        let connection = Connection::system().map_err(|e| format!("no system bus: {e}"))?;
+        let connection = Builder::system()
+            .and_then(|builder| builder.method_timeout(CALL_TIMEOUT).build())
+            .map_err(|e| format!("no system bus: {e}"))?;
+        Self::on(connection)
+    }
+
+    fn on(connection: Connection) -> Result<Self, String> {
         let proxy = Proxy::new_owned(connection, DESTINATION, PATH, DESTINATION)
             .map_err(|e| e.to_string())?;
         Ok(Self { proxy })
@@ -97,6 +110,9 @@ fn limit_real_time_cpu(max_usec: i64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, Command, Stdio};
+    use std::sync::{Arc, Mutex};
 
     fn cpu_time_limit() -> libc::rlimit {
         let mut limit = libc::rlimit {
@@ -129,12 +145,148 @@ mod tests {
         assert_eq!(cpu_time_limit().rlim_cur, 100_000);
     }
 
+    /// What the stand-in for rtkit was asked: the method and its arguments
+    type Calls = Arc<Mutex<Vec<(String, u64, i64)>>>;
+
+    /// Answers as rtkit does, with the names, types and limits of its D-Bus interface
+    struct StandInRtkit {
+        calls: Calls,
+        highest: i32,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.RealtimeKit1")]
+    impl StandInRtkit {
+        #[zbus(property)]
+        fn max_realtime_priority(&self) -> i32 {
+            self.highest
+        }
+
+        #[zbus(property, name = "RTTimeUSecMax")]
+        fn rt_time_usec_max(&self) -> i64 {
+            200_000
+        }
+
+        #[zbus(property)]
+        fn min_nice_level(&self) -> i32 {
+            -15
+        }
+
+        fn make_thread_realtime(&self, thread: u64, priority: u32) {
+            let call = ("MakeThreadRealtime".to_string(), thread, priority.into());
+            self.calls.lock().unwrap().push(call);
+        }
+
+        fn make_thread_high_priority(&self, thread: u64, priority: i32) {
+            let call = (
+                "MakeThreadHighPriority".to_string(),
+                thread,
+                priority.into(),
+            );
+            self.calls.lock().unwrap().push(call);
+        }
+    }
+
+    /// A bus of its own, with the stand-in on it, and a client connection to it
+    struct Bus {
+        daemon: Child,
+        _service: Connection,
+        client: RealtimeKit,
+        calls: Calls,
+    }
+
+    impl Bus {
+        fn start(highest: i32) -> Self {
+            let mut daemon = Command::new("dbus-daemon")
+                .args(["--session", "--nofork", "--print-address"])
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("dbus-daemon is needed to test the rtkit calls");
+            let mut address = String::new();
+            BufReader::new(daemon.stdout.take().unwrap())
+                .read_line(&mut address)
+                .unwrap();
+            let address = address.trim().to_string();
+            let calls = Calls::default();
+            let service = Builder::address(address.as_str())
+                .unwrap()
+                .name(DESTINATION)
+                .unwrap()
+                .serve_at(
+                    PATH,
+                    StandInRtkit {
+                        calls: calls.clone(),
+                        highest,
+                    },
+                )
+                .unwrap()
+                .build()
+                .unwrap();
+            let client = RealtimeKit::on(
+                Builder::address(address.as_str())
+                    .unwrap()
+                    .method_timeout(CALL_TIMEOUT)
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+            Self {
+                daemon,
+                _service: service,
+                client,
+                calls,
+            }
+        }
+    }
+
+    impl Drop for Bus {
+        fn drop(&mut self) {
+            let _ = self.daemon.kill();
+            let _ = self.daemon.wait();
+        }
+    }
+
     #[test]
-    fn when_there_is_no_system_bus_rtkit_cannot_be_reached_and_the_error_says_so() {
-        std::env::set_var("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=/nonexistent/bus");
+    fn when_rtkit_allows_less_than_wanted_the_thread_gets_the_highest_it_allows() {
+        let bus = Bus::start(20);
 
-        let error = RealtimeKit::connect().err().expect("no bus to connect to");
+        let given = bus.client.make_thread_realtime(4321, 90).unwrap();
 
-        assert!(error.contains("no system bus"), "{error}");
+        assert_eq!(given, 20);
+        assert_eq!(
+            *bus.calls.lock().unwrap(),
+            [("MakeThreadRealtime".to_string(), 4321, 20)]
+        );
+    }
+
+    #[test]
+    fn when_rtkit_allows_more_than_wanted_the_thread_gets_what_was_wanted() {
+        let bus = Bus::start(99);
+
+        let given = bus.client.make_thread_realtime(4321, 90).unwrap();
+
+        assert_eq!(given, 90);
+    }
+
+    #[test]
+    fn when_rtkit_allows_no_real_time_priority_it_is_not_asked_for_one() {
+        let bus = Bus::start(0);
+
+        let error = bus.client.make_thread_realtime(4321, 90).unwrap_err();
+
+        assert!(error.contains("no real-time priority"), "{error}");
+        assert!(bus.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn when_a_thread_is_made_high_priority_it_gets_the_lowest_nice_value_rtkit_allows() {
+        let bus = Bus::start(20);
+
+        let nice = bus.client.make_thread_high_priority(4321).unwrap();
+
+        assert_eq!(nice, -15);
+        assert_eq!(
+            *bus.calls.lock().unwrap(),
+            [("MakeThreadHighPriority".to_string(), 4321, -15)]
+        );
     }
 }
