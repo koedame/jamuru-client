@@ -158,6 +158,8 @@ interface ChatMessageProps {
   recentEmojis?: string[];
   /** アクションバー表示（デフォルト: onAddReaction が提供されている場合 true） */
   showActions?: boolean;
+  /** 本文のリンクをクリックしたときのコールバック（無いときは新しいタブで開く素のリンク。Storybook 用） */
+  onOpenLink?: (url: string) => void;
 }
 
 type ChatMessageType = "own" | "other" | "system";
@@ -270,6 +272,16 @@ type EmojiCategory = "recent" | "smileys" | "gestures" | "hearts" | "music" | "o
 - `hearts`: ハート（❤️ 🧡 💛 など）
 - `music`: 音楽（🎵 🎶 🎸 など）
 - `objects`: その他オブジェクト（⭐ ✨ 💯 など）
+
+### 本文のリンク（REQ-GUI-029）
+
+本文中の `http://` / `https://` のアドレスは `<a class="chat-message__link">` として表示する（`linkify.ts` の `splitLinks`）。
+
+- リンクになるのは http と https だけ。`file:` や独自スキームはリンクにしない
+- 前後の日本語・直後の句読点（`.,;:!?'*`）・対にならない閉じ括弧は含めない。URL に使える ASCII 文字だけを拾う
+- `onOpenLink` があるとき、リンクに `target` は付けない（Tauri の shell プラグインが `_blank` のリンクを自分で開こうとして、ACL エラーを出すため。実機で確認）。無いとき（Storybook）は `target="_blank"` の素のリンク
+- クリックしたらウィンドウの遷移を止め、アドレスを `onOpenLink` に渡す。アプリ側（`ChatPanelAdapter`）は Tauri コマンド `chat_open_link` を呼び、OS の既定のブラウザで開く
+- `chat_open_link` は画面からだけ呼べる（手伝いの口・テスト用の口には開かない）。http と https の Web アドレス以外、空白・制御文字を含むもの、2048 バイトを超えるものは開かない
 
 ---
 

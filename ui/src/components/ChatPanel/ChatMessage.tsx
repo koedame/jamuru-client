@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { ReactionBar, type Reaction } from "./ReactionBar";
 import { AddReactionButton } from "./AddReactionButton";
 import { settingLabel } from "../SettingsHelp/settingText";
+import { splitLinks } from "./linkify";
 import "./ChatMessage.css";
 
 export type ChatMessageType = "own" | "other" | "system";
@@ -56,6 +57,13 @@ export interface ChatMessageProps {
   helperName?: string | null;
   /** For "settings_help_changed": the setting that changed, as a settings change names it */
   setting?: string | null;
+  /**
+   * Called with the address when a link in the message is clicked. Without it
+   * the link is a plain anchor that opens in a new tab (Storybook). With it the
+   * anchor has no `target`: the shell plugin opens every `_blank` anchor by
+   * itself, which would run next to the app's own handler.
+   */
+  onOpenLink?: (url: string) => void;
 }
 
 /**
@@ -161,6 +169,7 @@ export function ChatMessage({
   systemKind,
   helperName,
   setting,
+  onOpenLink,
 }: ChatMessageProps) {
   const { t, i18n } = useTranslation();
   const timeLocale = locale ?? i18n.language;
@@ -202,7 +211,30 @@ export function ChatMessage({
         {senderName && <span className="chat-message__sender">{senderName}</span>}
         <span className="chat-message__time">{formatTime(timestamp, timeLocale)}</span>
       </div>
-      <div className="chat-message__content">{content}</div>
+      <div className="chat-message__content">
+        {splitLinks(content).map((part, i) =>
+          part.kind === "link" ? (
+            <a
+              key={i}
+              className="chat-message__link"
+              href={part.url}
+              {...(onOpenLink ? {} : { target: "_blank", rel: "noopener noreferrer" })}
+              onClick={
+                onOpenLink
+                  ? (e) => {
+                      e.preventDefault();
+                      onOpenLink(part.url);
+                    }
+                  : undefined
+              }
+            >
+              {part.text}
+            </a>
+          ) : (
+            part.text
+          )
+        )}
+      </div>
       {(reactions.length > 0 || shouldShowActions) && (
         <div className="chat-message__reactions">
           {reactions.length > 0 && (

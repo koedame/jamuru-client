@@ -84,3 +84,14 @@
   gap: var(--space-xs);
   margin-top: var(--space-xs);
 }
+
+/* Web address in a message */
+.chat-message__link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.chat-message__link:hover {
+  text-decoration-thickness: 2px;
+}
