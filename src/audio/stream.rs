@@ -177,12 +177,12 @@ const SEAM_FRAMES: usize = 48;
 /// frame as it was sent: it plays silence where a frame was due, conceals a
 /// lost one, inserts silence to raise the delay or skips frames to lower it.
 /// The waveform then steps from where the last frame ended to wherever the
-/// next one starts, and a step is a click. The first frames after a cut
-/// start from the last sample that was played instead, and the difference
-/// decays to zero over [`SEAM_FRAMES`] sample frames, so the signal leaves
-/// the old waveform and joins the new one without a jump. Silence that
-/// follows signal falls to zero the same way, and the signal that follows
-/// silence rises from it.
+/// next one starts, and a step is a click. The first [`SEAM_FRAMES`] sample
+/// frames after a cut are a cross-fade from the last sample that was played
+/// to the new signal, so the output leaves the old waveform and joins the new
+/// one without a jump, and never goes beyond the larger of the two. Silence
+/// that follows signal falls away from the last sample the same way, and the
+/// signal that follows silence rises from it.
 #[derive(Default)]
 struct Seam {
     /// The last sample frame played (left, right)
@@ -210,20 +210,17 @@ impl Seam {
             return;
         }
         if broken || self.pending {
-            let step = [self.last[0] - block[0], self.last[1] - block[1]];
-            if step != [0.0, 0.0] {
-                let span = frames.min(SEAM_FRAMES);
-                for (i, frame) in block
-                    .as_chunks_mut::<WIRE_CHANNELS>()
-                    .0
-                    .iter_mut()
-                    .take(span)
-                    .enumerate()
-                {
-                    let gain = 1.0 - i as f32 / span as f32;
-                    frame[0] += step[0] * gain;
-                    frame[1] += step[1] * gain;
-                }
+            let span = frames.min(SEAM_FRAMES);
+            for (i, frame) in block
+                .as_chunks_mut::<WIRE_CHANNELS>()
+                .0
+                .iter_mut()
+                .take(span)
+                .enumerate()
+            {
+                let new = (i + 1) as f32 / span as f32;
+                frame[0] = frame[0] * new + self.last[0] * (1.0 - new);
+                frame[1] = frame[1] * new + self.last[1] * (1.0 - new);
             }
         }
         self.pending = broken;
@@ -1632,5 +1629,27 @@ mod tests {
             (end - (40.0 * 64.0 + 63.0) * 0.0001).abs() < 1e-6,
             "and has joined the signal by the end of the frame, at {end}"
         );
+    }
+
+    /// Joining a cut must not push the signal beyond its own size: a tone
+    /// that starts mid-wave is joined to silence with a fade, not an offset.
+    ///
+    /// Verifies: REQ-AUD-041
+    #[test]
+    fn a_tone_that_starts_mid_wave_is_never_louder_than_itself() {
+        let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 0).expect("PCM");
+        let tone: Vec<f32> = (0..64)
+            .flat_map(|n| {
+                let v = 0.35 * (n as f32 * 0.3 + 2.0).sin();
+                [v, v]
+            })
+            .collect();
+        assert!(path.receive(0, &pcm(&tone)));
+        let mut out = vec![0.0; RAMP_SAMPLES];
+
+        path.read_into(&mut out);
+
+        let peak = out.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+        assert!(peak <= 0.35 + 1e-6, "peak {peak} of a 0.35 tone");
     }
 }
