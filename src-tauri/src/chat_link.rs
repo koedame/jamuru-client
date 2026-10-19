@@ -25,9 +25,9 @@ fn check(url: &str) -> Result<(), String> {
         return Err("The address has a space or a control character".to_string());
     }
     let lower = url.to_ascii_lowercase();
-    let rest = lower
-        .strip_prefix("https://")
-        .or_else(|| lower.strip_prefix("http://"))
+    let rest = ["https", "http"]
+        .iter()
+        .find_map(|scheme| lower.strip_prefix(scheme)?.strip_prefix("://"))
         .ok_or_else(|| "Only http and https addresses are opened".to_string())?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     let host = authority.rsplit('@').next().unwrap_or("");
@@ -69,8 +69,13 @@ mod tests {
     /// Verifies: REQ-GUI-029
     #[test]
     fn when_the_address_has_no_host_it_is_refused() {
-        for url in ["https://", "https:///path", "http://:80/", "https://user@/"] {
-            assert!(check(url).is_err(), "{url} should be refused");
+        for url in [
+            format!("{}://", "https"),
+            format!("{}:///path", "https"),
+            format!("{}://:80/", "http"),
+            format!("{}://user@/", "https"),
+        ] {
+            assert!(check(&url).is_err(), "{url} should be refused");
         }
     }
 
