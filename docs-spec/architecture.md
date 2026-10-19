@@ -59,6 +59,7 @@ jamuruの技術構成を定義する。本ドキュメントは実装の正と�
 | 端末アイデンティティ署名（ADR-024） | ed25519-dalek | 実装済 |
 | base32 / base64（識別子・鍵のエンコード） | data-encoding | 実装済 |
 | OS バージョン・搭載メモリの取得 | sysinfo | 実装済 |
+| 音声スレッドの実時間優先度（Linux。rtkit に D-Bus で頼む。[ADR-086](./adr/ADR-086-linux-realtime-through-rtkit.md)） | zbus | 実装済 |
 
 ### 3.3 実装済みモジュール構成
 
@@ -73,6 +74,7 @@ src/
 │   ├── playout.rs      # 受信音声の再生バッファ（ジッタバッファ兼用、ADR-028）
 │   ├── plc.rs          # Packet Loss Concealment
 │   ├── preset.rs       # プリセット定義と遅延バジェット（ADR-019の正）
+│   ├── priority.rs     # 音声スレッドの実時間優先度。Linux は SCHED_FIFO → rtkit → nice の順（ADR-086）
 │   ├── resampler.rs    # 受信側リサンプリング（ADR-013）
 │   └── stream.rs       # 送受信の音声形式と受信経路（CLI と GUI で共有）
 ├── network/
@@ -585,8 +587,8 @@ jamuru join-room --server <URL> --room <CODE>       # ルーム参加
 
 | スレッド | 優先度 | 役割 |
 |---------|--------|------|
-| Audio Capture | リアルタイム | 音声入力の取得 |
-| Audio Playback | リアルタイム | 音声出力の再生 |
+| Audio Capture | リアルタイム | 音声入力の取得（Linux は最初のコールバックで自分の優先度を頼む。ADR-086） |
+| Audio Playback | リアルタイム | 音声出力の再生（同上） |
 | Network Send | 高 | パケット送信 |
 | Network Receive | 高 | パケット受信 |
 | Jitter Buffer | 高 | バッファ管理 |
