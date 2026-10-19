@@ -6,10 +6,12 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use rtrb::{Consumer, RingBuffer};
 use serde::Serialize;
 
+use super::mic_access::{MicAccess, MicSystem};
 use super::taps::taps;
 use super::{
     capture_attempts, input_devices, output_devices, pair_in_use, rms_level, AudioEngine,
@@ -41,6 +43,13 @@ pub enum DeviceTrouble {
     /// The stream is open but its callback is no longer called, and opening it
     /// again did not bring it back (REQ-AUD-128)
     Stalled,
+    /// The system is asking whether the app may use the microphone, and the
+    /// answer has not come. The input is not opened until it does: opening it
+    /// waits on the same question and stalls the output with it.
+    PermissionPending,
+    /// The system does not let the app use the microphone. Changed in its
+    /// privacy settings.
+    PermissionRefused,
 }
 
 /// A device the audio thread could not open, for the UI to tell the user
@@ -103,6 +112,67 @@ pub fn note_trouble(
             side,
             trouble,
             device: name,
+            sample_rate,
+        });
+    }
+}
+
+/// How long a session start waits for the person to answer the system's
+/// question about the microphone
+pub const MIC_ANSWER_WAIT: Duration = Duration::from_secs(60);
+
+/// Whether the input may be opened now, asking the system about the
+/// microphone first and telling the screen what is being waited for.
+///
+/// `false` means the input stays closed and `problems` says why: the person
+/// has not answered within `wait` (it stays on screen as pending), or the
+/// system does not let the app use the microphone. The output does not
+/// depend on any of this and is opened either way.
+pub fn microphone_allows_input(
+    mic: &impl MicSystem,
+    problems: &RwLock<Vec<DeviceProblem>>,
+    sample_rate: u32,
+    wait: Duration,
+) -> bool {
+    let mut access = mic.status();
+    let asked = access == MicAccess::Undecided;
+    if asked {
+        tracing::info!("Waiting for the answer to the system's microphone question");
+        note_permission(problems, DeviceTrouble::PermissionPending, sample_rate);
+        access = mic.ask(wait);
+    }
+    match access {
+        MicAccess::Granted => {
+            if asked {
+                clear_device_problem(problems, DeviceSide::Input);
+            }
+            true
+        }
+        MicAccess::Refused => {
+            tracing::warn!("The system does not let the app use the microphone");
+            note_permission(problems, DeviceTrouble::PermissionRefused, sample_rate);
+            false
+        }
+        MicAccess::Undecided => {
+            tracing::warn!("The microphone question was not answered within {:?}", wait);
+            false
+        }
+    }
+}
+
+/// Records a microphone permission trouble for the input. The device's name
+/// is left out: the system's list is behind the same question.
+fn note_permission(
+    problems: &RwLock<Vec<DeviceProblem>>,
+    trouble: DeviceTrouble,
+    sample_rate: u32,
+) {
+    if let Ok(mut problems) = problems.write() {
+        problems.retain(|p| p.side != DeviceSide::Input);
+        problems.push(DeviceProblem {
+            side: DeviceSide::Input,
+            trouble,
+            device: None,
             sample_rate,
         });
     }
@@ -455,6 +525,133 @@ mod tests {
     use super::*;
     use crate::audio::{AudioPreset, PeerGain, PeerMeter, ReceivePath, VoiceHandle};
     use crate::network::MAX_PEERS_PER_ROOM;
+
+    /// A system whose microphone question is in the given state, and which
+    /// answers `answer` when asked (`Undecided` for a person who does not)
+    struct FakeMic {
+        status: MicAccess,
+        answer: MicAccess,
+        asked: std::sync::atomic::AtomicBool,
+    }
+
+    impl FakeMic {
+        fn new(status: MicAccess, answer: MicAccess) -> Self {
+            Self {
+                status,
+                answer,
+                asked: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        fn was_asked(&self) -> bool {
+            self.asked.load(Ordering::SeqCst)
+        }
+    }
+
+    impl MicSystem for FakeMic {
+        fn status(&self) -> MicAccess {
+            self.status
+        }
+
+        fn ask(&self, _wait: Duration) -> MicAccess {
+            self.asked.store(true, Ordering::SeqCst);
+            self.answer
+        }
+    }
+
+    fn input_trouble(problems: &RwLock<Vec<DeviceProblem>>) -> Option<DeviceTrouble> {
+        problems
+            .read()
+            .unwrap()
+            .iter()
+            .find(|p| p.side == DeviceSide::Input)
+            .map(|p| p.trouble)
+    }
+
+    /// Verifies: REQ-AUD-129
+    #[test]
+    fn when_the_system_already_allows_the_microphone_the_input_opens_without_asking() {
+        let mic = FakeMic::new(MicAccess::Granted, MicAccess::Granted);
+        let problems = RwLock::new(Vec::new());
+
+        let allowed = microphone_allows_input(&mic, &problems, 48000, Duration::from_secs(1));
+
+        assert!(allowed);
+        assert!(!mic.was_asked());
+        assert_eq!(input_trouble(&problems), None);
+    }
+
+    /// Verifies: REQ-AUD-129
+    #[test]
+    fn when_the_person_has_not_been_asked_yet_the_input_opens_after_they_allow_it() {
+        let mic = FakeMic::new(MicAccess::Undecided, MicAccess::Granted);
+        let problems = RwLock::new(Vec::new());
+
+        let allowed = microphone_allows_input(&mic, &problems, 48000, Duration::from_secs(1));
+
+        assert!(allowed);
+        assert!(mic.was_asked());
+        assert_eq!(input_trouble(&problems), None);
+    }
+
+    /// Verifies: REQ-AUD-129
+    #[test]
+    fn when_the_person_declines_the_question_the_input_stays_closed_and_the_screen_says_so() {
+        let mic = FakeMic::new(MicAccess::Undecided, MicAccess::Refused);
+        let problems = RwLock::new(Vec::new());
+
+        let allowed = microphone_allows_input(&mic, &problems, 48000, Duration::from_secs(1));
+
+        assert!(!allowed);
+        assert_eq!(
+            input_trouble(&problems),
+            Some(DeviceTrouble::PermissionRefused)
+        );
+    }
+
+    /// Verifies: REQ-AUD-129
+    #[test]
+    fn when_the_microphone_is_switched_off_for_the_app_the_input_is_not_opened_or_asked_about() {
+        let mic = FakeMic::new(MicAccess::Refused, MicAccess::Refused);
+        let problems = RwLock::new(Vec::new());
+
+        let allowed = microphone_allows_input(&mic, &problems, 48000, Duration::from_secs(1));
+
+        assert!(!allowed);
+        assert!(!mic.was_asked());
+        assert_eq!(
+            input_trouble(&problems),
+            Some(DeviceTrouble::PermissionRefused)
+        );
+    }
+
+    /// Verifies: REQ-AUD-129
+    #[test]
+    fn when_nobody_answers_in_time_the_input_stays_closed_and_the_screen_says_it_is_waiting() {
+        let mic = FakeMic::new(MicAccess::Undecided, MicAccess::Undecided);
+        let problems = RwLock::new(Vec::new());
+
+        let allowed = microphone_allows_input(&mic, &problems, 48000, Duration::from_millis(10));
+
+        assert!(!allowed);
+        assert_eq!(
+            input_trouble(&problems),
+            Some(DeviceTrouble::PermissionPending)
+        );
+    }
+
+    /// Verifies: REQ-AUD-129
+    #[test]
+    fn when_the_answer_comes_after_the_screen_said_it_was_waiting_the_notice_goes_away() {
+        let mic = FakeMic::new(MicAccess::Undecided, MicAccess::Granted);
+        let problems = RwLock::new(Vec::new());
+        note_permission(&problems, DeviceTrouble::PermissionPending, 48000);
+
+        let allowed = microphone_allows_input(&mic, &problems, 48000, Duration::from_secs(1));
+
+        assert!(allowed);
+        assert_eq!(input_trouble(&problems), None);
+    }
 
     /// Verifies: REQ-AUD-125
     #[test]
