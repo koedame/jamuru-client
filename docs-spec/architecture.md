@@ -60,6 +60,7 @@ jamuruの技術構成を定義する。本ドキュメントは実装の正と�
 | base32 / base64（識別子・鍵のエンコード） | data-encoding | 実装済 |
 | OS バージョン・搭載メモリの取得 | sysinfo | 実装済 |
 | 音声スレッドの実時間優先度（Linux。rtkit に D-Bus で頼む。[ADR-086](./adr/ADR-086-linux-realtime-through-rtkit.md)） | zbus | 実装済 |
+| 音声スレッドの実時間優先度（Windows。MMCSS に登録する。[ADR-087](./adr/ADR-087-windows-audio-threads-join-mmcss.md)） | windows（`Win32_System_Threading`） | 実装済 |
 
 ### 3.3 実装済みモジュール構成
 
@@ -74,7 +75,7 @@ src/
 │   ├── playout.rs      # 受信音声の再生バッファ（ジッタバッファ兼用、ADR-028）
 │   ├── plc.rs          # Packet Loss Concealment
 │   ├── preset.rs       # プリセット定義と遅延バジェット（ADR-019の正）
-│   ├── priority.rs     # 音声スレッドの実時間優先度。Linux は SCHED_FIFO → rtkit → nice の順（ADR-086）
+│   ├── priority.rs     # 音声スレッドの実時間優先度。Linux は SCHED_FIFO → rtkit → nice の順、Windows は MMCSS の "Pro Audio"（ADR-086、ADR-087）
 │   ├── resampler.rs    # 受信側リサンプリング（ADR-013）
 │   └── stream.rs       # 送受信の音声形式と受信経路（CLI と GUI で共有）
 ├── network/
