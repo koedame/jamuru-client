@@ -6,6 +6,7 @@
 mod app_info;
 #[cfg(feature = "debug-tools")]
 mod audio_tap;
+mod chat_link;
 mod config;
 #[cfg(feature = "debug-remote")]
 mod debug_remote;
