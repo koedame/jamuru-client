@@ -14,7 +14,7 @@ export interface StereoMeterProps {
   levelL: number;
   /** Right channel level (0-100) */
   levelR: number;
-  /** Height in pixels */
+  /** Height in pixels. Omit to size by CSS (200px, or filling a flex parent). */
   height?: number;
   /** Whether the channel is muted */
   isMuted?: boolean;
@@ -25,7 +25,7 @@ export interface StereoMeterProps {
 export function StereoMeter({
   levelL,
   levelR,
-  height = 200,
+  height,
   isMuted = false,
   peakReleaseTime = 1500,
 }: StereoMeterProps) {
@@ -41,7 +41,7 @@ export function StereoMeter({
   return (
     <div
       className={`stereo-meter ${isMuted ? "stereo-meter--muted" : ""}`}
-      style={{ height: `${height}px` }}
+      style={height === undefined ? undefined : { height: `${height}px` }}
     >
       <div className="stereo-meter__box">
         <div className="stereo-meter__bar">

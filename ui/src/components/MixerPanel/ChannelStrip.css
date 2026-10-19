@@ -21,6 +21,8 @@
   justify-content: center;
   gap: var(--space-xs);
   width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .channel-strip__col {
@@ -28,6 +30,15 @@
   flex-direction: column;
   align-items: center;
   gap: var(--space-xs);
+}
+
+/* The fader and meter take the height the strip is stretched to, never less
+   than their 200px base height. */
+.channel-strip__col .stereo-fader,
+.channel-strip__col .stereo-meter {
+  flex: 1;
+  height: auto;
+  min-height: 200px;
 }
 
 .channel-strip__value {
