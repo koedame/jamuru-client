@@ -11,14 +11,15 @@ use super::links::{senders_of, Link, LinkSetup, LinkStage};
 use super::shared::{LinkReport, Shared, MAX_LINKS};
 use super::stand_in::StandIns;
 use super::{send, Command, Params};
+use crate::audio::mic_access::SystemMic;
 use crate::audio::{
-    capture_or_silence, clear_device_problem, note_device_problem, note_trouble, playout_source,
-    start_capture_ring, start_playout, AudioConfig, AudioEngine, DeviceId, DeviceSide, DeviceSlot,
-    DeviceTrouble, FlightKind, LocalMonitor, PeerMix, RecordingFeed, Verdict, ADAPT_INTERVAL,
-    WIRE_CHANNELS,
+    capture_or_silence, clear_device_problem, microphone_allows_input, note_device_problem,
+    note_trouble, playout_source, start_capture_ring, start_playout, AudioConfig, AudioEngine,
+    CaptureRing, DeviceId, DeviceSide, DeviceSlot, DeviceTrouble, FlightKind, LocalMonitor,
+    PeerMix, RecordingFeed, Verdict, ADAPT_INTERVAL, MIC_ANSWER_WAIT, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
-use crate::audio::{open_asio, shared_asio_driver, AsioDuplex, AsioSwitch, CaptureRing};
+use crate::audio::{open_asio, shared_asio_driver, AsioDuplex, AsioSwitch};
 use crate::link::Senders;
 use crate::network::{audio_packet_duration_ms, required_bps, AudioEncodingConfig, UdpMux};
 use crate::protocol::LatencyInfoMessage;
@@ -220,6 +221,15 @@ pub(super) async fn run(
                     stand_ins.input(signal, &monitor, &input_level_for_capture),
                     false,
                 ),
+                None if !microphone_allows_input(
+                    &SystemMic,
+                    device_problems,
+                    sample_rate,
+                    MIC_ANSWER_WAIT,
+                ) =>
+                {
+                    (CaptureRing::silent(wanted_channels as usize), false)
+                }
                 None => {
                     let opened = start_capture_ring(
                         &mut capture_engine,

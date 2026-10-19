@@ -685,9 +685,17 @@ export interface DeviceProblem {
    * "unresponsive": the driver did not answer in time. "failed": it refused.
    * "unsupported_format": it does not open at the session's sample rate.
    * "stalled": it is open but stopped delivering audio, and opening it again
-   * did not bring it back.
+   * did not bring it back. "permission_pending": the system's question about
+   * the microphone has not been answered. "permission_refused": the system
+   * does not let the app use the microphone.
    */
-  trouble: "unresponsive" | "failed" | "unsupported_format" | "stalled";
+  trouble:
+    | "unresponsive"
+    | "failed"
+    | "unsupported_format"
+    | "stalled"
+    | "permission_pending"
+    | "permission_refused";
   /** The device's name, when the system's list has one for it */
   device: string | null;
   /** The sample rate the session asked the device to open at */
