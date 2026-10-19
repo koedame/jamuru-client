@@ -2546,6 +2546,7 @@ dependencies = [
  "uuid",
  "windows",
  "x25519-dalek",
+ "zbus",
 ]
 
 [[package]]
