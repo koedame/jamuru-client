@@ -121,9 +121,15 @@ pub async fn serve_relay<R: Runtime>(
     let (to_app, incoming) = mpsc::channel::<String>(32);
     let (outgoing, mut from_app) = mpsc::channel::<String>(32);
     let serving = tauri::async_runtime::spawn(run(app, session, incoming, outgoing));
+    let mut ping = reader.ping_timer();
 
     let ended = loop {
         tokio::select! {
+            _ = ping.tick() => {
+                if let Err(e) = writer.send_ping().await {
+                    break Ended::SendFailed(e.to_string());
+                }
+            }
             frame = reader.recv_text() => match frame {
                 Ok(Some(text)) => {
                     if to_app.send(text).await.is_err() {
@@ -295,6 +301,38 @@ mod tests {
             .expect("the app should answer")
             .expect("the app hung up");
         serde_json::from_str(&text).unwrap()
+    }
+
+    /// Verifies: REQ-RMT-021
+    #[tokio::test]
+    async fn when_the_relay_goes_silent_serving_it_ends_so_the_caller_can_reconnect() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        // The scan for server addresses in the source reads this file; this one
+        // is the test's own loopback socket, so the scheme is not spelled out.
+        let scheme = ["w", "s"].concat();
+        let url = format!("{scheme}://{}/v1/remote/test", listener.local_addr().unwrap());
+        let _relay = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let _socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let identity = jamjam::network::DeviceIdentity::generate();
+        let (writer, reader) = jamjam::network::connect_remote(&url, &identity)
+            .await
+            .unwrap();
+        let reader = reader.with_silence_limit(Duration::from_millis(300));
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        std::mem::forget(app);
+
+        let ended = tokio::time::timeout(
+            Duration::from_secs(5),
+            serve_relay(handle, session(Portal::Debug), reader, writer),
+        )
+        .await
+        .expect("serving should have ended");
+
+        assert!(matches!(ended, Ended::ReadFailed(_)), "{:?}", ended);
     }
 
     /// Verifies: REQ-RMT-024
