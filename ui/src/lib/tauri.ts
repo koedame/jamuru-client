@@ -1090,6 +1090,11 @@ export async function termsOpenPage(page: TermsPage): Promise<void> {
   return invoke("terms_open_page", { page });
 }
 
+/** Open a web address from a chat message in the browser (http and https only) */
+export async function chatOpenLink(url: string): Promise<void> {
+  return invoke("chat_open_link", { url });
+}
+
 // ============================================================================
 // Diagnostics API
 // ============================================================================

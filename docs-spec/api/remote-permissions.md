@@ -79,6 +79,7 @@
 | `signaling_add_reaction` | チャットにリアクションを付ける |
 | `signaling_remove_reaction` | チャットのリアクションを外す |
 | `signaling_toggle_reaction` | チャットのリアクションを付け外しする |
+| `chat_open_link` | チャットに書かれた Web のアドレスをブラウザで開く |
 | `settings_help_ask` | 設定の手伝いを頼む |
 | `settings_help_answer` | 設定の手伝いの依頼に答える |
 | `settings_help_begin` | 設定の手伝いを始める |
