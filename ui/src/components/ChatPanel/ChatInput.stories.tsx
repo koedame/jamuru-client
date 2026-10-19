@@ -73,6 +73,6 @@ export const MaxRows6: Story = {
 /** Send a message to see the failure: the text stays and an error shows. */
 export const SendFails: Story = {
   args: {
-    onSend: () => Promise.reject(new Error("offline")),
+    onSend: fn().mockRejectedValue(new Error("offline")),
   },
 };
