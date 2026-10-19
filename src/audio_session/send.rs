@@ -29,6 +29,7 @@ pub(super) struct SendFeed {
 /// side): it reads frames from the capture ring and sends each, through every link that is up
 pub(super) fn spawn(feed: SendFeed) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
+        crate::audio::priority::set_current_thread_realtime_priority("send");
         let SendFeed {
             ring,
             senders,
