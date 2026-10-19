@@ -13,7 +13,6 @@
 //! - Pre-allocated stereo conversion buffer
 
 mod links;
-mod priority;
 mod run;
 mod send;
 mod shared;
@@ -151,7 +150,7 @@ pub fn start(
 
     let thread = std::thread::spawn(move || {
         // Set real-time priority immediately upon thread start
-        priority::set_current_thread_realtime_priority();
+        crate::audio::priority::set_current_thread_realtime_priority("session");
 
         // Create tokio runtime for this thread
         let rt = tokio::runtime::Builder::new_current_thread()
