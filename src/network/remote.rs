@@ -13,6 +13,7 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
+use tokio::time::{interval_at, timeout, timeout_at, Instant, Interval, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
@@ -27,6 +28,18 @@ pub const REMOTE_ENROLLMENT_PATH: &str = "/api/v1/remote/enrollment";
 
 /// How long the question may take before it counts as failed.
 const ENROLLMENT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a relay connection may go without a single frame from the relay
+/// before it counts as lost. The relay answers a ping at once, so a connection
+/// that stays silent this long is not listening any more: a NAT that forgot the
+/// mapping, a path that went away. Without this the read waits for ever, as TCP
+/// has nothing in flight to time out.
+pub const RELAY_SILENCE_LIMIT: Duration = Duration::from_secs(60);
+
+/// How long a send may take before the connection counts as lost. A peer that
+/// stopped acknowledging lets the kernel's buffer fill, and the send then waits
+/// without end.
+const RELAY_SEND_LIMIT: Duration = Duration::from_secs(30);
 
 /// The server's answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,22 +187,52 @@ pub async fn connect_remote(
     let (socket, _) = connect_async(request).await.map_err(|e| {
         NetworkError::SignalingError(format!("Connecting to the relay failed: {}", e))
     })?;
+    Ok(halves(socket, RELAY_SILENCE_LIMIT))
+}
+
+fn halves(socket: Socket, silence_limit: Duration) -> (RemoteWriter, RemoteReader) {
     let (sink, stream) = socket.split();
-    Ok((RemoteWriter { sink }, RemoteReader { stream }))
+    (
+        RemoteWriter {
+            sink,
+            send_limit: RELAY_SEND_LIMIT,
+        },
+        RemoteReader {
+            stream,
+            silence_limit,
+            last_heard: Instant::now(),
+        },
+    )
 }
 
 /// The sending half of a relay connection.
 pub struct RemoteWriter {
     sink: SplitSink<Socket, Message>,
+    send_limit: Duration,
 }
 
 impl RemoteWriter {
     /// Sends one text frame.
     pub async fn send_text(&mut self, text: String) -> Result<(), NetworkError> {
-        self.sink
-            .send(Message::Text(text.into()))
-            .await
-            .map_err(|e| NetworkError::SignalingError(format!("Send failed: {}", e)))
+        self.send(Message::Text(text.into())).await
+    }
+
+    /// Sends a WebSocket ping, which the relay answers with a pong. The pong is
+    /// what [`RemoteReader::recv_text`] counts as the relay still being there.
+    pub async fn send_ping(&mut self) -> Result<(), NetworkError> {
+        self.send(Message::Ping(Vec::new().into())).await
+    }
+
+    async fn send(&mut self, message: Message) -> Result<(), NetworkError> {
+        match timeout(self.send_limit, self.sink.send(message)).await {
+            Ok(sent) => {
+                sent.map_err(|e| NetworkError::SignalingError(format!("Send failed: {}", e)))
+            }
+            Err(_) => Err(NetworkError::SignalingError(format!(
+                "Send failed: no progress in {} s",
+                self.send_limit.as_secs()
+            ))),
+        }
     }
 
     /// Ends the connection.
@@ -201,14 +244,48 @@ impl RemoteWriter {
 /// The receiving half of a relay connection.
 pub struct RemoteReader {
     stream: SplitStream<Socket>,
+    silence_limit: Duration,
+    /// When the relay last sent anything, a pong included. Kept here rather than
+    /// in the caller's loop so that dropping a pending `recv_text` (a `select!`
+    /// taking another branch) does not forget it.
+    last_heard: Instant,
 }
 
 impl RemoteReader {
+    /// Replaces how long the relay may stay silent; the ping interval follows.
+    pub fn with_silence_limit(mut self, limit: Duration) -> Self {
+        self.silence_limit = limit;
+        self
+    }
+
+    /// When to ping the relay: three times within the silence limit, so one
+    /// lost ping does not end the connection. Pair it with
+    /// [`RemoteWriter::send_ping`] in the loop that reads.
+    pub fn ping_timer(&self) -> Interval {
+        let every = self.silence_limit / 3;
+        let mut timer = interval_at(Instant::now() + every, every);
+        timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        timer
+    }
+
     /// The next text frame, or `None` once the relay ended the connection.
     /// Anything that is not text is skipped: the protocol has nothing else.
+    /// Fails when the relay has sent nothing, not even a pong, for the silence
+    /// limit.
     pub async fn recv_text(&mut self) -> Result<Option<String>, NetworkError> {
         loop {
-            match self.stream.next().await {
+            let next = timeout_at(self.last_heard + self.silence_limit, self.stream.next())
+                .await
+                .map_err(|_| {
+                    NetworkError::SignalingError(format!(
+                        "Receive failed: nothing heard from the relay for {} s",
+                        self.silence_limit.as_secs()
+                    ))
+                })?;
+            if next.is_some() {
+                self.last_heard = Instant::now();
+            }
+            match next {
                 Some(Ok(Message::Text(text))) => return Ok(Some(text.to_string())),
                 Some(Ok(Message::Close(_))) | None => return Ok(None),
                 Some(Ok(_)) => continue,
@@ -226,6 +303,95 @@ impl RemoteReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::accept_async;
+
+    const LIMIT: Duration = Duration::from_millis(300);
+
+    /// A relay on a local port that accepts one connection. `answers` decides
+    /// whether it reads from it, and so answers pings, or only holds it open.
+    async fn local_relay(answers: bool) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/v1/remote/test", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(tcp).await.unwrap();
+            if answers {
+                socket.send(Message::Text("hello".into())).await.unwrap();
+                while socket.next().await.is_some() {}
+            } else {
+                std::future::pending::<()>().await;
+            }
+        });
+        (url, task)
+    }
+
+    async fn connect_to(url: &str) -> (RemoteWriter, RemoteReader) {
+        let (writer, reader) = connect_remote(url, &DeviceIdentity::generate())
+            .await
+            .unwrap();
+        (writer, reader.with_silence_limit(LIMIT))
+    }
+
+    /// Reads the way the app's loops do: pinging on the timer, until a frame
+    /// or a failure.
+    async fn read_with_pings(
+        writer: &mut RemoteWriter,
+        reader: &mut RemoteReader,
+    ) -> Result<Option<String>, NetworkError> {
+        let mut ping = reader.ping_timer();
+        loop {
+            tokio::select! {
+                _ = ping.tick() => writer.send_ping().await?,
+                frame = reader.recv_text() => return frame,
+            }
+        }
+    }
+
+    /// Verifies: REQ-RMT-021
+    #[tokio::test]
+    async fn when_the_relay_goes_silent_the_read_fails_instead_of_waiting_for_ever() {
+        let (url, _relay) = local_relay(false).await;
+        let (mut writer, mut reader) = connect_to(&url).await;
+
+        let started = std::time::Instant::now();
+        let outcome = timeout(
+            Duration::from_secs(5),
+            read_with_pings(&mut writer, &mut reader),
+        )
+        .await
+        .expect("the read should have given up");
+
+        assert!(outcome.is_err(), "{:?}", outcome);
+        assert!(started.elapsed() >= LIMIT, "{:?}", started.elapsed());
+    }
+
+    /// Verifies: REQ-RMT-021
+    #[tokio::test]
+    async fn while_the_relay_answers_pings_a_quiet_connection_stays_up_past_the_limit() {
+        let (url, _relay) = local_relay(true).await;
+        let (mut writer, mut reader) = connect_to(&url).await;
+        assert_eq!(reader.recv_text().await.unwrap().as_deref(), Some("hello"));
+
+        let outcome = timeout(LIMIT * 4, read_with_pings(&mut writer, &mut reader)).await;
+
+        assert!(outcome.is_err(), "the connection ended: {:?}", outcome);
+    }
+
+    /// Verifies: REQ-RMT-021
+    #[tokio::test]
+    async fn the_silence_is_counted_across_reads_that_were_given_up() {
+        let (url, _relay) = local_relay(false).await;
+        let (_writer, mut reader) = connect_to(&url).await;
+
+        // A loop that keeps taking another branch drops the read each time.
+        for _ in 0..3 {
+            let _ = timeout(LIMIT / 4, reader.recv_text()).await;
+        }
+        let outcome = timeout(LIMIT, reader.recv_text()).await;
+
+        assert!(matches!(outcome, Ok(Err(_))), "{:?}", outcome);
+    }
 
     #[test]
     fn a_help_session_number_is_128_random_bits_as_hex_and_no_two_are_alike() {
