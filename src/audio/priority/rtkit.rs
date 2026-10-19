@@ -4,7 +4,9 @@
 use std::time::Duration;
 
 use zbus::blocking::connection::Builder;
+use zbus::blocking::proxy::Builder as ProxyBuilder;
 use zbus::blocking::{Connection, Proxy};
+use zbus::proxy::CacheProperties;
 
 const DESTINATION: &str = "org.freedesktop.RealtimeKit1";
 const PATH: &str = "/org/freedesktop/RealtimeKit1";
@@ -28,7 +30,12 @@ impl RealtimeKit {
     }
 
     fn on(connection: Connection) -> Result<Self, String> {
-        let proxy = Proxy::new_owned(connection, DESTINATION, PATH, DESTINATION)
+        // rtkit answers `Get` but not `GetAll`, which a proxy that caches properties sends first
+        let proxy = ProxyBuilder::new(&connection)
+            .destination(DESTINATION)
+            .and_then(|builder| builder.path(PATH))
+            .and_then(|builder| builder.interface(DESTINATION))
+            .and_then(|builder| builder.cache_properties(CacheProperties::No).build())
             .map_err(|e| e.to_string())?;
         Ok(Self { proxy })
     }
@@ -113,6 +120,7 @@ mod tests {
     use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
     use std::sync::{Arc, Mutex};
+    use zbus::zvariant::Value;
 
     fn cpu_time_limit() -> libc::rlimit {
         let mut limit = libc::rlimit {
@@ -148,41 +156,54 @@ mod tests {
     /// What the stand-in for rtkit was asked: the method and its arguments
     type Calls = Arc<Mutex<Vec<(String, u64, i64)>>>;
 
-    /// Answers as rtkit does, with the names, types and limits of its D-Bus interface
-    struct StandInRtkit {
-        calls: Calls,
-        highest: i32,
-    }
-
-    #[zbus::interface(name = "org.freedesktop.RealtimeKit1")]
-    impl StandInRtkit {
-        #[zbus(property)]
-        fn max_realtime_priority(&self) -> i32 {
-            self.highest
-        }
-
-        #[zbus(property, name = "RTTimeUSecMax")]
-        fn rt_time_usec_max(&self) -> i64 {
-            200_000
-        }
-
-        #[zbus(property)]
-        fn min_nice_level(&self) -> i32 {
-            -15
-        }
-
-        fn make_thread_realtime(&self, thread: u64, priority: u32) {
-            let call = ("MakeThreadRealtime".to_string(), thread, priority.into());
-            self.calls.lock().unwrap().push(call);
-        }
-
-        fn make_thread_high_priority(&self, thread: u64, priority: i32) {
-            let call = (
-                "MakeThreadHighPriority".to_string(),
-                thread,
-                priority.into(),
-            );
-            self.calls.lock().unwrap().push(call);
+    /// Answers as rtkit does: `Get` for its three properties and the two thread calls. Anything
+    /// else, `GetAll` included, is an unknown method, as it is for the real one.
+    fn answer(connection: &Connection, calls: &Calls, highest: i32) {
+        for message in zbus::blocking::MessageIterator::from(connection) {
+            let Ok(message) = message else { break };
+            let header = message.header();
+            if header.message_type() != zbus::message::Type::MethodCall {
+                continue;
+            }
+            let member = header.member().map(|m| m.to_string()).unwrap_or_default();
+            let body = message.body();
+            let reply = match member.as_str() {
+                "Get" => {
+                    let (_interface, name): (String, String) = body.deserialize().unwrap();
+                    match name.as_str() {
+                        "MaxRealtimePriority" => connection.reply(&header, &Value::from(highest)),
+                        "RTTimeUSecMax" => connection.reply(&header, &Value::from(200_000_i64)),
+                        "MinNiceLevel" => connection.reply(&header, &Value::from(-15_i32)),
+                        _ => connection.reply_error(
+                            &header,
+                            "org.freedesktop.DBus.Error.UnknownProperty",
+                            &name,
+                        ),
+                    }
+                }
+                "MakeThreadRealtime" => {
+                    let (thread, priority): (u64, u32) = body.deserialize().unwrap();
+                    calls
+                        .lock()
+                        .unwrap()
+                        .push((member.clone(), thread, priority.into()));
+                    connection.reply(&header, &())
+                }
+                "MakeThreadHighPriority" => {
+                    let (thread, nice): (u64, i32) = body.deserialize().unwrap();
+                    calls
+                        .lock()
+                        .unwrap()
+                        .push((member.clone(), thread, nice.into()));
+                    connection.reply(&header, &())
+                }
+                _ => connection.reply_error(
+                    &header,
+                    "org.freedesktop.DBus.Error.UnknownMethod",
+                    &format!("Method \"{member}\" doesn't exist"),
+                ),
+            };
+            reply.unwrap();
         }
     }
 
@@ -211,16 +232,11 @@ mod tests {
                 .unwrap()
                 .name(DESTINATION)
                 .unwrap()
-                .serve_at(
-                    PATH,
-                    StandInRtkit {
-                        calls: calls.clone(),
-                        highest,
-                    },
-                )
-                .unwrap()
                 .build()
                 .unwrap();
+            let served = service.clone();
+            let served_calls = calls.clone();
+            std::thread::spawn(move || answer(&served, &served_calls, highest));
             let client = RealtimeKit::on(
                 Builder::address(address.as_str())
                     .unwrap()
