@@ -69,3 +69,10 @@ export const MaxRows6: Story = {
     maxRows: 6,
   },
 };
+
+/** Send a message to see the failure: the text stays and an error shows. */
+export const SendFails: Story = {
+  args: {
+    onSend: fn().mockRejectedValue(new Error("offline")),
+  },
+};

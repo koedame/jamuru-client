@@ -4,6 +4,18 @@
  * yellow send button. Outer padding is owned by the chat panel container.
  */
 
+.chat-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.chat-input__error {
+  font-size: var(--font-size-caption);
+  color: var(--color-danger);
+}
+
 .chat-input {
   display: flex;
   gap: var(--space-sm);

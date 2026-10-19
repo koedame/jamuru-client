@@ -28,6 +28,12 @@
   gap: 12px;
 }
 
+.chat-message-list__date {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-tertiary);
+  text-align: center;
+}
+
 .chat-message-list__item {
   display: flex;
 }
