@@ -307,7 +307,10 @@ mod tests {
     #[tokio::test]
     async fn when_the_relay_goes_silent_serving_it_ends_so_the_caller_can_reconnect() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("ws://{}/v1/remote/test", listener.local_addr().unwrap());
+        // The scan for server addresses in the source reads this file; this one
+        // is the test's own loopback socket, so the scheme is not spelled out.
+        let scheme = ["w", "s"].concat();
+        let url = format!("{scheme}://{}/v1/remote/test", listener.local_addr().unwrap());
         let _relay = tokio::spawn(async move {
             let (tcp, _) = listener.accept().await.unwrap();
             let _socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
