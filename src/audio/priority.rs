@@ -126,7 +126,7 @@ pub(crate) fn promote_callback_thread(role: &'static str) {
         .spawn(move || log_outcome(role, promote_thread(tid)));
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub(crate) fn promote_callback_thread(_role: &'static str) {}
 
 /// How long the thread that calls waits for the real-time priority to be settled
@@ -265,24 +265,118 @@ fn nice_instead(
 #[cfg(target_os = "linux")]
 mod rtkit;
 
+/// The MMCSS task the audio threads join. Windows ships "Pro Audio" for latency-critical work:
+/// scheduling category High, active in the foreground. "Audio" is category Medium and background
+/// only.
 #[cfg(target_os = "windows")]
-pub(crate) fn set_current_thread_realtime_priority(_role: &str) {
+const MMCSS_TASK: &str = "Pro Audio";
+
+/// Asks Windows for MMCSS scheduling for the thread that calls, and says in the log what it got.
+/// `role` names the thread in the log.
+///
+/// MMCSS (the Multimedia Class Scheduler Service) is how Windows lets an ordinary process put a
+/// thread in the real-time range (16-31) without any privilege. If the service refuses, the thread
+/// is set to `THREAD_PRIORITY_TIME_CRITICAL`, which is the top of the normal range, and the log
+/// says so.
+#[cfg(target_os = "windows")]
+pub(crate) fn set_current_thread_realtime_priority(role: &str) {
+    log_outcome(role, join_mmcss());
+}
+
+/// Puts the thread that calls into the MMCSS task the first time it is called: for the thread of
+/// an audio callback, which the audio library started and which cannot ask for itself before it
+/// runs. MMCSS registers only the thread that calls, so this cannot be done from another thread.
+///
+/// ASIO is not covered: its callback runs on a thread the driver owns and schedules, and this
+/// function is not called from there.
+#[cfg(target_os = "windows")]
+pub(crate) fn promote_callback_thread(role: &'static str) {
+    thread_local! {
+        static ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if ASKED.with(|asked| asked.replace(true)) {
+        return;
+    }
+    log_outcome(role, join_mmcss());
+}
+
+/// What a thread was given
+#[cfg(target_os = "windows")]
+enum Granted {
+    /// In the MMCSS task. `raised` says whether the priority inside the task was raised too
+    Mmcss {
+        task_index: u32,
+        raised: Result<(), String>,
+    },
+    /// MMCSS said no; the top of the normal range instead
+    TimeCritical { why_not_mmcss: String },
+}
+
+#[cfg(target_os = "windows")]
+fn join_mmcss() -> Result<Granted, String> {
+    use windows::core::HSTRING;
     use windows::Win32::System::Threading::{
-        GetCurrentProcess, GetCurrentThread, SetPriorityClass, SetThreadPriority,
-        HIGH_PRIORITY_CLASS, THREAD_PRIORITY_TIME_CRITICAL,
+        AvSetMmThreadCharacteristicsW, AvSetMmThreadPriority, GetCurrentProcess, GetCurrentThread,
+        SetPriorityClass, SetThreadPriority, AVRT_PRIORITY_CRITICAL, HIGH_PRIORITY_CLASS,
+        THREAD_PRIORITY_TIME_CRITICAL,
     };
 
+    // SAFETY: each call only acts on the calling thread or process
     unsafe {
-        // First, elevate the process priority class
+        // The other threads of the process (network, timers) are not in the MMCSS task; the
+        // class keeps them from falling behind the audio threads
         let _ = SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 
-        // Then set thread to TIME_CRITICAL (highest within the priority class)
-        let result = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-        if result.is_ok() {
-            tracing::info!("Audio thread: real-time priority enabled (HIGH + TIME_CRITICAL)");
-        } else {
-            tracing::warn!("Audio thread: failed to set thread priority");
+        let mut task_index = 0u32;
+        match AvSetMmThreadCharacteristicsW(&HSTRING::from(MMCSS_TASK), &mut task_index) {
+            Ok(task) => Ok(Granted::Mmcss {
+                task_index,
+                raised: AvSetMmThreadPriority(task, AVRT_PRIORITY_CRITICAL)
+                    .map_err(|e| e.to_string()),
+            }),
+            Err(mmcss_error) => {
+                let why_not_mmcss = mmcss_error.to_string();
+                match SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) {
+                    Ok(()) => Ok(Granted::TimeCritical { why_not_mmcss }),
+                    Err(e) => Err(format!("MMCSS: {why_not_mmcss}; SetThreadPriority: {e}")),
+                }
+            }
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn log_outcome(role: &str, outcome: Result<Granted, String>) {
+    match outcome {
+        Ok(Granted::Mmcss {
+            task_index,
+            raised: Ok(()),
+        }) => tracing::info!(
+            "Audio thread ({}): real-time priority enabled through MMCSS (task \"{}\", index {})",
+            role,
+            MMCSS_TASK,
+            task_index
+        ),
+        Ok(Granted::Mmcss {
+            task_index,
+            raised: Err(why),
+        }) => tracing::warn!(
+            "Audio thread ({}): in the MMCSS task \"{}\" (index {}), but its priority inside the task was not raised ({})",
+            role,
+            MMCSS_TASK,
+            task_index,
+            why
+        ),
+        Ok(Granted::TimeCritical { why_not_mmcss }) => tracing::warn!(
+            "Audio thread ({}): no real-time priority, using the top of the normal range (TIME_CRITICAL) ({})",
+            role,
+            why_not_mmcss
+        ),
+        Err(why) => tracing::warn!(
+            "Audio thread ({}): no real-time priority, runs at normal priority ({})",
+            role,
+            why
+        ),
     }
 }
 
