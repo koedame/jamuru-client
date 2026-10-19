@@ -373,8 +373,14 @@ async fn run_helper<R: Runtime>(app: AppHandle<R>, label: String, link: Link) {
     }
 
     tracing::info!("Settings help: the window {} is open on the relay", label);
+    let mut ping = end.reader.ping_timer();
     let ended = loop {
         tokio::select! {
+            _ = ping.tick() => {
+                if let Err(e) = end.writer.send_ping().await {
+                    break Ended::SendFailed(e.to_string());
+                }
+            }
             frame = end.reader.recv_text() => match frame {
                 Ok(Some(text)) => {
                     if let Some(event) = bridge.receive(&text) {
