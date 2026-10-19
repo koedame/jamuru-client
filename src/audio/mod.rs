@@ -15,6 +15,7 @@ pub mod fault;
 mod flight;
 mod heartbeat;
 mod listing;
+pub mod mic_access;
 mod monitor;
 mod open;
 mod peer_mix;
@@ -60,9 +61,9 @@ pub use monitor::{LocalMonitor, MonitorTap, MONITOR_MARGIN_FRAMES};
 #[cfg(target_os = "windows")]
 pub use open::open_asio;
 pub use open::{
-    capture_or_silence, clear_device_problem, discard_queued, note_device_problem, note_trouble,
-    on_captured_frame, playout_source, start_capture_ring, start_playout, CaptureRing,
-    DeviceProblem, DeviceSide, DeviceTrouble,
+    capture_or_silence, clear_device_problem, discard_queued, microphone_allows_input,
+    note_device_problem, note_trouble, on_captured_frame, playout_source, start_capture_ring,
+    start_playout, CaptureRing, DeviceProblem, DeviceSide, DeviceTrouble, MIC_ANSWER_WAIT,
 };
 pub use peer_mix::{PeerGain, PeerMeter, PeerMix, VoiceHandle};
 pub use playout::{

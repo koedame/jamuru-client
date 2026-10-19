@@ -128,6 +128,10 @@ azo = "0.4"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "AudioHardware"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString"] }
+# Whether the system lets the app use the microphone (`audio::mic_access`)
+objc2 = "0.6"
+block2 = "0.6"
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
 
 [dev-dependencies]
 # Testing

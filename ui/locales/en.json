@@ -681,6 +681,12 @@
       "stalled": {
         "input": "The input device{{name}} stopped delivering audio, and opening it again didn't help. Leave the room and join again",
         "output": "The output device{{name}} stopped playing audio, and opening it again didn't help. Leave the room and join again"
+      },
+      "permission_pending": {
+        "input": "Waiting for you to allow the microphone. Press Allow in the dialog that appeared"
+      },
+      "permission_refused": {
+        "input": "The microphone isn't allowed. Turn on jamuru in System Settings → Privacy & Security → Microphone, then join again"
       }
     }
   },
