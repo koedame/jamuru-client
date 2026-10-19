@@ -126,6 +126,8 @@ app_commands! {
     [Access::NO_HELP] "チャットにリアクションを付ける" crate::signaling::signaling_add_reaction;
     [Access::NO_HELP] "チャットのリアクションを外す" crate::signaling::signaling_remove_reaction;
     [Access::NO_HELP] "チャットのリアクションを付け外しする" crate::signaling::signaling_toggle_reaction;
+    // What is opened is picked by a click on a participant's text, on the app's own screen only.
+    [Access::SCREEN_ONLY] "チャットに書かれた Web のアドレスをブラウザで開く" crate::chat_link::chat_open_link;
     // Starting and stopping a help is the person's own (ADR-044 §3).
     [Access::NO_HELP] "設定の手伝いを頼む" crate::signaling::settings_help_ask;
     [Access::NO_HELP] "設定の手伝いの依頼に答える" crate::signaling::settings_help_answer;
@@ -418,6 +420,7 @@ mod tests {
             "signaling_add_reaction",
             "signaling_remove_reaction",
             "signaling_toggle_reaction",
+            "chat_open_link",
             "session_leave",
             "session_connect",
             "session_join",
