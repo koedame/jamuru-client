@@ -35,6 +35,15 @@ describe("ChatMessage links", () => {
   });
 
   // Verifies: REQ-GUI-029
+  it("onOpenLink があるとき、リンクに target が付かないこと（シェルのプラグインが重ねて開かないように）", () => {
+    render(
+      <ChatMessage type="other" senderName="Bob" content="https://example.com/a" timestamp={0} onOpenLink={vi.fn()} />
+    );
+
+    expect(screen.getByRole("link")).not.toHaveAttribute("target");
+  });
+
+  // Verifies: REQ-GUI-029
   it("本文が http と https 以外のとき、リンクにならないこと", () => {
     render(<ChatMessage type="other" senderName="Bob" content="file:///etc/passwd javascript:alert(1)" timestamp={0} />);
 
