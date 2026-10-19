@@ -112,6 +112,12 @@ sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Real-time priority of the audio thread
 libc = "0.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Asks rtkit, the desktop's service for real-time priority, over the system D-Bus
+# for the audio threads (`audio::priority`). Pure Rust, no libdbus to be installed. The app
+# (src-tauri) already builds it, through its windowing library.
+zbus = "5"
+
 [target.'cfg(windows)'.dependencies]
 # Real-time priority of the audio thread. The same `windows` the app is built on.
 windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
