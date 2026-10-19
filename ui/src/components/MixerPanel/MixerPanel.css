@@ -34,13 +34,13 @@
   min-height: 0;
 }
 
-/* A group of channel strips (input = local, output = remote).
-   Strips are content-height and top-aligned (ui.pen Screens/Main), so the
-   mixer's spare vertical space sits below the strips, not inside their border. */
+/* A group of channel strips (input = local, output = remote). Strips stretch
+   to the section's height, so the faders and meters use the mixer's spare
+   vertical space. */
 .mixer-panel__section {
   display: flex;
   gap: var(--space-sm);
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .mixer-panel__divider {
