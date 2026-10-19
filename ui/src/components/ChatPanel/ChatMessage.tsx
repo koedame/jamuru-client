@@ -59,7 +59,9 @@ export interface ChatMessageProps {
   setting?: string | null;
   /**
    * Called with the address when a link in the message is clicked. Without it
-   * the link is a plain anchor that opens in a new tab (Storybook).
+   * the link is a plain anchor that opens in a new tab (Storybook). With it the
+   * anchor has no `target`: the shell plugin opens every `_blank` anchor by
+   * itself, which would run next to the app's own handler.
    */
   onOpenLink?: (url: string) => void;
 }
@@ -216,8 +218,7 @@ export function ChatMessage({
               key={i}
               className="chat-message__link"
               href={part.url}
-              target="_blank"
-              rel="noopener noreferrer"
+              {...(onOpenLink ? {} : { target: "_blank", rel: "noopener noreferrer" })}
               onClick={
                 onOpenLink
                   ? (e) => {
