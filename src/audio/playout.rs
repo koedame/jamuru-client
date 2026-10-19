@@ -24,16 +24,6 @@
 //! target. [`PlayoutBuffer::adapt`] moves the target from the loss rate and
 //! [`PlayoutBuffer::set_delay`] moves it because the user chose a preset.
 //!
-//! # No click where the delay moves
-//!
-//! Both moves cut the stream: raising the delay puts silence where the signal
-//! was, and lowering it jumps the signal ahead. The waveform steps from where
-//! the last frame ended to wherever the next one starts, and a step is heard
-//! as a click. [`smooth_seam`] closes it: the first frames after a cut start
-//! from the last sample that was played, and the difference decays to zero
-//! over [`SEAM_FRAMES`] sample frames (about a millisecond), so the signal
-//! leaves the old waveform and joins the new one without a jump.
-//!
 //! # Holding no more than the target
 //!
 //! What is held only ever grows by itself: a read that finds nothing waits
@@ -79,42 +69,12 @@ const DEPTH_WINDOW_READS: u32 = 500;
 /// is the playing phase: the count moves by one as a frame arrives and is
 /// read. Two means the buffer never needed what it held.
 const TRIM_WHEN_EXCESS_AT_LEAST: u32 = 2;
-/// Sample frames over which a cut in the signal is smoothed. 48 is one
-/// millisecond at 48 kHz: long enough that no step is left, short enough to
-/// leave the waveform of the new frame alone.
-const SEAM_FRAMES: usize = 48;
-/// Channels in a frame: the wire is always interleaved stereo.
-const SEAM_CHANNELS: usize = 2;
 /// Reads in a row that found nothing after which the sender is taken to be
 /// silent - muted, or gone - rather than late. About half a second at
 /// 64-sample frames and 48 kHz. Those reads say nothing about the link, so
 /// adaptation does not count them, and the first frame after them starts the
 /// buffer again at the delay it had.
 const SILENT_AFTER_STARVED_READS: u32 = 375;
-
-/// Joins `block` to the sample that was played just before it, `previous`
-/// (left, right): the first sample becomes `previous`, and the difference to
-/// the block's own first sample fades out over the next [`SEAM_FRAMES`]
-/// sample frames. Allocation-free, for the audio callback.
-fn smooth_seam(block: &mut [f32], previous: [f32; SEAM_CHANNELS]) {
-    let frames = block.len() / SEAM_CHANNELS;
-    let span = frames.min(SEAM_FRAMES);
-    if span == 0 {
-        return;
-    }
-    let step = [previous[0] - block[0], previous[1] - block[1]];
-    for (i, frame) in block
-        .as_chunks_mut::<SEAM_CHANNELS>()
-        .0
-        .iter_mut()
-        .take(span)
-        .enumerate()
-    {
-        let gain = 1.0 - i as f32 / span as f32;
-        frame[0] += step[0] * gain;
-        frame[1] += step[1] * gain;
-    }
-}
 
 /// How the buffer is sized and how long it holds audio back.
 ///
@@ -308,10 +268,6 @@ pub struct PlayoutBuffer {
     /// audio it stands in for.
     last_len: usize,
     stats: PlayoutStats,
-    /// The last sample frame handed out (left, right), what a cut is joined to.
-    last_out: [f32; SEAM_CHANNELS],
-    /// The next read follows a cut that the previous one has not smoothed.
-    seam_pending: bool,
 }
 
 impl PlayoutBuffer {
@@ -361,8 +317,6 @@ impl PlayoutBuffer {
             plc,
             last_len: frame_samples,
             stats: PlayoutStats::default(),
-            last_out: [0.0; SEAM_CHANNELS],
-            seam_pending: false,
         }
     }
 
@@ -436,23 +390,6 @@ impl PlayoutBuffer {
     /// Allocation-free and non-blocking by construction: every buffer it
     /// touches was allocated up front.
     pub fn read_into(&mut self, out: &mut [f32]) -> PlayoutRead {
-        let trimmed_before = self.stats.frames_trimmed;
-        let read = self.read_frame(out);
-        let padded = read.result == PlayoutResult::Padded;
-        let cut = self.seam_pending || padded || self.stats.frames_trimmed > trimmed_before;
-        let len = read.samples.min(out.len());
-        if cut && len >= SEAM_CHANNELS {
-            smooth_seam(&mut out[..len], self.last_out);
-        }
-        // Padding is silence, so the read after it joins silence to the signal
-        self.seam_pending = padded;
-        if len >= SEAM_CHANNELS {
-            self.last_out = [out[len - 2], out[len - 1]];
-        }
-        read
-    }
-
-    fn read_frame(&mut self, out: &mut [f32]) -> PlayoutRead {
         // Silence of the length the stream is running at, so the device clock
         // keeps its cadence while nothing is ready.
         let silence = |out: &mut [f32], len: usize| {
@@ -682,8 +619,6 @@ impl PlayoutBuffer {
         self.play_sequence = None;
         self.playing = false;
         self.target_delay_frames = self.config.target_delay_frames;
-        self.last_out = [0.0; SEAM_CHANNELS];
-        self.seam_pending = false;
         self.last_len = self.config.frame_samples;
         self.plc.reset();
         self.stats = PlayoutStats::default();
@@ -1481,8 +1416,7 @@ mod tests {
         );
     }
 
-    /// The silence lasts as long as the audio it makes room for, and ends in
-    /// silence: the signal leaves the last played sample and falls to zero.
+    /// The silence lasts as long as the audio it makes room for, and is silent.
     #[test]
     fn padding_is_silent_and_keeps_the_device_cadence() {
         let mut buffer = PlayoutBuffer::new(config(1));
@@ -1496,88 +1430,7 @@ mod tests {
 
         assert_eq!(read.result, PlayoutResult::Padded);
         assert_eq!(read.samples, 4);
-        // Frame 2 was the last one played
-        assert_eq!(out[0], 2.0, "the padded frame starts where the signal was");
-        assert!(out[2] < out[0], "and falls towards silence");
-    }
-
-    /// Plays frames of a slow ramp, so any step in the output is a cut.
-    fn ramp_frame(index: u32) -> Vec<f32> {
-        (0..RAMP_FRAME)
-            .map(|i| (index as usize * RAMP_FRAME / 2 + i / 2) as f32 * 0.0001)
-            .collect()
-    }
-
-    /// 64 sample frames of stereo, the size of a 64-sample device buffer.
-    const RAMP_FRAME: usize = 128;
-
-    fn ramp_config(target: u32) -> PlayoutConfig {
-        PlayoutConfig {
-            frame_samples: RAMP_FRAME,
-            ..config(target)
-        }
-    }
-
-    /// The largest jump between neighbouring sample frames over `reads` reads.
-    fn largest_step(
-        buffer: &mut PlayoutBuffer,
-        next: &mut u32,
-        last: &mut Option<f32>,
-        reads: u32,
-    ) -> f32 {
-        let mut out = vec![0.0; RAMP_FRAME];
-        let mut largest = 0.0f32;
-        for _ in 0..reads {
-            buffer.write(*next, &ramp_frame(*next));
-            *next += 1;
-            buffer.read_into(&mut out);
-            for pair in out.as_chunks::<2>().0 {
-                if let Some(last) = *last {
-                    largest = largest.max((pair[0] - last).abs());
-                }
-                *last = Some(pair[0]);
-            }
-        }
-        largest
-    }
-
-    /// Raising the delay is heard as a click when the signal drops to silence
-    /// in one step; the cut is smoothed.
-    ///
-    /// Verifies: REQ-LAT-025
-    #[test]
-    fn raising_the_delay_leaves_no_step_in_the_signal() {
-        let mut buffer = PlayoutBuffer::new(ramp_config(2));
-        let mut next = 0;
-        let mut last = None;
-        largest_step(&mut buffer, &mut next, &mut last, 40);
-
-        buffer.set_target_delay_frames(4);
-        let step = largest_step(&mut buffer, &mut next, &mut last, 8);
-
-        assert!(
-            step <= 0.01,
-            "the signal falls and rises within a fade, largest step {step} (a cut is about 0.25)"
-        );
-    }
-
-    /// Lowering the delay skips frames; the signal must not jump with them.
-    ///
-    /// Verifies: REQ-LAT-025
-    #[test]
-    fn lowering_the_delay_leaves_no_step_in_the_signal() {
-        let mut buffer = PlayoutBuffer::new(ramp_config(4));
-        let mut next = 0;
-        let mut last = None;
-        largest_step(&mut buffer, &mut next, &mut last, 40);
-
-        buffer.set_target_delay_frames(2);
-        let step = largest_step(&mut buffer, &mut next, &mut last, 8);
-
-        assert!(
-            step <= 0.003,
-            "the skip is joined to the old signal, largest step {step} (a skip is about 0.013)"
-        );
+        assert!(out.iter().all(|&s| s == 0.0));
     }
 
     /// Lowering the delay while playing releases what is held beyond the new
