@@ -21,6 +21,7 @@ mod peer_mix;
 mod playout;
 mod plc;
 mod preset;
+pub(crate) mod priority;
 mod probe;
 mod resampler;
 mod slot;

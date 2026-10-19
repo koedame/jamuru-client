@@ -353,6 +353,7 @@ impl AudioEngine {
                 .build_input_stream(
                     stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        super::priority::promote_callback_thread("capture");
                         if fault::stream_stalled(serial) {
                             return;
                         }
@@ -512,6 +513,7 @@ impl AudioEngine {
                 .build_output_stream(
                     stream_config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        super::priority::promote_callback_thread("playback");
                         if fault::stream_stalled(serial) {
                             data.fill(0.0);
                             return;
