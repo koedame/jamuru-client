@@ -117,7 +117,6 @@ export function ChannelStrip({
           <span className="channel-strip__value">{faderDb}</span>
           <StereoFader
             volume={volume}
-            height={200}
             onChange={onVolumeChange}
             label={t("mixer.channel.volumeLabel", { name: displayName })}
           />
@@ -129,7 +128,7 @@ export function ChannelStrip({
           <span className="channel-strip__value" data-testid="channel-peak" data-peak={maxPeak}>
             {peakDb}
           </span>
-          <StereoMeter levelL={levelL} levelR={levelR} height={200} isMuted={isMuted} />
+          <StereoMeter levelL={levelL} levelR={levelR} isMuted={isMuted} />
         </div>
       </div>
 
