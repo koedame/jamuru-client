@@ -14,7 +14,7 @@ import "./StereoFader.css";
 export interface StereoFaderProps {
   /** Volume value (0-100) */
   volume: number;
-  /** Height in pixels */
+  /** Height in pixels. Omit to size by CSS (200px, or filling a flex parent). */
   height?: number;
   /** Whether the fader is disabled */
   disabled?: boolean;
@@ -29,7 +29,7 @@ const ZERO_DB_PERCENT = 80;
 
 export function StereoFader({
   volume,
-  height = 200,
+  height,
   disabled = false,
   onChange,
   label: labelProp,
@@ -87,7 +87,7 @@ export function StereoFader({
   return (
     <div
       className={`stereo-fader ${disabled ? "stereo-fader--disabled" : ""}`}
-      style={{ height: `${height}px` }}
+      style={height === undefined ? undefined : { height: `${height}px` }}
       onDoubleClick={handleDoubleClick}
     >
       {/* Hidden range input for accessibility and interaction */}

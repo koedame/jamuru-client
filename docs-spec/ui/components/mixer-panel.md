@@ -264,8 +264,9 @@ interface AudioQualityBadgeProps {
 |------|--------|
 | チャンネルストリップ幅 | 100px |
 | マスターセクション幅 | 固定値なし。ルームサイドバー（240px）の内側に収まる可変幅の水平メーター |
-| メーター高さ | 200px |
-| フェーダー高さ | 200px |
+| チャンネルストリップ高さ | ミキサーの縦いっぱいに伸びる（セクションと同じ高さ） |
+| メーター高さ | 最小 200px。ストリップの余った高さまで伸びる |
+| フェーダー高さ | 最小 200px。ストリップの余った高さまで伸びる |
 | パンスライダー幅 | 80px |
 | チャンネル間スペース | 8px |
 
@@ -398,7 +399,7 @@ interface StereoMeterProps {
   levelL: number;
   /** 右チャンネルレベル (0-100) */
   levelR: number;
-  /** 高さ (px) - default: 200 */
+  /** 高さ (px)。省略するとスタイルで決まる（既定 200px、フレックスの親の中では親に合わせて伸びる） */
   height?: number;
   /** ミュート状態 */
   isMuted?: boolean;
@@ -447,7 +448,7 @@ function levelToDb(level: number): string {
 interface StereoFaderProps {
   /** 音量 (0-100) */
   volume: number;
-  /** 高さ (px) - default: 200 */
+  /** 高さ (px)。省略するとスタイルで決まる（既定 200px、フレックスの親の中では親に合わせて伸びる） */
   height?: number;
   /** 無効状態 */
   disabled?: boolean;
