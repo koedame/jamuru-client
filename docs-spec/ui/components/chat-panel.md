@@ -175,8 +175,10 @@ interface ChatMessageListProps {
   renderMessage: (message: ChatMessageData) => ReactNode;
   /** 空状態メッセージ */
   emptyMessage?: string;
-  /** 新規メッセージ時に自動スクロール */
+  /** 末尾にいるあいだ、新規メッセージに追従する */
   autoScroll?: boolean;
+  /** 日付の区切りのロケール */
+  locale?: string;
 }
 
 interface ChatMessageData {
@@ -189,6 +191,12 @@ interface ChatMessageData {
 }
 ```
 
+**スクロールと日付の区切り（REQ-GUI-030）**:
+- 追従するのは、一覧の末尾から 48px 以内にいるときだけ。履歴を読み返している間は、
+  再描画や他の人の新着で表示位置を動かさない。自分が送ったメッセージが末尾に加わったときは末尾へ移る
+- 日付の区切り（`role="separator"`）は、前のメッセージと日が変わる位置と、
+  先頭のメッセージが今日より前のときの先頭に出す。時刻の表示は `HH:MM` のまま
+
 #### ChatInput（入力フィールド）
 
 複数行対応の入力フィールド。Cmd/Ctrl+Enter で送信。
@@ -197,8 +205,11 @@ interface ChatMessageData {
 interface ChatInputProps {
   /** プレースホルダーテキスト */
   placeholder?: string;
-  /** メッセージ送信コールバック */
-  onSend: (message: string) => void;
+  /**
+   * メッセージ送信コールバック。Promise を返すと、成功するまで入力欄の文章を残す。
+   * 失敗（reject）したときは文章を残し、入力欄の上に失敗を出す
+   */
+  onSend: (message: string) => void | Promise<void>;
   /** 入力無効化 */
   disabled?: boolean;
   /** スクロール開始前の最大行数 */
@@ -211,6 +222,10 @@ interface ChatInputProps {
 **キーボード操作**:
 - Cmd+Enter (macOS) / Ctrl+Enter (Windows/Linux): メッセージ送信
 - Enter / Shift+Enter: 改行（通常動作）
+
+**送信の結果（REQ-GUI-030）**:
+- 送信の結果を待つあいだは送信ボタンを押せず、同じ文章を二重に送らない
+- 失敗したときは文章を消さず、`role="alert"` で `chat.sendFailed` を出す。文章を直し始めると消える
 
 **自動リサイズ**:
 - 入力内容に応じて高さが自動調整
@@ -290,7 +305,9 @@ type EmojiCategory = "recent" | "smileys" | "gestures" | "hearts" | "music" | "o
 現在の実装では、チャットは接続済み画面（ui.pen Screens/Main）の**右端に固定された
 ドッキング列**として常時表示する（スライドアウト/別ウィンドウではない）。`ChatPanelAdapter`
 は `SidePanel` を使わず `ChatPanel` を直接描画し、`connId !== null` の間メッセージを
-ポーリングする。Props は `{ connId: number | null; myPeerId: string | null }`。
+ポーリングする（500ms 間隔。前回と同じ内容なら一覧の状態を更新しない）。
+送信が成功した直後は、次のポーリングを待たずに一覧を取り直す。送信が失敗したときは
+`ChatInput` に伝えるために reject する。Props は `{ connId: number | null; myPeerId: string | null }`。
 
 | 項目 | 値 |
 |------|-----|
@@ -590,6 +607,7 @@ type EmojiCategory = "recent" | "smileys" | "gestures" | "hearts" | "music" | "o
   "chat.title": "チャット",
   "chat.placeholder": "メッセージを入力...",
   "chat.sendLabel": "送信",
+  "chat.sendFailed": "メッセージを送れませんでした。もう一度送ってください",
   "chat.emptyMessage": "メッセージはまだありません",
   "chat.addReaction": "リアクションを追加",
   "chat.emoji.title": "絵文字",
