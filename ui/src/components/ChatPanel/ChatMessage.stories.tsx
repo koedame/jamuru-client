@@ -46,6 +46,16 @@ export const OtherMessage: Story = {
   },
 };
 
+export const MessageWithLink: Story = {
+  args: {
+    type: "other",
+    senderName: "Alice",
+    content: "資料はこちら https://example.com/docs/chat-links?page=1 です。\n(参考: https://example.com/a_(b))",
+    timestamp: now,
+    onOpenLink: fn(),
+  },
+};
+
 export const SystemMessage: Story = {
   args: {
     type: "system",
