@@ -166,6 +166,72 @@ impl GainRamp {
     }
 }
 
+/// Sample frames over which a cut in the signal is smoothed. 48 is one
+/// millisecond at 48 kHz: long enough that no step is left, short enough to
+/// leave the waveform of the new frame alone.
+const SEAM_FRAMES: usize = 48;
+
+/// Keeps the cuts in what is played from being heard as clicks.
+///
+/// The play-out buffer cuts the signal whenever it cannot hand over the next
+/// frame as it was sent: it plays silence where a frame was due, conceals a
+/// lost one, inserts silence to raise the delay or skips frames to lower it.
+/// The waveform then steps from where the last frame ended to wherever the
+/// next one starts, and a step is a click. The first frames after a cut
+/// start from the last sample that was played instead, and the difference
+/// decays to zero over [`SEAM_FRAMES`] sample frames, so the signal leaves
+/// the old waveform and joins the new one without a jump. Silence that
+/// follows signal falls to zero the same way, and the signal that follows
+/// silence rises from it.
+#[derive(Default)]
+struct Seam {
+    /// The last sample frame played (left, right)
+    last: [f32; WIRE_CHANNELS],
+    /// The block before this one was a cut, so this one joins to it
+    pending: bool,
+}
+
+impl Seam {
+    /// A stream started over: nothing was played, so its first block rises
+    /// from silence
+    fn restarted() -> Self {
+        Self {
+            pending: true,
+            ..Self::default()
+        }
+    }
+
+    /// Smooths `block`, the next interleaved stereo samples to play.
+    /// `broken` says they do not continue the signal. Allocation-free, for
+    /// the audio callback.
+    fn smooth(&mut self, block: &mut [f32], broken: bool) {
+        let frames = block.len() / WIRE_CHANNELS;
+        if frames == 0 {
+            return;
+        }
+        if broken || self.pending {
+            let step = [self.last[0] - block[0], self.last[1] - block[1]];
+            if step != [0.0, 0.0] {
+                let span = frames.min(SEAM_FRAMES);
+                for (i, frame) in block
+                    .as_chunks_mut::<WIRE_CHANNELS>()
+                    .0
+                    .iter_mut()
+                    .take(span)
+                    .enumerate()
+                {
+                    let gain = 1.0 - i as f32 / span as f32;
+                    frame[0] += step[0] * gain;
+                    frame[1] += step[1] * gain;
+                }
+            }
+        }
+        self.pending = broken;
+        let end = frames * WIRE_CHANNELS;
+        self.last = [block[end - 2], block[end - 1]];
+    }
+}
+
 /// What following the peer's sample rate changed.
 #[derive(Debug)]
 pub enum PeerRateChange {
@@ -251,6 +317,9 @@ pub struct ReceivePath {
     /// When the device last asked for a frame, in the recorder's microseconds;
     /// 0 before the first.
     last_read_us: Arc<AtomicU64>,
+    /// Where the last frame handed to the device ended, so a cut in the
+    /// signal can be joined (see [`Seam`]). Only the output callback uses it.
+    seam: Arc<Mutex<Seam>>,
 }
 
 impl ReceivePath {
@@ -320,6 +389,7 @@ impl ReceivePath {
             last_arrival_us: Arc::new(AtomicU64::new(0)),
             started: Arc::new(AtomicBool::new(false)),
             last_read_us: Arc::new(AtomicU64::new(0)),
+            seam: Arc::new(Mutex::new(Seam::default())),
         })
     }
 
@@ -402,7 +472,7 @@ impl ReceivePath {
     pub fn read_into(&self, out: &mut [f32]) -> PlayoutRead {
         self.flight.count_read();
         self.note_read_time();
-        let read = match self.playout.try_lock() {
+        let (read, trimmed) = match self.playout.try_lock() {
             Ok(mut buffer) => {
                 let trimmed_before = buffer.stats().frames_trimmed;
                 let read = buffer.read_into(out);
@@ -410,16 +480,20 @@ impl ReceivePath {
                 if trimmed > 0 {
                     self.flight.note(Kind::Trimmed, trimmed);
                 }
-                read
+                (read, trimmed > 0)
             }
             Err(_) => {
                 self.flight.note(Kind::Busy, 0);
                 let samples = self.frame_samples().min(out.len());
                 out[..samples].fill(0.0);
-                return PlayoutRead {
-                    result: PlayoutResult::Priming,
-                    samples,
-                };
+                return self.joined(
+                    out,
+                    PlayoutRead {
+                        result: PlayoutResult::Priming,
+                        samples,
+                    },
+                    false,
+                );
             }
         };
         match read.result {
@@ -431,6 +505,20 @@ impl ReceivePath {
                 self.flight.note(Kind::Primed, 0)
             }
             PlayoutResult::Priming => {}
+        }
+        self.joined(out, read, trimmed)
+    }
+
+    /// Joins what was just read to what was played before it. Anything but a
+    /// frame that follows the last one - silence where a frame was due,
+    /// concealment, a frame skipped to lower the delay - puts a step in the
+    /// waveform, which is heard as a click.
+    fn joined(&self, out: &mut [f32], read: PlayoutRead, skipped: bool) -> PlayoutRead {
+        let broken = skipped || !matches!(read.result, PlayoutResult::Played { .. });
+        let len = read.samples.min(out.len());
+        // A reset holds the seam for an instant; that one read goes unjoined
+        if let Ok(mut seam) = self.seam.try_lock() {
+            seam.smooth(&mut out[..len], broken);
         }
         read
     }
@@ -445,6 +533,9 @@ impl ReceivePath {
                 .store(buffer.target_delay_frames(), Ordering::Relaxed);
         }
         self.started.store(false, Ordering::Relaxed);
+        if let Ok(mut seam) = self.seam.lock() {
+            *seam = Seam::restarted();
+        }
     }
 
     /// Chooses a new play-out delay, as a preset switch does. What is held
@@ -709,20 +800,25 @@ mod tests {
     /// Verifies: REQ-LAT-025
     #[test]
     fn a_received_payload_plays_after_the_configured_delay() {
-        let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 2).expect("PCM is always available");
-        let mut out = stereo_frame(4, 9.0);
+        let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 2).expect("PCM is always available");
+        let mut out = stereo_frame(64, 9.0);
 
         for sequence in 0..2 {
-            assert!(path.receive(sequence, &pcm(&stereo_frame(4, sequence as f32 + 1.0))));
+            assert!(path.receive(sequence, &pcm(&stereo_frame(64, sequence as f32 + 1.0))));
             assert_eq!(path.read_into(&mut out).result, PlayoutResult::Priming);
             assert!(out.iter().all(|&s| s == 0.0), "priming must be silent");
         }
 
-        assert!(path.receive(2, &pcm(&stereo_frame(4, 3.0))));
+        assert!(path.receive(2, &pcm(&stereo_frame(64, 3.0))));
         let read = path.read_into(&mut out);
         assert_eq!(read.result, PlayoutResult::Played { sequence: 0 });
-        assert_eq!(read.samples, 8);
-        assert_eq!(out, stereo_frame(4, 1.0), "the oldest frame plays first");
+        assert_eq!(read.samples, 128);
+        // The start rises from silence (see `Seam`); the rest is the frame
+        assert_eq!(
+            out[2 * SEAM_FRAMES..],
+            stereo_frame(64, 1.0)[2 * SEAM_FRAMES..],
+            "the oldest frame plays first"
+        );
         assert_eq!(path.stats().frames_played, 1);
     }
 
@@ -732,17 +828,17 @@ mod tests {
     /// Verifies: REQ-LAT-025
     #[test]
     fn a_missing_frame_is_concealed_in_its_slot() {
-        let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available");
-        let mut out = stereo_frame(4, 0.0);
+        let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 0).expect("PCM is always available");
+        let mut out = stereo_frame(64, 0.0);
 
-        path.receive(0, &pcm(&stereo_frame(4, 0.5)));
+        path.receive(0, &pcm(&stereo_frame(64, 0.5)));
         assert_eq!(
             path.read_into(&mut out).result,
             PlayoutResult::Played { sequence: 0 }
         );
 
         // 1 is lost; 2 arrives.
-        path.receive(2, &pcm(&stereo_frame(4, 0.25)));
+        path.receive(2, &pcm(&stereo_frame(64, 0.25)));
         assert_eq!(
             path.read_into(&mut out).result,
             PlayoutResult::Concealed { sequence: 1 }
@@ -751,7 +847,11 @@ mod tests {
             path.read_into(&mut out).result,
             PlayoutResult::Played { sequence: 2 }
         );
-        assert_eq!(out, stereo_frame(4, 0.25));
+        // Joined to the concealment for the first millisecond (see `Seam`)
+        assert_eq!(
+            out[2 * SEAM_FRAMES..],
+            stereo_frame(64, 0.25)[2 * SEAM_FRAMES..]
+        );
 
         let stats = path.stats();
         assert_eq!((stats.frames_played, stats.frames_concealed), (2, 1));
@@ -1370,5 +1470,167 @@ mod tests {
     fn test_rms_level_rejects_non_finite_samples() {
         assert_eq!(rms_level(&[f32::NAN, 0.5, 0.5]), 0);
         assert_eq!(rms_level(&[f32::INFINITY, 0.5]), 0);
+    }
+
+    /// 64 sample frames of stereo, the size of a 64-sample device buffer.
+    const RAMP_SAMPLES: usize = 128;
+
+    /// A frame of a slow ramp, both sides alike, so any step in what is played
+    /// is a cut: neighbouring sample frames differ by 0.0001.
+    fn ramp_payload(index: u32) -> Vec<u8> {
+        let ramp: Vec<f32> = (0..RAMP_SAMPLES)
+            .map(|i| (index as usize * RAMP_SAMPLES / 2 + i / 2) as f32 * 0.0001)
+            .collect();
+        pcm(&ramp)
+    }
+
+    /// Plays a ramp through a path with `delay` frames of play-out delay.
+    struct Ramp {
+        path: ReceivePath,
+        next: u32,
+        last: Option<f32>,
+    }
+
+    impl Ramp {
+        fn new(delay: u32) -> Self {
+            Self {
+                path: ReceivePath::new(CodecType::Pcm, 48000, 64, delay).expect("PCM"),
+                next: 0,
+                last: None,
+            }
+        }
+
+        /// Reads one frame, after `arrive` frames of the ramp have arrived, and
+        /// returns the largest jump between neighbouring sample frames in it
+        /// (counted from the frame before).
+        fn read(&mut self, arrive: u32) -> f32 {
+            for _ in 0..arrive {
+                assert!(self.path.receive(self.next, &ramp_payload(self.next)));
+                self.next += 1;
+            }
+            let mut out = vec![9.0; RAMP_SAMPLES];
+            let read = self.path.read_into(&mut out);
+            let mut largest = 0.0f32;
+            for pair in out[..read.samples].chunks(2) {
+                if let Some(last) = self.last {
+                    largest = largest.max((pair[0] - last).abs());
+                }
+                self.last = Some(pair[0]);
+            }
+            largest
+        }
+
+        /// The largest jump over `reads` reads, one frame arriving for each
+        fn play(&mut self, reads: u32) -> f32 {
+            (0..reads).map(|_| self.read(1)).fold(0.0, f32::max)
+        }
+    }
+
+    /// Raising the delay puts silence where the signal was; the drop to it
+    /// and the rise from it are ramps, not steps.
+    ///
+    /// Verifies: REQ-AUD-041
+    #[test]
+    fn raising_the_delay_leaves_no_step_in_what_is_played() {
+        let mut ramp = Ramp::new(2);
+        ramp.play(40);
+
+        ramp.path.set_delay_frames(4);
+        let step = ramp.play(8);
+
+        assert!(
+            step <= 0.01,
+            "largest step {step} (an unjoined cut is about 0.25)"
+        );
+    }
+
+    /// Lowering the delay skips frames; the signal must not jump with them.
+    ///
+    /// Verifies: REQ-AUD-041
+    #[test]
+    fn lowering_the_delay_leaves_no_step_in_what_is_played() {
+        let mut ramp = Ramp::new(4);
+        ramp.play(40);
+
+        ramp.path.set_delay_frames(2);
+        let step = ramp.play(8);
+
+        assert!(
+            step <= 0.003,
+            "largest step {step} (an unjoined skip is about 0.013)"
+        );
+    }
+
+    /// The network side holds the buffer for the instant the device asks, so
+    /// that read is silence; it must not be a drop to zero and back.
+    ///
+    /// Verifies: REQ-AUD-041
+    #[test]
+    fn a_read_that_finds_the_buffer_held_leaves_no_step_in_what_is_played() {
+        let mut ramp = Ramp::new(2);
+        ramp.play(40);
+
+        let held = ramp.path.playout.lock().unwrap();
+        let mut out = vec![9.0; RAMP_SAMPLES];
+        let read = ramp.path.read_into(&mut out);
+        drop(held);
+        let mut largest = 0.0f32;
+        for pair in out[..read.samples].chunks(2) {
+            largest = largest.max((pair[0] - ramp.last.unwrap()).abs());
+            ramp.last = Some(pair[0]);
+        }
+        let after = ramp.play(8);
+
+        assert!(
+            largest <= 0.01 && after <= 0.01,
+            "steps {largest} into the silence and {after} out of it (an unjoined cut is about 0.25)"
+        );
+    }
+
+    /// A frame that does not arrive in time is a read of silence, then the
+    /// signal comes back.
+    ///
+    /// Verifies: REQ-AUD-041
+    #[test]
+    fn a_frame_that_is_late_leaves_no_step_in_what_is_played() {
+        let mut ramp = Ramp::new(0);
+        ramp.play(40);
+
+        let into = ramp.read(0);
+        let out_of = ramp.read(1);
+
+        assert!(
+            into <= 0.01 && out_of <= 0.01,
+            "steps {into} into the silence and {out_of} out of it (an unjoined cut is about 0.25)"
+        );
+    }
+
+    /// The first frame after the buffer is started over rises from silence,
+    /// whatever the sender's waveform was doing.
+    ///
+    /// Verifies: REQ-AUD-041
+    #[test]
+    fn the_first_frame_after_a_reset_rises_from_silence() {
+        let mut ramp = Ramp::new(0);
+        ramp.play(40);
+        ramp.path.reset();
+        ramp.next = 40;
+        assert!(ramp.path.receive(ramp.next, &ramp_payload(40)));
+        let mut out = vec![9.0; RAMP_SAMPLES];
+
+        let read = ramp.path.read_into(&mut out);
+
+        assert!(matches!(read.result, PlayoutResult::Played { .. }));
+        assert!(
+            out[0].abs() <= 0.01,
+            "starts at {} (the signal is at {})",
+            out[0],
+            40.0 * 64.0 * 0.0001
+        );
+        let end = out[RAMP_SAMPLES - 2];
+        assert!(
+            (end - (40.0 * 64.0 + 63.0) * 0.0001).abs() < 1e-6,
+            "and has joined the signal by the end of the frame, at {end}"
+        );
     }
 }
