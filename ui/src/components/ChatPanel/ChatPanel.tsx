@@ -12,8 +12,11 @@ import "./ChatPanel.css";
 export interface ChatPanelProps {
   /** Chat messages to display */
   messages: ChatMessageData[];
-  /** Callback when a message is sent */
-  onSend?: (message: string) => void;
+  /**
+   * Callback when a message is sent. If it returns a promise, the input keeps
+   * the text until the promise resolves and shows an error when it rejects.
+   */
+  onSend?: (message: string) => void | Promise<void>;
   /** Callback when a reaction is clicked on a message */
   onReactionClick?: (messageId: string, emoji: string) => void;
   /** Callback when adding a new reaction to a message */
@@ -51,9 +54,7 @@ export function ChatPanel({
   const titleText = title ?? t("chat.title");
   const timeLocale = locale ?? i18n.language;
   const handleSend = useCallback(
-    (content: string) => {
-      onSend?.(content);
-    },
+    (content: string) => onSend?.(content),
     [onSend]
   );
 
@@ -97,6 +98,7 @@ export function ChatPanel({
         messages={messages}
         renderMessage={renderMessage}
         emptyMessage={emptyMessage}
+        locale={timeLocale}
       />
       <ChatInput
         placeholder={placeholder}

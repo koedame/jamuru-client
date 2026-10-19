@@ -152,6 +152,7 @@
     "title": "Chat",
     "placeholder": "Type a message...",
     "sendLabel": "Send",
+    "sendFailed": "Couldn't send the message. Try again.",
     "emptyMessage": "No messages yet",
     "addReaction": "Add reaction",
     "emoji": {

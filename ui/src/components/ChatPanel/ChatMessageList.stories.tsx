@@ -129,3 +129,16 @@ export const NoAutoScroll: Story = {
     autoScroll: false,
   },
 };
+
+const day = 24 * 60 * 60 * 1000;
+
+export const AcrossDays: Story = {
+  args: {
+    messages: [
+      { id: "d1", type: "other", senderName: "Alice", content: "昨日の続きからやろう", timestamp: now - 2 * day },
+      { id: "d2", type: "own", content: "了解", timestamp: now - 2 * day + 60000 },
+      { id: "d3", type: "other", senderName: "Alice", content: "今日もよろしく", timestamp: now },
+    ] as ChatMessageData[],
+    renderMessage,
+  },
+};

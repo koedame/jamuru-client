@@ -1,8 +1,9 @@
 /**
- * ChatMessageList - Scrollable message list with auto-scroll
+ * ChatMessageList - Scrollable message list that follows new messages while the
+ * reader is at the bottom, with a date divider where the day changes.
  * MixerPanel design guide: minimal styling, functional focus
  */
-import { useEffect, useRef, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Reaction } from "./ReactionBar";
 import type { ChatSystemKind } from "./ChatMessage";
@@ -35,8 +36,27 @@ export interface ChatMessageListProps {
   renderMessage: (message: ChatMessageData) => ReactNode;
   /** Empty state message */
   emptyMessage?: string;
-  /** Auto-scroll to bottom on new messages */
+  /** Follow new messages while the list is scrolled to (near) the bottom */
   autoScroll?: boolean;
+  /** Locale for the date dividers */
+  locale?: string;
+}
+
+/** How far from the bottom (px) the list still counts as "at the bottom". */
+const FOLLOW_THRESHOLD_PX = 48;
+
+function dayKey(timestamp: number): string {
+  const d = new Date(timestamp);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function formatDay(timestamp: number, locale: string): string {
+  return new Date(timestamp).toLocaleDateString(locale, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  });
 }
 
 export function ChatMessageList({
@@ -44,17 +64,37 @@ export function ChatMessageList({
   renderMessage,
   emptyMessage,
   autoScroll = true,
+  locale,
 }: ChatMessageListProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const dayLocale = locale ?? i18n.language;
   const containerRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // Whether the reader is at the bottom. The list is re-rendered on every
+  // poll, so scrolling on each render would drag someone reading older
+  // messages back down; only follow while they are already at the bottom.
+  const followingRef = useRef(true);
 
-  // Auto-scroll to bottom when messages change
+  const last = messages[messages.length - 1];
+  const lastId = last?.id;
+  const lastIsOwn = last?.type === "own";
+
+  // Follow only when a message was added (not on every re-render). A message
+  // the reader just sent always brings them to the bottom.
   useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    const el = containerRef.current;
+    if (!autoScroll || !el || lastId === undefined) return;
+    if (lastIsOwn) followingRef.current = true;
+    if (followingRef.current) {
+      el.scrollTop = el.scrollHeight;
     }
-  }, [messages, autoScroll]);
+  }, [lastId, lastIsOwn, messages.length, autoScroll]);
+
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    followingRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_THRESHOLD_PX;
+  };
 
   if (messages.length === 0) {
     return (
@@ -65,14 +105,27 @@ export function ChatMessageList({
   }
 
   return (
-    <div className="chat-message-list" ref={containerRef}>
+    <div className="chat-message-list" ref={containerRef} onScroll={handleScroll}>
       <div className="chat-message-list__messages">
-        {messages.map((message) => (
-          <div key={message.id} className="chat-message-list__item">
-            {renderMessage(message)}
-          </div>
-        ))}
-        <div ref={bottomRef} />
+        {messages.map((message, i) => {
+          const day = dayKey(message.timestamp);
+          const startsDay =
+            i === 0 ? day !== dayKey(Date.now()) : day !== dayKey(messages[i - 1].timestamp);
+          return (
+            <Fragment key={message.id}>
+              {startsDay && (
+                <div
+                  className="chat-message-list__date"
+                  role="separator"
+                  data-testid="chat-date-separator"
+                >
+                  {formatDay(message.timestamp, dayLocale)}
+                </div>
+              )}
+              <div className="chat-message-list__item">{renderMessage(message)}</div>
+            </Fragment>
+          );
+        })}
       </div>
     </div>
   );
