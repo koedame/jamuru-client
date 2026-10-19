@@ -34,7 +34,7 @@ function count(text: string, char: string): number {
   return text.split(char).length - 1;
 }
 
-/** A address with a host after the scheme (so "https://" alone stays text). */
+/** An address with a host after the scheme (a scheme alone stays text). */
 function hasHost(url: string): boolean {
   return /^https?:\/\/[^/?#:@]/i.test(url);
 }
