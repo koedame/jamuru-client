@@ -263,6 +263,8 @@ interface AddReactionButtonProps {
 }
 ```
 
+ピッカーはチャット列（幅 280px・はみ出しを隠す）に切り取られないよう、`document.body` 直下に描画し（`createPortal`）、`position: fixed` でウィンドウを基準に置く。ボタンの上に収まればボタンの上、収まらなければ下に開く。左右・上下とも、ウィンドウの端から 8px 以上内側に収める。ウィンドウのリサイズとスクロールのたびに置き直す。
+
 #### EmojiPicker（絵文字ピッカー）
 
 ```typescript
@@ -471,10 +473,6 @@ type EmojiCategory = "recent" | "smileys" | "gestures" | "hearts" | "music" | "o
   border: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  z-index: 1000;
 }
 
 .emoji-picker__header {

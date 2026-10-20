@@ -40,10 +40,8 @@
   color: var(--color-text-secondary);
 }
 
+/* Placed against the window by AddReactionButton (left / top set inline) */
 .add-reaction-button__picker {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  margin-bottom: var(--space-xs);
+  position: fixed;
   z-index: var(--z-popover);
 }
