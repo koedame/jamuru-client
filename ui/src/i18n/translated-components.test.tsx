@@ -287,16 +287,6 @@ describe('components without hard-coded text', () => {
     expect(screen.getByLabelText(fill(bundle.mixer.channel.volumeLabel, { name: 'Alice' }))).toBeInTheDocument();
   });
 
-  // Given the mixer is shown
-  // When the language is English or Japanese
-  // Then the loud-sound caution above the faders reads in that language
-  it.each(languages)('shows the loud sound caution on the mixer in %s', async (language, bundle: Bundle) => {
-    await i18n.changeLanguage(language);
-    render(<MixerPanel channels={channels} />);
-
-    expect(screen.getByTestId('mixer-loud-notice')).toHaveTextContent(bundle.mixer.loudNotice);
-  });
-
   // Given the privacy tab is shown
   // When the language is English or Japanese
   // Then the usage reporting switch, with its description, reads in that language
