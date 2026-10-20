@@ -10,9 +10,10 @@ name: Dependabot license notices
 # a read-only token. That event runs the workflow of the base branch with a
 # write token, so the PR branch is checked out only to be read, under three
 # guards: only Dependabot's own same-repository PRs, only when the PR touches
-# nothing but manifests, lock files and workflows, and the generation step has
-# no token in its environment (`npm ci` runs without install scripts, `cargo
-# fetch` and `cargo about` do not run build scripts).
+# nothing but manifests, lock files, workflows and the two notices (a person may
+# have pushed a fix to the PR, and the notices are what this job regenerates),
+# and the generation step has no token in its environment (`npm ci` runs without
+# install scripts, `cargo fetch` and `cargo about` do not run build scripts).
 #
 # The runs the push starts wait for approval (the pusher is the workflow's own
 # bot, not a collaborator), so they are approved here to get the PR's checks.
@@ -51,13 +52,13 @@ jobs:
       pull-requests: read
       actions: write
     steps:
-      - name: Check the PR only changes manifests and lock files
+      - name: Check the PR only changes manifests, lock files and the notices
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename' > files.txt
-          if grep -Ev '^((src-tauri/|tests/e2e/|ui/)?(Cargo\.toml|Cargo\.lock|package\.json|package-lock\.json)|\.github/workflows/[^/]+\.ya?ml)$' files.txt; then
+          if grep -Ev '^((src-tauri/|tests/e2e/|ui/)?(Cargo\.toml|Cargo\.lock|package\.json|package-lock\.json)|THIRD_PARTY_LICENSES\.md|src-tauri/resources/LICENSES\.txt|\.github/workflows/[^/]+\.ya?ml)$' files.txt; then
             echo "::error::The files above are not manifests, lock files or workflows; not regenerating."
             exit 1
           fi
