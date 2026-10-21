@@ -1233,17 +1233,24 @@ mod tests {
         path.receive(0, &pcm(&stereo_frame(4, 0.5)));
         let mut out = stereo_frame(4, 9.0);
 
+        // The holder lets go the moment the read starts, as a store that was
+        // already under way would.
+        let reading = Arc::new(AtomicBool::new(false));
         let (taken_tx, taken_rx) = std::sync::mpsc::channel();
         let holder = {
             let path = Arc::clone(&path);
+            let reading = Arc::clone(&reading);
             std::thread::spawn(move || {
                 let held = path.playout.lock().unwrap();
                 taken_tx.send(()).unwrap();
-                std::thread::sleep(std::time::Duration::from_micros(2));
+                while !reading.load(Ordering::Acquire) {
+                    std::hint::spin_loop();
+                }
                 drop(held);
             })
         };
         taken_rx.recv().unwrap();
+        reading.store(true, Ordering::Release);
         let read = path.read_into(&mut out);
         holder.join().unwrap();
 
