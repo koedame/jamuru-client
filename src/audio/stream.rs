@@ -475,9 +475,15 @@ impl ReceivePath {
     /// way cannot stall the device, and it lasts no longer than the frame it
     /// stands in for.
     pub fn read_into(&self, out: &mut [f32]) -> PlayoutRead {
+        self.read_pausing(out, std::hint::spin_loop)
+    }
+
+    /// [`Self::read_into`], with what is done between two tries of the lock
+    /// given by the caller.
+    fn read_pausing(&self, out: &mut [f32], pause: impl FnMut()) -> PlayoutRead {
         self.flight.count_read();
         self.note_read_time();
-        let (read, trimmed) = match self.lock_playout() {
+        let (read, trimmed) = match self.lock_playout(pause) {
             Some(mut buffer) => {
                 let trimmed_before = buffer.stats().frames_trimmed;
                 let read = buffer.read_into(out);
@@ -516,11 +522,11 @@ impl ReceivePath {
 
     /// Takes the play-out lock without blocking, trying again while it is only
     /// held (not poisoned) up to [`PLAYOUT_LOCK_TRIES`] times.
-    fn lock_playout(&self) -> Option<MutexGuard<'_, PlayoutBuffer>> {
+    fn lock_playout(&self, mut pause: impl FnMut()) -> Option<MutexGuard<'_, PlayoutBuffer>> {
         for _ in 0..PLAYOUT_LOCK_TRIES {
             match self.playout.try_lock() {
                 Ok(guard) => return Some(guard),
-                Err(TryLockError::WouldBlock) => std::hint::spin_loop(),
+                Err(TryLockError::WouldBlock) => pause(),
                 Err(TryLockError::Poisoned(_)) => return None,
             }
         }
@@ -1224,36 +1230,23 @@ mod tests {
 
     /// The network side holds the buffer for the few tens of nanoseconds a
     /// store takes. The device waits that out and plays the frame instead of
-    /// dropping it.
+    /// dropping it. The holder lets go during the third pause.
     #[test]
     fn a_read_that_finds_the_buffer_held_briefly_still_plays_the_frame() {
-        let path = Arc::new(
-            ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available"),
-        );
+        let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available");
         path.receive(0, &pcm(&stereo_frame(4, 0.5)));
         let mut out = stereo_frame(4, 9.0);
 
-        // The holder lets go the moment the read starts, as a store that was
-        // already under way would.
-        let reading = Arc::new(AtomicBool::new(false));
-        let (taken_tx, taken_rx) = std::sync::mpsc::channel();
-        let holder = {
-            let path = Arc::clone(&path);
-            let reading = Arc::clone(&reading);
-            std::thread::spawn(move || {
-                let held = path.playout.lock().unwrap();
-                taken_tx.send(()).unwrap();
-                while !reading.load(Ordering::Acquire) {
-                    std::hint::spin_loop();
-                }
-                drop(held);
-            })
-        };
-        taken_rx.recv().unwrap();
-        reading.store(true, Ordering::Release);
-        let read = path.read_into(&mut out);
-        holder.join().unwrap();
+        let mut held = Some(path.playout.lock().unwrap());
+        let mut pauses = 0;
+        let read = path.read_pausing(&mut out, || {
+            pauses += 1;
+            if pauses == 3 {
+                held.take();
+            }
+        });
 
+        assert_eq!(pauses, 3);
         assert!(
             matches!(read.result, PlayoutResult::Played { .. }),
             "the frame is played, not replaced by silence: {:?}",
@@ -1271,9 +1264,11 @@ mod tests {
         let mut out = stereo_frame(4, 9.0);
 
         let held = path.playout.lock().unwrap();
-        let read = path.read_into(&mut out);
+        let mut pauses = 0;
+        let read = path.read_pausing(&mut out, || pauses += 1);
         drop(held);
 
+        assert_eq!(pauses, PLAYOUT_LOCK_TRIES);
         assert_eq!(read.result, PlayoutResult::Priming);
         assert!(out[..read.samples].iter().all(|&s| s == 0.0));
         assert_eq!(path.flight().count(Kind::Busy), 1);
