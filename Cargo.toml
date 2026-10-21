@@ -126,7 +126,7 @@ windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Found
 # Steinberg's ASIO SDK: the SDK's proprietary license needs a signed
 # submission, and its GPLv3 option conflicts with this app's source-available
 # license.
-azo = "0.4"
+azo = "0.5"
 
 # How CoreAudio says a device is connected (Bluetooth or not), which `cpal`
 # does not pass on. Both are already pulled in by `cpal`; only the features
@@ -150,7 +150,7 @@ hound = "3.5"  # WAV file handling for audio quality tests
 tempfile = "3"
 
 # Checks the usage log lines against schema.json in tests
-jsonschema = { version = "0.58", default-features = false }
+jsonschema = { version = "0.59", default-features = false }
 
 
 # The key exchange of every link signs and checks with curve25519, which in an unoptimised
