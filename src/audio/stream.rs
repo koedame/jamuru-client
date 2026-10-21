@@ -7,7 +7,7 @@
 //! (ADR-027, ADR-028).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
 use super::codec::{create_codec, AudioCodec, CodecConfig, CodecError, CodecType};
 use super::flight::{FlightRecorder, Kind};
@@ -170,6 +170,12 @@ impl GainRamp {
 /// millisecond at 48 kHz: long enough that no step is left, short enough to
 /// leave the waveform of the new frame alone.
 const SEAM_FRAMES: usize = 48;
+
+/// How many times the audio callback tries the play-out lock before giving up
+/// the frame. The network side holds it for about 40 ns while it stores one
+/// frame, so one or two tries get it; 32 bounds the wait to a couple of
+/// microseconds when the holder has been descheduled.
+const PLAYOUT_LOCK_TRIES: u32 = 32;
 
 /// Keeps the cuts in what is played from being heard as clicks.
 ///
@@ -462,15 +468,17 @@ impl ReceivePath {
 
     /// Fills `out` with the next frame. Called from the audio callback.
     ///
-    /// Never waits: if the network side holds the buffer at this instant, the
-    /// result is one nominal frame of silence, reported as
-    /// [`PlayoutResult::Priming`]. One frame lost that way cannot stall the
-    /// device, and it lasts no longer than the frame it stands in for.
+    /// Never blocks: if the network side holds the buffer, the lock is tried
+    /// again a bounded number of times (the holder lets go within tens of
+    /// nanoseconds). If it is still held, the result is one nominal frame of
+    /// silence, reported as [`PlayoutResult::Priming`]. One frame lost that
+    /// way cannot stall the device, and it lasts no longer than the frame it
+    /// stands in for.
     pub fn read_into(&self, out: &mut [f32]) -> PlayoutRead {
         self.flight.count_read();
         self.note_read_time();
-        let (read, trimmed) = match self.playout.try_lock() {
-            Ok(mut buffer) => {
+        let (read, trimmed) = match self.lock_playout() {
+            Some(mut buffer) => {
                 let trimmed_before = buffer.stats().frames_trimmed;
                 let read = buffer.read_into(out);
                 let trimmed = buffer.stats().frames_trimmed - trimmed_before;
@@ -479,7 +487,7 @@ impl ReceivePath {
                 }
                 (read, trimmed > 0)
             }
-            Err(_) => {
+            None => {
                 self.flight.note(Kind::Busy, 0);
                 let samples = self.frame_samples().min(out.len());
                 out[..samples].fill(0.0);
@@ -504,6 +512,19 @@ impl ReceivePath {
             PlayoutResult::Priming => {}
         }
         self.joined(out, read, trimmed)
+    }
+
+    /// Takes the play-out lock without blocking, trying again while it is only
+    /// held (not poisoned) up to [`PLAYOUT_LOCK_TRIES`] times.
+    fn lock_playout(&self) -> Option<MutexGuard<'_, PlayoutBuffer>> {
+        for _ in 0..PLAYOUT_LOCK_TRIES {
+            match self.playout.try_lock() {
+                Ok(guard) => return Some(guard),
+                Err(TryLockError::WouldBlock) => std::hint::spin_loop(),
+                Err(TryLockError::Poisoned(_)) => return None,
+            }
+        }
+        None
     }
 
     /// Joins what was just read to what was played before it. Anything but a
@@ -1199,6 +1220,56 @@ mod tests {
         assert_eq!(read.result, PlayoutResult::Priming);
         assert_eq!(path.flight().count(Kind::Busy), 1);
         assert_eq!(path.flight().report().reads, 1);
+    }
+
+    /// The network side holds the buffer for the few tens of nanoseconds a
+    /// store takes. The device waits that out and plays the frame instead of
+    /// dropping it.
+    #[test]
+    fn a_read_that_finds_the_buffer_held_briefly_still_plays_the_frame() {
+        let path = Arc::new(
+            ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available"),
+        );
+        path.receive(0, &pcm(&stereo_frame(4, 0.5)));
+        let mut out = stereo_frame(4, 9.0);
+
+        let (taken_tx, taken_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let path = Arc::clone(&path);
+            std::thread::spawn(move || {
+                let held = path.playout.lock().unwrap();
+                taken_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_micros(2));
+                drop(held);
+            })
+        };
+        taken_rx.recv().unwrap();
+        let read = path.read_into(&mut out);
+        holder.join().unwrap();
+
+        assert!(
+            matches!(read.result, PlayoutResult::Played { .. }),
+            "the frame is played, not replaced by silence: {:?}",
+            read.result
+        );
+        assert_eq!(path.flight().count(Kind::Busy), 0);
+    }
+
+    /// A buffer that stays held does not hold the device: the retries run out
+    /// and the read returns a frame of silence, as it did before the retries.
+    #[test]
+    fn a_read_that_finds_the_buffer_held_throughout_gives_up_with_silence() {
+        let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available");
+        path.receive(0, &pcm(&stereo_frame(4, 0.5)));
+        let mut out = stereo_frame(4, 9.0);
+
+        let held = path.playout.lock().unwrap();
+        let read = path.read_into(&mut out);
+        drop(held);
+
+        assert_eq!(read.result, PlayoutResult::Priming);
+        assert!(out[..read.samples].iter().all(|&s| s == 0.0));
+        assert_eq!(path.flight().count(Kind::Busy), 1);
     }
 
     /// Frames that come more than two frames apart are recorded with the gap,
