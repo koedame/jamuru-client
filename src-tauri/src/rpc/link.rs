@@ -310,7 +310,10 @@ mod tests {
         // The scan for server addresses in the source reads this file; this one
         // is the test's own loopback socket, so the scheme is not spelled out.
         let scheme = ["w", "s"].concat();
-        let url = format!("{scheme}://{}/v1/remote/test", listener.local_addr().unwrap());
+        let url = format!(
+            "{scheme}://{}/v1/remote/test",
+            listener.local_addr().unwrap()
+        );
         let _relay = tokio::spawn(async move {
             let (tcp, _) = listener.accept().await.unwrap();
             let _socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
