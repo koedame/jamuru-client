@@ -354,9 +354,9 @@ dependencies = [
 
 [[package]]
 name = "azo"
-version = "0.4.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce12a2d95f3c1ff13b6638c7f4cac96c462326f3a81809914cc7990b9fc1ae9b"
+checksum = "5bcc2f8ff4522d285fce9eeeab3fd76af8ff4bc86150c751e87a4df9cffcf0ce"
 dependencies = [
  "azo-sys",
  "oneshot",
@@ -3033,7 +3033,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
