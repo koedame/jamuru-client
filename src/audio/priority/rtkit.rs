@@ -281,6 +281,23 @@ mod tests {
         }
     }
 
+    /// Needs the system bus with rtkit on it, so run it by hand on a desktop:
+    /// `cargo test --lib real_rtkit -- --ignored`
+    #[test]
+    #[ignore = "asks the rtkit of the machine it runs on"]
+    fn when_the_machine_has_rtkit_the_thread_becomes_real_time_through_it() {
+        let rtkit = RealtimeKit::connect().unwrap();
+        // SAFETY: gettid has no arguments and cannot fail
+        let tid = unsafe { libc::syscall(libc::SYS_gettid) } as libc::pid_t;
+
+        let given = rtkit.make_thread_realtime(tid, 20).unwrap();
+
+        // SAFETY: reads the policy of a thread of this process
+        let policy = unsafe { libc::sched_getscheduler(tid) };
+        assert!(given >= 1, "given {given}");
+        assert_eq!(policy & !libc::SCHED_RESET_ON_FORK, libc::SCHED_RR);
+    }
+
     #[test]
     fn when_rtkit_allows_less_than_wanted_the_thread_gets_the_highest_it_allows() {
         let bus = Bus::start(20);
