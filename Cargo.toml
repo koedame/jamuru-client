@@ -116,7 +116,7 @@ libc = "0.2"
 # Asks rtkit, the desktop's service for real-time priority, over the system D-Bus
 # for the audio threads (`audio::priority`). Pure Rust, no libdbus to be installed. The app
 # (src-tauri) already builds it, through its windowing library.
-zbus = "5"
+zbus = "6"
 
 [target.'cfg(windows)'.dependencies]
 # Real-time priority of the audio thread. The same `windows` the app is built on.
