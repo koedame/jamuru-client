@@ -773,10 +773,10 @@ sequenceDiagram
 
 | ファイル | 変更内容 |
 |---------|---------|
-| `ui/src/styles.css` | カラーパレット、デザイントークン適用 |
+| `ui/src/styles/tokens.css` | カラーパレット、デザイントークン適用 |
 | `ui/locales/ja.json` | 用語変更、新規キー追加 |
 | `ui/locales/en.json` | 用語変更、新規キー追加 |
-| `ui/src/main.ts` | オンボーディング、エラーハンドリング実装 |
+| `ui/src/main.tsx` | オンボーディング、エラーハンドリング実装 |
 
 ### 検証項目
 
