@@ -8,6 +8,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::time::{Duration, Instant};
 
 use super::codec::{create_codec, AudioCodec, CodecConfig, CodecError, CodecType};
 use super::flight::{FlightRecorder, Kind};
@@ -171,11 +172,16 @@ impl GainRamp {
 /// leave the waveform of the new frame alone.
 const SEAM_FRAMES: usize = 48;
 
-/// How many times the audio callback tries the play-out lock before giving up
+/// How long the audio callback keeps trying the play-out lock before giving up
 /// the frame. The network side holds it for about 40 ns while it stores one
-/// frame, so one or two tries get it; 32 bounds the wait to a couple of
-/// microseconds when the holder has been descheduled.
-const PLAYOUT_LOCK_TRIES: u32 = 32;
+/// frame, but a holder that is stalled for 10-100 us (measured on a loaded
+/// machine, one store in a few thousand) would outlast a count of tries, which
+/// is a different length of time on every CPU. 50 us is under 4% of a
+/// 64-sample callback.
+const PLAYOUT_LOCK_BUDGET: Duration = Duration::from_micros(50);
+
+/// The clock is read once per this many failed tries, so waiting stays cheap.
+const PLAYOUT_LOCK_TRIES_PER_CLOCK_READ: u32 = 4;
 
 /// Keeps the cuts in what is played from being heard as clicks.
 ///
@@ -469,8 +475,8 @@ impl ReceivePath {
     /// Fills `out` with the next frame. Called from the audio callback.
     ///
     /// Never blocks: if the network side holds the buffer, the lock is tried
-    /// again a bounded number of times (the holder lets go within tens of
-    /// nanoseconds). If it is still held, the result is one nominal frame of
+    /// again for a bounded time (the holder lets go within tens of
+    /// nanoseconds unless it is stalled). If it is still held, the result is one nominal frame of
     /// silence, reported as [`PlayoutResult::Priming`]. One frame lost that
     /// way cannot stall the device, and it lasts no longer than the frame it
     /// stands in for.
@@ -521,16 +527,23 @@ impl ReceivePath {
     }
 
     /// Takes the play-out lock without blocking, trying again while it is only
-    /// held (not poisoned) up to [`PLAYOUT_LOCK_TRIES`] times.
+    /// held (not poisoned) for up to [`PLAYOUT_LOCK_BUDGET`].
     fn lock_playout(&self, mut pause: impl FnMut()) -> Option<MutexGuard<'_, PlayoutBuffer>> {
-        for _ in 0..PLAYOUT_LOCK_TRIES {
+        let start = Instant::now();
+        let mut failed = 0u32;
+        loop {
             match self.playout.try_lock() {
                 Ok(guard) => return Some(guard),
                 Err(TryLockError::WouldBlock) => pause(),
                 Err(TryLockError::Poisoned(_)) => return None,
             }
+            failed += 1;
+            if failed % PLAYOUT_LOCK_TRIES_PER_CLOCK_READ == 0
+                && start.elapsed() >= PLAYOUT_LOCK_BUDGET
+            {
+                return None;
+            }
         }
-        None
     }
 
     /// Joins what was just read to what was played before it. Anything but a
@@ -1255,8 +1268,9 @@ mod tests {
         assert_eq!(path.flight().count(Kind::Busy), 0);
     }
 
-    /// A buffer that stays held does not hold the device: the retries run out
-    /// and the read returns a frame of silence, as it did before the retries.
+    /// A buffer that stays held does not hold the device: the time for retries
+    /// runs out and the read returns a frame of silence, as it did before the
+    /// retries.
     #[test]
     fn a_read_that_finds_the_buffer_held_throughout_gives_up_with_silence() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available");
@@ -1265,10 +1279,20 @@ mod tests {
 
         let held = path.playout.lock().unwrap();
         let mut pauses = 0;
+        let started = Instant::now();
         let read = path.read_pausing(&mut out, || pauses += 1);
+        let waited = started.elapsed();
         drop(held);
 
-        assert_eq!(pauses, PLAYOUT_LOCK_TRIES);
+        assert!(waited >= PLAYOUT_LOCK_BUDGET, "it waited {waited:?}");
+        assert!(
+            waited < Duration::from_secs(1),
+            "and then gave up: {waited:?}"
+        );
+        assert!(
+            pauses >= PLAYOUT_LOCK_TRIES_PER_CLOCK_READ,
+            "it tried again"
+        );
         assert_eq!(read.result, PlayoutResult::Priming);
         assert!(out[..read.samples].iter().all(|&s| s == 0.0));
         assert_eq!(path.flight().count(Kind::Busy), 1);
