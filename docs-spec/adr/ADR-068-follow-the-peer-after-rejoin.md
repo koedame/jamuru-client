@@ -56,5 +56,5 @@ Accepted
 ## 参照
 
 - [ADR-026](./ADR-026-gui-audio-path.md): アドレスの交換（先に入った側が、あとから入った側のアドレスを待つ）
-- `src-tauri/src/session/roster.rs`・`src-tauri/src/session/mod.rs`
+- `src/network/roster.rs`・`src-tauri/src/session/mod.rs`
 - 要求: `REQ-CON-130`・`REQ-CON-131`（`docs-spec/behavior/connection.feature`）
