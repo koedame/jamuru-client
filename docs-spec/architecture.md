@@ -120,7 +120,7 @@ src-tauri/              # Tauri デスクトップアプリ
   src/help_link.rs      # 手伝いの中継の両端: 手伝われる側は手伝いの口として受ける、手伝う側は窓を開いて相手のアプリの呼びを運ぶ（ADR-044 §5）
 ui/
 ├── src/                # TypeScript ソース
-│   ├── main.ts         # エントリポイント
+│   ├── main.tsx        # エントリポイント
 │   └── i18n/           # 国際化
 └── locales/            # 翻訳ファイル（en.json, ja.json）
 ```

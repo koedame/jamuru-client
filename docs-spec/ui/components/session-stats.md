@@ -579,13 +579,11 @@ peerAudio?.needs_resampling === true
 ## 実装ファイル構成
 
 ```
-ui/src/components/SessionStats/
+ui/src/components/
 ├── SessionStats.tsx              # コンポーネント本体
 ├── SessionStats.css              # スタイル
 ├── SessionStats.test.tsx         # テスト
-├── LatencyBar.tsx                # 遅延バーサブコンポーネント
-├── formatBytes.ts                # バイト数フォーマット関数
-└── index.ts                      # エクスポート
+└── SessionStats.stories.tsx      # Storybook
 ```
 
 ---
