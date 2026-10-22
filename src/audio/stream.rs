@@ -538,7 +538,7 @@ impl ReceivePath {
                 Err(TryLockError::Poisoned(_)) => return None,
             }
             failed += 1;
-            if failed % PLAYOUT_LOCK_TRIES_PER_CLOCK_READ == 0
+            if failed.is_multiple_of(PLAYOUT_LOCK_TRIES_PER_CLOCK_READ)
                 && start.elapsed() >= PLAYOUT_LOCK_BUDGET
             {
                 return None;
