@@ -7,6 +7,7 @@
 //! a stretch of time, and a [`ProcessSampler`] for the process's CPU and memory
 //! over the same stretch.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -181,13 +182,17 @@ impl Window {
 }
 
 /// This process's CPU and memory over a stretch of time, and those of the
-/// processes it started (on Linux the webview that draws the window is one).
+/// processes it started (the webview that draws the window is one).
 ///
-/// The audio path runs in this process; the window is drawn by the children.
+/// The audio path runs in this process; the window is drawn by the others.
 /// Both are counted because a machine has to carry both.
 pub struct ProcessSampler {
     system: sysinfo::System,
     pid: sysinfo::Pid,
+    started: Instant,
+    /// What every process had used when sampling started, in milliseconds of
+    /// CPU time. A process that is not here started during the stretch.
+    cpu_time_at_start: HashMap<sysinfo::Pid, u64>,
 }
 
 /// One process the app started, by what it used.
@@ -207,7 +212,8 @@ pub struct ProcessUsage {
     /// Logical cores of the machine, to turn `cpu_percent` into a share of it.
     pub cpu_cores: usize,
     /// Everything the app started, all levels down, the busiest first (at most
-    /// [`MAX_CHILDREN`]).
+    /// [`MAX_CHILDREN`]). On macOS this includes the WebKit services that draw
+    /// the window, which the system starts on the app's behalf.
     pub children: Vec<ChildUsage>,
     /// Their sum, not limited to the ones listed.
     pub children_cpu_percent: f32,
@@ -218,17 +224,37 @@ pub struct ProcessUsage {
 const MAX_CHILDREN: usize = 6;
 
 impl ProcessSampler {
-    /// Starts sampling. Wait at least [`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL`]
-    /// before [`ProcessSampler::finish`], or the CPU reads as 0.
+    /// Starts sampling.
     pub fn start() -> Result<Self, String> {
         let pid = sysinfo::get_current_pid().map_err(|e| e.to_string())?;
         let mut system = sysinfo::System::new();
         refresh(&mut system);
-        Ok(Self { system, pid })
+        let cpu_time_at_start = system
+            .processes()
+            .iter()
+            .map(|(pid, process)| (*pid, process.accumulated_cpu_time()))
+            .collect();
+        Ok(Self {
+            system,
+            pid,
+            started: Instant::now(),
+            cpu_time_at_start,
+        })
     }
 
     pub fn finish(mut self) -> Result<ProcessUsage, String> {
+        let elapsed_ms = self.started.elapsed().as_secs_f32() * 1000.0;
         refresh(&mut self.system);
+        // The CPU is the time a process used over the time that passed, not
+        // sysinfo's `cpu_usage`: on Windows that one keeps no starting point
+        // from the first reading, so the second is the process's whole life
+        // over the machine's whole uptime (a few hundredths of a percent).
+        let cpu_percent = |pid: &sysinfo::Pid, process: &sysinfo::Process| {
+            let used_ms = process
+                .accumulated_cpu_time()
+                .saturating_sub(self.cpu_time_at_start.get(pid).copied().unwrap_or(0));
+            used_ms as f32 / elapsed_ms * 100.0
+        };
         let process = self
             .system
             .process(self.pid)
@@ -241,7 +267,8 @@ impl ProcessSampler {
                 // process as parent; they are already in the process's own reading
                 if candidate.thread_kind().is_none()
                     && !descendants.contains(pid)
-                    && candidate.parent().is_some_and(|p| descendants.contains(&p))
+                    && (candidate.parent().is_some_and(|p| descendants.contains(&p))
+                        || is_serving(*pid, &descendants))
                 {
                     descendants.push(*pid);
                 }
@@ -253,10 +280,10 @@ impl ProcessSampler {
         let mut children: Vec<ChildUsage> = descendants
             .iter()
             .filter(|pid| **pid != self.pid)
-            .filter_map(|pid| self.system.process(*pid))
-            .map(|child| ChildUsage {
+            .filter_map(|pid| Some((pid, self.system.process(*pid)?)))
+            .map(|(pid, child)| ChildUsage {
                 name: child.name().to_string_lossy().into_owned(),
-                cpu_percent: child.cpu_usage(),
+                cpu_percent: cpu_percent(pid, child),
                 memory_mb: child.memory() as f64 / (1024.0 * 1024.0),
             })
             .collect();
@@ -265,7 +292,7 @@ impl ProcessSampler {
         children.sort_by(|a, b| b.cpu_percent.total_cmp(&a.cpu_percent));
         children.truncate(MAX_CHILDREN);
         Ok(ProcessUsage {
-            cpu_percent: process.cpu_usage(),
+            cpu_percent: cpu_percent(&self.pid, process),
             memory_mb: process.memory() as f64 / (1024.0 * 1024.0),
             cpu_cores: std::thread::available_parallelism().map_or(1, |n| n.get()),
             children,
@@ -273,6 +300,31 @@ impl ProcessSampler {
             children_memory_mb,
         })
     }
+}
+
+/// Whether the system runs `pid` on behalf of one of `group`, though it is not
+/// their child. On macOS the WebKit services that draw the window (WebContent,
+/// Networking, GPU) are started by launchd, so the parent is launchd; the
+/// system still records whose work they are, which is what Activity Monitor
+/// and the privacy prompts go by.
+#[cfg(target_os = "macos")]
+fn is_serving(pid: sysinfo::Pid, group: &[sysinfo::Pid]) -> bool {
+    extern "C" {
+        /// In libSystem, not in its public headers.
+        fn responsibility_get_pid_responsible_for_pid(pid: libc::pid_t) -> libc::pid_t;
+    }
+    let Ok(pid) = libc::pid_t::try_from(pid.as_u32()) else {
+        return false;
+    };
+    let responsible = unsafe { responsibility_get_pid_responsible_for_pid(pid) };
+    responsible > 0
+        && responsible != pid
+        && group.contains(&sysinfo::Pid::from_u32(responsible as u32))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_serving(_pid: sysinfo::Pid, _group: &[sysinfo::Pid]) -> bool {
+    false
 }
 
 /// The processor's brand string and its logical core count, for a debug
@@ -379,7 +431,7 @@ mod tests {
             let _ = wait.recv();
         });
         let sampler = ProcessSampler::start().unwrap();
-        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+        std::thread::sleep(Duration::from_millis(200));
 
         let usage = sampler.finish().unwrap();
         stop.send(()).unwrap();
@@ -399,7 +451,7 @@ mod tests {
             .spawn()
             .unwrap();
         let sampler = ProcessSampler::start().unwrap();
-        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+        std::thread::sleep(Duration::from_millis(200));
 
         let usage = sampler.finish().unwrap();
         child.kill().unwrap();
@@ -414,9 +466,53 @@ mod tests {
     }
 
     #[test]
+    fn a_thread_that_runs_the_whole_time_reads_as_about_one_core() {
+        let _turn = CHILD_PROCESS_TESTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let spinner = {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    std::hint::spin_loop();
+                }
+            })
+        };
+        let sampler = ProcessSampler::start().unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+
+        let usage = sampler.finish().unwrap();
+        stop.store(true, Ordering::Relaxed);
+        spinner.join().unwrap();
+
+        assert!(usage.cpu_percent > 40.0, "{:?}", usage);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_process_that_runs_the_whole_time_reads_as_about_one_core() {
+        let _turn = CHILD_PROCESS_TESTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "while :; do :; done"])
+            .spawn()
+            .unwrap();
+        let sampler = ProcessSampler::start().unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+
+        let usage = sampler.finish().unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert!(usage.children_cpu_percent > 40.0, "{:?}", usage);
+    }
+
+    #[test]
     fn the_process_sampler_reads_this_process_memory() {
         let sampler = ProcessSampler::start().unwrap();
-        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+        std::thread::sleep(Duration::from_millis(200));
 
         let usage = sampler.finish().unwrap();
 
