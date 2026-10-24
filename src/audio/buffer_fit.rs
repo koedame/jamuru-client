@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Which sizes between a driver's `min` and `max` it accepts (ASIO's
 /// `granularity`).
+#[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Steps {
     /// Every size in the range
@@ -27,6 +28,7 @@ pub(crate) enum Steps {
 ///
 /// `preferred` is used only when the driver's range is unusable (empty or not
 /// positive), where there is nothing to move the request to.
+#[cfg(any(target_os = "windows", test))]
 pub(crate) fn fit(requested: i32, min: i32, max: i32, preferred: i32, steps: Steps) -> i32 {
     if min <= 0 || max < min {
         return preferred;
@@ -64,6 +66,7 @@ pub(crate) fn fit(requested: i32, min: i32, max: i32, preferred: i32, steps: Ste
 /// The size the running ASIO session opened at, in frames; 0 while none runs.
 static OPENED: AtomicU32 = AtomicU32::new(0);
 
+#[cfg(any(target_os = "windows", test))]
 pub(crate) fn set_opened(frames: u32) {
     OPENED.store(frames, Ordering::Relaxed);
 }

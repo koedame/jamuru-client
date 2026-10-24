@@ -65,7 +65,7 @@ pub const METHODS: &[Method] = &[
         name: "debug.info",
         access: Access::TOOLS,
         kind: Kind::Native,
-        summary: "版・ビルド・OS・音声デバイスと設定・ASIO で実際に開いたバッファ・接続先・ログの場所",
+        summary: "版・ビルド・OS・音声デバイスと設定・接続先・ログの場所",
     },
     Method {
         name: "debug.logs",
