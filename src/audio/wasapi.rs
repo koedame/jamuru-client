@@ -1134,16 +1134,22 @@ fn probe_one(flow: Flow, endpoint: &str) -> Result<EndpointCaps, (AudioError, Op
     });
     // The rates an exclusive stream is opened at (`open_exclusive`)
     let mut exclusive_rates = Vec::new();
+    let mut exclusive_allowed = true;
     for rate in std::iter::once(mix.rate).chain(
         VALID_SAMPLE_RATES
             .into_iter()
             .filter(|&rate| rate != mix.rate),
     ) {
-        if first_exclusive_format(&client, &[rate], &mix)
-            .map_err(|e| failure_of("exclusive format", &e))?
-            .is_some()
-        {
-            exclusive_rates.push(rate);
+        match first_exclusive_format(&client, &[rate], &mix) {
+            Ok(Some(_)) => exclusive_rates.push(rate),
+            Ok(None) => {}
+            // An answer, not a device that is silent: Windows keeps every
+            // app from taking it until the person allows it
+            Err(e) if e.code() == AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED => {
+                exclusive_allowed = false;
+                break;
+            }
+            Err(e) => return Err(failure_of("exclusive format", &e)),
         }
     }
     Ok(EndpointCaps {
@@ -1152,5 +1158,6 @@ fn probe_one(flow: Flow, endpoint: &str) -> Result<EndpointCaps, (AudioError, Op
         low_latency,
         exclusive_period_us: (smallest / 10) as u32,
         exclusive_rates,
+        exclusive_allowed,
     })
 }

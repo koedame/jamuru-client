@@ -169,6 +169,24 @@ export const WasapiNothingFaster: Story = {
   },
 };
 
+/** Windows, the built-in codec with exclusive control not allowed in its properties */
+export const WasapiExclusiveNotAllowed: Story = {
+  args: {
+    ...baseArgs,
+    wasapi: {
+      mode: "shared",
+      advice: {
+        applies: true,
+        modes: [
+          advice("shared", "recommended", "nothing_faster", 10000),
+          advice("low_latency", "not_recommended", "same_period", 10000),
+          advice("exclusive", "unavailable", "exclusive_not_allowed", null),
+        ],
+      },
+    },
+  },
+};
+
 /** Windows, an ASIO driver on both sides: the WASAPI mode is not used */
 export const WasapiNotUsedWithAsio: Story = {
   args: {
