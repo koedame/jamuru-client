@@ -623,7 +623,8 @@ async fn install_newer<R: Runtime>(
 /// The running version is kept first (`trial::open`); without it nothing is
 /// installed. What the install came to is written down on the same thread,
 /// once it has returned, so that an install given up on still leaves the
-/// trial as it really ended.
+/// trial as it really ended. A release that does not say it reports its
+/// start ([`reports_started`]) is installed without being watched.
 async fn install(
     update: Update,
     bytes: Vec<u8>,
@@ -633,7 +634,6 @@ async fn install(
     blocking_within("the install", INSTALL_LIMIT, move || {
         let store = trial::Store::locate()
             .ok_or_else(|| UpdateError::NoWayBack("there is no place to keep it".into()))?;
-        let package = trial::Package::running().map_err(UpdateError::NoWayBack)?;
         if asked == Asked::ByItself {
             // Noted before anything can fail: a release that cannot be
             // installed here is not downloaded again at every start.
@@ -641,6 +641,19 @@ async fn install(
                 tracing::warn!("Could not note the update tried by itself: {}", e);
             }
         }
+        if !reports_started(&update.raw_json) {
+            // Made before the version it replaces could be kept: it never
+            // says it has started, so watched it would always be put back.
+            tracing::info!(
+                "{} does not say when it has started; installing it without keeping {}",
+                update.version,
+                update.current_version
+            );
+            update.install(bytes)?;
+            turn.installed();
+            return Ok(());
+        }
+        let package = trial::Package::running().map_err(UpdateError::NoWayBack)?;
         let opened = trial::open(
             &store,
             package,
@@ -687,6 +700,16 @@ async fn install(
         }
     })
     .await
+}
+
+/// Whether the release's `latest.json` says the release reports when it has
+/// started (`scripts/make-update-manifest.sh`), so the running version can be
+/// kept until it does.
+fn reports_started(manifest: &serde_json::Value) -> bool {
+    manifest
+        .get("reports_started")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
 }
 
 async fn within<T>(
@@ -776,6 +799,25 @@ mod tests {
         use tauri::utils::config::BundleType;
         assert!(!bundle_updates_itself("linux", Some(BundleType::Deb)));
         assert!(bundle_updates_itself("linux", Some(BundleType::AppImage)));
+    }
+
+    /// A release made before the running version could be kept never says it
+    /// has started; watching it would put back a release that works.
+    ///
+    /// Verifies: REQ-UPD-026
+    #[test]
+    fn only_a_release_whose_update_info_says_it_reports_its_start_is_watched() {
+        use serde_json::json;
+        assert!(reports_started(
+            &json!({"version": "0.2.0", "reports_started": true})
+        ));
+        assert!(!reports_started(&json!({"version": "0.2.0"})));
+        assert!(!reports_started(
+            &json!({"version": "0.2.0", "reports_started": false})
+        ));
+        assert!(!reports_started(
+            &json!({"version": "0.2.0", "reports_started": "true"})
+        ));
     }
 
     /// Verifies: REQ-UPD-021

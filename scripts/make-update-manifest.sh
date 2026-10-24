@@ -17,6 +17,11 @@
 #   - every platform has its updater bundle and signature;
 #   - each signature names the version it was signed for, and it is that
 #     version (the app rejects a signature that does not).
+#
+# `reports_started` tells the version installed now that this release says
+# when it has started, so the version it replaces is kept until it does
+# (ADR-089). A release made before that mechanism lacks it and would never
+# say so, and is installed without being watched.
 set -euo pipefail
 
 tag=${1:?usage: $0 <tag> <artifacts directory>}
@@ -78,4 +83,4 @@ jq -n \
   --arg version "$version" \
   --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson platforms "$platforms" \
-  '{version: $version, pub_date: $pub_date, platforms: $platforms}'
+  '{version: $version, pub_date: $pub_date, reports_started: true, platforms: $platforms}'
