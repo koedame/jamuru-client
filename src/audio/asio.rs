@@ -44,12 +44,20 @@ use azo::dto::{ChannelId, Granularity};
 use azo::sys::{self, Bool, Callbacks, MessageSelector, SampleType};
 use azo::win::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
+use super::asio_roster::Roster;
 use super::buffer_fit::{fit, set_opened, Steps};
 use super::channels::{pick_channels, OutputRoute};
 use super::device::{AudioDevice, DeviceId, ASIO_ID_PREFIX};
 use super::driver::StreamHost;
 use super::engine::{FramePuller, RoutedPuller};
 use super::error::AudioError;
+
+/// What the listing knows of the drivers, and the driver a session holds open.
+static ROSTER: Mutex<Roster> = Mutex::new(Roster::new());
+
+/// Held while drivers are opened to be listed, and while a session marks its driver as held, so a
+/// listing cannot open the session's driver in between.
+static PROBING: Mutex<()> = Mutex::new(());
 
 /// Lists the ASIO drivers Windows has registered (`HKLM\SOFTWARE\ASIO`), one
 /// [`AudioDevice`] per driver. Usable as both the input and the output
@@ -60,11 +68,42 @@ use super::error::AudioError;
 /// A driver that fails to report anything useful (does not initialize, or
 /// supports none of the common rates) is left out rather than shown as a
 /// dead end.
+///
+/// While a session holds a driver, no driver is opened: creating the session's driver a second
+/// time takes it from the session. The answer is then the last listing, with the session's
+/// driver as it described itself on opening.
 pub(crate) fn list_drivers() -> Vec<AudioDevice> {
+    let _probing = PROBING.lock();
+    {
+        let roster = ROSTER.lock();
+        if roster.holds_a_driver() {
+            return roster.while_open();
+        }
+    }
     let Ok(metas) = Metadata::enumerate() else {
         return Vec::new();
     };
-    metas.iter().filter_map(probe_driver).collect()
+    let found: Vec<AudioDevice> = metas.iter().filter_map(probe_driver).collect();
+    ROSTER.lock().found(found.clone());
+    found
+}
+
+/// Marks that a session holds a driver for as long as it lives, so that [`list_drivers`] leaves
+/// the driver alone.
+struct HeldDriver;
+
+impl HeldDriver {
+    fn take() -> Self {
+        let _probing = PROBING.lock();
+        ROSTER.lock().opening();
+        Self
+    }
+}
+
+impl Drop for HeldDriver {
+    fn drop(&mut self) {
+        ROSTER.lock().closed();
+    }
 }
 
 /// A COM apartment entered on the current thread; leaving it (on drop) must
@@ -111,6 +150,11 @@ fn probe_driver(meta: &Metadata) -> Option<AudioDevice> {
     if !driver.init(None) {
         return None;
     }
+    describe_driver(driver)
+}
+
+/// What an initialized driver offers, or `None` if it offers nothing usable.
+fn describe_driver(driver: &UnsafeHandle) -> Option<AudioDevice> {
     let name = driver.name().to_string_lossy().into_owned();
     let counts = driver.channel_counts().ok()?;
     let supported_sample_rates: Vec<u32> = [44100u32, 48000, 96000, 192000]
@@ -205,6 +249,8 @@ impl AsioDuplex {
 /// buffers, clears [`CALLBACK`] and finally uninitializes COM, in that order.
 struct AsioResources {
     instance: DriverInstance,
+    /// After `instance`, so the driver is released before it stops being marked as held.
+    _held: HeldDriver,
 }
 
 impl Drop for AsioResources {
@@ -230,6 +276,7 @@ fn open_duplex(
     capture_callback: impl FnMut(&[f32], u64) + Send + 'static,
     fill_frame: impl FnMut(&mut [f32]) -> usize + Send + 'static,
 ) -> Result<AsioResources, AudioError> {
+    let held = HeldDriver::take();
     let metas = Metadata::enumerate()
         .map_err(|e| AudioError::DeviceOpenFailed(format!("listing ASIO drivers: {e}")))?;
     let meta = metas
@@ -244,6 +291,9 @@ fn open_duplex(
             "{driver_name} failed to initialize: {:?}",
             driver.last_error()
         )));
+    }
+    if let Some(device) = describe_driver(driver) {
+        ROSTER.lock().opened(device);
     }
 
     driver
@@ -392,7 +442,10 @@ fn open_duplex(
         .map_err(|e| AudioError::StreamError(format!("starting {driver_name}: {e}")))?;
     set_opened(buffer_size as u32);
 
-    Ok(AsioResources { instance })
+    Ok(AsioResources {
+        instance,
+        _held: held,
+    })
 }
 
 fn is_supported(sample_type: SampleType) -> bool {

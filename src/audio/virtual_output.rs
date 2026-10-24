@@ -419,6 +419,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn starts_and_stops_against_a_real_pipewire_daemon() {
+        let _turn = crate::perf::child_process_turn();
         if which("pw-loopback").is_none() || which("pw-cat").is_none() {
             eprintln!("skipping: pw-loopback/pw-cat not on PATH");
             return;
@@ -469,6 +470,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn a_recording_feed_writes_a_b_and_c_to_a_real_pipewire_daemon() {
+        let _turn = crate::perf::child_process_turn();
         if which("pw-loopback").is_none() || which("pw-cat").is_none() {
             eprintln!("skipping: pw-loopback/pw-cat not on PATH");
             return;
