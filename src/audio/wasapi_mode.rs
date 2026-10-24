@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(exclusive.output_period_us, Some(3_000));
     }
 
-    /// Verifies: REQ-AUD-040
+    /// Verifies: REQ-AUD-042
     #[test]
     fn when_the_buffer_is_longer_than_the_smallest_period_an_exclusive_stream_runs_at_the_buffer() {
         // 256 frames at 48 kHz is 5.33 ms, longer than the 3 ms the device allows
@@ -719,7 +719,7 @@ mod tests {
         assert_eq!(exclusive_period_us(3_000, 64, 48000), 3_000);
     }
 
-    /// Verifies: REQ-AUD-040
+    /// Verifies: REQ-AUD-042
     #[test]
     fn when_the_buffer_falls_between_two_shared_periods_the_larger_one_is_asked_for() {
         let periods = SharedPeriods {
@@ -737,7 +737,7 @@ mod tests {
         assert_eq!(low_latency_period(&periods, 48000, 48000, 1024), 480);
     }
 
-    /// Verifies: REQ-AUD-040
+    /// Verifies: REQ-AUD-042
     #[test]
     fn when_a_driver_offers_one_shared_period_that_period_is_asked_for() {
         let fixed = SharedPeriods {
@@ -751,7 +751,7 @@ mod tests {
         assert_eq!(low_latency_period(&fixed, 44100, 48000, 1024), 441);
     }
 
-    /// Verifies: REQ-AUD-040
+    /// Verifies: REQ-AUD-042
     #[test]
     fn every_sample_layout_carries_a_signal_through_encode_and_decode() {
         let signal = [0.0f32, 0.5, -0.5, 0.999, -1.0, 0.123_456];
@@ -780,7 +780,7 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-040
+    /// Verifies: REQ-AUD-042
     #[test]
     fn a_sample_beyond_full_scale_is_clipped_rather_than_wrapped_around() {
         for layout in [SampleLayout::I32, SampleLayout::I24, SampleLayout::I16] {
@@ -794,7 +794,7 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-040
+    /// Verifies: REQ-AUD-042
     #[test]
     fn when_a_stream_closes_after_its_replacement_opened_the_replacement_stays_recorded() {
         let way = OpenedWay {
