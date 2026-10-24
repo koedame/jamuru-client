@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Plugin commands the webview calls: the launch URL and the invite-link listener (ui/src/lib/deepLink.ts). Nothing else is granted.",
-  "windows": ["main", "settings", "chat", "help-*"],
+  "description": "Plugin commands the webview calls: the launch URL and the invite-link listener (ui/src/lib/deepLink.ts), and the listener of the update's progress (ui/src/screens/StartupUpdateScreen.tsx). Nothing else is granted.",
+  "windows": ["main", "settings", "chat", "help-*", "updating"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",

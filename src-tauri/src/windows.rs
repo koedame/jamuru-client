@@ -484,6 +484,39 @@ mod tests {
         assert_eq!(settings_url(None, false), "index.html#/settings");
     }
 
+    /// Every window the app opens listens for what the app tells it, and the
+    /// webview may call the listener only from the windows the capability
+    /// names. The window shown while updating once was not, and never heard
+    /// how far the update had come.
+    ///
+    /// Verifies: REQ-UPD-025
+    #[test]
+    fn every_window_the_app_opens_may_listen_for_what_it_is_told() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let windows: Vec<&str> = capability["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|window| window.as_str().unwrap())
+            .collect();
+        let granted = |label: &str| {
+            windows.iter().any(|pattern| match pattern.strip_suffix('*') {
+                Some(prefix) => label.starts_with(prefix),
+                None => *pattern == label,
+            })
+        };
+        for label in [
+            labels::MAIN,
+            labels::SETTINGS,
+            labels::CHAT,
+            labels::UPDATING,
+            "help-1",
+        ] {
+            assert!(granted(label), "{} may not listen", label);
+        }
+    }
+
     #[test]
     fn test_session_state() {
         // Reset state
