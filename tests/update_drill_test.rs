@@ -142,7 +142,7 @@ fn check(binary: &Path, expected: &str) -> std::process::Output {
 fn a_build_that_can_be_broken_on_purpose_does_not_pass_as_a_release() {
     let dir = tempfile::tempdir().unwrap();
     let drill = dir.path().join("drill");
-    std::fs::write(&drill, b"\x7fELF\0...JAMJAM_UPDATE_DRILL_BREAK\0...").unwrap();
+    std::fs::write(&drill, b"\x7fELF\0...jamjam-update-drill-break\0...").unwrap();
     let release = dir.path().join("release");
     std::fs::write(&release, b"\x7fELF\0...JAMJAM_SERVER_URL\0...").unwrap();
 

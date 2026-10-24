@@ -14,8 +14,11 @@ newer release, starts A and waits for what must follow:
   never-runs       B ends before it starts at all; A is put back as above.
   crash-on-screen  B's screen comes up, and B ends before it has been up long
                    enough to count as started; A is put back as above.
+  unwatched        B is offered as a release made before the previous version
+                   could be kept (its latest.json does not say it reports its
+                   start); A installs it without a trial, and B is kept.
 
-A scenario passes only when the installed package is exactly B's (good) or
+A scenario passes only when the installed package is B's (good, unwatched) or
 exactly A's again, every file and its mode (the rest), the version kept
 reaches its screen and stays up, the update's files are cleaned up, and the
 version given up on is remembered.
@@ -60,12 +63,22 @@ from pathlib import Path
 VERSION_A = "0.0.1"
 VERSION_B = "0.0.2"
 DEFAULT_PORT = 18765
-SCENARIOS = ("good", "crash", "hang", "never-runs", "crash-on-screen")
+SCENARIOS = ("good", "crash", "hang", "never-runs", "crash-on-screen", "unwatched")
+# Next to config.toml; the drill's builds read what to break from it
+# (src-tauri/src/update_drill.rs).
+BREAK_FILE = "jamjam-update-drill-break"
 REPO = Path(__file__).resolve().parent.parent
 
 # How long each outcome may take. The watcher gives a new version 180 s to say
 # it is up, and the Windows installer runs inside the 180 s it gives a start.
-OUTCOME_LIMIT = {"good": 300, "crash": 240, "hang": 360, "never-runs": 360, "crash-on-screen": 240}
+OUTCOME_LIMIT = {
+    "good": 300,
+    "crash": 240,
+    "hang": 360,
+    "never-runs": 360,
+    "crash-on-screen": 240,
+    "unwatched": 300,
+}
 # How long a version put back is watched for installing the given-up one again.
 NO_REINSTALL_WATCH = 40
 # How long the version kept must stay up once its screen is: past the 10 s a
@@ -230,12 +243,8 @@ class Offer:
         shutil.copy2(builds.b_update, self.dir / builds.b_update.name)
         url = f"http://127.0.0.1:{port}/{builds.b_update.name}"
         signature = builds.b_signature.read_text(encoding="utf-8").strip()
-        manifest = {
-            "version": VERSION_B,
-            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "platforms": {key: {"url": url, "signature": signature} for key in builds.platform_keys},
-        }
-        (self.dir / "latest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        self.platforms = {key: {"url": url, "signature": signature} for key in builds.platform_keys}
+        self.publish(reports_started=True)
         self.requests: list[str] = []
         offer = self
 
@@ -248,6 +257,19 @@ class Offer:
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def publish(self, reports_started: bool) -> None:
+        """Writes B's latest.json as the release workflow does
+        (scripts/make-update-manifest.sh), or as a release made before the
+        previous version could be kept did: without `reports_started`."""
+        manifest: dict = {
+            "version": VERSION_B,
+            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "platforms": self.platforms,
+        }
+        if reports_started:
+            manifest["reports_started"] = True
+        (self.dir / "latest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     def close(self) -> None:
         self.server.shutdown()
@@ -266,7 +288,7 @@ class App:
         self.run_id = uuid.uuid4().hex
         self.output = work / "app-output.log"
 
-    def env(self, breaking: str | None) -> dict[str, str]:
+    def env(self) -> dict[str, str]:
         env = dict(os.environ)
         env["HOME"] = str(self.places.home)
         # The places above are the ones a home of their own gives.
@@ -278,9 +300,6 @@ class App:
             env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
         # Every process of this drill carries this, to be found and ended.
         env["JAMJAM_UPDATE_DRILL_RUN"] = self.run_id
-        env.pop("JAMJAM_UPDATE_DRILL_BREAK", None)
-        if breaking:
-            env["JAMJAM_UPDATE_DRILL_BREAK"] = f"{VERSION_B}:{breaking}"
         return env
 
     def install_a(self) -> None:
@@ -299,7 +318,7 @@ class App:
         if not program.is_file():
             raise DrillFailed(f"A was installed but {program} is not there")
 
-    def start(self, breaking: str | None) -> None:
+    def start(self) -> None:
         kwargs: dict = {}
         if sys.platform == "win32":
             kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -308,7 +327,7 @@ class App:
         with self.output.open("ab") as out:
             subprocess.Popen(
                 [str(self.places.installed_program)],
-                env=self.env(breaking),
+                env=self.env(),
                 stdin=subprocess.DEVNULL,
                 stdout=out,
                 stderr=subprocess.STDOUT,
@@ -461,9 +480,17 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
     look = Look(places)
     fresh(places, app)
     a_hash = look.installed()
-    breaking = None if name == "good" else name
+    # What to break is read by the drill's builds from a file next to the
+    # settings: the version the Windows installer starts does not carry the
+    # drill's environment.
+    told = places.config.parent / BREAK_FILE
+    if name in ("good", "unwatched"):
+        told.unlink(missing_ok=True)
+    else:
+        told.write_text(f"{VERSION_B}:{name}", encoding="utf-8")
+    offer.publish(reports_started=name != "unwatched")
     offer.requests.clear()
-    app.start(breaking)
+    app.start()
     wait_for("A starts", 60, lambda: look.starts(VERSION_A) >= 1)
 
     if name == "good":
@@ -481,6 +508,19 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
         # newest release: it finds nothing newer and installs nothing.
         stays_up(app, look, VERSION_B, screens=1)
         expect(not look.trial_open(), "B opened no trial of its own")
+        expect(look.starts(VERSION_B) == 1, f"{VERSION_B} did not restart")
+    elif name == "unwatched":
+        wait_for(f"{VERSION_B} starts", OUTCOME_LIMIT[name], lambda: look.starts(VERSION_B) >= 1)
+        expect(
+            f"{VERSION_B} does not say when it has started" in look.app_log(),
+            "A says it installs B without keeping itself",
+        )
+        expect(look.installed() not in (None, a_hash), "B is what is installed")
+        stays_up(app, look, VERSION_B, screens=1)
+        expect(
+            look.watch_log() == "" and not look.trial_open() and not look.slot_left(),
+            "no trial was opened and nothing of A was kept",
+        )
         expect(look.starts(VERSION_B) == 1, f"{VERSION_B} did not restart")
     else:
         wait_for(
@@ -540,7 +580,9 @@ def run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    work = Path(tempfile.mkdtemp(prefix="update-drill-"))
+    # Without a symlink on the way: the updater does not replace an app whose
+    # path has one, as the temporary folder's has on macOS (/var).
+    work = Path(tempfile.mkdtemp(prefix="update-drill-")).resolve()
     if sys.platform in ("darwin", "win32"):
         home = Path.home()
     else:

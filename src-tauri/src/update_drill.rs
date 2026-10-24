@@ -2,13 +2,17 @@
 //! ADR-089).
 //!
 //! The drill installs one build over another and checks that a release that
-//! cannot start is taken out again. `JAMJAM_UPDATE_DRILL_BREAK=<version>:<how>`
-//! makes the build of that version fail in one of the ways a broken release
-//! can; every other version starts as usual, so the version put back is not
-//! broken too. Compiled into the drill's builds only (the `update-drill`
-//! feature), never into a release.
+//! cannot start is taken out again. The file [`FILE`] next to `config.toml`,
+//! holding `<version>:<how>`, makes the build of that version fail in one of
+//! the ways a broken release can; every other version starts as usual, so the
+//! version put back is not broken too. Compiled into the drill's builds only
+//! (the `update-drill` feature), never into a release.
+//!
+//! A file and not an environment variable: the Windows installer starts the
+//! version it installed through the shell, which does not carry the
+//! environment the drill started the first version with.
 
-const ENV_VAR: &str = "JAMJAM_UPDATE_DRILL_BREAK";
+const FILE: &str = "jamjam-update-drill-break";
 
 /// How far the start has come.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,10 +28,12 @@ pub(crate) enum Stage {
 
 /// Fails the start of `version` here when the drill asked for it.
 pub(crate) fn at(stage: Stage, version: &str) {
-    let Some(asked) = std::env::var(ENV_VAR).ok() else {
+    let Some(asked) =
+        jamjam::config::config_dir().and_then(|dir| std::fs::read_to_string(dir.join(FILE)).ok())
+    else {
         return;
     };
-    match how(&asked, version, stage) {
+    match how(asked.trim(), version, stage) {
         Some(Break::Exit) => std::process::exit(127),
         // What a panic while starting ends as.
         Some(Break::Crash) => std::process::exit(101),

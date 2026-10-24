@@ -2,8 +2,8 @@
 # Checks that a built app can be broken on purpose by the update drill only
 # when it is one of the drill's builds (ADR-089).
 #
-# The `update-drill` feature lets an environment variable make the app fail to
-# start. It leaves the variable's name in the binary; this looks for it, so a
+# The `update-drill` feature lets a file next to the settings make the app fail
+# to start. It leaves the file's name in the binary; this looks for it, so a
 # release that has the code, or a drill build that lost it, is stopped.
 #
 # Usage:
@@ -13,7 +13,7 @@ set -euo pipefail
 
 binary=${1:?usage: $0 <app binary> <present|absent>}
 expected=${2:?usage: $0 <app binary> <present|absent>}
-marker='JAMJAM_UPDATE_DRILL_BREAK'
+marker='jamjam-update-drill-break'
 
 case "$expected" in
   present | absent) ;;
