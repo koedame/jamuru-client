@@ -463,8 +463,10 @@ export type WasapiReason =
   | "faster_available"
   /** Low latency: the driver offers a shorter period than the standard one */
   | "shorter_period"
-  /** Low latency: the driver's smallest period is the standard one */
+  /** Low latency or exclusive: the device's smallest period that way is the standard one */
   | "same_period"
+  /** Low latency or exclusive: a shorter period, but a frame of the buffer is longer than the standard period */
+  | "buffer_longer"
   /** Low latency: the system has no low-latency shared mode */
   | "no_low_latency_mode"
   /** Exclusive: the devices open in exclusive mode */

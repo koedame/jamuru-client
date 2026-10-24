@@ -190,6 +190,40 @@ describe('the WASAPI mode in the Devices tab', () => {
   });
 
   // Verifies: REQ-GUI-031
+  it('a saved exclusive mode that only one device opens shows that device at the exclusive period and keeps the caution', async () => {
+    fakeBackend(
+      audioSettings({
+        buffer_size: 64,
+        sample_rate: 48000,
+        wasapi: {
+          mode: 'exclusive',
+          advice: {
+            applies: true,
+            modes: [
+              advice('shared', 'recommended', 'nothing_faster', 10000),
+              advice('low_latency', 'not_recommended', 'same_period', 10000),
+              {
+                mode: 'exclusive',
+                verdict: 'unavailable',
+                reason: 'no_exclusive_format',
+                input_period_us: null,
+                output_period_us: 3000,
+              },
+            ],
+          },
+        },
+      })
+    );
+    render(<SettingsPanelAdapter initialTab="devices" />);
+
+    const exclusive = await option(text.modes.exclusive);
+    expect(exclusive.radio.checked).toBe(true);
+    expect(within(exclusive.card).getByText(text.exclusiveCaution)).toBeInTheDocument();
+    expect(latency(en.settings.devices.latencyInput)).toBe('10.0ms');
+    expect(latency(en.settings.devices.latencyOutput)).toBe('3.0ms');
+  });
+
+  // Verifies: REQ-GUI-031
   it('with an ASIO driver on both sides, the choice is replaced by a note that it is not used', async () => {
     fakeBackend(audioSettings({ wasapi: { mode: 'exclusive', advice: { applies: false, modes: [] } } }));
     render(<SettingsPanelAdapter initialTab="devices" />);

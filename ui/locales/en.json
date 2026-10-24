@@ -283,6 +283,7 @@
           "faster_available": "With this device, another mode gives lower latency",
           "shorter_period": "Runs at a shorter period than the standard one. Other apps can still play through the same device",
           "same_period": "This device's driver doesn't offer a period shorter than the standard one, so the latency stays the same",
+          "buffer_longer": "The buffer is longer than the standard period, so the latency stays the same. A smaller buffer lowers it",
           "no_low_latency_mode": "Not available on this version of Windows",
           "opens_exclusively": "Gives the lowest latency",
           "no_exclusive_format": "This device has no format it can be opened in exclusively",
