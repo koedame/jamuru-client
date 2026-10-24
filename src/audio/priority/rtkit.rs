@@ -164,8 +164,15 @@ mod tests {
 
     /// Answers as rtkit does: `Get` for its three properties and the two thread calls. Anything
     /// else, `GetAll` included, is an unknown method, as it is for the real one.
-    fn answer(connection: &Connection, calls: &Calls, highest: i32) {
-        let mut messages = zbus::MessageStream::from(connection);
+    ///
+    /// `messages` is made by the caller before anything can call: a stream only sees what
+    /// arrives after it exists, so one made on this thread could miss a call that came first.
+    fn answer(
+        connection: &Connection,
+        mut messages: zbus::MessageStream,
+        calls: &Calls,
+        highest: i32,
+    ) {
         while let Some(message) = block_on(messages.next()) {
             let Ok(message) = message else { break };
             let header = message.header();
@@ -236,10 +243,13 @@ mod tests {
         _service: Connection,
         client: RealtimeKit,
         calls: Calls,
+        /// Last, so the daemon is gone before the next test may count children
+        _turn: std::sync::MutexGuard<'static, ()>,
     }
 
     impl Bus {
         fn start(highest: i32) -> Self {
+            let turn = crate::perf::child_process_turn();
             let mut daemon = Command::new("dbus-daemon")
                 .args(["--session", "--nofork", "--print-address"])
                 .stdout(Stdio::piped())
@@ -255,7 +265,8 @@ mod tests {
                 block_on(Builder::address(address.as_str()).name(DESTINATION).build()).unwrap();
             let served = service.clone();
             let served_calls = calls.clone();
-            std::thread::spawn(move || answer(&served, &served_calls, highest));
+            let messages = zbus::MessageStream::from(&service);
+            std::thread::spawn(move || answer(&served, messages, &served_calls, highest));
             let client = RealtimeKit::on(
                 &block_on(
                     Builder::address(address.as_str())
@@ -270,6 +281,7 @@ mod tests {
                 _service: service,
                 client,
                 calls,
+                _turn: turn,
             }
         }
     }
