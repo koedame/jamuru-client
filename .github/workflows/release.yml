@@ -234,6 +234,10 @@ jobs:
         shell: bash
         run: scripts/check-debug-remote.sh "src-tauri/target/${{ matrix.target }}/release/jamuru-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" ${{ contains(needs.prepare.outputs.tag, '-') && 'present' || 'absent' }}
 
+      - name: Check the update drill cannot break a release
+        shell: bash
+        run: scripts/check-update-drill.sh "src-tauri/target/${{ matrix.target }}/release/jamuru-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" absent
+
       - name: Check the element picker is in a beta and only in a beta
         shell: bash
         run: scripts/check-element-grab.sh ui/dist ${{ contains(needs.prepare.outputs.tag, '-') && 'present' || 'absent' }}
@@ -282,10 +286,17 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
 
+  # Every system installs this source's update over an earlier build of it,
+  # and puts that build back when the update cannot start (ADR-089). Nothing
+  # is published until it passes on all of them.
+  update-drill:
+    name: Update drill
+    uses: ./.github/workflows/update-drill.yml
+
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [prepare, build]
+    needs: [prepare, build, update-drill]
     # A run started by hand is a rehearsal: it stops after the artifacts are
     # uploaded. A `v*` tag publishes a release.
     if: needs.prepare.outputs.tag != ''

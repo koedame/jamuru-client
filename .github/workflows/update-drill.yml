@@ -1,0 +1,120 @@
+name: Update drill
+
+# Installs real packages over each other on each system and checks that an
+# update that cannot start is taken out again, and the version before it put
+# back and started (ADR-089, scripts/update-drill.py). The release workflow
+# runs this and publishes nothing until it passes on every system.
+on:
+  workflow_call:
+  pull_request:
+    paths:
+      - 'src-tauri/src/updater.rs'
+      - 'src-tauri/src/updater/**'
+      - 'src-tauri/src/update_drill.rs'
+      - 'src-tauri/src/restart.rs'
+      - 'src-tauri/src/lib.rs'
+      - 'src-tauri/tauri.conf.json'
+      - 'src-tauri/tauri.updater.conf.json'
+      - 'src-tauri/Cargo.toml'
+      - 'src-tauri/Cargo.lock'
+      - 'scripts/update-drill.py'
+      - '.github/workflows/update-drill.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    name: Update drill (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            program: jamuru-app
+            python: python3
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            program: jamuru-app
+            python: python3
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            program: jamuru-app.exe
+            python: python
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libssl-dev \
+            pkg-config \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            fuse3 \
+            xvfb
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # The release build's caches, which the weekly rehearsal of the release
+      # saves; the drill's builds differ from it only in the app itself.
+      - name: Restore cargo registry
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-
+
+      - name: Restore cargo git
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cargo/git
+          key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-git-
+
+      - name: Restore cargo target
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            src-tauri/target
+            !src-tauri/target/**/bundle
+          key: cargo-target-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-target-release-${{ matrix.target }}-
+
+      - name: Install Tauri CLI
+        shell: bash
+        run: scripts/install-tauri-cli.sh
+
+      - name: Build the drill's two versions
+        shell: bash
+        run: ${{ matrix.python }} scripts/update-drill.py build --out "${RUNNER_TEMP}/drill" --target ${{ matrix.target }}
+
+      - name: Check the drill's builds can be broken on purpose
+        shell: bash
+        run: scripts/check-update-drill.sh "src-tauri/target/${{ matrix.target }}/release/${{ matrix.program }}" present
+
+      # Mounted with FUSE, as on a person's desktop.
+      - name: Run the drill (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a python3 scripts/update-drill.py run --fuse --a "${RUNNER_TEMP}/drill/a" --b "${RUNNER_TEMP}/drill/b"
+
+      - name: Run the drill
+        if: matrix.os != 'ubuntu-latest'
+        shell: bash
+        run: ${{ matrix.python }} scripts/update-drill.py run --a "${RUNNER_TEMP}/drill/a" --b "${RUNNER_TEMP}/drill/b"

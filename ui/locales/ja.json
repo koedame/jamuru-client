@@ -948,5 +948,15 @@
       "copied": "デバッグ情報をコピーしました",
       "failed": "デバッグ情報をコピーできませんでした"
     }
+  },
+  "startupUpdate": {
+    "checking": "アップデートを確認しています",
+    "downloading": "新しい版をダウンロードしています",
+    "percent": "{{percent}}%",
+    "installing": "新しい版を入れています",
+    "restarting": "再起動しています",
+    "note": "終わると jamuru が開きます。",
+    "skip": "待たずに開く",
+    "progressLabel": "アップデートの進み具合"
   }
 }
