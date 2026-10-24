@@ -109,12 +109,17 @@ pub enum Reason {
     FasterAvailable,
     /// Low latency: the driver offers a shorter period than the standard one
     ShorterPeriod,
-    /// Low latency: the driver's smallest period is the standard one, so it
-    /// runs as the standard way does
+    /// Low latency or exclusive: the device's smallest period in that way is
+    /// the standard one, so it runs as the standard way does
     SamePeriod,
+    /// Low latency or exclusive: the device runs at a shorter period that
+    /// way, but a frame of the session's buffer is longer than the standard
+    /// period, so the latency is the buffer's either way
+    BufferLonger,
     /// Low latency: the system has no low-latency shared mode
     NoLowLatencyMode,
-    /// Exclusive: the devices open in exclusive mode
+    /// Exclusive: the devices open in exclusive mode, sooner than the
+    /// standard way
     OpensExclusively,
     /// Exclusive: a device has no format it opens in exclusive mode
     NoExclusiveFormat,
@@ -149,9 +154,11 @@ pub struct Advice {
 /// What one way of opening does with one device
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Outcome {
-    /// Opens it, at this period
+    /// Opens it, at `period_us` for the session's frame. `floor_us` is the
+    /// shortest period the device runs at that way, whatever the frame.
     Opens {
         period_us: u32,
+        floor_us: u32,
     },
     Refused(Reason),
     Unknown,
@@ -161,9 +168,11 @@ enum Outcome {
 /// `sample_rate` with frames of `buffer_frames`.
 ///
 /// Exclusive and low latency are each recommended when they open every
-/// WASAPI device chosen and are faster than the standard way. The standard
-/// way is recommended when neither is. A way that leaves a device it cannot
-/// open to the standard way is not offered: it would not be what it says.
+/// WASAPI device chosen and a device then hands over its frames sooner than
+/// the standard way (a side's latency is its period or the frame, whichever
+/// is longer). The standard way is recommended when neither is. A way that
+/// leaves a device it cannot open to the standard way is not offered: it
+/// would not be what it says.
 pub fn advise(input: Endpoint, output: Endpoint, sample_rate: u32, buffer_frames: u32) -> Advice {
     let sides = [input, output];
     if sides.iter().all(|side| matches!(side, Endpoint::NotWasapi)) {
@@ -181,28 +190,52 @@ pub fn advise(input: Endpoint, output: Endpoint, sample_rate: u32, buffer_frames
     };
     let standard = outcomes(|caps, _, _| Outcome::Opens {
         period_us: caps.shared_period_us,
+        floor_us: caps.shared_period_us,
     });
     let low_latency = outcomes(low_latency_outcome);
     let exclusive = outcomes(exclusive_outcome);
-
-    let exclusive_advice = judge(WasapiMode::Exclusive, &exclusive, |_| {
-        (Verdict::Recommended, Reason::OpensExclusively)
-    });
-    let low_latency_advice = judge(WasapiMode::LowLatency, &low_latency, |periods| {
-        let shorter =
-            periods
-                .iter()
-                .zip(&standard)
-                .any(|(period, standard)| match (period, standard) {
-                    (Some(period), Some(Outcome::Opens { period_us })) => period < period_us,
-                    _ => false,
-                });
-        if shorter {
-            (Verdict::Recommended, Reason::ShorterPeriod)
-        } else {
-            (Verdict::NotRecommended, Reason::SamePeriod)
+    let frame_us = frames_to_us(buffer_frames, sample_rate);
+    let against_standard = |faster: Reason| {
+        let standard = &standard;
+        move |outcomes: &[Option<Outcome>; 2]| {
+            let sides = || {
+                outcomes
+                    .iter()
+                    .zip(standard)
+                    .filter_map(|sides| match sides {
+                        (
+                            Some(Outcome::Opens {
+                                period_us,
+                                floor_us,
+                            }),
+                            Some(Outcome::Opens {
+                                period_us: standard_us,
+                                ..
+                            }),
+                        ) => Some((*period_us, *floor_us, *standard_us)),
+                        _ => None,
+                    })
+            };
+            if sides().any(|(period, _, standard)| period.max(frame_us) < standard.max(frame_us)) {
+                (Verdict::Recommended, faster)
+            } else if sides().any(|(_, floor, standard)| floor < standard) {
+                (Verdict::NotRecommended, Reason::BufferLonger)
+            } else {
+                (Verdict::NotRecommended, Reason::SamePeriod)
+            }
         }
-    });
+    };
+
+    let exclusive_advice = judge(
+        WasapiMode::Exclusive,
+        &exclusive,
+        against_standard(Reason::OpensExclusively),
+    );
+    let low_latency_advice = judge(
+        WasapiMode::LowLatency,
+        &low_latency,
+        against_standard(Reason::ShorterPeriod),
+    );
     let faster = [&exclusive_advice, &low_latency_advice]
         .iter()
         .any(|advice| advice.verdict == Verdict::Recommended);
@@ -221,14 +254,14 @@ pub fn advise(input: Endpoint, output: Endpoint, sample_rate: u32, buffer_frames
 
 /// The advice on `mode` from what it does with each side. A side it refuses
 /// makes it unavailable, one not known makes it not recommended, and
-/// otherwise `opens` decides from the periods it opens the sides at.
+/// otherwise `opens` decides from how it opens the sides.
 fn judge(
     mode: WasapiMode,
     outcomes: &[Option<Outcome>; 2],
-    opens: impl FnOnce(&[Option<u32>; 2]) -> (Verdict, Reason),
+    opens: impl FnOnce(&[Option<Outcome>; 2]) -> (Verdict, Reason),
 ) -> ModeAdvice {
     let periods = outcomes.map(|outcome| match outcome {
-        Some(Outcome::Opens { period_us }) => Some(period_us),
+        Some(Outcome::Opens { period_us, .. }) => Some(period_us),
         _ => None,
     });
     let refused = outcomes.iter().find_map(|outcome| match outcome {
@@ -239,7 +272,7 @@ fn judge(
     let (verdict, reason) = match (refused, unknown) {
         (Some(reason), _) => (Verdict::Unavailable, reason),
         (None, true) if mode != WasapiMode::Shared => (Verdict::NotRecommended, Reason::Unknown),
-        _ => opens(&periods),
+        _ => opens(outcomes),
     };
     ModeAdvice {
         mode,
@@ -258,6 +291,7 @@ fn low_latency_outcome(caps: &EndpointCaps, sample_rate: u32, buffer_frames: u32
                 low_latency_period(&periods, caps.mix_rate, sample_rate, buffer_frames),
                 caps.mix_rate,
             ),
+            floor_us: frames_to_us(periods.min, caps.mix_rate),
         },
     }
 }
@@ -268,6 +302,7 @@ fn exclusive_outcome(caps: &EndpointCaps, sample_rate: u32, buffer_frames: u32) 
     }
     Outcome::Opens {
         period_us: exclusive_period_us(caps.exclusive_period_us, buffer_frames, sample_rate),
+        floor_us: caps.exclusive_period_us,
     }
 }
 
@@ -361,11 +396,21 @@ pub(crate) struct Noted {
     note: u64,
 }
 
-/// Records how the `side` device was opened, replacing what was recorded
-pub(crate) fn note_opened(side: DeviceSide, way: OpenedWay) -> Noted {
-    let note = NEXT_NOTE.fetch_add(1, Ordering::Relaxed);
+/// The number of a stream about to be asked for, for [`note_opened`]
+pub(crate) fn next_note() -> u64 {
+    NEXT_NOTE.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Records how the `side` device was opened by the stream numbered `note`
+/// ([`next_note`], taken when the stream was asked for). A stream asked for
+/// later that has recorded already stays recorded: an open that finishes
+/// late does not replace the stream that replaced it.
+pub(crate) fn note_opened(side: DeviceSide, note: u64, way: OpenedWay) -> Noted {
     let mut opened = OPENED.lock().unwrap_or_else(|e| e.into_inner());
-    opened[slot(side)] = Some((note, way));
+    let slot = &mut opened[slot(side)];
+    if slot.is_none_or(|(current, _)| current < note) {
+        *slot = Some((note, way));
+    }
     Noted { side, note }
 }
 
@@ -424,23 +469,18 @@ impl Endpoints {
 
 /// Reads what the devices `ids` offer through WASAPI, without opening a
 /// stream. Waits for the drivers to answer (at most `LIST_TIMEOUT`), so it is
-/// called off the async runtime. A device that is not a WASAPI one is
-/// skipped, and off Windows nothing is read.
+/// called off the async runtime. A device whose driver does not answer is
+/// given what it said the last time, as the listing gives the last list. A
+/// device that is not a WASAPI one is skipped, and off Windows nothing is
+/// read.
 pub fn read_endpoints(ids: &[(DeviceSide, String)]) -> Endpoints {
     let ids: Vec<_> = ids
         .iter()
         .filter(|(_, id)| is_wasapi_id(id))
         .cloned()
         .collect();
-    // A driver that does not answer leaves its device unknown, as the
-    // listing leaves it out
     #[cfg(target_os = "windows")]
-    let caps = super::driver::bounded(
-        "reading the WASAPI devices",
-        super::driver::LIST_TIMEOUT,
-        move || super::wasapi::probe(&ids),
-    )
-    .unwrap_or_default();
+    let caps = super::wasapi::probe(ids);
     #[cfg(not(target_os = "windows"))]
     let caps = {
         let _ = ids;
@@ -617,6 +657,29 @@ mod tests {
         assert_eq!(low_latency.verdict, Verdict::Recommended);
         assert_eq!(low_latency.reason, Reason::ShorterPeriod);
         assert_eq!(low_latency.input_period_us, Some(2_667));
+    }
+
+    /// Verifies: REQ-GUI-031
+    #[test]
+    fn when_a_frame_is_longer_than_the_standard_period_no_faster_way_is_recommended() {
+        let device = small_period_device();
+
+        // 1024 frames at 48 kHz: 21.3 ms, past the standard 10 ms
+        let advice = advise(
+            Endpoint::Known(&device),
+            Endpoint::Known(&device),
+            48000,
+            1024,
+        );
+
+        for mode in [WasapiMode::Exclusive, WasapiMode::LowLatency] {
+            let faster = advice_on(&advice, mode);
+            assert_eq!(faster.verdict, Verdict::NotRecommended, "{:?}", mode);
+            assert_eq!(faster.reason, Reason::BufferLonger, "{:?}", mode);
+        }
+        let standard = advice_on(&advice, WasapiMode::Shared);
+        assert_eq!(standard.verdict, Verdict::Recommended);
+        assert_eq!(standard.reason, Reason::NothingFaster);
     }
 
     /// Verifies: REQ-GUI-031
@@ -802,9 +865,10 @@ mod tests {
             opened: WasapiMode::Exclusive,
             failure: None,
         };
-        let old = note_opened(DeviceSide::Output, way);
+        let old = note_opened(DeviceSide::Output, next_note(), way);
         let replacement = note_opened(
             DeviceSide::Output,
+            next_note(),
             OpenedWay {
                 opened: WasapiMode::Shared,
                 failure: Some(OpenFailure::InUse),
@@ -819,5 +883,33 @@ mod tests {
         );
         drop(replacement);
         assert_eq!(opened_ways().output, None);
+    }
+
+    /// Verifies: REQ-AUD-042
+    #[test]
+    fn when_an_open_asked_for_before_its_replacement_finishes_after_it_the_replacement_stays_recorded(
+    ) {
+        let way = OpenedWay {
+            asked: WasapiMode::Exclusive,
+            opened: WasapiMode::Exclusive,
+            failure: None,
+        };
+        let late = next_note();
+        let replacement = note_opened(DeviceSide::Input, next_note(), way);
+
+        let late = note_opened(
+            DeviceSide::Input,
+            late,
+            OpenedWay {
+                opened: WasapiMode::Shared,
+                failure: Some(OpenFailure::InUse),
+                ..way
+            },
+        );
+        assert_eq!(opened_ways().input, Some(way));
+        drop(late);
+        assert_eq!(opened_ways().input, Some(way));
+        drop(replacement);
+        assert_eq!(opened_ways().input, None);
     }
 }

@@ -21,7 +21,9 @@ use super::heartbeat::Heartbeat;
 use super::open::DeviceSide;
 use super::playout::widest_frame_samples;
 use super::resampler::{CaptureResampler, ResamplerError};
-use super::wasapi_mode::{note_opened, opened_through_wasapi, Noted, OpenedWay, WasapiMode};
+use super::wasapi_mode::{
+    next_note, note_opened, opened_through_wasapi, Noted, OpenedWay, WasapiMode,
+};
 
 /// Events that can occur during audio streaming
 #[derive(Debug, Clone)]
@@ -297,6 +299,9 @@ impl AudioEngine {
         let wanted = device_id.cloned();
         let heartbeat = self.heartbeat.clone();
         let serial = fault::stream_serial();
+        // Numbered now, so an open that finishes late is told from the one
+        // that replaced it
+        let note = next_note();
 
         // Error callback with device disconnection detection
         let event_tx = self.event_tx.clone();
@@ -366,6 +371,7 @@ impl AudioEngine {
                             _stream: stream,
                             _way: note_opened(
                                 DeviceSide::Input,
+                                note,
                                 OpenedWay {
                                     asked: mode,
                                     opened: mode,
@@ -441,6 +447,7 @@ impl AudioEngine {
                 _way: through_wasapi.then(|| {
                     note_opened(
                         DeviceSide::Input,
+                        note,
                         OpenedWay {
                             asked: mode,
                             opened: WasapiMode::Shared,
@@ -531,6 +538,9 @@ impl AudioEngine {
             wasapi_fault_handler(self.event_tx.clone(), AudioEvent::OutputDeviceDisconnected);
         let heartbeat = self.heartbeat.clone();
         let serial = fault::stream_serial();
+        // Numbered now, so an open that finishes late is told from the one
+        // that replaced it
+        let note = next_note();
 
         // Opened on a thread of its own, like capture
         let host = StreamHost::open("output stream", self.open_timeout, move || {
@@ -574,6 +584,7 @@ impl AudioEngine {
                             _stream: stream,
                             _way: note_opened(
                                 DeviceSide::Output,
+                                note,
                                 OpenedWay {
                                     asked: mode,
                                     opened: mode,
@@ -649,6 +660,7 @@ impl AudioEngine {
                 _way: through_wasapi.then(|| {
                     note_opened(
                         DeviceSide::Output,
+                        note,
                         OpenedWay {
                             asked: mode,
                             opened: WasapiMode::Shared,
