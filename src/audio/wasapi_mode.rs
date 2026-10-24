@@ -77,6 +77,10 @@ pub struct EndpointCaps {
     /// The sample rates the device opens at in exclusive mode, of those a
     /// session runs at
     pub exclusive_rates: Vec<u32>,
+    /// Whether Windows lets apps take the device exclusively (a setting in
+    /// the device's properties in the system's sound settings). When it does
+    /// not, `exclusive_rates` is empty.
+    pub exclusive_allowed: bool,
 }
 
 /// A device of a session, as far as WASAPI is concerned
@@ -123,6 +127,9 @@ pub enum Reason {
     OpensExclusively,
     /// Exclusive: a device has no format it opens in exclusive mode
     NoExclusiveFormat,
+    /// Exclusive: Windows does not let apps take a device exclusively (a
+    /// setting in the device's properties in the system's sound settings)
+    ExclusiveNotAllowed,
     /// What a device offers could not be read. Choosing the way tries it; a
     /// device it does not open is opened the standard way.
     Unknown,
@@ -297,6 +304,9 @@ fn low_latency_outcome(caps: &EndpointCaps, sample_rate: u32, buffer_frames: u32
 }
 
 fn exclusive_outcome(caps: &EndpointCaps, sample_rate: u32, buffer_frames: u32) -> Outcome {
+    if !caps.exclusive_allowed {
+        return Outcome::Refused(Reason::ExclusiveNotAllowed);
+    }
     if caps.exclusive_rates.is_empty() {
         return Outcome::Refused(Reason::NoExclusiveFormat);
     }
@@ -599,6 +609,7 @@ mod tests {
             }),
             exclusive_period_us: 3_000,
             exclusive_rates: vec![44100, 48000],
+            exclusive_allowed: true,
         }
     }
 
@@ -728,6 +739,32 @@ mod tests {
         let exclusive = advice_on(&advice, WasapiMode::Exclusive);
         assert_eq!(exclusive.verdict, Verdict::Unavailable);
         assert_eq!(exclusive.reason, Reason::NoExclusiveFormat);
+        assert_eq!(
+            advice_on(&advice, WasapiMode::Shared).verdict,
+            Verdict::Recommended
+        );
+    }
+
+    /// Verifies: REQ-GUI-031
+    #[test]
+    fn when_windows_does_not_allow_exclusive_control_of_the_output_exclusive_is_unavailable() {
+        let microphone = fixed_period_codec();
+        let speakers = EndpointCaps {
+            exclusive_rates: Vec::new(),
+            exclusive_allowed: false,
+            ..fixed_period_codec()
+        };
+
+        let advice = advise(
+            Endpoint::Known(&microphone),
+            Endpoint::Known(&speakers),
+            48000,
+            64,
+        );
+
+        let exclusive = advice_on(&advice, WasapiMode::Exclusive);
+        assert_eq!(exclusive.verdict, Verdict::Unavailable);
+        assert_eq!(exclusive.reason, Reason::ExclusiveNotAllowed);
         assert_eq!(
             advice_on(&advice, WasapiMode::Shared).verdict,
             Verdict::Recommended
