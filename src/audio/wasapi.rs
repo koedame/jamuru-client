@@ -44,8 +44,8 @@ use super::driver::{bounded, LIST_TIMEOUT};
 use super::error::AudioError;
 use super::open::DeviceSide;
 use super::wasapi_mode::{
-    low_latency_period, EndpointCaps, OpenFailure, SampleLayout, SharedPeriods, WasapiMode,
-    WASAPI_ID_PREFIX,
+    frames_to_us, low_latency_period, EndpointCaps, OpenFailure, SampleLayout, SharedPeriods,
+    WasapiMode, WASAPI_ID_PREFIX,
 };
 use crate::config::VALID_SAMPLE_RATES;
 
@@ -109,6 +109,14 @@ pub(crate) struct NotOpened<F> {
 pub(crate) struct Stream {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    period_us: u32,
+}
+
+impl Stream {
+    /// The period the stream runs at, in microseconds
+    pub(crate) fn period_us(&self) -> u32 {
+        self.period_us
+    }
 }
 
 impl Drop for Stream {
@@ -191,7 +199,7 @@ where
 {
     let endpoint = endpoint.map(|id| endpoint_id(&id.0));
     let stop = Arc::new(AtomicBool::new(false));
-    let (ready_tx, ready_rx) = mpsc::channel::<Result<(), NotOpened<F>>>();
+    let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, NotOpened<F>>>();
     let thread_stop = stop.clone();
     let name = match flow {
         Flow::Capture => "audio-wasapi-capture",
@@ -231,7 +239,7 @@ where
                 let _ = ready_tx.send(Err(not_opened(failure_of("start", &e), None)));
                 return;
             }
-            if ready_tx.send(Ok(())).is_ok() {
+            if ready_tx.send(Ok(opened.period_us)).is_ok() {
                 super::priority::promote_callback_thread(match flow {
                     Flow::Capture => "capture",
                     Flow::Render => "playback",
@@ -252,9 +260,10 @@ where
         }
     };
     match ready_rx.recv() {
-        Ok(Ok(())) => Ok(Stream {
+        Ok(Ok(period_us)) => Ok(Stream {
             stop,
             thread: Some(thread),
+            period_us,
         }),
         Ok(Err(not_opened)) => {
             let _ = thread.join();
@@ -322,6 +331,8 @@ struct Opened {
     format: Format,
     /// The frames the device's buffer holds
     buffer_frames: u32,
+    /// The period the stream runs at, in microseconds
+    period_us: u32,
     /// Exclusive streams fill or empty the whole buffer each period
     exclusive: bool,
     /// For a stream on the system default device: whether Windows has
@@ -645,7 +656,7 @@ fn open_client(
     wanted: Wanted,
 ) -> Result<Opened, (AudioError, OpenFailure)> {
     let device = device_of(flow, endpoint)?;
-    let (client, layout, format) = match mode {
+    let (client, layout, format, period_us) = match mode {
         WasapiMode::Exclusive => open_exclusive(&device, wanted)?,
         WasapiMode::LowLatency => open_low_latency(&device, wanted)?,
         WasapiMode::Shared => {
@@ -694,6 +705,7 @@ fn open_client(
             layout,
             format,
             buffer_frames,
+            period_us,
             exclusive: mode == WasapiMode::Exclusive,
             watch,
         })
@@ -705,7 +717,7 @@ fn open_client(
 fn open_exclusive(
     device: &IMMDevice,
     wanted: Wanted,
-) -> Result<(IAudioClient, SampleLayout, Format), (AudioError, OpenFailure)> {
+) -> Result<(IAudioClient, SampleLayout, Format, u32), (AudioError, OpenFailure)> {
     let client: IAudioClient = activate(device)?;
     let mix = mix_format(&client)?;
     if usize::from(mix.channels) < wanted.channels {
@@ -752,8 +764,8 @@ fn open_exclusive(
             )
         }
     };
-    let client = match initialize(&client, period) {
-        Ok(()) => client,
+    let (client, period) = match initialize(&client, period) {
+        Ok(()) => (client, period),
         Err(e) if e.code() == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED => {
             // The device rounds the buffer to a size of its own; the period
             // is asked again at that size, on a new client
@@ -761,9 +773,9 @@ fn open_exclusive(
             let frames = unsafe { client.GetBufferSize() }
                 .map_err(|e| failure_of("aligned buffer size", &e))?;
             let client: IAudioClient = activate(device)?;
-            initialize(&client, frames_to_hns(frames, rate))
-                .map_err(|e| failure_of("initialize", &e))?;
-            client
+            let period = frames_to_hns(frames, rate);
+            initialize(&client, period).map_err(|e| failure_of("initialize", &e))?;
+            (client, period)
         }
         Err(e) => return Err(failure_of("initialize", &e)),
     };
@@ -774,6 +786,7 @@ fn open_exclusive(
             rate,
             channels: usize::from(mix.channels),
         },
+        (period / 10) as u32,
     ))
 }
 
@@ -782,7 +795,7 @@ fn open_exclusive(
 fn open_low_latency(
     device: &IMMDevice,
     wanted: Wanted,
-) -> Result<(IAudioClient, SampleLayout, Format), (AudioError, OpenFailure)> {
+) -> Result<(IAudioClient, SampleLayout, Format, u32), (AudioError, OpenFailure)> {
     let client: IAudioClient3 = activate(device)?;
     // SAFETY: the mixer allocates the format; it is used for the calls below
     // and freed before returning
@@ -830,13 +843,13 @@ fn open_low_latency(
                 wanted.sample_rate,
                 wanted.buffer_frames,
             );
-            let client = match client.InitializeSharedAudioStream(
+            let (client, period) = match client.InitializeSharedAudioStream(
                 AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                 period,
                 format,
                 None,
             ) {
-                Ok(()) => client.clone(),
+                Ok(()) => (client.clone(), period),
                 // Another app runs the mixer at a period of its own; a stream
                 // runs at that period, on a new client (one whose initialize
                 // failed is not initialized again)
@@ -856,7 +869,7 @@ fn open_low_latency(
                             None,
                         )
                         .map_err(|e| failure_of("initialize", &e))?;
-                    retry
+                    (retry, current)
                 }
                 Err(e) => return Err(failure_of("initialize", &e)),
             };
@@ -867,12 +880,13 @@ fn open_low_latency(
                     rate: mix.rate,
                     channels: usize::from(mix.channels),
                 },
+                frames_to_us(period, mix.rate),
             ))
         })();
         CoTaskMemFree(Some(format as *const _));
-        let (client, layout, format) = opened?;
+        let (client, layout, format, period_us) = opened?;
         let client: IAudioClient = client.cast().map_err(|e| failure_of("client", &e))?;
-        Ok((client, layout, format))
+        Ok((client, layout, format, period_us))
     }
 }
 
@@ -1101,6 +1115,26 @@ fn last_read(ids: &[(DeviceSide, String)]) -> HashMap<String, EndpointCaps> {
                 .map(|caps| (id.clone(), caps.clone()))
         })
         .collect()
+}
+
+/// The period of the standard way on the device `id` (`None`: the system
+/// default), in microseconds: how often the mixer hands a stream its samples.
+/// Read on a thread of its own: the thread that opens a `cpal` stream has
+/// entered COM in a mode this module's apartment cannot share.
+pub(crate) fn shared_period_us(side: DeviceSide, id: Option<&DeviceId>) -> Option<u32> {
+    let endpoint = id.map(|id| endpoint_id(&id.0));
+    let flow = key_of(side, "").0;
+    bounded("reading the standard period", LIST_TIMEOUT, move || {
+        let _com = Com::enter().ok()?;
+        let device = device_of(flow, endpoint.as_deref()).ok()?;
+        let client: IAudioClient = activate(&device).ok()?;
+        let mut shared = 0i64;
+        // SAFETY: COM call on a thread in the apartment
+        unsafe { client.GetDevicePeriod(Some(&mut shared), None) }.ok()?;
+        Some((shared / 10) as u32)
+    })
+    .ok()
+    .flatten()
 }
 
 fn probe_one(flow: Flow, endpoint: &str) -> Result<EndpointCaps, (AudioError, OpenFailure)> {

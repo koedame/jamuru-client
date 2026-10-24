@@ -47,6 +47,8 @@ pub(super) struct Link {
     pub(super) announced_delay_frames: u32,
     /// The channel count the peer has been told we send
     pub(super) announced_channel_count: u8,
+    /// The periods of the input and the output the peer has been told about
+    pub(super) announced_os_periods: (Option<u32>, Option<u32>),
 }
 
 /// What every link of a session is set up with
@@ -159,6 +161,7 @@ impl LinkSetup<'_> {
             announced_delay_frames: jitter_buffer_frames,
             // Told when the link comes up
             announced_channel_count: 0,
+            announced_os_periods: (None, None),
         })
     }
 }
