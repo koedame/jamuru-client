@@ -228,7 +228,9 @@ mod armed {
             .map(Run::report)
     }
 
-    /// Never waits: a callback that finds the run being read skips its turn.
+    /// Never waits: an output callback that finds the run held skips its turn,
+    /// and the burst it would have started goes out in the next one, stamped
+    /// then.
     pub(crate) fn on_output(stereo: &mut [f32], sample_rate: u32) {
         if !ARMED.load(Ordering::Acquire) {
             return;
@@ -245,11 +247,15 @@ mod armed {
         if !ARMED.load(Ordering::Acquire) {
             return;
         }
-        let now = Instant::now();
-        if let Ok(mut run) = RUN.try_lock() {
-            if let Some(run) = run.as_mut() {
-                run.input(data, device_channels, now);
-            }
+        hear(&RUN, data, device_channels, Instant::now());
+    }
+
+    /// Waits for the run: the output callback holds it only while it writes
+    /// its frames, and an input callback that skipped its turn would lose a
+    /// burst that came back in it.
+    fn hear(run: &Mutex<Option<Run>>, data: &[f32], device_channels: usize, now: Instant) {
+        if let Some(run) = run.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            run.input(data, device_channels, now);
         }
     }
 
@@ -350,6 +356,33 @@ mod armed {
             assert_eq!(report.bursts_sent, 10);
             assert_eq!(report.bursts_heard, 0);
             assert_eq!(report.delay, None);
+        }
+
+        /// Verifies: REQ-RMT-027
+        #[test]
+        fn a_burst_that_comes_back_while_the_output_callback_holds_the_run_is_still_heard() {
+            let mut run = Run::new(params(1));
+            let t0 = Instant::now();
+            let warm_up_and_a_burst =
+                (WARM_UP.as_secs_f64() * f64::from(RATE)) as usize + BURST_FRAMES;
+            run.output(&mut vec![0.0f32; warm_up_and_a_burst * 2], RATE, t0);
+            let slot = Mutex::new(Some(run));
+            let back = t0 + WARM_UP + Duration::from_millis(7);
+
+            std::thread::scope(|scope| {
+                let held = slot.lock().unwrap();
+                let input = scope.spawn(|| hear(&slot, &[0.4, 0.4], 2, back));
+                std::thread::sleep(Duration::from_millis(20));
+                drop(held);
+                input.join().unwrap();
+            });
+
+            let report = slot.into_inner().unwrap().expect("the run").report();
+            assert_eq!(
+                report.bursts_heard, 1,
+                "the input callback waited for the run instead of skipping the burst"
+            );
+            assert_eq!(report.other_sounds, 0);
         }
 
         /// Verifies: REQ-RMT-027
