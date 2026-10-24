@@ -18,8 +18,10 @@ use super::driver::{StreamHost, OPEN_TIMEOUT};
 use super::error::AudioError;
 use super::fault::{self, Call};
 use super::heartbeat::Heartbeat;
+use super::open::DeviceSide;
 use super::playout::widest_frame_samples;
 use super::resampler::{CaptureResampler, ResamplerError};
+use super::wasapi_mode::{note_opened, opened_through_wasapi, Noted, OpenedWay, WasapiMode};
 
 /// Events that can occur during audio streaming
 #[derive(Debug, Clone)]
@@ -53,6 +55,8 @@ pub struct AudioConfig {
     pub channels: u16,
     /// Frame size in samples
     pub frame_size: u32,
+    /// How a WASAPI device is opened (Windows; ADR-088)
+    pub wasapi_mode: WasapiMode,
 }
 
 impl Default for AudioConfig {
@@ -61,6 +65,7 @@ impl Default for AudioConfig {
             sample_rate: 48000,
             channels: 1,
             frame_size: 64,
+            wasapi_mode: WasapiMode::default(),
         }
     }
 }
@@ -95,6 +100,7 @@ impl From<CaptureConfig> for AudioConfig {
             sample_rate: config.sample_rate,
             channels: config.channels,
             frame_size: config.frame_size,
+            ..AudioConfig::default()
         }
     }
 }
@@ -129,6 +135,7 @@ impl From<PlaybackConfig> for AudioConfig {
             sample_rate: config.sample_rate,
             channels: config.channels,
             frame_size: config.frame_size,
+            ..AudioConfig::default()
         }
     }
 }
@@ -269,7 +276,7 @@ impl AudioEngine {
     pub fn start_capture<F>(
         &mut self,
         device_id: Option<&DeviceId>,
-        mut callback: F,
+        callback: F,
     ) -> Result<(), AudioError>
     where
         F: FnMut(&[f32], u64) + Send + 'static,
@@ -286,12 +293,16 @@ impl AudioEngine {
         let needed = picks.iter().max().map_or(1, |highest| highest + 1);
         let sample_rate = self.config.sample_rate;
         let frame_size = self.config.frame_size;
+        let mode = self.config.wasapi_mode;
         let wanted = device_id.cloned();
         let heartbeat = self.heartbeat.clone();
         let serial = fault::stream_serial();
 
         // Error callback with device disconnection detection
         let event_tx = self.event_tx.clone();
+        #[cfg(target_os = "windows")]
+        let on_fault =
+            wasapi_fault_handler(self.event_tx.clone(), AudioEvent::InputDeviceDisconnected);
         let err_fn = move |err: cpal::Error| {
             error!("Capture stream error: {:?}", err);
             if matches!(err.kind(), cpal::ErrorKind::Xrun) {
@@ -316,6 +327,71 @@ impl AudioEngine {
         // thread and not this one (see `driver`).
         let host = StreamHost::open("input stream", self.open_timeout, move || {
             fault::point(Call::OpenInput);
+            let through_wasapi = opened_through_wasapi(wanted.as_ref());
+            let mut fell_back = None;
+            // The two ways `cpal` does not open a WASAPI device are opened by
+            // `wasapi`; a device they do not open is opened by `cpal` below
+            #[cfg(target_os = "windows")]
+            let callback = if through_wasapi && mode != WasapiMode::Shared {
+                let (picks, heartbeat) = (picks.clone(), heartbeat.clone());
+                let opened = super::wasapi::open_capture(
+                    wanted.as_ref(),
+                    mode,
+                    super::wasapi::Wanted {
+                        sample_rate,
+                        channels: needed,
+                        buffer_frames: frame_size,
+                    },
+                    callback,
+                    move |format, callback| {
+                        capture_delivery(
+                            callback,
+                            picks,
+                            Shape {
+                                device_rate: format.rate,
+                                device_channels: format.channels,
+                                sample_rate,
+                                frame_size,
+                            },
+                            heartbeat,
+                            serial,
+                        )
+                    },
+                    on_fault,
+                );
+                match opened {
+                    Ok(stream) => {
+                        info!("Capture opened through WASAPI the {:?} way", mode);
+                        return Ok(HeldStream::Wasapi {
+                            _stream: stream,
+                            _way: note_opened(
+                                DeviceSide::Input,
+                                OpenedWay {
+                                    asked: mode,
+                                    opened: mode,
+                                    failure: None,
+                                },
+                            ),
+                        });
+                    }
+                    Err(super::wasapi::NotOpened {
+                        error,
+                        failure,
+                        callback: Some(callback),
+                    }) => {
+                        warn!(
+                            "Capture did not open the {:?} way ({}); it opens the standard way",
+                            mode, error
+                        );
+                        fell_back = Some(failure);
+                        callback
+                    }
+                    Err(super::wasapi::NotOpened { error, .. }) => return Err(error),
+                }
+            } else {
+                callback
+            };
+
             let device = resolve_input_device(wanted.as_ref())?;
             debug!(
                 "Capture device: {}",
@@ -330,23 +406,18 @@ impl AudioEngine {
                 sample_rate: device_rate,
                 buffer_size: cpal::BufferSize::Fixed(frame_size),
             };
-            let mut resampler = if device_rate == sample_rate {
-                None
-            } else {
-                let resampler = CaptureResampler::new(device_rate, sample_rate, picks.len())
-                    .map_err(|e| AudioError::UnsupportedConfig(e.to_string()))?;
-                info!(
-                    "Capture opens at {} Hz and is converted to the session's {} Hz ({} frames of delay)",
+            let mut deliver = capture_delivery(
+                callback,
+                picks,
+                Shape {
                     device_rate,
+                    device_channels,
                     sample_rate,
-                    resampler.delay_frames()
-                );
-                Some(resampler)
-            };
-            // A device frame that is already the frame wanted goes through as is
-            let whole_frame = resampler.is_none() && picks.iter().copied().eq(0..device_channels);
-            let mut picked = Vec::with_capacity(frame_size as usize * picks.len().max(1) * 4);
-            let sample_count = std::sync::atomic::AtomicU64::new(0);
+                    frame_size,
+                },
+                heartbeat,
+                serial,
+            )?;
 
             // Callback is moved directly (no Arc) - allows FnMut without Sync requirement
             let stream = device
@@ -354,32 +425,7 @@ impl AudioEngine {
                     stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
                         super::priority::promote_callback_thread("capture");
-                        if fault::stream_stalled(serial) {
-                            return;
-                        }
-                        heartbeat.beat();
-                        let started = crate::perf::start();
-                        super::device_loop::on_input(data, device_channels);
-                        if whole_frame {
-                            let timestamp =
-                                sample_count.fetch_add(data.len() as u64, Ordering::Relaxed);
-                            callback(data, timestamp);
-                        } else {
-                            pick_channels(data, device_channels, &picks, &mut picked);
-                            match resampler.as_mut() {
-                                None => {
-                                    let timestamp = sample_count
-                                        .fetch_add(picked.len() as u64, Ordering::Relaxed);
-                                    callback(&picked, timestamp);
-                                }
-                                Some(resampler) => resampler.process(&picked, |converted| {
-                                    let timestamp = sample_count
-                                        .fetch_add(converted.len() as u64, Ordering::Relaxed);
-                                    callback(converted, timestamp);
-                                }),
-                            }
-                        }
-                        crate::perf::INPUT_CALLBACK.stop(started);
+                        deliver(data);
                     },
                     err_fn,
                     None,
@@ -390,7 +436,19 @@ impl AudioEngine {
                 .play()
                 .map_err(|e| AudioError::StreamError(e.to_string()))?;
             debug!("Capture opened with {} device channel(s)", device_channels);
-            Ok(stream)
+            Ok(HeldStream::Cpal {
+                _stream: stream,
+                _way: through_wasapi.then(|| {
+                    note_opened(
+                        DeviceSide::Input,
+                        OpenedWay {
+                            asked: mode,
+                            opened: WasapiMode::Shared,
+                            failure: fell_back.take(),
+                        },
+                    )
+                }),
+            })
         })?;
         self.capture_stream = Some(host);
         self.running.store(true, Ordering::SeqCst);
@@ -458,6 +516,7 @@ impl AudioEngine {
 
         let route = self.playback_route;
         let sample_rate = self.config.sample_rate;
+        let mode = self.config.wasapi_mode;
         let period = output_period_frames(self.config.frame_size);
         if period != self.config.frame_size {
             info!(
@@ -467,12 +526,80 @@ impl AudioEngine {
         }
         let wanted = device_id.cloned();
         let err_fn = self.stream_error_handler();
+        #[cfg(target_os = "windows")]
+        let on_fault =
+            wasapi_fault_handler(self.event_tx.clone(), AudioEvent::OutputDeviceDisconnected);
         let heartbeat = self.heartbeat.clone();
         let serial = fault::stream_serial();
 
         // Opened on a thread of its own, like capture
         let host = StreamHost::open("output stream", self.open_timeout, move || {
             fault::point(Call::OpenOutput);
+            let through_wasapi = opened_through_wasapi(wanted.as_ref());
+            let mut fell_back = None;
+            // As capture: the ways `cpal` does not open are opened by `wasapi`
+            #[cfg(target_os = "windows")]
+            let fill_frame = if through_wasapi && mode != WasapiMode::Shared {
+                let heartbeat = heartbeat.clone();
+                let opened = super::wasapi::open_render(
+                    wanted.as_ref(),
+                    mode,
+                    super::wasapi::Wanted {
+                        sample_rate,
+                        channels: route.channels_needed(),
+                        buffer_frames: period,
+                    },
+                    fill_frame,
+                    move |format, fill_frame| {
+                        playback_delivery(
+                            fill_frame,
+                            frame_samples,
+                            route,
+                            Shape {
+                                device_rate: format.rate,
+                                device_channels: format.channels,
+                                sample_rate,
+                                frame_size: period,
+                            },
+                            heartbeat,
+                            serial,
+                        )
+                    },
+                    on_fault,
+                );
+                match opened {
+                    Ok(stream) => {
+                        info!("Playback opened through WASAPI the {:?} way", mode);
+                        return Ok(HeldStream::Wasapi {
+                            _stream: stream,
+                            _way: note_opened(
+                                DeviceSide::Output,
+                                OpenedWay {
+                                    asked: mode,
+                                    opened: mode,
+                                    failure: None,
+                                },
+                            ),
+                        });
+                    }
+                    Err(super::wasapi::NotOpened {
+                        error,
+                        failure,
+                        callback: Some(fill_frame),
+                    }) => {
+                        warn!(
+                            "Playback did not open the {:?} way ({}); it opens the standard way",
+                            mode, error
+                        );
+                        fell_back = Some(failure);
+                        fill_frame
+                    }
+                    Err(super::wasapi::NotOpened { error, .. }) => return Err(error),
+                }
+            } else {
+                fill_frame
+            };
+
             let device = resolve_output_device(wanted.as_ref())?;
             debug!(
                 "Playback device: {}",
@@ -488,40 +615,26 @@ impl AudioEngine {
                 sample_rate: device_rate,
                 buffer_size: cpal::BufferSize::Fixed(period),
             };
-
-            let source = if device_rate == sample_rate {
-                FramePuller::new(frame_samples, fill_frame)
-            } else {
-                let source =
-                    FramePuller::converting(frame_samples, fill_frame, sample_rate, device_rate)
-                        .map_err(|e| AudioError::UnsupportedConfig(e.to_string()))?;
-                info!(
-                    "Playback opens at {} Hz and is converted from the session's {} Hz",
-                    device_rate, sample_rate
-                );
-                source
-            };
-            let mut puller = RoutedPuller {
-                puller: source,
-                stereo: vec![0.0; period as usize * 2 * 4],
-                device_channels,
+            let mut deliver = playback_delivery(
+                fill_frame,
+                frame_samples,
                 route,
-                sample_rate: device_rate,
-            };
+                Shape {
+                    device_rate,
+                    device_channels,
+                    sample_rate,
+                    frame_size: period,
+                },
+                heartbeat,
+                serial,
+            )?;
 
             let stream = device
                 .build_output_stream(
                     stream_config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         super::priority::promote_callback_thread("playback");
-                        if fault::stream_stalled(serial) {
-                            data.fill(0.0);
-                            return;
-                        }
-                        heartbeat.beat();
-                        let started = crate::perf::start();
-                        puller.fill(data);
-                        crate::perf::OUTPUT_CALLBACK.stop(started);
+                        deliver(data);
                     },
                     err_fn,
                     None,
@@ -531,7 +644,19 @@ impl AudioEngine {
             stream
                 .play()
                 .map_err(|e| AudioError::StreamError(e.to_string()))?;
-            Ok(stream)
+            Ok(HeldStream::Cpal {
+                _stream: stream,
+                _way: through_wasapi.then(|| {
+                    note_opened(
+                        DeviceSide::Output,
+                        OpenedWay {
+                            asked: mode,
+                            opened: WasapiMode::Shared,
+                            failure: fell_back.take(),
+                        },
+                    )
+                }),
+            })
         })?;
         self.playback_stream = Some(host);
 
@@ -602,6 +727,170 @@ fn stream_open_error(error: cpal::Error) -> AudioError {
     match error.kind() {
         cpal::ErrorKind::UnsupportedConfig => AudioError::UnsupportedConfig(error.to_string()),
         _ => AudioError::StreamError(error.to_string()),
+    }
+}
+
+/// A stream the engine holds open. Dropping it closes the stream, and
+/// forgets how its device was opened.
+enum HeldStream {
+    Cpal {
+        _stream: cpal::Stream,
+        _way: Option<Noted>,
+    },
+    #[cfg(target_os = "windows")]
+    Wasapi {
+        _stream: super::wasapi::Stream,
+        _way: Noted,
+    },
+}
+
+/// The format a device was opened in, and the session's
+struct Shape {
+    device_rate: u32,
+    device_channels: usize,
+    sample_rate: u32,
+    /// Capture: the session's frame size. Playback: the device's period.
+    frame_size: u32,
+}
+
+/// What capture does with each period a device delivers, whichever way it
+/// was opened: takes the channels the session uses, converts them to the
+/// session's rate, and hands them to `callback` with the count of samples
+/// delivered before them.
+fn capture_delivery<F>(
+    mut callback: F,
+    picks: Vec<usize>,
+    shape: Shape,
+    heartbeat: Heartbeat,
+    serial: u64,
+) -> Result<impl FnMut(&[f32]) + Send + 'static, AudioError>
+where
+    F: FnMut(&[f32], u64) + Send + 'static,
+{
+    let Shape {
+        device_rate,
+        device_channels,
+        sample_rate,
+        frame_size,
+    } = shape;
+    let mut resampler = if device_rate == sample_rate {
+        None
+    } else {
+        let resampler = CaptureResampler::new(device_rate, sample_rate, picks.len())
+            .map_err(|e| AudioError::UnsupportedConfig(e.to_string()))?;
+        info!(
+            "Capture opens at {} Hz and is converted to the session's {} Hz ({} frames of delay)",
+            device_rate,
+            sample_rate,
+            resampler.delay_frames()
+        );
+        Some(resampler)
+    };
+    // A device frame that is already the frame wanted goes through as is
+    let whole_frame = resampler.is_none() && picks.iter().copied().eq(0..device_channels);
+    let mut picked = Vec::with_capacity(frame_size as usize * picks.len().max(1) * 4);
+    let mut sample_count = 0u64;
+    Ok(move |data: &[f32]| {
+        if fault::stream_stalled(serial) {
+            return;
+        }
+        heartbeat.beat();
+        let started = crate::perf::start();
+        super::device_loop::on_input(data, device_channels);
+        if whole_frame {
+            let timestamp = sample_count;
+            sample_count += data.len() as u64;
+            callback(data, timestamp);
+        } else {
+            pick_channels(data, device_channels, &picks, &mut picked);
+            match resampler.as_mut() {
+                None => {
+                    let timestamp = sample_count;
+                    sample_count += picked.len() as u64;
+                    callback(&picked, timestamp);
+                }
+                Some(resampler) => resampler.process(&picked, |converted| {
+                    let timestamp = sample_count;
+                    sample_count += converted.len() as u64;
+                    callback(converted, timestamp);
+                }),
+            }
+        }
+        crate::perf::INPUT_CALLBACK.stop(started);
+    })
+}
+
+/// What playback does with each period a device asks for, whichever way it
+/// was opened: pulls frames from `fill_frame`, converts them to the device's
+/// rate, and writes them to the channels `route` names.
+fn playback_delivery<F>(
+    fill_frame: F,
+    frame_samples: usize,
+    route: OutputRoute,
+    shape: Shape,
+    heartbeat: Heartbeat,
+    serial: u64,
+) -> Result<impl FnMut(&mut [f32]) + Send + 'static, AudioError>
+where
+    F: FnMut(&mut [f32]) -> usize + Send + 'static,
+{
+    let Shape {
+        device_rate,
+        device_channels,
+        sample_rate,
+        frame_size: period,
+    } = shape;
+    let source = if device_rate == sample_rate {
+        FramePuller::new(frame_samples, fill_frame)
+    } else {
+        let source = FramePuller::converting(frame_samples, fill_frame, sample_rate, device_rate)
+            .map_err(|e| AudioError::UnsupportedConfig(e.to_string()))?;
+        info!(
+            "Playback opens at {} Hz and is converted from the session's {} Hz",
+            device_rate, sample_rate
+        );
+        source
+    };
+    let mut puller = RoutedPuller {
+        puller: source,
+        stereo: vec![0.0; period as usize * 2 * 4],
+        device_channels,
+        route,
+        sample_rate: device_rate,
+    };
+    Ok(move |data: &mut [f32]| {
+        if fault::stream_stalled(serial) {
+            data.fill(0.0);
+            return;
+        }
+        heartbeat.beat();
+        let started = crate::perf::start();
+        puller.fill(data);
+        crate::perf::OUTPUT_CALLBACK.stop(started);
+    })
+}
+
+/// What a WASAPI stream jamuru opened itself reports when it stops: `lost`
+/// when its device went away, a stream error otherwise
+#[cfg(target_os = "windows")]
+fn wasapi_fault_handler(
+    event_tx: Option<Sender<AudioEvent>>,
+    lost: AudioEvent,
+) -> impl FnMut(super::wasapi::Fault) + Send + 'static {
+    move |fault| {
+        let event = match fault {
+            super::wasapi::Fault::Lost => {
+                warn!("A WASAPI device went away: {:?}", lost);
+                lost.clone()
+            }
+            super::wasapi::Fault::Failed(message) => {
+                error!("WASAPI stream error: {}", message);
+                AudioEvent::StreamError(message)
+            }
+        };
+        if let Some(ref tx) = event_tx {
+            let _ = tx.send(event);
+        }
     }
 }
 

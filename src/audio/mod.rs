@@ -32,6 +32,9 @@ mod taps;
 #[cfg(target_os = "macos")]
 mod transport;
 mod virtual_output;
+#[cfg(target_os = "windows")]
+mod wasapi;
+mod wasapi_mode;
 
 #[cfg(target_os = "windows")]
 pub use asio::AsioDuplex;
@@ -91,4 +94,9 @@ pub use taps::{set_taps, Taps};
 pub use virtual_output::{
     RecordingFeed, RecordingTap, VirtualOutputSink, CHANNELS as VIRTUAL_OUTPUT_CHANNELS,
     NODE_NAME_OUT,
+};
+pub use wasapi_mode::{
+    advise, is_wasapi_id, opened_ways, read_endpoints, Advice, Endpoint, EndpointCaps, Endpoints,
+    ModeAdvice, OpenFailure, OpenedWay, OpenedWays, Reason as WasapiReason, SharedPeriods,
+    Verdict as WasapiVerdict, WasapiMode, WasapiSettings,
 };

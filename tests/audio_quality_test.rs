@@ -21,6 +21,7 @@ fn test_sample_rate_48khz() {
         sample_rate: 48000,
         channels: 1,
         frame_size: 128,
+        ..Default::default()
     };
     let engine = AudioEngine::new(config);
 
@@ -37,6 +38,7 @@ fn test_sample_rate_96khz() {
         sample_rate: 96000,
         channels: 1,
         frame_size: 128,
+        ..Default::default()
     };
     let engine = AudioEngine::new(config);
 
@@ -198,6 +200,7 @@ fn test_frame_size_64() {
         sample_rate: 48000,
         channels: 1,
         frame_size: 64,
+        ..Default::default()
     };
 
     assert_eq!(config.frame_size, 64);
@@ -217,6 +220,7 @@ fn test_frame_size_256() {
         sample_rate: 48000,
         channels: 1,
         frame_size: 256,
+        ..Default::default()
     };
 
     assert_eq!(config.frame_size, 256);
@@ -344,6 +348,7 @@ fn test_capture_callback_accepts_fnmut() {
         sample_rate: 48000,
         channels: 1,
         frame_size: 64,
+        ..Default::default()
     };
     let engine = AudioEngine::new(config);
 
@@ -379,6 +384,7 @@ fn test_capture_callback_accepts_non_sync_types() {
         sample_rate: 48000,
         channels: 1,
         frame_size: 32, // Test with 32 samples
+        ..Default::default()
     };
     let engine = AudioEngine::new(config);
 

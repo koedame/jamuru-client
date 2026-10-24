@@ -119,8 +119,10 @@ libc = "0.2"
 zbus = "6"
 
 [target.'cfg(windows)'.dependencies]
-# Real-time priority of the audio thread. The same `windows` the app is built on.
-windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+# Real-time priority of the audio thread, and the WASAPI streams `cpal` does not
+# open (exclusive and low-latency shared, `audio::wasapi`). The same `windows`
+# the app is built on.
+windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Media_Audio", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
 
 # ASIO support. Talks to the driver's COM interface directly, without
 # Steinberg's ASIO SDK: the SDK's proprietary license needs a signed

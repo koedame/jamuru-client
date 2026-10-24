@@ -12,6 +12,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use jamjam::audio::WasapiMode;
 use jamjam::config::AudioPreset;
 use serde::Serialize;
 use serde_json::json;
@@ -71,6 +72,8 @@ pub struct Entry {
 pub struct Baseline {
     pub settings: AudioSettings,
     pub preset: AudioPreset,
+    /// Saved whether or not the settings show it (they do not off Windows)
+    pub wasapi_mode: WasapiMode,
 }
 
 /// Whether a call to the help portal is something being done, which keeps the
@@ -246,12 +249,16 @@ pub async fn watch_idle<R: Runtime>(app: &AppHandle<R>, record: &HelpRecord) {
 /// The audio settings as they are now, to be put back after the help.
 pub async fn capture_baseline<R: Runtime>(app: &AppHandle<R>) -> Option<Baseline> {
     let settings = settings::current(app).await.ok()?;
-    let preset = app.state::<crate::config::ConfigState>().get().ok()?.preset;
-    Some(Baseline { settings, preset })
+    let config = app.state::<crate::config::ConfigState>().get().ok()?;
+    Some(Baseline {
+        settings,
+        preset: config.preset,
+        wasapi_mode: config.wasapi_mode,
+    })
 }
 
 /// The order settings are put back in: a device before the channels of it.
-const RESTORE_ORDER: [&str; 8] = [
+const RESTORE_ORDER: [&str; 9] = [
     "input_device",
     "output_device",
     "input_channel",
@@ -260,6 +267,7 @@ const RESTORE_ORDER: [&str; 8] = [
     "preset",
     "buffer_size",
     "sample_rate",
+    "wasapi_mode",
 ];
 
 /// What putting one setting back came to: the setting's name, and the changes made or why they were refused.
@@ -325,8 +333,11 @@ fn restoring(baseline: &Baseline, changed: &[String]) -> Vec<Restoration> {
                 "buffer_size" => Ok(vec![SettingChange::BufferSize {
                     samples: before.buffer_size,
                 }]),
-                _ => Ok(vec![SettingChange::SampleRate {
+                "sample_rate" => Ok(vec![SettingChange::SampleRate {
                     hz: before.sample_rate,
+                }]),
+                _ => Ok(vec![SettingChange::WasapiMode {
+                    mode: baseline.wasapi_mode,
                 }]),
             };
             (setting.to_string(), changes)
@@ -635,6 +646,7 @@ mod tests {
         Baseline {
             settings,
             preset: AudioPreset::default(),
+            wasapi_mode: WasapiMode::Exclusive,
         }
     }
 
@@ -701,6 +713,9 @@ mod tests {
                 },
                 SettingChange::BufferSize { samples: 128 },
                 SettingChange::SampleRate { hz: 44100 },
+                SettingChange::WasapiMode {
+                    mode: WasapiMode::Exclusive
+                },
             ]
         );
     }
