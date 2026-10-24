@@ -142,6 +142,154 @@
   cursor: not-allowed;
 }
 
+/* WASAPI mode (Windows): one card per way of opening, marked for the devices in use. */
+.wasapi-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.wasapi-mode__legend {
+  padding: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-primary);
+}
+
+.wasapi-mode__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.wasapi-mode__option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.wasapi-mode__option:hover:not(.wasapi-mode__option--checked):not(.wasapi-mode__option--unavailable) {
+  border-color: var(--color-border-hover);
+}
+
+.wasapi-mode__option--checked {
+  border-color: var(--color-accent);
+}
+
+.wasapi-mode__option:has(.wasapi-mode__radio:focus-visible) {
+  box-shadow: var(--shadow-focus);
+}
+
+.wasapi-mode__option--unavailable {
+  cursor: not-allowed;
+}
+
+.wasapi-mode__option--unavailable .wasapi-mode__name,
+.wasapi-mode__option--unavailable .wasapi-mode__radio {
+  opacity: 0.5;
+}
+
+.wasapi-mode:disabled .wasapi-mode__option {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.wasapi-mode__radio {
+  margin: 2px 0 0;
+  accent-color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.wasapi-mode__radio:focus-visible {
+  outline: none;
+}
+
+.wasapi-mode__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+  flex: 1;
+}
+
+.wasapi-mode__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.wasapi-mode__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.wasapi-mode__name {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-primary);
+}
+
+.wasapi-mode__verdict {
+  padding: 0 var(--space-xs);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-normal);
+}
+
+.wasapi-mode__verdict--recommended {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.wasapi-mode__verdict--not_recommended {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.wasapi-mode__verdict--unavailable {
+  color: var(--color-text-secondary);
+}
+
+.wasapi-mode__period {
+  flex-shrink: 0;
+  white-space: nowrap;
+  line-height: var(--line-height-normal);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}
+
+.wasapi-mode__notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.wasapi-mode__reason,
+.wasapi-mode__caution {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-secondary);
+}
+
+.wasapi-mode__caution {
+  color: var(--color-warning);
+}
+
 /* Latency summary card (computed from buffer size / sample rate). */
 .latency-card {
   display: flex;
