@@ -159,6 +159,31 @@
   color: var(--color-text-primary);
 }
 
+.wasapi-mode__about {
+  font-size: var(--font-size-tiny);
+}
+
+.wasapi-mode__about-summary {
+  width: fit-content;
+  color: var(--color-accent);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.wasapi-mode__about-summary:hover {
+  color: var(--color-accent-hover);
+}
+
+.wasapi-mode__about-summary:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.wasapi-mode__about-text {
+  margin: var(--space-xs) 0 0;
+  color: var(--color-text-secondary);
+}
+
 .wasapi-mode__options {
   display: flex;
   flex-direction: column;

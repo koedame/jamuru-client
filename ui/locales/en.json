@@ -264,7 +264,9 @@
       "bufferOption": "{{samples}} samples ({{ms}}ms)",
       "channelOption": "Ch {{channel}}",
       "wasapi": {
-        "label": "WASAPI mode",
+        "label": "WASAPI (Windows Audio Session API) mode",
+        "about": "What is WASAPI (Windows Audio Session API)?",
+        "aboutText": "It's the part of Windows that apps use to play and record sound. jamuru opens any device that isn't an ASIO one through it. In shared mode, Windows processes the sound of every app together at a fixed period (usually 10ms), which adds to the latency. In exclusive mode, jamuru skips that processing and uses the device directly",
         "description": "How Windows opens a device that isn't an ASIO one. Each mode is marked for the devices you're using",
         "modes": {
           "shared": "Shared (standard)",
