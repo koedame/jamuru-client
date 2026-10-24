@@ -22,7 +22,7 @@ use super::open::DeviceSide;
 use super::playout::widest_frame_samples;
 use super::resampler::{CaptureResampler, ResamplerError};
 use super::wasapi_mode::{
-    next_note, note_opened, opened_through_wasapi, Noted, OpenedWay, WasapiMode,
+    next_note, note_opened, opened_through_wasapi, standard_period_us, Noted, OpenedWay, WasapiMode,
 };
 
 /// Events that can occur during audio streaming
@@ -367,6 +367,7 @@ impl AudioEngine {
                 match opened {
                     Ok(stream) => {
                         info!("Capture opened through WASAPI the {:?} way", mode);
+                        let period_us = Some(stream.period_us());
                         return Ok(HeldStream::Wasapi {
                             _stream: stream,
                             _way: note_opened(
@@ -376,6 +377,7 @@ impl AudioEngine {
                                     asked: mode,
                                     opened: mode,
                                     failure: None,
+                                    period_us,
                                 },
                             ),
                         });
@@ -452,6 +454,7 @@ impl AudioEngine {
                             asked: mode,
                             opened: WasapiMode::Shared,
                             failure: fell_back.take(),
+                            period_us: standard_period_us(DeviceSide::Input, wanted.as_ref()),
                         },
                     )
                 }),
@@ -580,6 +583,7 @@ impl AudioEngine {
                 match opened {
                     Ok(stream) => {
                         info!("Playback opened through WASAPI the {:?} way", mode);
+                        let period_us = Some(stream.period_us());
                         return Ok(HeldStream::Wasapi {
                             _stream: stream,
                             _way: note_opened(
@@ -589,6 +593,7 @@ impl AudioEngine {
                                     asked: mode,
                                     opened: mode,
                                     failure: None,
+                                    period_us,
                                 },
                             ),
                         });
@@ -665,6 +670,7 @@ impl AudioEngine {
                             asked: mode,
                             opened: WasapiMode::Shared,
                             failure: fell_back.take(),
+                            period_us: standard_period_us(DeviceSide::Output, wanted.as_ref()),
                         },
                     )
                 }),

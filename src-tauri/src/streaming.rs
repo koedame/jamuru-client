@@ -298,6 +298,13 @@ impl StreamingState {
         // the audio configuration. Without this the breakdown shown to the user
         // omits the buffer entirely - up to 21.33ms on high-quality (ADR-019, ADR-070).
         info.set_jitter_buffer_ms(jitter_buffer_delay_us as f32 / 1000.0);
+
+        // Nor does it know how often the system hands the devices their
+        // samples (the Windows mixer's 10 ms in the standard way, whatever
+        // the buffer size). Without it the display is the same in every
+        // WASAPI mode.
+        let (input_us, output_us) = opened_ways().periods_us();
+        info.set_os_periods_us(input_us, output_us);
         info
     }
 }
@@ -1054,6 +1061,16 @@ fn network_stats(s: &ConnectionStats, bandwidth: Option<BandwidthSnapshot>) -> N
     }
 }
 
+/// What a buffer's row says of where its time comes from: the frames, and
+/// the system's period when that is what makes the buffer longer
+fn buffer_info(frames: String, buffer_ms: f32, frame_ms: f32) -> String {
+    if buffer_ms > frame_ms + 0.01 {
+        format!("{}, system period {:.1} ms", frames, buffer_ms)
+    } else {
+        frames
+    }
+}
+
 fn detailed_latency(
     s: &ConnectionStats,
     local_info: &LocalLatencyInfo,
@@ -1062,12 +1079,17 @@ fn detailed_latency(
 ) -> DetailedLatency {
     let breakdown =
         LatencyBreakdown::calculate(local_info, None, s.rtt_ms.unwrap_or(0.0), s.jitter_ms);
+    let frame_ms = frame_size as f32 / sample_rate.max(1) as f32 * 1000.0;
 
     let upstream = vec![
         LatencyComponent {
             name: "Capture buffer".to_string(),
             ms: breakdown.upstream.capture_buffer_ms,
-            info: Some(format!("{} samples @ {} Hz", frame_size, sample_rate)),
+            info: Some(buffer_info(
+                format!("{} samples @ {} Hz", frame_size, sample_rate),
+                breakdown.upstream.capture_buffer_ms,
+                frame_ms,
+            )),
         },
         LatencyComponent {
             name: "Encode (pcm)".to_string(),
@@ -1100,7 +1122,11 @@ fn detailed_latency(
         LatencyComponent {
             name: "Playback buffer".to_string(),
             ms: breakdown.downstream.playback_buffer_ms,
-            info: Some(format!("{} samples", frame_size)),
+            info: Some(buffer_info(
+                format!("{} samples", frame_size),
+                breakdown.downstream.playback_buffer_ms,
+                frame_ms,
+            )),
         },
     ];
 
@@ -1405,6 +1431,46 @@ mod tests {
             Some("checkingconnectivity")
         );
         assert!(of(4).network.is_none() && of(4).latency.is_none());
+    }
+
+    /// The bug this guards: the breakdown counted only the frame in each
+    /// buffer, so the screen said the same few milliseconds in every WASAPI
+    /// mode while a round trip was 30 ms longer in the standard one.
+    ///
+    /// Verifies: REQ-AUD-043
+    #[test]
+    fn when_the_system_period_is_longer_than_the_frame_the_breakdown_counts_the_period() {
+        let stats = ConnectionStats {
+            rtt_ms: Some(10.0),
+            ..Default::default()
+        };
+        let mut local = LocalLatencyInfo::from_audio_config(64, 48000, "pcm");
+        local.set_os_periods_us(Some(10_000), Some(1_000));
+
+        let latency = detailed_latency(&stats, &local, 64, 48000);
+
+        let ms = |components: &[LatencyComponent], name: &str| {
+            components.iter().find(|c| c.name == name).unwrap().ms
+        };
+        assert!((ms(&latency.upstream, "Capture buffer") - 10.0).abs() < 0.001);
+        // The playback side's period is shorter than the frame: the frame is
+        // what it takes
+        assert!((ms(&latency.downstream, "Playback buffer") - 1.333).abs() < 0.01);
+        let capture = latency
+            .upstream
+            .iter()
+            .find(|c| c.name == "Capture buffer")
+            .unwrap();
+        assert_eq!(
+            capture.info.as_deref(),
+            Some("64 samples @ 48000 Hz, system period 10.0 ms")
+        );
+        let playback = latency
+            .downstream
+            .iter()
+            .find(|c| c.name == "Playback buffer")
+            .unwrap();
+        assert_eq!(playback.info.as_deref(), Some("64 samples"));
     }
 
     /// The status says what each participant told of their own audio side, so
