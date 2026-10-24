@@ -838,6 +838,35 @@ export async function updateInstall(): Promise<UpdateInstalled> {
   return invoke("update_install");
 }
 
+/** Event the backend sends to the updating window as an update before the app opens moves on */
+export const UPDATE_STARTUP = "update:startup";
+
+/** How far an update before the app opens has come (ADR-088) */
+export type StartupProgress =
+  | { phase: "checking" }
+  /** `total` is `null` when the server did not say how big the download is */
+  | { phase: "downloading"; received: number; total: number | null }
+  | { phase: "installing" }
+  | { phase: "restarting" };
+
+/** How far the update before the app opens has come, or `null` once it is over */
+export async function updateStartupProgress(): Promise<StartupProgress | null> {
+  return (await invoke<StartupProgress | null | undefined>("update_startup_progress")) ?? null;
+}
+
+/** Opens the app without waiting for the update. Does nothing once the install has begun. */
+export async function updateStartupSkip(): Promise<void> {
+  return invoke("update_startup_skip");
+}
+
+/**
+ * Tells the backend the main screen is up. A version just installed is kept
+ * once it has stayed up a little while after this (ADR-088).
+ */
+export async function updateAppReady(): Promise<void> {
+  return invoke("update_app_ready");
+}
+
 /** Where the faders stand */
 export async function mixerGet(): Promise<MixerSnapshot> {
   return invoke("mixer_get");

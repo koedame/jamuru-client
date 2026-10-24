@@ -29,11 +29,18 @@ vi.mock('./screens/SettingsScreen', () => ({
   SettingsScreen: () => <div>settings screen</div>,
 }));
 
+vi.mock('./screens/StartupUpdateScreen', () => ({
+  UPDATING_HASH: '#/updating',
+  StartupUpdateScreen: () => <div>updating screen</div>,
+}));
+
 const configGetLanguage = vi.fn();
 const termsGet = vi.fn();
 const termsAccept = vi.fn();
+const updateAppReady = vi.fn();
 vi.mock('./lib/tauri', () => ({
   windowOpenSettings: vi.fn(),
+  updateAppReady: (...args: unknown[]) => updateAppReady(...args),
   configGetLanguage: (...args: unknown[]) => configGetLanguage(...args),
   termsGet: (...args: unknown[]) => termsGet(...args),
   termsAccept: (...args: unknown[]) => termsAccept(...args),
@@ -62,6 +69,8 @@ describe('App', () => {
     termsGet.mockResolvedValue({ version: 1, accepted: true, text: '# 利用規約' });
     termsAccept.mockReset();
     termsAccept.mockResolvedValue(undefined);
+    updateAppReady.mockReset();
+    updateAppReady.mockResolvedValue(undefined);
     languageChangedHandlers.length = 0;
   });
 
@@ -88,6 +97,62 @@ describe('App', () => {
     // The mount is recorded in an effect, which runs after the element is
     // already in the document.
     await waitFor(() => expect(mainScreenMounted).toHaveBeenCalledTimes(1));
+  });
+
+  // Verifies: REQ-UPD-025
+  it('the window is opened with the updating hash, the updating screen shows and the main screen never mounts', () => {
+    window.location.hash = '#/updating';
+
+    render(<App />);
+
+    expect(screen.getByText('updating screen')).toBeInTheDocument();
+    expect(mainScreenMounted).not.toHaveBeenCalled();
+    expect(updateAppReady).not.toHaveBeenCalled();
+  });
+
+  // A version just installed is kept only once its screen is up (ADR-088).
+  //
+  // Verifies: REQ-UPD-027
+  it('the main screen has mounted, the backend is told the app is up, once and after the mount', async () => {
+    const order: string[] = [];
+    mainScreenMounted.mockImplementation(() => order.push('mounted'));
+    updateAppReady.mockImplementation(async () => {
+      order.push('up');
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(order).toEqual(['mounted', 'up']));
+  });
+
+  // A release whose terms changed opens on the consent screen; reading them
+  // must not count as a start that failed.
+  //
+  // Verifies: REQ-UPD-027
+  it('the consent screen shows, the backend is told the app is up too', async () => {
+    termsGet.mockResolvedValue({ version: 2, accepted: false, text: '# 利用規約' });
+
+    render(<App />);
+
+    expect(await screen.findByTestId('consent-screen')).toBeInTheDocument();
+    await waitFor(() => expect(updateAppReady).toHaveBeenCalledTimes(1));
+  });
+
+  // Verifies: REQ-UPD-027
+  it('the terms cannot be read or the settings window opens, the backend is not told the app is up', async () => {
+    termsGet.mockRejectedValue('no backend');
+    const { unmount } = render(<App />);
+    expect(await screen.findByTestId('consent-load-error')).toBeInTheDocument();
+    unmount();
+
+    window.location.hash = '#/settings';
+    render(<App />);
+    expect(screen.getByText('settings screen')).toBeInTheDocument();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(updateAppReady).not.toHaveBeenCalled();
   });
 
   // The backend holds back everything that reaches the network until the

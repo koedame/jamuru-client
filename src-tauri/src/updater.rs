@@ -16,6 +16,13 @@
 //! background loop and `debug.update_apply` would otherwise both replace the
 //! same bundle), and each step has a time limit, so a download that stalls or
 //! an install that never returns is given up on while the app keeps running.
+//!
+//! An update never leaves the app unable to start either (ADR-088). A start
+//! looks for one before the app opens (`startup`), and every install keeps the
+//! version it replaces until the new one has started (`trial`): a new version
+//! that does not start is replaced by the kept one again, and is not installed
+//! again by itself. Where the kept version could not be put back, nothing is
+//! installed by itself.
 
 use std::fmt;
 use std::future::Future;
@@ -25,11 +32,14 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
-use tauri_plugin_updater::{Update, UpdaterExt};
+use tauri_plugin_updater::{Update, Updater, UpdaterExt};
 
 use crate::config;
 use crate::watchdog::Watchdog;
 use crate::windows;
+
+pub(crate) mod startup;
+pub(crate) mod trial;
 
 /// Left alone so the first frames and the audio device setup are not competing
 /// with a network request.
@@ -39,6 +49,10 @@ const SESSION_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const CHECK_LIMIT: Duration = Duration::from_secs(30);
 const DOWNLOAD_LIMIT: Duration = Duration::from_secs(10 * 60);
 const INSTALL_LIMIT: Duration = Duration::from_secs(2 * 60);
+/// A release the app installed by itself that is not what runs afterwards
+/// (it reports another version) is not installed by itself again for this
+/// long: otherwise every start would install it and restart.
+const REINSTALL_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Why an update did not happen.
 #[derive(Debug)]
@@ -51,6 +65,9 @@ pub(crate) enum UpdateError {
     InSession,
     /// A step did not finish within its time limit.
     TimedOut(&'static str),
+    /// The running version could not be kept to go back to, so the update is
+    /// not installed.
+    NoWayBack(String),
     Failed(tauri_plugin_updater::Error),
 }
 
@@ -67,6 +84,7 @@ impl fmt::Display for UpdateError {
             Self::Restarting => write!(f, "an update is installed and the app is restarting"),
             Self::InSession => write!(f, "the user is in a session"),
             Self::TimedOut(step) => write!(f, "{} did not finish in time", step),
+            Self::NoWayBack(why) => write!(f, "the running version cannot be kept: {}", why),
             Self::Failed(error) => write!(f, "{}", error),
         }
     }
@@ -130,13 +148,13 @@ pub(crate) enum Round {
 pub(crate) fn plan(
     auto_update: bool,
     development_build: bool,
-    package_updates_itself: bool,
+    installs_itself: bool,
 ) -> Result<Round, &'static str> {
     if development_build {
         Err("development build")
     } else if !auto_update {
         Err("turned off in config.toml")
-    } else if !package_updates_itself {
+    } else if !installs_itself {
         Ok(Round::Notify)
     } else {
         Ok(Round::Install)
@@ -160,6 +178,22 @@ fn is_development_build() -> bool {
 /// updates itself.
 pub(crate) fn package_updates_itself() -> bool {
     bundle_updates_itself(std::env::consts::OS, tauri::utils::platform::bundle_type())
+}
+
+/// Whether this package installs releases itself: one that replaces itself,
+/// where the running version can be kept to go back to (ADR-088). One that
+/// cannot keep it - installed where the app cannot write, say - is told of a
+/// newer release instead, as a package that cannot replace itself is.
+fn installs_itself() -> bool {
+    package_updates_itself() && previous_can_be_kept().is_ok()
+}
+
+fn previous_can_be_kept() -> Result<(), String> {
+    trial::Store::locate().ok_or("there is no place to keep it")?;
+    let package = trial::Package::running()?;
+    package
+        .writable()
+        .map_err(|e| format!("cannot write where it is installed: {}", e))
 }
 
 fn bundle_updates_itself(os: &str, bundle: Option<tauri::utils::config::BundleType>) -> bool {
@@ -187,19 +221,30 @@ pub fn update_notice_get(notice: State<'_, UpdateNotice>) -> Option<String> {
 }
 
 /// Starts the background loop: check shortly after launch, then every six
-/// hours. The setting is read again on every round, so turning it off in
+/// hours. A start that has already looked (`startup`) waits the six hours
+/// first. The setting is read again on every round, so turning it off in
 /// `config.toml` takes effect without a restart.
-pub(crate) fn spawn(app: AppHandle) {
+pub(crate) fn spawn(app: AppHandle, checked_at_start: bool) {
     if is_development_build() {
         tracing::debug!("Self-update is off in a development build");
         return;
     }
+    if !installs_itself() && package_updates_itself() {
+        if let Err(why) = previous_can_be_kept() {
+            tracing::info!("Not installing releases by itself: {}", why);
+        }
+    }
+    let first_delay = if checked_at_start {
+        CHECK_INTERVAL
+    } else {
+        FIRST_CHECK_DELAY
+    };
     tauri::async_runtime::spawn(async move {
         crate::terms::wait_accepted(&app).await;
-        tokio::time::sleep(FIRST_CHECK_DELAY).await;
+        tokio::time::sleep(first_delay).await;
         loop {
             let auto_update = config::load_config().unwrap_or_default().auto_update;
-            match plan(auto_update, false, package_updates_itself()) {
+            match plan(auto_update, false, installs_itself()) {
                 Err(reason) => tracing::debug!("Not checking for an update: {}", reason),
                 Ok(Round::Install) => match update_once(&app).await {
                     Ok(()) => {}
@@ -275,17 +320,18 @@ pub enum Support {
     /// A development build, or one made from source: it never looks for a
     /// release (ADR-041).
     None,
-    /// A package that cannot replace itself (ADR-076): it can say that a newer
+    /// A package that cannot replace itself (ADR-076), or that cannot keep the
+    /// running version to go back to (ADR-088): it can say that a newer
     /// release exists, and the person installs it by hand.
     Notice,
     /// Downloads, installs and restarts into the newer release.
     Install,
 }
 
-fn support(development_build: bool, configured: bool, package_updates_itself: bool) -> Support {
+fn support(development_build: bool, configured: bool, installs_itself: bool) -> Support {
     if development_build || !configured {
         Support::None
-    } else if package_updates_itself {
+    } else if installs_itself {
         Support::Install
     } else {
         Support::Notice
@@ -293,11 +339,11 @@ fn support(development_build: bool, configured: bool, package_updates_itself: bo
 }
 
 fn support_of<R: Runtime>(app: &AppHandle<R>) -> Support {
-    support(
-        is_development_build(),
-        app.config().plugins.0.contains_key("updater"),
-        package_updates_itself(),
-    )
+    let configured = app.config().plugins.0.contains_key("updater");
+    if is_development_build() || !configured {
+        return Support::None;
+    }
+    support(false, true, installs_itself())
 }
 
 /// What the settings screen shows before anything is checked.
@@ -434,6 +480,68 @@ impl InSession {
     fn refuses(self, in_session_now: bool) -> bool {
         self == InSession::Refuse && in_session_now
     }
+
+    fn asked(self) -> Asked {
+        match self {
+            InSession::Wait => Asked::ByItself,
+            InSession::Install | InSession::Refuse => Asked::ByPerson,
+        }
+    }
+}
+
+/// Who wants an update installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asked {
+    /// The app, by itself: it holds back a release that went wrong here
+    /// ([`held_back`]).
+    ByItself,
+    /// A person, by hand or debugging remotely, who installs what they ask for.
+    ByPerson,
+}
+
+/// Why the app does not install `version` by itself, if it does not.
+fn held_back(version: &str) -> Option<&'static str> {
+    let store = trial::Store::locate()?;
+    if store.is_rejected(version) {
+        Some("it did not start here before")
+    } else if store.installed_by_itself_lately(version, REINSTALL_AFTER) {
+        Some("it was installed a moment ago and is not what runs")
+    } else {
+        None
+    }
+}
+
+/// The trial of the update this run installed, until the app hands over to
+/// it (`hand_over`).
+static OPENED: Mutex<Option<trial::Opened>> = Mutex::new(None);
+
+/// The app is about to end so that the update it installed starts: from here
+/// the watcher counts the time to the new version's start. Called by the
+/// restart, and on Windows by the updater just before it runs the installer.
+pub(crate) fn handing_over() {
+    let mut opened = OPENED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(opened) = opened.as_mut() {
+        if let Err(e) = opened.hand_over() {
+            tracing::warn!("Could not hand over to the installed update: {}", e);
+        }
+    }
+}
+
+/// The updater an install uses. The Windows updater ends the process itself
+/// once the installer has started, without `RunEvent::Exit`: the hook says so
+/// first, or the next launch would report every update as a launch that did
+/// not end cleanly, and the new version would be given no time to start.
+fn updater_for_install<R: Runtime>(app: &AppHandle<R>) -> Result<Updater, UpdateError> {
+    let hook_app = app.clone();
+    Ok(app
+        .updater_builder()
+        .on_before_exit(move || {
+            if let Some(watchdog) = hook_app.try_state::<Watchdog>() {
+                watchdog.handing_over_to_installer();
+            }
+            handing_over();
+        })
+        .build()?)
 }
 
 /// Downloads and installs a release newer than the running one, and returns
@@ -446,23 +554,18 @@ async fn install_newer<R: Runtime>(
         return Err(UpdateError::InSession);
     }
     let turn = GATE.begin()?;
-    // The Windows updater ends the process itself once the installer has
-    // started, without `RunEvent::Exit`; without this the next launch would
-    // report every update as a launch that did not end cleanly.
-    let hook_app = app.clone();
-    let updater = app
-        .updater_builder()
-        .on_before_exit(move || {
-            if let Some(watchdog) = hook_app.try_state::<Watchdog>() {
-                watchdog.handing_over_to_installer();
-            }
-        })
-        .build()?;
+    let updater = updater_for_install(app)?;
     let checked = within("checking for a release", CHECK_LIMIT, updater.check()).await?;
     let Some(update) = checked else {
         tracing::debug!("No newer release");
         return Ok(None);
     };
+    if in_session.asked() == Asked::ByItself {
+        if let Some(reason) = held_back(&update.version) {
+            tracing::info!("Not installing {} by itself: {}", update.version, reason);
+            return Ok(None);
+        }
+    }
     tracing::info!(
         "Release {} is out (running {}); downloading",
         update.version,
@@ -496,7 +599,7 @@ async fn install_newer<R: Runtime>(
     };
 
     let version = update.version.clone();
-    if let Err(e) = install(update, bytes, turn).await {
+    if let Err(e) = install(update, bytes, turn, in_session.asked()).await {
         if let Some(watchdog) = app.try_state::<Watchdog>() {
             watchdog.handover_failed();
         }
@@ -509,11 +612,70 @@ async fn install_newer<R: Runtime>(
 /// administrator's password on the main thread; so it runs off the async
 /// workers, and the gate goes with it, staying shut until the install has
 /// really ended even when it is given up on.
-async fn install(update: Update, bytes: Vec<u8>, turn: Turn<'static>) -> Result<(), UpdateError> {
+///
+/// The running version is kept first (`trial::open`); without it nothing is
+/// installed. What the install came to is written down on the same thread,
+/// once it has returned, so that an install given up on still leaves the
+/// trial as it really ended.
+async fn install(
+    update: Update,
+    bytes: Vec<u8>,
+    turn: Turn<'static>,
+    asked: Asked,
+) -> Result<(), UpdateError> {
     blocking_within("the install", INSTALL_LIMIT, move || {
-        update.install(bytes)?;
-        turn.installed();
-        Ok(())
+        let store = trial::Store::locate()
+            .ok_or_else(|| UpdateError::NoWayBack("there is no place to keep it".into()))?;
+        let package = trial::Package::running().map_err(UpdateError::NoWayBack)?;
+        let opened = trial::open(
+            &store,
+            package,
+            &update.current_version,
+            &update.version,
+            trial::start_watcher,
+        )
+        .map_err(|e| UpdateError::NoWayBack(e.to_string()))?;
+        *OPENED.lock().unwrap_or_else(|e| e.into_inner()) = Some(opened);
+        if asked == Asked::ByItself {
+            if let Err(e) = store.installed_by_itself(&update.version) {
+                tracing::warn!("Could not note the update installed by itself: {}", e);
+            }
+        }
+        // On Windows this does not return once the installer has started.
+        let installed = update.install(bytes);
+        let mut opened = OPENED.lock().unwrap_or_else(|e| e.into_inner());
+        match installed {
+            Ok(()) => {
+                if let Some(opened) = opened.as_ref() {
+                    // Without it, the update is tried when it next starts,
+                    // or put back if the app ends without restarting.
+                    if let Err(e) = opened.installed() {
+                        tracing::warn!("Could not note the install: {}", e);
+                    }
+                }
+                turn.installed();
+                Ok(())
+            }
+            Err(e) => {
+                if asked == Asked::ByItself {
+                    let _ = store.forget_installed_by_itself();
+                }
+                if let Some(trying) = opened.as_mut() {
+                    match trying.abandon(true) {
+                        Ok(()) => {
+                            opened.take();
+                        }
+                        // Kept, with its lock: the watcher puts the running
+                        // version back once the app has ended.
+                        Err(put_back) => tracing::error!(
+                            "The install failed and the running version could not be put back: {}",
+                            put_back
+                        ),
+                    }
+                }
+                Err(e.into())
+            }
+        }
     })
     .await
 }
@@ -534,11 +696,11 @@ async fn within<T>(
 async fn blocking_within<T: Send + 'static>(
     step: &'static str,
     limit: Duration,
-    work: impl FnOnce() -> tauri_plugin_updater::Result<T> + Send + 'static,
+    work: impl FnOnce() -> Result<T, UpdateError> + Send + 'static,
 ) -> Result<T, UpdateError> {
     let running = tauri::async_runtime::spawn_blocking(work);
     match tokio::time::timeout(limit, running).await {
-        Ok(Ok(done)) => Ok(done?),
+        Ok(Ok(done)) => done,
         Ok(Err(e)) => Err(UpdateError::Failed(
             std::io::Error::other(e.to_string()).into(),
         )),

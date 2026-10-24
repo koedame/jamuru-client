@@ -18,6 +18,8 @@ pub mod labels {
     pub const MIXER: &str = "mixer";
     pub const CHAT: &str = "chat";
     pub const SETTINGS: &str = "settings";
+    /// Shown while the app updates before it opens (ADR-088).
+    pub const UPDATING: &str = "updating";
 }
 
 /// Global state to track if we're in a connected session
@@ -414,6 +416,10 @@ fn close_needs_leave_confirmation(label: &str, in_room: bool) -> bool {
 /// The window `label` is being closed. In a room, the main window stays and
 /// its screen is asked to confirm leaving; the screen quits once it has left.
 pub fn close_requested(app: &AppHandle, label: &str, api: &tauri::CloseRequestApi) {
+    if crate::updater::startup::close_requested(label) {
+        api.prevent_close();
+        return;
+    }
     if !close_needs_leave_confirmation(label, crate::menu::in_room(app)) {
         return;
     }

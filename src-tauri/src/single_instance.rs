@@ -36,9 +36,13 @@ pub fn plugin() -> Option<tauri::plugin::TauriPlugin<Wry>> {
 }
 
 /// The link itself reaches the page through the deep-link plugin; this only
-/// brings the window the person is looking for to the front.
+/// brings the window the person is looking for to the front: the main window,
+/// or the one shown while the app updates before it opens.
 fn show_main_window(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(labels::MAIN) else {
+    let Some(window) = app
+        .get_webview_window(labels::MAIN)
+        .or_else(|| app.get_webview_window(labels::UPDATING))
+    else {
         return;
     };
     for result in [window.unminimize(), window.show(), window.set_focus()] {
