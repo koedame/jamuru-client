@@ -51,6 +51,8 @@ pub(crate) enum Began {
 static CANDIDATE: Mutex<Option<Candidate>> = Mutex::new(None);
 /// The main window's screen has said it is up.
 static READY: AtomicBool = AtomicBool::new(false);
+/// The app could not open its main window, and ends for that.
+static FAILED: AtomicBool = AtomicBool::new(false);
 
 /// Looks for an update being tried, before the app's own start. In a build
 /// that installs releases itself, this comes before anything else: a start
@@ -208,12 +210,15 @@ fn begin_install(app: &AppHandle) -> bool {
 /// Runs `work` until it ends or the person skips. `None` when skipped.
 async fn unless_skipped<T>(work: impl std::future::Future<Output = T>) -> Option<T> {
     tokio::select! {
-        done = work => Some(done),
+        // A skip that has come wins over work that is done at the same time:
+        // the person said not to wait, so nothing goes on from here.
+        biased;
         _ = async {
             while !skipped() {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         } => None,
+        done = work => Some(done),
     }
 }
 
@@ -366,8 +371,19 @@ fn show_window(app: &AppHandle) {
     .resizable(false)
     .center()
     .build();
-    if let Err(e) = built {
-        tracing::warn!("Could not show the updating window: {}", e);
+    match built {
+        // A window gets the app's menu where windows carry one (Windows,
+        // Linux); this one only shows how far the update has come, and the
+        // app it would act on is not open yet.
+        #[cfg(not(target_os = "macos"))]
+        Ok(window) => {
+            if let Err(e) = window.remove_menu() {
+                tracing::debug!("Could not take the menu off the updating window: {}", e);
+            }
+        }
+        #[cfg(target_os = "macos")]
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Could not show the updating window: {}", e),
     }
 }
 
@@ -443,27 +459,70 @@ fn confirm() {
     }
 }
 
-/// The app is ending. A version being tried whose screen came up has started;
-/// one quit before then is replaced by the previous version, which is not
-/// started again.
+/// The app could not open its main window and ends. A version being tried
+/// that ends for this has not started, and the previous one is started again.
+pub(crate) fn could_not_open() {
+    FAILED.store(true, Ordering::SeqCst);
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AtExit {
+    /// Its screen came up: it has started.
+    Confirm,
+    /// The person quit it before then: the previous version is put back but
+    /// not started.
+    Quit,
+    /// Left to the watcher, as when it crashes: a restart comes back to the
+    /// trial, and one that could not open is put back and started again.
+    Nothing,
+}
+
+fn at_exit(ready: bool, restarting: bool, failed: bool) -> AtExit {
+    if ready {
+        AtExit::Confirm
+    } else if restarting || failed {
+        AtExit::Nothing
+    } else {
+        AtExit::Quit
+    }
+}
+
+/// The app is ending, and what that says of a version being tried.
 pub(crate) fn exiting() {
     if lock(&CANDIDATE).is_none() {
         return;
     }
-    if READY.load(Ordering::SeqCst) {
-        confirm();
-    } else if !crate::restart::is_restarting() {
-        if let Some(trying) = lock(&CANDIDATE).as_ref() {
-            if let Err(e) = trying.quitting() {
-                tracing::warn!("Could not say that {} was quit: {}", trying.version(), e);
+    match at_exit(
+        READY.load(Ordering::SeqCst),
+        crate::restart::is_restarting(),
+        FAILED.load(Ordering::SeqCst),
+    ) {
+        AtExit::Confirm => confirm(),
+        AtExit::Quit => {
+            if let Some(trying) = lock(&CANDIDATE).as_ref() {
+                if let Err(e) = trying.quitting() {
+                    tracing::warn!("Could not say that {} was quit: {}", trying.version(), e);
+                }
             }
         }
+        AtExit::Nothing => {}
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Verifies: REQ-UPD-028
+    #[test]
+    fn a_version_being_tried_that_ends_counts_as_started_only_once_its_screen_came_up() {
+        assert_eq!(at_exit(true, false, false), AtExit::Confirm);
+        // Quit by the person: put back, not started again.
+        assert_eq!(at_exit(false, false, false), AtExit::Quit);
+        // Restarting comes back to the trial; failing to open is not quitting.
+        assert_eq!(at_exit(false, true, false), AtExit::Nothing);
+        assert_eq!(at_exit(false, false, true), AtExit::Nothing);
+    }
 
     /// Verifies: REQ-UPD-025
     #[test]

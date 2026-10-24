@@ -30,6 +30,8 @@ mod single_instance;
 mod software_render;
 mod streaming;
 mod terms;
+#[cfg(feature = "update-drill")]
+mod update_drill;
 mod updater;
 mod usage;
 mod watchdog;
@@ -96,6 +98,7 @@ fn open_app(app: &tauri::AppHandle, self_updating: bool, checked_at_start: bool)
     if let Err(e) = opened {
         // Nothing would be left for the person to see or quit.
         tracing::error!("Could not open the main window: {}", e);
+        updater::startup::could_not_open();
         app.exit(1);
         return;
     }
@@ -140,16 +143,21 @@ pub fn run() {
     // Only the release build is given updater settings (`tauri.updater.conf.json`,
     // ADR-041), so a build made from source never replaces itself with a release.
     let self_updating = context.config().plugins.0.contains_key("updater");
+    let version = context.package_info().version.to_string();
+    #[cfg(feature = "update-drill")]
+    update_drill::at(update_drill::Stage::BeforeStart, &version);
     // Before anything of the app runs: a start while the version an update
     // replaced is put back ends here (ADR-088).
     let began = if self_updating {
-        updater::startup::begin(&context.package_info().version.to_string())
+        updater::startup::begin(&version)
     } else {
         updater::startup::Began::Off
     };
     if began == updater::startup::Began::Exit {
         std::process::exit(0);
     }
+    #[cfg(feature = "update-drill")]
+    update_drill::at(update_drill::Stage::Started, &version);
 
     let mut builder = tauri::Builder::default();
     // Before every other plugin: a second copy exits while they start (ADR-085).
