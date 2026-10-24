@@ -952,5 +952,15 @@
       "copied": "Copied the debug info",
       "failed": "Could not copy the debug info"
     }
+  },
+  "startupUpdate": {
+    "checking": "Checking for updates",
+    "downloading": "Downloading the new version",
+    "percent": "{{percent}}%",
+    "installing": "Installing the new version",
+    "restarting": "Restarting",
+    "note": "jamuru opens when this is done.",
+    "skip": "Open without waiting",
+    "progressLabel": "Update progress"
   }
 }

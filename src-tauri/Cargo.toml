@@ -152,3 +152,6 @@ debug-tools = [
 # enrolled and, if so, keeps a connection to the relay that lets it be operated
 # (ADR-044). Deliberately absent from `default`, like `e2e-control`.
 debug-remote = ["debug-tools"]
+# Lets the update drill (scripts/update-drill.py, ADR-089) break a build on
+# purpose. Absent from `default` and from every release build.
+update-drill = []

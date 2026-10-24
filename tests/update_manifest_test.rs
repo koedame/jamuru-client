@@ -83,7 +83,7 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// Verifies: REQ-UPD-009
+/// Verifies: REQ-UPD-009, REQ-UPD-026
 #[test]
 fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_all() {
     let version = built_version();
@@ -95,6 +95,9 @@ fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_a
     assert!(output.status.success(), "{}", stderr(&output));
     let manifest: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(manifest["version"], version.as_str());
+    // What makes the installed version keep itself until this one has
+    // started (REQ-UPD-026).
+    assert_eq!(manifest["reports_started"], true);
     let platforms = manifest["platforms"].as_object().unwrap();
     let mut keys: Vec<&String> = platforms.keys().collect();
     keys.sort();

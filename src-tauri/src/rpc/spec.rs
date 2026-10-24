@@ -214,6 +214,12 @@ app_commands! {
     [Access::NO_HELP] "実行中の版と、このビルドで更新について何ができるかを読む" crate::updater::update_status;
     [Access::NO_HELP] "新しい版が出ているかを、いま確かめる" crate::updater::update_check;
     [Access::SCREEN_ONLY] "新しい版を入れて再起動する（セッション中は断る）" crate::updater::update_install;
+    // Before the app opens there is only the app's own screen (ADR-089). The
+    // main screen saying it is up is what keeps a version just installed, so
+    // nothing else may say it.
+    [Access::SCREEN_ONLY] "起動前の更新がどこまで進んだかを読む" crate::updater::startup::update_startup_progress;
+    [Access::SCREEN_ONLY] "起動前の更新を待たずにアプリを開く" crate::updater::startup::update_startup_skip;
+    [Access::SCREEN_ONLY] "メインの画面が出たことを伝える（入れたばかりの版を残すかの判断に使う）" crate::updater::startup::update_app_ready;
 
     // The person's own windows: a helper's screen has its own.
     [Access::SCREEN_ONLY] "退室したあとに、アプリを終了する" crate::windows::window_quit_app;
@@ -482,6 +488,30 @@ mod tests {
         assert!(method.access.allows(Portal::Screen));
         for portal in [Portal::Loopback, Portal::Debug, Portal::Help] {
             assert!(!method.access.allows(portal), "{:?} may install", portal);
+        }
+    }
+
+    /// The main screen saying it is up keeps a version just installed, and
+    /// the update before the app opens is the person's own.
+    ///
+    /// Verifies: REQ-UPD-025, REQ-UPD-027
+    #[test]
+    fn only_the_apps_own_screen_may_say_it_is_up_or_skip_the_update_before_it_opens() {
+        for name in [
+            "update_app_ready",
+            "update_startup_progress",
+            "update_startup_skip",
+        ] {
+            let method = find(name).unwrap_or_else(|| panic!("{} has no row", name));
+            assert!(method.access.allows(Portal::Screen), "{}", name);
+            for portal in [Portal::Loopback, Portal::Debug, Portal::Help] {
+                assert!(
+                    !method.access.allows(portal),
+                    "{:?} may call {}",
+                    portal,
+                    name
+                );
+            }
         }
     }
 

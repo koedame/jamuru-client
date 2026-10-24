@@ -18,6 +18,8 @@ pub mod labels {
     pub const MIXER: &str = "mixer";
     pub const CHAT: &str = "chat";
     pub const SETTINGS: &str = "settings";
+    /// Shown while the app updates before it opens (ADR-089).
+    pub const UPDATING: &str = "updating";
 }
 
 /// Global state to track if we're in a connected session
@@ -414,6 +416,10 @@ fn close_needs_leave_confirmation(label: &str, in_room: bool) -> bool {
 /// The window `label` is being closed. In a room, the main window stays and
 /// its screen is asked to confirm leaving; the screen quits once it has left.
 pub fn close_requested(app: &AppHandle, label: &str, api: &tauri::CloseRequestApi) {
+    if crate::updater::startup::close_requested(label) {
+        api.prevent_close();
+        return;
+    }
     if !close_needs_leave_confirmation(label, crate::menu::in_room(app)) {
         return;
     }
@@ -476,6 +482,41 @@ mod tests {
             "index.html#/settings/about"
         );
         assert_eq!(settings_url(None, false), "index.html#/settings");
+    }
+
+    /// Every window the app opens listens for what the app tells it, and the
+    /// webview may call the listener only from the windows the capability
+    /// names. The window shown while updating once was not, and never heard
+    /// how far the update had come.
+    ///
+    /// Verifies: REQ-UPD-025
+    #[test]
+    fn every_window_the_app_opens_may_listen_for_what_it_is_told() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let windows: Vec<&str> = capability["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|window| window.as_str().unwrap())
+            .collect();
+        let granted = |label: &str| {
+            windows
+                .iter()
+                .any(|pattern| match pattern.strip_suffix('*') {
+                    Some(prefix) => label.starts_with(prefix),
+                    None => *pattern == label,
+                })
+        };
+        for label in [
+            labels::MAIN,
+            labels::SETTINGS,
+            labels::CHAT,
+            labels::UPDATING,
+            "help-1",
+        ] {
+            assert!(granted(label), "{} may not listen", label);
+        }
     }
 
     #[test]
