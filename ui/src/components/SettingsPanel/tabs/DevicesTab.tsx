@@ -5,6 +5,7 @@
  */
 
 import { useTranslation } from "react-i18next";
+import type { WasapiMode, WasapiModeAdvice, WasapiSettings } from "../../../lib/tauri";
 import { FormField } from "../FormField";
 import { Select, SelectOption } from "../Select";
 import "./TabContent.css";
@@ -50,6 +51,11 @@ export interface DevicesTabProps {
   transmitChannelOptions: SelectOption[];
   /** Selected transmit channels */
   selectedTransmitChannels: string;
+  /**
+   * How a WASAPI device is opened, with what each way would do for the
+   * devices in use (Windows). The choice is left out when absent.
+   */
+  wasapi?: WasapiSettings | null;
   /** Loading state */
   isLoading?: boolean;
   /** Input device change handler */
@@ -70,6 +76,8 @@ export interface DevicesTabProps {
   onBufferSizeChange: (value: string) => void;
   /** Transmit channels change handler */
   onTransmitChannelsChange: (value: string) => void;
+  /** WASAPI mode change handler */
+  onWasapiModeChange?: (mode: WasapiMode) => void;
 }
 
 /** One-way latency tone class based on app-induced buffer latency (ms). */
@@ -77,6 +85,117 @@ export function latencyTone(ms: number): string {
   if (ms <= 3) return "latency-card__value--good";
   if (ms <= 6) return "latency-card__value--warn";
   return "latency-card__value--bad";
+}
+
+/** Microseconds as milliseconds to one decimal place */
+function usToMs(us: number): number {
+  return Math.round(us / 100) / 10;
+}
+
+/**
+ * The way the devices in use run at: the one chosen, or the standard way
+ * when the one chosen does not open them (the app falls back to it).
+ */
+export function wasapiModeInEffect(wasapi: WasapiSettings): WasapiModeAdvice | undefined {
+  const chosen = wasapi.advice.modes.find((advice) => advice.mode === wasapi.mode);
+  if (chosen && chosen.verdict !== "unavailable") return chosen;
+  return wasapi.advice.modes.find((advice) => advice.mode === "shared");
+}
+
+/**
+ * One-way latency a side adds, in ms: the buffer, or the WASAPI period the
+ * device runs at when that is longer (a device delivers a period at a time).
+ */
+export function oneWayLatencyMs(bufferMs: number, periodUs: number | null | undefined): number {
+  return periodUs == null ? bufferMs : Math.max(bufferMs, periodUs / 1000);
+}
+
+interface WasapiModeFieldProps {
+  wasapi: WasapiSettings;
+  disabled?: boolean;
+  onChange: (mode: WasapiMode) => void;
+}
+
+/** The choice of how a WASAPI device is opened, each way marked for the devices in use */
+function WasapiModeField({ wasapi, disabled, onChange }: WasapiModeFieldProps) {
+  const { t } = useTranslation();
+  const label = t("settings.devices.wasapi.label");
+
+  if (!wasapi.advice.applies) {
+    return (
+      <div className="form-field form-field--row">
+        <div className="form-field__label-group">
+          <span className="form-field__label">{label}</span>
+          <p className="form-field__description">{t("settings.devices.wasapi.notApplied")}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const periodText = (advice: WasapiModeAdvice): string | null => {
+    const input = advice.input_period_us;
+    const output = advice.output_period_us;
+    if (input != null && output != null && usToMs(input) !== usToMs(output)) {
+      return t("settings.devices.wasapi.periodBoth", { input: usToMs(input).toFixed(1), output: usToMs(output).toFixed(1) });
+    }
+    const either = input ?? output;
+    return either == null ? null : t("settings.devices.wasapi.period", { ms: usToMs(either).toFixed(1) });
+  };
+
+  return (
+    <fieldset className="wasapi-mode" disabled={disabled}>
+      <legend className="wasapi-mode__legend">{label}</legend>
+      <p className="form-field__description">{t("settings.devices.wasapi.description")}</p>
+      <div className="wasapi-mode__options">
+        {wasapi.advice.modes.map((advice) => {
+          const checked = wasapi.mode === advice.mode;
+          const unavailable = advice.verdict === "unavailable";
+          const period = unavailable ? null : periodText(advice);
+          const id = `wasapi-mode-${advice.mode}`;
+          return (
+            <label
+              key={advice.mode}
+              htmlFor={id}
+              className={[
+                "wasapi-mode__option",
+                checked ? "wasapi-mode__option--checked" : "",
+                unavailable ? "wasapi-mode__option--unavailable" : "",
+              ].join(" ")}
+            >
+              <input
+                id={id}
+                type="radio"
+                name="wasapi-mode"
+                className="wasapi-mode__radio"
+                value={advice.mode}
+                checked={checked}
+                disabled={unavailable}
+                aria-describedby={`${id}-note`}
+                onChange={() => onChange(advice.mode)}
+              />
+              <span className="wasapi-mode__body">
+                <span className="wasapi-mode__head">
+                  <span className="wasapi-mode__title">
+                    <span className="wasapi-mode__name">{t(`settings.devices.wasapi.modes.${advice.mode}`)}</span>
+                    <span className={`wasapi-mode__verdict wasapi-mode__verdict--${advice.verdict}`}>
+                      {t(`settings.devices.wasapi.verdict.${advice.verdict}`)}
+                    </span>
+                  </span>
+                  {period && <span className="wasapi-mode__period">{period}</span>}
+                </span>
+                <span id={`${id}-note`} className="wasapi-mode__notes">
+                  <span className="wasapi-mode__reason">{t(`settings.devices.wasapi.reason.${advice.reason}`)}</span>
+                  {advice.mode === "exclusive" && !unavailable && (
+                    <span className="wasapi-mode__caution">{t("settings.devices.wasapi.exclusiveCaution")}</span>
+                  )}
+                </span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
 }
 
 export function DevicesTab({
@@ -96,6 +215,7 @@ export function DevicesTab({
   selectedBufferSize,
   transmitChannelOptions,
   selectedTransmitChannels,
+  wasapi,
   isLoading,
   onInputDeviceChange,
   onOutputDeviceChange,
@@ -106,6 +226,7 @@ export function DevicesTab({
   onSampleRateChange,
   onBufferSizeChange,
   onTransmitChannelsChange,
+  onWasapiModeChange = () => {},
 }: DevicesTabProps) {
   const { t } = useTranslation();
 
@@ -133,14 +254,18 @@ export function DevicesTab({
   const inputRChannelOptions: SelectOption[] = [noneOption, ...inputChannelOptions];
   const outputRChannelOptions: SelectOption[] = [noneOption, ...outputChannelOptions];
 
-  // App-induced one-way latency from the current buffer size / sample rate.
+  // App-induced one-way latency from the current buffer size / sample rate,
+  // or the WASAPI period a device runs at when that is longer.
   // Displayed values are rounded first so input + output = total stays consistent.
   const bufferSamples = parseInt(selectedBufferSize, 10);
   const sampleRateHz = parseInt(selectedSampleRate, 10);
-  const oneWayMs =
+  const bufferMs =
     bufferSamples > 0 && sampleRateHz > 0 ? (bufferSamples / sampleRateHz) * 1000 : 0;
-  const oneWayDisp = Math.round(oneWayMs * 10) / 10;
-  const totalDisp = Math.round(oneWayDisp * 2 * 10) / 10;
+  const inEffect = wasapi?.advice.applies ? wasapiModeInEffect(wasapi) : undefined;
+  const round = (ms: number) => Math.round(ms * 10) / 10;
+  const inputDisp = round(oneWayLatencyMs(bufferMs, inEffect?.input_period_us));
+  const outputDisp = round(oneWayLatencyMs(bufferMs, inEffect?.output_period_us));
+  const totalDisp = round(inputDisp + outputDisp);
 
   return (
     <div className="tab-content">
@@ -298,14 +423,16 @@ export function DevicesTab({
         />
       </FormField>
 
+      {wasapi && <WasapiModeField wasapi={wasapi} disabled={isLoading} onChange={onWasapiModeChange} />}
+
       <div className="latency-card">
         <div className="latency-card__item">
           <span className="latency-card__label">{t("settings.devices.latencyInput", "Input Latency")}</span>
-          <span className={`latency-card__value ${latencyTone(oneWayDisp)}`}>{oneWayDisp.toFixed(1)}ms</span>
+          <span className={`latency-card__value ${latencyTone(inputDisp)}`}>{inputDisp.toFixed(1)}ms</span>
         </div>
         <div className="latency-card__item">
           <span className="latency-card__label">{t("settings.devices.latencyOutput", "Output Latency")}</span>
-          <span className={`latency-card__value ${latencyTone(oneWayDisp)}`}>{oneWayDisp.toFixed(1)}ms</span>
+          <span className={`latency-card__value ${latencyTone(outputDisp)}`}>{outputDisp.toFixed(1)}ms</span>
         </div>
         <div className="latency-card__item">
           <span className="latency-card__label">{t("settings.devices.latencyTotal", "Total Latency")}</span>

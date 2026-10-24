@@ -262,7 +262,35 @@
       "latencyOutput": "Output Latency",
       "latencyTotal": "Total Latency",
       "bufferOption": "{{samples}} samples ({{ms}}ms)",
-      "channelOption": "Ch {{channel}}"
+      "channelOption": "Ch {{channel}}",
+      "wasapi": {
+        "label": "WASAPI mode",
+        "description": "How Windows opens a device that isn't an ASIO one. Each mode is marked for the devices you're using",
+        "modes": {
+          "shared": "Shared (standard)",
+          "low_latency": "Shared (low latency)",
+          "exclusive": "Exclusive"
+        },
+        "verdict": {
+          "recommended": "Recommended",
+          "not_recommended": "Not recommended",
+          "unavailable": "Unavailable"
+        },
+        "period": "Period {{ms}}ms",
+        "periodBoth": "Period: input {{input}}ms, output {{output}}ms",
+        "reason": {
+          "nothing_faster": "With this device, no other mode lowers the latency",
+          "faster_available": "With this device, another mode gives lower latency",
+          "shorter_period": "Runs at a shorter period than the standard one. Other apps can still play through the same device",
+          "same_period": "This device's driver doesn't offer a period shorter than the standard one, so the latency stays the same",
+          "no_low_latency_mode": "Not available on this version of Windows",
+          "opens_exclusively": "Gives the lowest latency",
+          "no_exclusive_format": "This device has no format it can be opened in exclusively",
+          "unknown": "Couldn't read what this device supports. Choosing it tries it, and a device it doesn't open is opened in the standard shared mode"
+        },
+        "exclusiveCaution": "While in exclusive mode, other apps can't play sound through this device. If another app is already using it, it's opened in the standard shared mode",
+        "notApplied": "Both the input and the output are ASIO devices, so this mode isn't used"
+      }
     },
     "privacy": {
       "previousHang": {
@@ -686,6 +714,28 @@
       },
       "permission_refused": {
         "input": "The microphone isn't allowed. Turn on jamuru in System Settings → Privacy & Security → Microphone, then join again"
+      }
+    },
+    "wasapiFallback": {
+      "in_use": {
+        "input": "Couldn't open the input device in {{mode}}, so it was opened in the standard shared mode. Another app is using it",
+        "output": "Couldn't open the output device in {{mode}}, so it was opened in the standard shared mode. Another app is using it"
+      },
+      "not_allowed": {
+        "input": "Couldn't open the input device in {{mode}}, so it was opened in the standard shared mode. In Control Panel > Sound, open this device's properties and, on the Advanced tab, turn on \"Allow applications to take exclusive control of this device\"",
+        "output": "Couldn't open the output device in {{mode}}, so it was opened in the standard shared mode. In Control Panel > Sound, open this device's properties and, on the Advanced tab, turn on \"Allow applications to take exclusive control of this device\""
+      },
+      "format_refused": {
+        "input": "The input device has no format it opens in {{mode}}, so it was opened in the standard shared mode",
+        "output": "The output device has no format it opens in {{mode}}, so it was opened in the standard shared mode"
+      },
+      "other": {
+        "input": "Couldn't open the input device in {{mode}}, so it was opened in the standard shared mode",
+        "output": "Couldn't open the output device in {{mode}}, so it was opened in the standard shared mode"
+      },
+      "mode": {
+        "low_latency": "the low-latency shared mode",
+        "exclusive": "exclusive mode"
       }
     }
   },

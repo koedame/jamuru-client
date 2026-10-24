@@ -115,6 +115,7 @@ export function useAudioSettingsTab(
       { value: "2", label: t("settings.devices.stereo", "Stereo") },
     ],
     selectedTransmitChannels: String(audio?.transmit_channels ?? 2),
+    wasapi: audio?.wasapi ?? null,
     onInputDeviceChange: (deviceId) => change({ setting: "input_device", device_id: deviceId }),
     onOutputDeviceChange: (deviceId) => change({ setting: "output_device", device_id: deviceId }),
     onInputChannelLChange: channelChange("input", "left"),
@@ -126,5 +127,6 @@ export function useAudioSettingsTab(
     onTransmitChannelsChange: numberChange((count) => {
       if (count === 1 || count === 2) change({ setting: "transmit_channels", count });
     }),
+    onWasapiModeChange: (mode) => change({ setting: "wasapi_mode", mode }),
   };
 }

@@ -18,7 +18,7 @@ import type { UpdateSectionProps } from "./tabs/UpdateSection";
 import { SelectOption } from "./Select";
 import type { LegalSectionProps } from "../Terms/LegalSection";
 import { MicIcon, SlidersIcon, ShieldIcon, ActivityIcon, InfoIcon } from "./icons";
-import { CompleteDiagnosticsResult, Hang, RecommendedPreset } from "../../lib/tauri";
+import { CompleteDiagnosticsResult, Hang, RecommendedPreset, WasapiMode, WasapiSettings } from "../../lib/tauri";
 import "./SettingsPanel.css";
 
 /** `devices` is the Audio tab: its id is kept because tests and the settings help address it. */
@@ -75,6 +75,8 @@ export interface SettingsPanelProps {
   transmitChannelOptions?: SelectOption[];
   /** Selected transmit channels */
   selectedTransmitChannels?: string;
+  /** How a WASAPI device is opened, with the advice for the devices in use (Windows) */
+  wasapi?: WasapiSettings | null;
   /** Loading state */
   isLoading?: boolean;
   /** Diagnostics state */
@@ -115,6 +117,8 @@ export interface SettingsPanelProps {
   onBufferSizeChange?: (value: string) => void;
   /** Transmit channels change handler */
   onTransmitChannelsChange?: (value: string) => void;
+  /** WASAPI mode change handler */
+  onWasapiModeChange?: (mode: WasapiMode) => void;
   /** Run diagnostics handler */
   onRunDiagnostics?: () => void;
   /** Cancel diagnostics handler (shows a cancel button while running) */
@@ -201,6 +205,7 @@ export function SettingsPanel({
   selectedBufferSize = "64",
   transmitChannelOptions = DEFAULT_CHANNEL_OPTIONS,
   selectedTransmitChannels = "2",
+  wasapi,
   isLoading,
   diagnosticsState = "idle",
   diagnosticsProgress = 0,
@@ -221,6 +226,7 @@ export function SettingsPanel({
   onSampleRateChange = () => {},
   onBufferSizeChange = () => {},
   onTransmitChannelsChange = () => {},
+  onWasapiModeChange,
   onRunDiagnostics,
   onCancelDiagnostics,
   onApplyPreset,
@@ -299,6 +305,7 @@ export function SettingsPanel({
             selectedBufferSize={selectedBufferSize}
             transmitChannelOptions={transmitChannelOptions}
             selectedTransmitChannels={selectedTransmitChannels}
+            wasapi={wasapi}
             isLoading={isLoading}
             onInputDeviceChange={onInputDeviceChange}
             onOutputDeviceChange={onOutputDeviceChange}
@@ -309,6 +316,7 @@ export function SettingsPanel({
             onSampleRateChange={onSampleRateChange}
             onBufferSizeChange={onBufferSizeChange}
             onTransmitChannelsChange={onTransmitChannelsChange}
+            onWasapiModeChange={onWasapiModeChange}
           />
         );
       case "privacy":
