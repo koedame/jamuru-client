@@ -65,17 +65,30 @@ mod tests {
             how("0.1.0-drill.2:crash", "0.1.0-drill.2", Stage::Started),
             Some(Break::Crash)
         );
-        assert_eq!(how("0.1.0-drill.2:crash", "0.1.0-drill.2", Stage::BeforeStart), None);
-        assert_eq!(how("0.1.0-drill.2:crash", "0.1.0-drill.1", Stage::Started), None);
         assert_eq!(
-            how("0.1.0-drill.2:never-runs", "0.1.0-drill.2", Stage::BeforeStart),
+            how("0.1.0-drill.2:crash", "0.1.0-drill.2", Stage::BeforeStart),
+            None
+        );
+        assert_eq!(
+            how("0.1.0-drill.2:crash", "0.1.0-drill.1", Stage::Started),
+            None
+        );
+        assert_eq!(
+            how(
+                "0.1.0-drill.2:never-runs",
+                "0.1.0-drill.2",
+                Stage::BeforeStart
+            ),
             Some(Break::Exit)
         );
         assert_eq!(
             how("0.1.0-drill.2:hang", "0.1.0-drill.2", Stage::Started),
             Some(Break::Hang)
         );
-        assert_eq!(how("0.1.0-drill.2:sing", "0.1.0-drill.2", Stage::Started), None);
+        assert_eq!(
+            how("0.1.0-drill.2:sing", "0.1.0-drill.2", Stage::Started),
+            None
+        );
         assert_eq!(how("nonsense", "0.1.0-drill.2", Stage::Started), None);
     }
 }

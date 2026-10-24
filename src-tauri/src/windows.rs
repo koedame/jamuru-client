@@ -501,10 +501,12 @@ mod tests {
             .map(|window| window.as_str().unwrap())
             .collect();
         let granted = |label: &str| {
-            windows.iter().any(|pattern| match pattern.strip_suffix('*') {
-                Some(prefix) => label.starts_with(prefix),
-                None => *pattern == label,
-            })
+            windows
+                .iter()
+                .any(|pattern| match pattern.strip_suffix('*') {
+                    Some(prefix) => label.starts_with(prefix),
+                    None => *pattern == label,
+                })
         };
         for label in [
             labels::MAIN,

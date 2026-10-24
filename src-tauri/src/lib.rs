@@ -92,7 +92,9 @@ fn open_app(app: &tauri::AppHandle, self_updating: bool, checked_at_start: bool)
         .iter()
         .find(|window| window.label == windows::labels::MAIN);
     let opened = match main {
-        Some(config) => tauri::WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()),
+        Some(config) => {
+            tauri::WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build())
+        }
         None => Err(tauri::Error::WindowNotFound),
     };
     if let Err(e) = opened {

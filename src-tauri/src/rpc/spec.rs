@@ -497,11 +497,20 @@ mod tests {
     /// Verifies: REQ-UPD-025, REQ-UPD-027
     #[test]
     fn only_the_apps_own_screen_may_say_it_is_up_or_skip_the_update_before_it_opens() {
-        for name in ["update_app_ready", "update_startup_progress", "update_startup_skip"] {
+        for name in [
+            "update_app_ready",
+            "update_startup_progress",
+            "update_startup_skip",
+        ] {
             let method = find(name).unwrap_or_else(|| panic!("{} has no row", name));
             assert!(method.access.allows(Portal::Screen), "{}", name);
             for portal in [Portal::Loopback, Portal::Debug, Portal::Help] {
-                assert!(!method.access.allows(portal), "{:?} may call {}", portal, name);
+                assert!(
+                    !method.access.allows(portal),
+                    "{:?} may call {}",
+                    portal,
+                    name
+                );
             }
         }
     }
