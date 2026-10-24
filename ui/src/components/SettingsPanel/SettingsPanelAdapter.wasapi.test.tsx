@@ -98,6 +98,28 @@ describe('the WASAPI mode in the Devices tab', () => {
   });
 
   // Verifies: REQ-GUI-031
+  it('the heading spells out WASAPI, and what it is opens from under the heading', async () => {
+    fakeBackend(audioSettings({ wasapi: codec }));
+    render(<SettingsPanelAdapter initialTab="devices" />);
+
+    expect(await screen.findByText('WASAPI (Windows Audio Session API) mode')).toBeInTheDocument();
+    const about = screen.getByText(text.about).closest('details') as HTMLDetailsElement;
+    expect(about.open).toBe(false);
+    fireEvent.click(screen.getByText(text.about));
+    expect(about.open).toBe(true);
+    expect(within(about).getByText(text.aboutText)).toBeInTheDocument();
+  });
+
+  // Verifies: REQ-GUI-031
+  it('with an ASIO driver on both sides, what WASAPI is can still be read', async () => {
+    fakeBackend(audioSettings({ wasapi: { mode: 'shared', advice: { applies: false, modes: [] } } }));
+    render(<SettingsPanelAdapter initialTab="devices" />);
+
+    expect(await screen.findByText(text.notApplied)).toBeInTheDocument();
+    expect(screen.getByText(text.about).closest('details')).not.toBeNull();
+  });
+
+  // Verifies: REQ-GUI-031
   it('the caution about other apps is only on the exclusive mode', async () => {
     fakeBackend(audioSettings({ wasapi: codec }));
     render(<SettingsPanelAdapter initialTab="devices" />);
