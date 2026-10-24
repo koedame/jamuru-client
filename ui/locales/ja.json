@@ -262,7 +262,9 @@
       "bufferOption": "{{samples}} サンプル ({{ms}}ms)",
       "channelOption": "チャンネル {{channel}}",
       "wasapi": {
-        "label": "WASAPI のモード",
+        "label": "WASAPI（Windows Audio Session API）のモード",
+        "about": "WASAPI（Windows Audio Session API）とは",
+        "aboutText": "Windows に標準で入っている、アプリが音を入出力するための仕組みです。ASIO 以外のデバイスは、jamuru もこれで開きます。共有モードでは、Windows がすべてのアプリの音を決まった周期（ふつうは 10ms）でまとめて処理するため、そのぶん遅延が増えます。排他モードはこの処理を通さず、jamuru がデバイスを直接使います",
         "description": "ASIO 以外のデバイスを Windows でどう開くか。いまのデバイスでの推奨と非推奨を示しています",
         "modes": {
           "shared": "共有モード（標準）",
