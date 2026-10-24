@@ -124,6 +124,17 @@ interface WasapiModeFieldProps {
   onChange: (mode: WasapiMode) => void;
 }
 
+/** What WASAPI is, folded under the heading: a technical detail most people can skip */
+function WasapiAbout() {
+  const { t } = useTranslation();
+  return (
+    <details className="wasapi-mode__about">
+      <summary className="wasapi-mode__about-summary">{t("settings.devices.wasapi.about")}</summary>
+      <p className="wasapi-mode__about-text">{t("settings.devices.wasapi.aboutText")}</p>
+    </details>
+  );
+}
+
 /** The choice of how a WASAPI device is opened, each way marked for the devices in use */
 function WasapiModeField({ wasapi, disabled, onChange }: WasapiModeFieldProps) {
   const { t } = useTranslation();
@@ -135,6 +146,7 @@ function WasapiModeField({ wasapi, disabled, onChange }: WasapiModeFieldProps) {
         <div className="form-field__label-group">
           <span className="form-field__label">{label}</span>
           <p className="form-field__description">{t("settings.devices.wasapi.notApplied")}</p>
+          <WasapiAbout />
         </div>
       </div>
     );
@@ -154,6 +166,7 @@ function WasapiModeField({ wasapi, disabled, onChange }: WasapiModeFieldProps) {
     <fieldset className="wasapi-mode" disabled={disabled}>
       <legend className="wasapi-mode__legend">{label}</legend>
       <p className="form-field__description">{t("settings.devices.wasapi.description")}</p>
+      <WasapiAbout />
       <div className="wasapi-mode__options">
         {wasapi.advice.modes.map((advice) => {
           const checked = wasapi.mode === advice.mode;
