@@ -437,6 +437,65 @@ export interface AudioSettings {
   buffer_sizes: number[];
   sample_rate: number;
   sample_rates: SampleRateInfo[];
+  /**
+   * How a WASAPI device is opened, with what each way would do for the
+   * devices in use (Windows, ADR-088). Absent where no device on offer is a
+   * WASAPI one.
+   */
+  wasapi?: WasapiSettings | null;
+}
+
+/**
+ * How a WASAPI device is opened. "shared" is the standard shared mode,
+ * "low_latency" the shared mode at the smallest period the driver offers,
+ * "exclusive" takes the device for the app alone.
+ */
+export type WasapiMode = "shared" | "low_latency" | "exclusive";
+
+/** Whether a way of opening suits the devices in use. "unavailable" does not open them. */
+export type WasapiVerdict = "recommended" | "not_recommended" | "unavailable";
+
+/** Why a way of opening got its verdict */
+export type WasapiReason =
+  /** Standard: no faster way opens these devices */
+  | "nothing_faster"
+  /** Standard: a faster way opens these devices */
+  | "faster_available"
+  /** Low latency: the driver offers a shorter period than the standard one */
+  | "shorter_period"
+  /** Low latency or exclusive: the device's smallest period that way is the standard one */
+  | "same_period"
+  /** Low latency or exclusive: a shorter period, but a frame of the buffer is longer than the standard period */
+  | "buffer_longer"
+  /** Low latency: the system has no low-latency shared mode */
+  | "no_low_latency_mode"
+  /** Exclusive: the devices open in exclusive mode */
+  | "opens_exclusively"
+  /** Exclusive: a device has no format it opens in exclusive mode */
+  | "no_exclusive_format"
+  /** What a device offers could not be read; choosing the way tries it */
+  | "unknown";
+
+/** What one way of opening would do with the devices in use */
+export interface WasapiModeAdvice {
+  mode: WasapiMode;
+  verdict: WasapiVerdict;
+  reason: WasapiReason;
+  /** The period the input would run at, in microseconds; null when not known or not a WASAPI device */
+  input_period_us: number | null;
+  /** The period the output would run at, as input_period_us */
+  output_period_us: number | null;
+}
+
+export interface WasapiSettings {
+  /** The way chosen */
+  mode: WasapiMode;
+  advice: {
+    /** false when neither device is a WASAPI one (both are ASIO drivers); modes is then empty */
+    applies: boolean;
+    /** One per way: shared, low_latency, exclusive */
+    modes: WasapiModeAdvice[];
+  };
 }
 
 /** Which channel of a left/right pair */
@@ -454,6 +513,7 @@ export type SettingChange =
   | { setting: "transmit_channels"; count: number }
   | { setting: "buffer_size"; samples: number }
   | { setting: "sample_rate"; hz: number }
+  | { setting: "wasapi_mode"; mode: WasapiMode }
   | { setting: "preset"; preset: AudioPresetId };
 
 /** Event every window hears after an audio setting changed */
@@ -676,6 +736,26 @@ export interface StreamingStatus {
    * device never became active.
    */
   device_problems: DeviceProblem[];
+  /**
+   * How the session's WASAPI devices were opened (Windows, ADR-088): null for
+   * a side not opened through WASAPI or not open. Absent from an app older
+   * than this field, as a helped participant's may be.
+   */
+  wasapi_opened?: { input: WasapiOpenedWay | null; output: WasapiOpenedWay | null };
+}
+
+/** How a WASAPI device of the session was opened */
+export interface WasapiOpenedWay {
+  /** The way the settings asked for */
+  asked: WasapiMode;
+  /** The way it was opened: the standard one when the one asked for did not open it */
+  opened: WasapiMode;
+  /**
+   * Why the way asked for did not open it. "in_use": another app has the
+   * device to itself. "not_allowed": the sound settings do not let apps take
+   * the device for themselves. "format_refused": it refused every format.
+   */
+  failure: "in_use" | "not_allowed" | "format_refused" | "other" | null;
 }
 
 /** A device the audio thread could not open */

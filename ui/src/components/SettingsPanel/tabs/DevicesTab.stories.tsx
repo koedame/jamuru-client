@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { WasapiMode, WasapiModeAdvice } from "../../../lib/tauri";
 import { DevicesTab } from "./DevicesTab";
 
 const meta = {
@@ -104,5 +105,74 @@ export const BluetoothSelected: Story = {
     outputDevices: [...outputDevices, { id: "bt-out", name: "Taro's AirPods", isBluetooth: true }],
     selectedInputId: "bt-in",
     selectedOutputId: "bt-out",
+  },
+};
+
+const advice = (
+  mode: WasapiMode,
+  verdict: WasapiModeAdvice["verdict"],
+  reason: WasapiModeAdvice["reason"],
+  periodUs: number | null
+): WasapiModeAdvice => ({ mode, verdict, reason, input_period_us: periodUs, output_period_us: periodUs });
+
+/** Windows, a built-in codec: the shared period is fixed at 10 ms, exclusive runs at 3 ms */
+export const WasapiBuiltInCodec: Story = {
+  args: {
+    ...baseArgs,
+    wasapi: {
+      mode: "shared",
+      advice: {
+        applies: true,
+        modes: [
+          advice("shared", "not_recommended", "faster_available", 10000),
+          advice("low_latency", "not_recommended", "same_period", 10000),
+          advice("exclusive", "recommended", "opens_exclusively", 3000),
+        ],
+      },
+    },
+  },
+};
+
+/** Windows, a driver offering small shared periods: low latency is recommended too */
+export const WasapiSmallPeriods: Story = {
+  args: {
+    ...baseArgs,
+    wasapi: {
+      mode: "low_latency",
+      advice: {
+        applies: true,
+        modes: [
+          advice("shared", "not_recommended", "faster_available", 10000),
+          advice("low_latency", "recommended", "shorter_period", 2667),
+          advice("exclusive", "recommended", "opens_exclusively", 3000),
+        ],
+      },
+    },
+  },
+};
+
+/** Windows, a device with neither faster way: only the standard one can be chosen */
+export const WasapiNothingFaster: Story = {
+  args: {
+    ...baseArgs,
+    wasapi: {
+      mode: "shared",
+      advice: {
+        applies: true,
+        modes: [
+          advice("shared", "recommended", "nothing_faster", 10000),
+          advice("low_latency", "unavailable", "no_low_latency_mode", null),
+          advice("exclusive", "unavailable", "no_exclusive_format", null),
+        ],
+      },
+    },
+  },
+};
+
+/** Windows, an ASIO driver on both sides: the WASAPI mode is not used */
+export const WasapiNotUsedWithAsio: Story = {
+  args: {
+    ...baseArgs,
+    wasapi: { mode: "shared", advice: { applies: false, modes: [] } },
   },
 };

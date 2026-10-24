@@ -52,6 +52,20 @@ Audio Engineは以下の責務を持つ:
 - **設定の読み書きは待たされない**: 一覧が固まっている間は、最後に読めた一覧を出す。固まった呼び出しが戻るまで、同じ一覧を読む呼び出しは重ねない
 - **画面に出す**: 開けなかったデバイスは `streaming_status` の `device_problems` に、向き（`input` / `output`）と理由（`unresponsive` / `failed`）、分かればデバイス名を載せる。同じ向きのデバイスが開けたとき、セッションが始まるとき・終わるときに消える
 
+### 1.5 Windows の WASAPI のモード（ADR-088）
+
+Windows で ASIO ではないデバイスは、`AudioConfig::wasapi_mode`（設定ファイルの `wasapi_mode`）に従って開く（REQ-AUD-042）。
+
+| モード | 開き方 | 周期 |
+|---|---|---|
+| `shared`（既定） | cpal の WASAPI 共有モード | ミキサーの周期（多くは 10 ms） |
+| `low_latency` | `audio/wasapi.rs` が `IAudioClient3::InitializeSharedAudioStream` で開く | ドライバが許す周期のうち、1 フレームが収まる最小のもの |
+| `exclusive` | `audio/wasapi.rs` が `IAudioClient::Initialize`（排他・イベント駆動）で開く | デバイスの最小の周期と 1 フレームの長い方 |
+
+- `low_latency` と `exclusive` のストリームは、それぞれ専用のスレッドでデバイスを開き、周期ごとのイベントで cpal と同じ形（インターリーブの `f32`）をコールバックに渡す。デバイスのレートがセッションと違えば、cpal の経路と同じく変換する
+- 選んだ方式で開けないときは、同じコールバックで `shared` に開き直す。どちらで開いたかと開けなかった理由（`in_use` / `not_allowed` / `format_refused` / `other`）は `streaming_status` の `wasapi_opened` に、向きごとに載る（WASAPI で開いていない向きは `null`）
+- 使っているデバイスがそれぞれのモードで開けるか・周期がいくつかは、ストリームを開かずに読み（`wasapi_mode::read_endpoints`。一覧と同じ `LIST_TIMEOUT` で諦める）、`wasapi_mode::advise` が推奨・非推奨・使えないを決める。設定の応答の `wasapi` に載る
+
 ---
 
 ## 2. モジュール構成
@@ -67,7 +81,9 @@ audio/
 ├── plc.rs          # Packet Loss Concealment
 ├── preset.rs       # プリセット定義と遅延バジェット（ADR-019）
 ├── resampler.rs    # サンプルレート変換（ADR-013）
-└── stream.rs       # 送受信の音声形式と受信経路（§5.4）
+├── stream.rs       # 送受信の音声形式と受信経路（§5.4）
+├── wasapi.rs       # WASAPI の排他・低遅延の共有モードのストリーム（Windows のみ。§1.5）
+└── wasapi_mode.rs  # WASAPI のモードの選択肢と推奨の判定（§1.5）
 ```
 
 ---

@@ -27,7 +27,7 @@ use std::thread::JoinHandle;
 
 use uuid::Uuid;
 
-use crate::audio::{AudioPreset, BurstProbe};
+use crate::audio::{AudioPreset, BurstProbe, WasapiMode};
 use crate::network::LinkIdentity;
 
 pub use shared::{BandwidthSnapshot, Flights, LinkReport, LinkReports, Shared, MAX_LINKS};
@@ -105,6 +105,8 @@ pub struct Params {
     pub buffer_size: u32,
     pub preset: AudioPreset,
     pub sample_rate: u32,
+    /// How a WASAPI device is opened (Windows)
+    pub wasapi_mode: WasapiMode,
     /// How many channels are sent: 1 (mono) or 2 (stereo)
     pub transmit_channels: u32,
     /// Which channels of a multi-channel interface are read (1-based)

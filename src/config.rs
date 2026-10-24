@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
-use crate::audio::LINUX_MIN_OUTPUT_PERIOD;
+use crate::audio::{WasapiMode, LINUX_MIN_OUTPUT_PERIOD};
 
 /// Application name used for configuration directory
 const APP_NAME: &str = "jamuru";
@@ -191,6 +191,11 @@ pub struct AppConfig {
     #[serde(default = "default_transmit_channels")]
     pub transmit_channels: u32,
 
+    /// How a WASAPI device is opened on Windows (ADR-088). The standard
+    /// shared way unless the user picks another in Settings.
+    #[serde(default)]
+    pub wasapi_mode: WasapiMode,
+
     /// UI language (None = not chosen yet; the GUI falls back to browser/OS
     /// detection). Set once the user picks one in Settings, so every window,
     /// not just the one that changed it, shows the same language.
@@ -250,6 +255,7 @@ impl Default for AppConfig {
             output_channel_l: 1,
             output_channel_r: Some(2),
             transmit_channels: 2,
+            wasapi_mode: WasapiMode::default(),
             language: None,
             usage_reporting: false,
             auto_update: true,
