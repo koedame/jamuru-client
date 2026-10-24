@@ -1555,6 +1555,8 @@ fn print_link_stats(report: &LinkSummary, settings: &AudioSettings) {
     let mut local_info =
         LocalLatencyInfo::from_audio_config(settings.frame_size, settings.sample_rate, "pcm");
     local_info.set_jitter_buffer_ms(report.jitter_buffer_delay_us as f32 / 1000.0);
+    let (input_us, output_us) = jamjam::audio::opened_ways().periods_us();
+    local_info.set_os_periods_us(input_us, output_us);
     print_session_stats(
         &report.stats,
         &local_info,

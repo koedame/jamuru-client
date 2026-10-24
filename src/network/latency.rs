@@ -50,10 +50,25 @@ impl LocalLatencyInfo {
         }
     }
 
+    /// Count the period the system hands the devices their samples at (the
+    /// Windows mixer's 10 ms, or what the way the device was opened gives).
+    /// Each side takes the longer of its buffer and its period; a side whose
+    /// period is not known keeps its buffer.
+    pub fn set_os_periods_us(&mut self, capture: Option<u32>, playback: Option<u32>) {
+        self.capture_buffer_ms = longer_of_buffer_and_period(self.capture_buffer_ms, capture);
+        self.playback_buffer_ms = longer_of_buffer_and_period(self.playback_buffer_ms, playback);
+    }
+
     /// Update jitter buffer delay
     pub fn set_jitter_buffer_ms(&mut self, jitter_buffer_ms: f32) {
         self.jitter_buffer_ms = jitter_buffer_ms;
     }
+}
+
+/// The latency of one side: its buffer or the system's period, whichever is
+/// longer. `None`: the period is not known, and the buffer is all there is.
+pub fn longer_of_buffer_and_period(buffer_ms: f32, period_us: Option<u32>) -> f32 {
+    buffer_ms.max(period_us.map_or(0.0, |us| us as f32 / 1000.0))
 }
 
 /// Network latency info (measured)
@@ -227,6 +242,36 @@ mod tests {
         assert!((info.capture_buffer_ms - 2.67).abs() < 0.1); // 128/48000 * 1000 ≈ 2.67ms
         assert_eq!(info.encode_ms, 0.0);
         assert_eq!(info.decode_ms, 0.0);
+    }
+
+    /// Verifies: REQ-AUD-043
+    #[test]
+    fn when_the_system_period_is_longer_than_the_buffer_the_period_is_the_latency() {
+        let mut info = LocalLatencyInfo::from_audio_config(64, 48000, "pcm");
+        info.set_os_periods_us(Some(10_000), Some(10_000));
+
+        assert!((info.capture_buffer_ms - 10.0).abs() < 0.001);
+        assert!((info.playback_buffer_ms - 10.0).abs() < 0.001);
+    }
+
+    /// Verifies: REQ-AUD-043
+    #[test]
+    fn when_the_buffer_is_longer_than_the_system_period_the_buffer_is_the_latency() {
+        let mut info = LocalLatencyInfo::from_audio_config(960, 48000, "pcm");
+        info.set_os_periods_us(Some(3_000), Some(10_000));
+
+        assert!((info.capture_buffer_ms - 20.0).abs() < 0.001);
+        assert!((info.playback_buffer_ms - 20.0).abs() < 0.001);
+    }
+
+    /// Verifies: REQ-AUD-043
+    #[test]
+    fn when_a_side_has_no_known_period_it_keeps_its_buffer_and_the_other_side_takes_its_period() {
+        let mut info = LocalLatencyInfo::from_audio_config(64, 48000, "pcm");
+        info.set_os_periods_us(None, Some(10_000));
+
+        assert!((info.capture_buffer_ms - 1.333).abs() < 0.01);
+        assert!((info.playback_buffer_ms - 10.0).abs() < 0.001);
     }
 
     #[test]

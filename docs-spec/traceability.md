@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 311 |
+| 要求 総数 | 312 |
 | うち must | 292 |
-| うち should | 19 |
-| 検証済み | 285 |
+| うち should | 20 |
+| 検証済み | 286 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 3 |
 
@@ -42,6 +42,7 @@
 | REQ-AUD-040 | must | FEC の受信側が持つパケットの写し（グループ）の数は、損失があってもなくても上限（16 グループ）を超えない。損失がなければ復元は起きないので、復元の成功を待たずに古いグループを捨てる。上限に収めても、直近のグループの欠けた 1 パケットは FEC で復元できる | `docs-spec/requirements.md` | `src/network/fec.rs`::test_decoder_keeps_bounded_groups_without_loss<br/>`src/network/fec.rs`::test_decoder_recovers_after_many_lossless_groups |
 | REQ-AUD-041 | must | 受信した音が途切れたり切り替わったりする場所で、出力の波形に段差を入れない（クリックを出さない）。対象は、フレームが間に合わず無音になる読み出し、ロックが取れず無音になる読み出し、失われたフレームの補間、受信バッファの段数を動かすときの無音の挿入とフレームの読み飛ばし、入室や繋ぎ直しのあとの最初のフレーム。切れ目の直後の約 1ms は、直前に出した最後のサンプルから新しい信号へのクロスフェードにする（元の振幅を超えない）。連続したフレームには手を加えない | `docs-spec/requirements.md` | `src/audio/stream.rs`::a_frame_that_is_late_leaves_no_step_in_what_is_played<br/>`src/audio/stream.rs`::a_read_that_finds_the_buffer_held_leaves_no_step_in_what_is_played<br/>`src/audio/stream.rs`::a_tone_that_starts_mid_wave_is_never_louder_than_itself<br/>`src/audio/stream.rs`::lowering_the_delay_leaves_no_step_in_what_is_played<br/>`src/audio/stream.rs`::raising_the_delay_leaves_no_step_in_what_is_played<br/>`src/audio/stream.rs`::the_first_frame_after_a_reset_rises_from_silence |
 | REQ-AUD-042 | should | Windows で ASIO ではないデバイスは、設定の「WASAPI のモード」に従って開く（[ADR-088](./adr/ADR-088-wasapi-exclusive-and-low-latency-modes.md)）。標準の共有モード（既定）は従来どおり。低遅延の共有モードは、ドライバが許す共有モードの周期のうち、セッションの 1 フレームが収まる最小のもので開く（ほかのアプリがミキサーの周期を決めているときはその周期）。排他モードは、デバイスの最小の周期と 1 フレームの長い方の周期で、デバイスが受ける形式（`f32` → 24 bit → 32 bit → 16 bit の順）で開く。選んだ方式で開けないとき（Windows が排他的な制御を許していない・ほかのアプリが共有モードで鳴らしていて Windows が排他モードのアプリを優先しない・受ける形式が無い）は、セッションを止めずに標準の共有モードで開き、どちらで開いたかと理由をセッションの状態に出す。ほかのアプリがデバイスを排他モードで使っているときは標準の共有モードでも開けないので、これまでと同じくデバイスを開けなかったと扱う。各モードの推奨・非推奨・使えないは、使っているデバイスが何に対応しているかから決める: 排他モードは WASAPI の側すべてに排他で開ける形式があれば推奨、Windows が排他的な制御を許していない側か、形式が無い側があれば使えない。低遅延の共有モードは標準より短い周期で動く側があれば推奨、標準と同じ周期なら非推奨、Windows に低遅延の共有モードが無ければ使えない。標準の共有モードは、ほかに推奨のモードが無ければ推奨。何に対応しているか読めない側があれば、排他と低遅延は非推奨（選べば試す）。入力も出力も ASIO のときはモードを使わない | `docs-spec/requirements.md` | `src/audio/wasapi_mode.rs`::a_sample_beyond_full_scale_is_clipped_rather_than_wrapped_around<br/>`src/audio/wasapi_mode.rs`::every_sample_layout_carries_a_signal_through_encode_and_decode<br/>`src/audio/wasapi_mode.rs`::when_a_driver_offers_one_shared_period_that_period_is_asked_for<br/>`src/audio/wasapi_mode.rs`::when_a_stream_closes_after_its_replacement_opened_the_replacement_stays_recorded<br/>`src/audio/wasapi_mode.rs`::when_an_open_asked_for_before_its_replacement_finishes_after_it_the_replacement_stays_recorded<br/>`src/audio/wasapi_mode.rs`::when_the_buffer_falls_between_two_shared_periods_the_larger_one_is_asked_for<br/>`src/audio/wasapi_mode.rs`::when_the_buffer_is_longer_than_the_smallest_period_an_exclusive_stream_runs_at_the_buffer |
+| REQ-AUD-043 | should | メイン画面の遅延（参加者の行の↑↓と内訳）と、相手に伝える自分の取り込み・再生のバッファは、各側を「セッションのバッファの長さと、その側が実際に開いた方式の周期の長い方」で数える（[ADR-088](./adr/ADR-088-wasapi-exclusive-and-low-latency-modes.md)）。周期は、標準の共有モードならミキサーの周期、低遅延の共有モードと排他モードなら開いたときに選んだ周期で、設定の画面の見積もりと同じ。WASAPI で開いていない側（ASIO・Windows 以外）と、周期を読めなかった側は、これまでどおりバッファの長さだけ | `docs-spec/requirements.md` | `src-tauri/src/streaming.rs`::when_the_system_period_is_longer_than_the_frame_the_breakdown_counts_the_period<br/>`src/network/latency.rs`::when_a_side_has_no_known_period_it_keeps_its_buffer_and_the_other_side_takes_its_period<br/>`src/network/latency.rs`::when_the_buffer_is_longer_than_the_system_period_the_buffer_is_the_latency<br/>`src/network/latency.rs`::when_the_system_period_is_longer_than_the_buffer_the_period_is_the_latency |
 | REQ-AUD-101 | must | 非圧縮PCMコーデックを使用する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_pcm_codec_is_uncompressed |
 | REQ-AUD-104 | must | サンプルレート48kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_48khz |
 | REQ-AUD-105 | must | サンプルレート96kHzで動作する | `docs-spec/behavior/audio-quality.feature` | `tests/audio_quality_test.rs`::test_sample_rate_96khz |
