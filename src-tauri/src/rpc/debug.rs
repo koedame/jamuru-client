@@ -65,7 +65,7 @@ pub const METHODS: &[Method] = &[
         name: "debug.info",
         access: Access::TOOLS,
         kind: Kind::Native,
-        summary: "版・ビルド・OS・音声デバイスと設定・接続先・ログの場所",
+        summary: "版・ビルド・OS・音声デバイスと設定・ASIO で実際に開いたバッファ・接続先・ログの場所",
     },
     Method {
         name: "debug.logs",
@@ -202,6 +202,7 @@ async fn info<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
         "cpu_model": cpu_model,
         "cpu_threads": cpu_threads,
         "audio_host": jamjam::environment::audio_host(),
+        "asio_buffer_frames": jamjam::audio::opened_asio_buffer_frames(),
         "device_id": app.state::<DeviceIdentityState>().identity().device_id(),
         "server_url": strip_userinfo(&server_url),
         "log_file": log_path(app).ok().map(|p| p.display().to_string()),
