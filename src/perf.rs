@@ -350,13 +350,19 @@ fn refresh(system: &mut sysinfo::System) {
     );
 }
 
+/// A child process started by one test is a child of the whole test binary, so a test that
+/// starts one and a test that looks at children must not overlap: both take their turn here.
+#[cfg(test)]
+pub(crate) fn child_process_turn() -> std::sync::MutexGuard<'static, ()> {
+    static CHILD_PROCESS_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    CHILD_PROCESS_TESTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A child process started by one test is a child of the whole test binary, so the tests
-    /// that look at children must not overlap.
-    static CHILD_PROCESS_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn a_pass_stopped_while_timing_is_off_records_nothing() {
@@ -423,9 +429,7 @@ mod tests {
 
     #[test]
     fn the_threads_of_this_process_are_not_counted_as_children() {
-        let _turn = CHILD_PROCESS_TESTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _turn = child_process_turn();
         let (stop, wait) = std::sync::mpsc::channel::<()>();
         let worker = std::thread::spawn(move || {
             let _ = wait.recv();
@@ -443,9 +447,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_child_process_is_counted_with_what_it_used() {
-        let _turn = CHILD_PROCESS_TESTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _turn = child_process_turn();
         let mut child = std::process::Command::new("sleep")
             .arg("3")
             .spawn()
@@ -467,9 +469,7 @@ mod tests {
 
     #[test]
     fn a_thread_that_runs_the_whole_time_reads_as_about_one_core() {
-        let _turn = CHILD_PROCESS_TESTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _turn = child_process_turn();
         let stop = std::sync::Arc::new(AtomicBool::new(false));
         let spinner = {
             let stop = stop.clone();
@@ -492,9 +492,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_child_process_that_runs_the_whole_time_reads_as_about_one_core() {
-        let _turn = CHILD_PROCESS_TESTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _turn = child_process_turn();
         let mut child = std::process::Command::new("sh")
             .args(["-c", "while :; do :; done"])
             .spawn()
