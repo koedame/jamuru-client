@@ -1391,6 +1391,7 @@ mod tests {
             }),
             exclusive_period_us: 3_000,
             exclusive_rates: vec![48000],
+            exclusive_allowed: true,
         }
     }
 
