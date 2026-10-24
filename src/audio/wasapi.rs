@@ -17,16 +17,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 
-use windows::core::{Interface, HRESULT, HSTRING};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, S_OK, WAIT_OBJECT_0};
+use windows::core::{implement, Interface, HRESULT, HSTRING, PCWSTR};
+use windows::Win32::Foundation::{
+    CloseHandle, HANDLE, PROPERTYKEY, S_OK, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows::Win32::Media::Audio::{
-    eCapture, eConsole, eRender, IAudioCaptureClient, IAudioClient, IAudioClient3,
-    IAudioRenderClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
-    AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY, AUDCLNT_BUFFERFLAGS_SILENT,
-    AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED, AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_E_DEVICE_IN_USE,
-    AUDCLNT_E_ENGINE_PERIODICITY_LOCKED, AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED,
-    AUDCLNT_E_UNSUPPORTED_FORMAT, AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-    WAVEFORMATEX, WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0, WAVE_FORMAT_PCM,
+    eCapture, eConsole, eRender, EDataFlow, ERole, IAudioCaptureClient, IAudioClient,
+    IAudioClient3, IAudioRenderClient, IMMDevice, IMMDeviceEnumerator, IMMNotificationClient,
+    IMMNotificationClient_Impl, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY,
+    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED, AUDCLNT_E_DEVICE_INVALIDATED,
+    AUDCLNT_E_DEVICE_IN_USE, AUDCLNT_E_ENGINE_PERIODICITY_LOCKED,
+    AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED, AUDCLNT_E_UNSUPPORTED_FORMAT,
+    AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, DEVICE_STATE, WAVEFORMATEX,
+    WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0, WAVE_FORMAT_PCM,
 };
 use windows::Win32::Media::KernelStreaming::{KSDATAFORMAT_SUBTYPE_PCM, WAVE_FORMAT_EXTENSIBLE};
 use windows::Win32::Media::Multimedia::{KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, WAVE_FORMAT_IEEE_FLOAT};
@@ -37,11 +40,12 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
 use super::device::DeviceId;
+use super::driver::{bounded, LIST_TIMEOUT};
 use super::error::AudioError;
 use super::open::DeviceSide;
 use super::wasapi_mode::{
-    exclusive_period_us, low_latency_period, EndpointCaps, OpenFailure, SampleLayout,
-    SharedPeriods, WasapiMode, WASAPI_ID_PREFIX,
+    low_latency_period, EndpointCaps, OpenFailure, SampleLayout, SharedPeriods, WasapiMode,
+    WASAPI_ID_PREFIX,
 };
 use crate::config::VALID_SAMPLE_RATES;
 
@@ -56,7 +60,8 @@ const EXCLUSIVE_FORMATS: [(SampleLayout, u16); 5] = [
 ];
 
 /// How long a stream's thread waits for the device's event before it looks
-/// at whether it has been told to stop
+/// at whether it has been told to stop, and asks the device whether it is
+/// still there
 const EVENT_WAIT_MS: u32 = 100;
 
 /// Which way a stream carries audio
@@ -319,11 +324,116 @@ struct Opened {
     buffer_frames: u32,
     /// Exclusive streams fill or empty the whole buffer each period
     exclusive: bool,
+    /// For a stream on the system default device: whether Windows has
+    /// changed its default since
+    watch: Option<DefaultWatch>,
 }
 
 enum Io {
     Capture(IAudioCaptureClient),
     Render(IAudioRenderClient),
+}
+
+/// Tells a stream opened on the system default device that Windows has
+/// changed its default. The stream then stops with an error and is reopened,
+/// on the new default, as a `cpal` stream on the default device is.
+struct DefaultWatch {
+    enumerator: IMMDeviceEnumerator,
+    client: IMMNotificationClient,
+    changed: Arc<AtomicBool>,
+}
+
+impl DefaultWatch {
+    fn start(flow: Flow) -> Result<Self, (AudioError, OpenFailure)> {
+        let changed = Arc::new(AtomicBool::new(false));
+        let client: IMMNotificationClient = DefaultChanged {
+            flow: data_flow(flow),
+            changed: changed.clone(),
+        }
+        .into();
+        // SAFETY: COM calls on a thread in the apartment; the client stays
+        // registered until `drop`
+        unsafe {
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                    .map_err(|e| failure_of("device enumerator", &e))?;
+            enumerator
+                .RegisterEndpointNotificationCallback(&client)
+                .map_err(|e| failure_of("default device notifications", &e))?;
+            Ok(Self {
+                enumerator,
+                client,
+                changed,
+            })
+        }
+    }
+
+    fn changed(&self) -> bool {
+        self.changed.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for DefaultWatch {
+    fn drop(&mut self) {
+        // SAFETY: unregisters what `start` registered. Waits for a
+        // notification in progress, which only sets a flag.
+        let _ = unsafe {
+            self.enumerator
+                .UnregisterEndpointNotificationCallback(&self.client)
+        };
+    }
+}
+
+#[implement(IMMNotificationClient)]
+struct DefaultChanged {
+    flow: EDataFlow,
+    changed: Arc<AtomicBool>,
+}
+
+impl IMMNotificationClient_Impl for DefaultChanged_Impl {
+    fn OnDefaultDeviceChanged(
+        &self,
+        flow: EDataFlow,
+        role: ERole,
+        _id: &PCWSTR,
+    ) -> windows::core::Result<()> {
+        // The role the stream was opened for (`device_of`)
+        if flow == self.flow && role == eConsole {
+            self.changed.store(true, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
+    fn OnDeviceStateChanged(
+        &self,
+        _id: &PCWSTR,
+        _state: DEVICE_STATE,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnDeviceAdded(&self, _id: &PCWSTR) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnDeviceRemoved(&self, _id: &PCWSTR) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnPropertyValueChanged(
+        &self,
+        _id: &PCWSTR,
+        _key: &PROPERTYKEY,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+}
+
+fn data_flow(flow: Flow) -> EDataFlow {
+    match flow {
+        Flow::Capture => eCapture,
+        Flow::Render => eRender,
+    }
 }
 
 /// What a WASAPI error means for the person, with the call that made it
@@ -360,13 +470,7 @@ fn device_of(flow: Flow, endpoint: Option<&str>) -> Result<IMMDevice, (AudioErro
                 .map_err(|e| failure_of("device enumerator", &e))?;
         match endpoint {
             Some(id) => enumerator.GetDevice(&HSTRING::from(id)),
-            None => enumerator.GetDefaultAudioEndpoint(
-                match flow {
-                    Flow::Capture => eCapture,
-                    Flow::Render => eRender,
-                },
-                eConsole,
-            ),
+            None => enumerator.GetDefaultAudioEndpoint(data_flow(flow), eConsole),
         }
         .map_err(|e| {
             let (_, failure) = failure_of("device", &e);
@@ -494,14 +598,16 @@ fn exclusive_format(
 }
 
 /// The first of `rates` and of [`EXCLUSIVE_FORMATS`] the device opens in
-/// exclusive mode
+/// exclusive mode, `None` when it opens none of them. An error when the
+/// device does not say (another app or this one has it exclusively, or
+/// Windows does not let apps take it): that is not an answer about formats.
 fn first_exclusive_format(
     client: &IAudioClient,
     rates: &[u32],
     mix: &MixFormat,
-) -> Option<(u32, (SampleLayout, u16))> {
-    rates.iter().find_map(|&rate| {
-        EXCLUSIVE_FORMATS.into_iter().find_map(|format| {
+) -> windows::core::Result<Option<(u32, (SampleLayout, u16))>> {
+    for &rate in rates {
+        for format in EXCLUSIVE_FORMATS {
             let asked = exclusive_format(rate, mix.channels, mix.channel_mask, format);
             // SAFETY: `asked` lives across the call; no closest match is asked for
             let answer: HRESULT = unsafe {
@@ -511,14 +617,25 @@ fn first_exclusive_format(
                     None,
                 )
             };
-            (answer == S_OK).then_some((rate, format))
-        })
-    })
+            if answer == S_OK {
+                return Ok(Some((rate, format)));
+            }
+            if answer.is_err() && answer != AUDCLNT_E_UNSUPPORTED_FORMAT {
+                return Err(answer.into());
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// 100-nanosecond units for `frames` at `rate`
 fn frames_to_hns(frames: u32, rate: u32) -> i64 {
     (10_000_000.0 * f64::from(frames) / f64::from(rate.max(1)) + 0.5) as i64
+}
+
+/// 100-nanosecond units that hold `frames` at `rate` whole (rounded up)
+fn frames_to_hns_up(frames: u32, rate: u32) -> i64 {
+    (10_000_000u64 * u64::from(frames)).div_ceil(u64::from(rate.max(1))) as i64
 }
 
 fn open_client(
@@ -537,6 +654,10 @@ fn open_client(
                 OpenFailure::Other,
             ))
         }
+    };
+    let watch = match endpoint {
+        None => Some(DefaultWatch::start(flow)?),
+        Some(_) => None,
     };
     let event = Event::new()?;
     // SAFETY: COM calls on the client initialized above, on this thread
@@ -574,6 +695,7 @@ fn open_client(
             format,
             buffer_frames,
             exclusive: mode == WasapiMode::Exclusive,
+            watch,
         })
     }
 }
@@ -599,23 +721,23 @@ fn open_exclusive(
     // rate other than the session's is converted by the caller
     let mut rates = vec![wanted.sample_rate, mix.rate];
     rates.extend(VALID_SAMPLE_RATES);
-    let (rate, format) = first_exclusive_format(&client, &rates, &mix).ok_or_else(|| {
-        (
-            AudioError::UnsupportedConfig(
-                "the device opens in none of the formats asked for in exclusive mode".into(),
-            ),
-            OpenFailure::FormatRefused,
-        )
-    })?;
+    let (rate, format) = first_exclusive_format(&client, &rates, &mix)
+        .map_err(|e| failure_of("exclusive format", &e))?
+        .ok_or_else(|| {
+            (
+                AudioError::UnsupportedConfig(
+                    "the device opens in none of the formats asked for in exclusive mode".into(),
+                ),
+                OpenFailure::FormatRefused,
+            )
+        })?;
     let mut smallest = 0i64;
     // SAFETY: COM call on a thread in the apartment
     unsafe { client.GetDevicePeriod(None, Some(&mut smallest)) }
         .map_err(|e| failure_of("device period", &e))?;
-    let period_us = exclusive_period_us(
-        (smallest / 10) as u32,
-        wanted.buffer_frames,
-        wanted.sample_rate,
-    );
+    // A whole frame, never less than the device's smallest period (in its
+    // own units: a hair less is refused)
+    let period = smallest.max(frames_to_hns_up(wanted.buffer_frames, wanted.sample_rate));
     let asked = exclusive_format(rate, mix.channels, mix.channel_mask, format);
     let initialize = |client: &IAudioClient, period: i64| {
         // SAFETY: `asked` lives across the call
@@ -630,7 +752,7 @@ fn open_exclusive(
             )
         }
     };
-    let client = match initialize(&client, i64::from(period_us) * 10) {
+    let client = match initialize(&client, period) {
         Ok(()) => client,
         Err(e) if e.code() == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED => {
             // The device rounds the buffer to a size of its own; the period
@@ -708,15 +830,16 @@ fn open_low_latency(
                 wanted.sample_rate,
                 wanted.buffer_frames,
             );
-            match client.InitializeSharedAudioStream(
+            let client = match client.InitializeSharedAudioStream(
                 AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                 period,
                 format,
                 None,
             ) {
-                Ok(()) => {}
+                Ok(()) => client.clone(),
                 // Another app runs the mixer at a period of its own; a stream
-                // runs at that period
+                // runs at that period, on a new client (one whose initialize
+                // failed is not initialized again)
                 Err(e) if e.code() == AUDCLNT_E_ENGINE_PERIODICITY_LOCKED => {
                     let mut current_format = std::ptr::null_mut();
                     let mut current = 0u32;
@@ -724,7 +847,8 @@ fn open_low_latency(
                         .GetCurrentSharedModeEnginePeriod(&mut current_format, &mut current)
                         .map_err(|e| failure_of("current shared period", &e))?;
                     CoTaskMemFree(Some(current_format as *const _));
-                    client
+                    let retry: IAudioClient3 = activate(device)?;
+                    retry
                         .InitializeSharedAudioStream(
                             AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                             current,
@@ -732,10 +856,12 @@ fn open_low_latency(
                             None,
                         )
                         .map_err(|e| failure_of("initialize", &e))?;
+                    retry
                 }
                 Err(e) => return Err(failure_of("initialize", &e)),
-            }
+            };
             Ok((
+                client,
                 layout,
                 Format {
                     rate: mix.rate,
@@ -744,21 +870,37 @@ fn open_low_latency(
             ))
         })();
         CoTaskMemFree(Some(format as *const _));
-        let (layout, format) = opened?;
+        let (client, layout, format) = opened?;
         let client: IAudioClient = client.cast().map_err(|e| failure_of("client", &e))?;
         Ok((client, layout, format))
     }
 }
 
-/// Waits for the device's next period. `false` when the stream is to stop.
-fn next_period(opened: &Opened, stop: &AtomicBool) -> bool {
+/// Waits for the device's next period: `false` when the stream is to stop,
+/// or can no longer run (told to `on_fault`). A device whose event stops
+/// coming is asked whether it is still there, which notices one unplugged;
+/// a stream on the system default stops when Windows changes the default.
+fn next_period(opened: &Opened, stop: &AtomicBool, on_fault: &mut impl FnMut(Fault)) -> bool {
     loop {
         if stop.load(Ordering::Relaxed) {
             return false;
         }
-        // SAFETY: the event lives as long as `opened`
-        if unsafe { WaitForSingleObject(opened.event.0, EVENT_WAIT_MS) } == WAIT_OBJECT_0 {
-            return true;
+        if opened.watch.as_ref().is_some_and(DefaultWatch::changed) {
+            on_fault(Fault::Failed(
+                "WASAPI: Windows changed its default device".into(),
+            ));
+            return false;
+        }
+        // SAFETY: the event lives as long as `opened`; COM call on the
+        // stream's thread
+        let gone = match unsafe { WaitForSingleObject(opened.event.0, EVENT_WAIT_MS) } {
+            WAIT_OBJECT_0 => return true,
+            WAIT_TIMEOUT => unsafe { opened.client.GetCurrentPadding() }.err(),
+            _ => Some(windows::core::Error::from_thread()),
+        };
+        if let Some(error) = gone {
+            report(on_fault, &error);
+            return false;
         }
     }
 }
@@ -787,7 +929,7 @@ fn capture_loop<C: FnMut(&[f32])>(
     let channels = opened.format.channels;
     let bytes_per_frame = channels * opened.layout.bytes();
     let mut samples = vec![0.0f32; opened.buffer_frames as usize * channels];
-    while next_period(opened, stop) {
+    while next_period(opened, stop, &mut on_fault) {
         loop {
             match next_packet(capture, opened.layout, bytes_per_frame, &mut samples) {
                 Ok(Some(n)) => deliver(&samples[..n]),
@@ -846,7 +988,7 @@ fn render_loop<C: FnMut(&mut [f32])>(
     let channels = opened.format.channels;
     let bytes_per_frame = channels * opened.layout.bytes();
     let mut samples = vec![0.0f32; opened.buffer_frames as usize * channels];
-    while next_period(opened, stop) {
+    while next_period(opened, stop, &mut on_fault) {
         // SAFETY: COM calls on the stream's thread; the buffer handed out is
         // written before it is released
         let result = unsafe {
@@ -878,40 +1020,87 @@ fn render_loop<C: FnMut(&mut [f32])>(
 }
 
 /// What each device last told [`probe`], kept for when it cannot answer
-/// (this app has it open exclusively)
+/// (this app has it open exclusively, or its driver is not answering)
 static LAST_READ: Mutex<Option<HashMap<(Flow, String), EndpointCaps>>> = Mutex::new(None);
 
-/// What the WASAPI devices `ids` offer, read without opening a stream: the
-/// ones that answer, by their id. A device that does not answer is given
-/// what it said the last time, if it said anything.
-pub(crate) fn probe(ids: &[(DeviceSide, String)]) -> HashMap<String, EndpointCaps> {
-    let Ok(_com) = Com::enter() else {
-        return HashMap::new();
+/// Set while a read of the devices is out. A driver that has not answered
+/// would hold the next read the same way, so none is made until it does.
+static READING: AtomicBool = AtomicBool::new(false);
+
+/// Clears [`READING`] when the read it was made for ends, late or not
+struct Read;
+
+impl Drop for Read {
+    fn drop(&mut self) {
+        READING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// What the WASAPI devices `ids` offer, read without opening a stream and
+/// waited for at most `LIST_TIMEOUT`: the ones that answer, by their id. A
+/// device that does not answer is given what it said the last time, if it
+/// said anything; so is every device while a read that has not returned is
+/// still out.
+pub(crate) fn probe(ids: Vec<(DeviceSide, String)>) -> HashMap<String, EndpointCaps> {
+    if !READING.swap(true, Ordering::SeqCst) {
+        let read = Read;
+        let asked = ids.clone();
+        let found = bounded("reading the WASAPI devices", LIST_TIMEOUT, move || {
+            let _read = read;
+            read_now(&asked)
+        });
+        if let Ok(found) = found {
+            return found;
+        }
+    }
+    last_read(&ids)
+}
+
+fn key_of(side: DeviceSide, id: &str) -> (Flow, String) {
+    let flow = match side {
+        DeviceSide::Input => Flow::Capture,
+        DeviceSide::Output => Flow::Render,
     };
-    let mut last = LAST_READ.lock().unwrap_or_else(|e| e.into_inner());
-    let last = last.get_or_insert_with(HashMap::new);
+    (flow, endpoint_id(id))
+}
+
+fn read_now(ids: &[(DeviceSide, String)]) -> HashMap<String, EndpointCaps> {
+    let Ok(_com) = Com::enter() else {
+        return last_read(ids);
+    };
     let mut found = HashMap::new();
     for (side, id) in ids {
-        let flow = match side {
-            DeviceSide::Input => Flow::Capture,
-            DeviceSide::Output => Flow::Render,
-        };
-        let endpoint = endpoint_id(id);
-        let key = (flow, endpoint.clone());
-        match probe_one(flow, &endpoint) {
+        let key = key_of(*side, id);
+        match probe_one(key.0, &key.1) {
             Ok(caps) => {
-                last.insert(key, caps.clone());
+                LAST_READ
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get_or_insert_with(HashMap::new)
+                    .insert(key, caps.clone());
                 found.insert(id.clone(), caps);
             }
             Err((error, _)) => {
                 tracing::debug!("What a WASAPI device offers could not be read: {}", error);
-                if let Some(caps) = last.get(&key) {
-                    found.insert(id.clone(), caps.clone());
-                }
+                found.extend(last_read(&[(*side, id.clone())]));
             }
         }
     }
     found
+}
+
+/// What the devices `ids` said the last time they were read
+fn last_read(ids: &[(DeviceSide, String)]) -> HashMap<String, EndpointCaps> {
+    let last = LAST_READ.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(last) = last.as_ref() else {
+        return HashMap::new();
+    };
+    ids.iter()
+        .filter_map(|(side, id)| {
+            last.get(&key_of(*side, id))
+                .map(|caps| (id.clone(), caps.clone()))
+        })
+        .collect()
 }
 
 fn probe_one(flow: Flow, endpoint: &str) -> Result<EndpointCaps, (AudioError, OpenFailure)> {
@@ -943,10 +1132,20 @@ fn probe_one(flow: Flow, endpoint: &str) -> Result<EndpointCaps, (AudioError, Op
             })
         }
     });
-    let exclusive_rates = VALID_SAMPLE_RATES
-        .into_iter()
-        .filter(|&rate| first_exclusive_format(&client, &[rate], &mix).is_some())
-        .collect();
+    // The rates an exclusive stream is opened at (`open_exclusive`)
+    let mut exclusive_rates = Vec::new();
+    for rate in std::iter::once(mix.rate).chain(
+        VALID_SAMPLE_RATES
+            .into_iter()
+            .filter(|&rate| rate != mix.rate),
+    ) {
+        if first_exclusive_format(&client, &[rate], &mix)
+            .map_err(|e| failure_of("exclusive format", &e))?
+            .is_some()
+        {
+            exclusive_rates.push(rate);
+        }
+    }
     Ok(EndpointCaps {
         mix_rate: mix.rate,
         shared_period_us: (shared / 10) as u32,
