@@ -14,14 +14,17 @@ use super::{send, Command, Params};
 use crate::audio::mic_access::SystemMic;
 use crate::audio::{
     capture_or_silence, clear_device_problem, microphone_allows_input, note_device_problem,
-    note_trouble, playout_source, start_capture_ring, start_playout, AudioConfig, AudioEngine,
-    CaptureRing, DeviceId, DeviceSide, DeviceSlot, DeviceTrouble, FlightKind, LocalMonitor,
-    PeerMix, RecordingFeed, Verdict, ADAPT_INTERVAL, MIC_ANSWER_WAIT, WIRE_CHANNELS,
+    note_trouble, opened_ways, playout_source, start_capture_ring, start_playout, AudioConfig,
+    AudioEngine, CaptureRing, DeviceId, DeviceSide, DeviceSlot, DeviceTrouble, FlightKind,
+    LocalMonitor, PeerMix, RecordingFeed, Verdict, ADAPT_INTERVAL, MIC_ANSWER_WAIT, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
 use crate::audio::{open_asio, shared_asio_driver, AsioDuplex, AsioSwitch};
 use crate::link::Senders;
-use crate::network::{audio_packet_duration_ms, required_bps, AudioEncodingConfig, UdpMux};
+use crate::network::{
+    audio_packet_duration_ms, longer_of_buffer_and_period, required_bps, AudioEncodingConfig,
+    UdpMux,
+};
 use crate::protocol::LatencyInfoMessage;
 
 /// How long the receive loop waits when it has nothing to hand to playback.
@@ -376,9 +379,14 @@ pub(super) async fn run(
     // What every peer is told about our audio when its link comes up (ADR-013:
     // sample rate communication). The delay is that of the peer's own
     // play-out buffer, filled in as it is sent.
+    let frame_ms = (buffer_size as f32 / sample_rate as f32) * 1000.0;
+    // A side's buffer is the frame or the period the system hands the device
+    // its samples at (Windows: the way the device was opened), whichever is
+    // longer
+    let mut os_periods = opened_ways().periods_us();
     let mut local_latency_info = LatencyInfoMessage {
-        capture_buffer_ms: (buffer_size as f32 / sample_rate as f32) * 1000.0,
-        playback_buffer_ms: (buffer_size as f32 / sample_rate as f32) * 1000.0,
+        capture_buffer_ms: longer_of_buffer_and_period(frame_ms, os_periods.0),
+        playback_buffer_ms: longer_of_buffer_and_period(frame_ms, os_periods.1),
         encode_ms: 0.0, // PCM, no encoding delay
         decode_ms: 0.0, // PCM, no decoding delay
         jitter_buffer_ms: jitter_buffer_frames as f32 * packet_duration_ms,
@@ -844,6 +852,7 @@ pub(super) async fn run(
                         tracing::warn!("Failed to send initial latency info: {}", e);
                     }
                     link.announced_channel_count = info.channel_count;
+                    link.announced_os_periods = os_periods;
                     came_up = true;
                     LinkStage::Up(Arc::new(tokio::sync::Mutex::new(connection)))
                 }
@@ -901,10 +910,20 @@ pub(super) async fn run(
         // keeps the value from connect time. If the connection is busy the
         // peer is told on the next tick.
         let channel_count = local_latency_info.channel_count;
+        // A device opened again (another device, another way) may run at
+        // another period
+        if opened_ways().periods_us() != os_periods {
+            os_periods = opened_ways().periods_us();
+            local_latency_info.capture_buffer_ms =
+                longer_of_buffer_and_period(frame_ms, os_periods.0);
+            local_latency_info.playback_buffer_ms =
+                longer_of_buffer_and_period(frame_ms, os_periods.1);
+        }
         for link in &mut links {
             let delay_frames = link.receive.delay_frames();
             if delay_frames == link.announced_delay_frames
                 && channel_count == link.announced_channel_count
+                && os_periods == link.announced_os_periods
             {
                 continue;
             }
@@ -929,6 +948,7 @@ pub(super) async fn run(
             if told {
                 link.announced_delay_frames = delay_frames;
                 link.announced_channel_count = channel_count;
+                link.announced_os_periods = os_periods;
             }
         }
 

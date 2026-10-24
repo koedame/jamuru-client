@@ -375,6 +375,10 @@ pub struct OpenedWay {
     /// not open it, and `failure` says why.
     pub opened: WasapiMode,
     pub failure: Option<OpenFailure>,
+    /// The period the device runs at in the way it was opened, in
+    /// microseconds: how often the system hands the stream its samples.
+    /// `None` when it could not be read.
+    pub period_us: Option<u32>,
 }
 
 /// How the devices of the session are open now. A side that is not open, or
@@ -383,6 +387,18 @@ pub struct OpenedWay {
 pub struct OpenedWays {
     pub input: Option<OpenedWay>,
     pub output: Option<OpenedWay>,
+}
+
+impl OpenedWays {
+    /// The periods the input and the output run at, in microseconds. A side
+    /// that is not open through WASAPI, or whose period is not known, is
+    /// `None`.
+    pub fn periods_us(&self) -> (Option<u32>, Option<u32>) {
+        (
+            self.input.and_then(|way| way.period_us),
+            self.output.and_then(|way| way.period_us),
+        )
+    }
 }
 
 /// How the devices are open now, with the note each came with. There is one
@@ -497,6 +513,19 @@ pub fn read_endpoints(ids: &[(DeviceSide, String)]) -> Endpoints {
         HashMap::new()
     };
     Endpoints { caps }
+}
+
+/// The period of the standard way (the mixer's) on the device `id` (`None`:
+/// the system default), in microseconds, read without opening a stream.
+/// `None` off Windows or when the device does not answer.
+pub(crate) fn standard_period_us(side: DeviceSide, id: Option<&DeviceId>) -> Option<u32> {
+    #[cfg(target_os = "windows")]
+    return super::wasapi::shared_period_us(side, id);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (side, id);
+        None
+    }
 }
 
 /// What the settings show of the ways of opening a WASAPI device. How the
@@ -901,6 +930,7 @@ mod tests {
             asked: WasapiMode::Exclusive,
             opened: WasapiMode::Exclusive,
             failure: None,
+            period_us: Some(3_000),
         };
         let old = note_opened(DeviceSide::Output, next_note(), way);
         let replacement = note_opened(
@@ -930,6 +960,7 @@ mod tests {
             asked: WasapiMode::Exclusive,
             opened: WasapiMode::Exclusive,
             failure: None,
+            period_us: Some(3_000),
         };
         let late = next_note();
         let replacement = note_opened(DeviceSide::Input, next_note(), way);
