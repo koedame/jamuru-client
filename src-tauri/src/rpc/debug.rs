@@ -202,6 +202,7 @@ async fn info<R: Runtime>(app: &AppHandle<R>) -> Result<Value, RpcError> {
         "cpu_model": cpu_model,
         "cpu_threads": cpu_threads,
         "audio_host": jamjam::environment::audio_host(),
+        "asio_buffer_frames": jamjam::audio::opened_asio_buffer_frames(),
         "device_id": app.state::<DeviceIdentityState>().identity().device_id(),
         "server_url": strip_userinfo(&server_url),
         "log_file": log_path(app).ok().map(|p| p.display().to_string()),

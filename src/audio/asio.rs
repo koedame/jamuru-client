@@ -40,10 +40,11 @@ use std::time::Duration;
 use parking_lot::Mutex;
 
 use azo::driver::{Driver, Metadata, UnsafeHandle};
-use azo::dto::ChannelId;
+use azo::dto::{ChannelId, Granularity};
 use azo::sys::{self, Bool, Callbacks, MessageSelector, SampleType};
 use azo::win::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
+use super::buffer_fit::{fit, set_opened, Steps};
 use super::channels::{pick_channels, OutputRoute};
 use super::device::{AudioDevice, DeviceId, ASIO_ID_PREFIX};
 use super::driver::StreamHost;
@@ -208,6 +209,7 @@ struct AsioResources {
 
 impl Drop for AsioResources {
     fn drop(&mut self) {
+        set_opened(0);
         *CALLBACK.lock() = None;
         let _ = self.instance.driver.stop();
         let _ = self.instance.driver.dispose_buffers();
@@ -303,11 +305,27 @@ fn open_duplex(
         .buffer_size()
         .map_err(|e| AudioError::DeviceOpenFailed(format!("{driver_name} buffer size: {e}")))?;
     let requested = frame_size as i32;
-    let buffer_size = if requested >= buffer_size_info.min && requested <= buffer_size_info.max {
-        requested
-    } else {
-        buffer_size_info.preferred
+    let steps = match buffer_size_info.granularity {
+        None => Steps::Any,
+        Some(Granularity::Linear { step }) => Steps::Linear(step.get()),
+        Some(Granularity::Exponential) => Steps::Doubling,
     };
+    let buffer_size = fit(
+        requested,
+        buffer_size_info.min,
+        buffer_size_info.max,
+        buffer_size_info.preferred,
+        steps,
+    );
+    if buffer_size == requested {
+        tracing::info!("{driver_name} opened at {buffer_size} frames");
+    } else {
+        tracing::warn!(
+            "{driver_name} cannot open at {requested} frames (it offers {}..={}); opened at {buffer_size}",
+            buffer_size_info.min,
+            buffer_size_info.max
+        );
+    }
 
     let channel_ids = (0..needed_in as i32)
         .map(|index| ChannelId { input: true, index })
@@ -372,6 +390,7 @@ fn open_duplex(
     driver
         .start()
         .map_err(|e| AudioError::StreamError(format!("starting {driver_name}: {e}")))?;
+    set_opened(buffer_size as u32);
 
     Ok(AsioResources { instance })
 }
