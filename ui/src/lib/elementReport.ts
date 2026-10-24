@@ -218,6 +218,7 @@ function audioLines(audio: AudioSettings | null | undefined): string[] {
     `transmit channels: ${audio.transmit_channels}`,
     `buffer size: ${audio.buffer_size} frames`,
     `sample rate: ${audio.sample_rate} Hz`,
+    ...(audio.wasapi ? [`wasapi mode: ${audio.wasapi.mode}${audio.wasapi.advice.applies ? "" : " (not used: asio)"}`] : []),
   ];
 }
 
