@@ -2,13 +2,22 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { termsAccept, termsGet, type TermsInfo } from "../../lib/tauri";
 import { ConsentScreen } from "./ConsentScreen";
 
+export interface ConsentGateProps {
+  children: ReactNode;
+  /**
+   * Called once the consent screen or `children` is on screen. Not called
+   * when `children` fail to render, nor when the terms cannot be read.
+   */
+  onShown?: () => void;
+}
+
 /**
  * Shows `children` once the user has agreed to the terms of use in force, and
  * the consent screen until then. The backend does not connect, check for
  * updates or report usage until the agreement is recorded, so `children`
  * mount into an app that is still silent only if they are not rendered early.
  */
-export function ConsentGate({ children }: { children: ReactNode }) {
+export function ConsentGate({ children, onShown }: ConsentGateProps) {
   const [terms, setTerms] = useState<TermsInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
@@ -22,6 +31,13 @@ export function ConsentGate({ children }: { children: ReactNode }) {
         setLoadError(String(e));
       });
   }, []);
+
+  // After the commit that put the screen in: an effect does not run when
+  // rendering what it shows failed.
+  const shown = terms !== null && loadError === null;
+  useEffect(() => {
+    if (shown) onShown?.();
+  }, [shown, onShown]);
 
   const handleAccept = useCallback(async () => {
     if (!terms) return;

@@ -79,8 +79,49 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// Opens the app: the main window, and what runs on its own once it is open.
+/// `checked_at_start` is whether a start that updates first has already looked
+/// for a newer release.
+fn open_app(app: &tauri::AppHandle, self_updating: bool, checked_at_start: bool) {
+    let main = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == windows::labels::MAIN);
+    let opened = match main {
+        Some(config) => tauri::WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()),
+        None => Err(tauri::Error::WindowNotFound),
+    };
+    if let Err(e) = opened {
+        // Nothing would be left for the person to see or quit.
+        tracing::error!("Could not open the main window: {}", e);
+        app.exit(1);
+        return;
+    }
+
+    if self_updating {
+        updater::spawn(app.clone(), checked_at_start);
+    }
+
+    // After the state is managed: the connection is made as soon as it
+    // starts, and the screen finds the session as it is when it asks.
+    session::spawn(app.clone());
+
+    // After the state is managed: the loop reads it as soon as it starts.
+    #[cfg(feature = "debug-remote")]
+    debug_remote::spawn(app.clone());
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A watcher of an update being tried is this program run from the copy
+    // of the version the update replaced (ADR-088). It does nothing else, so
+    // it comes before everything.
+    if let Some((store, id)) = updater::trial::watcher_args(std::env::args_os()) {
+        std::process::exit(updater::trial::run_watcher(store, id));
+    }
+
     // First: the web process inherits this, and it must be set before any other thread exists.
     let software_render_limits = software_render::limit_software_rendering();
     let log_spec = logging::LogSpec::from_env();
@@ -99,6 +140,16 @@ pub fn run() {
     // Only the release build is given updater settings (`tauri.updater.conf.json`,
     // ADR-041), so a build made from source never replaces itself with a release.
     let self_updating = context.config().plugins.0.contains_key("updater");
+    // Before anything of the app runs: a start while the version an update
+    // replaced is put back ends here (ADR-088).
+    let began = if self_updating {
+        updater::startup::begin(&context.package_info().version.to_string())
+    } else {
+        updater::startup::Began::Off
+    };
+    if began == updater::startup::Began::Exit {
+        std::process::exit(0);
+    }
 
     let mut builder = tauri::Builder::default();
     // Before every other plugin: a second copy exits while they start (ADR-085).
@@ -197,25 +248,25 @@ pub fn run() {
     rpc::events::install(app.handle());
 
     logging::log_startup(app.handle(), &log_spec);
+    updater::startup::log_began(&began);
 
     // After the state above is managed: the menu reads it.
     if let Err(e) = menu::install(app.handle()) {
         tracing::warn!("Could not set up the menu: {}", e);
     }
 
-    if self_updating {
-        updater::spawn(app.handle().clone());
-    }
-
-    // After the state above is managed: the connection is made as soon as it
-    // starts, and the screen finds the session as it is when it asks.
-    session::spawn(app.handle().clone());
-
-    // After the state above is managed: the loop reads it as soon as it starts.
-    #[cfg(feature = "debug-remote")]
-    debug_remote::spawn(app.handle().clone());
-
+    let mut began = Some(began);
     app.run(move |handle, event| match event {
+        // Tauri does not make the main window (`create: false`): a start that
+        // updates first opens it afterwards, or never, when it restarts into
+        // the update (ADR-088).
+        tauri::RunEvent::Ready => {
+            if let Some(began) = began.take() {
+                updater::startup::run(handle.clone(), began, move |app, checked| {
+                    open_app(app, self_updating, checked)
+                });
+            }
+        }
         tauri::RunEvent::ExitRequested { code, .. } => {
             tracing::info!("Exit requested (code {:?})", code);
         }
@@ -225,6 +276,7 @@ pub fn run() {
                 .state::<UsageState>()
                 .app_exiting(&handle.state::<StreamingState>());
             drop(_stage);
+            updater::startup::exiting();
             watchdog.mark_clean_exit();
         }
         _ => {}

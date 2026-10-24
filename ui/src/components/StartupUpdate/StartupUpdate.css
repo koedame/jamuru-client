@@ -1,0 +1,104 @@
+/**
+ * The small window a start shows while it updates the app before opening it.
+ */
+
+.startup-update {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-sm);
+  height: 100vh;
+  box-sizing: border-box;
+  padding: var(--space-lg);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+.startup-update__status {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+}
+
+.startup-update__percent {
+  font-family: var(--font-family-mono);
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-secondary);
+}
+
+.startup-update__bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+.startup-update__fill {
+  width: 0;
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  transition: width var(--transition-normal);
+}
+
+/* How far it is cannot be told: a short piece slides across instead. */
+.startup-update__bar--unknown .startup-update__fill {
+  position: absolute;
+  width: 30%;
+  animation: startup-update-slide 1.4s var(--ease-in-out) infinite;
+}
+
+@keyframes startup-update-slide {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-update__bar--unknown .startup-update__fill {
+    left: 0;
+    width: 100%;
+    opacity: 0.4;
+    animation: none;
+  }
+}
+
+.startup-update__note {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.startup-update__skip {
+  align-self: flex-end;
+  margin-top: var(--space-sm);
+  padding: var(--padding-button);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+}
+
+.startup-update__skip:hover:not(:disabled) {
+  border-color: var(--color-text-primary);
+}
+
+.startup-update__skip:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.startup-update__skip:disabled {
+  color: var(--color-text-tertiary);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
