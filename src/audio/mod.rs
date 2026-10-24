@@ -4,6 +4,8 @@
 
 #[cfg(target_os = "windows")]
 mod asio;
+#[cfg(any(target_os = "windows", test))]
+mod asio_roster;
 mod channels;
 pub(crate) mod codec;
 mod device;
