@@ -289,7 +289,7 @@
           "no_exclusive_format": "This device has no format it can be opened in exclusively",
           "unknown": "Couldn't read what this device supports. Choosing it tries it, and a device it doesn't open is opened in the standard shared mode"
         },
-        "exclusiveCaution": "While in exclusive mode, other apps can't play sound through this device. If another app is already using it, it's opened in the standard shared mode",
+        "exclusiveCaution": "While in exclusive mode, other apps can't play sound through this device. With Windows' default settings, an app already playing through it goes silent too",
         "notApplied": "Both the input and the output are ASIO devices, so this mode isn't used"
       }
     },
