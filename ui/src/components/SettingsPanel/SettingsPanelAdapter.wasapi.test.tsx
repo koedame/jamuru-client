@@ -167,6 +167,32 @@ describe('the WASAPI mode in the Devices tab', () => {
   });
 
   // Verifies: REQ-GUI-031
+  it('when Windows does not let apps take a device exclusively, exclusive cannot be chosen and says how to allow it', async () => {
+    fakeBackend(
+      audioSettings({
+        wasapi: {
+          mode: 'shared',
+          advice: {
+            applies: true,
+            modes: [
+              advice('shared', 'recommended', 'nothing_faster', 10000),
+              advice('low_latency', 'not_recommended', 'same_period', 10000),
+              advice('exclusive', 'unavailable', 'exclusive_not_allowed', null),
+            ],
+          },
+        },
+      })
+    );
+    render(<SettingsPanelAdapter initialTab="devices" />);
+
+    const exclusive = await option(text.modes.exclusive);
+    expect(exclusive.radio.disabled).toBe(true);
+    expect(within(exclusive.card).getByText(text.verdict.unavailable)).toBeInTheDocument();
+    expect(within(exclusive.card).getByText(text.reason.exclusive_not_allowed)).toBeInTheDocument();
+    expect((await option(text.modes.shared)).radio.disabled).toBe(false);
+  });
+
+  // Verifies: REQ-GUI-031
   it('a saved way the devices now in use do not open stays shown as chosen, and the latency is the standard way', async () => {
     fakeBackend(
       audioSettings({

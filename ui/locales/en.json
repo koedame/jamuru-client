@@ -287,6 +287,7 @@
           "no_low_latency_mode": "Not available on this version of Windows",
           "opens_exclusively": "Gives the lowest latency",
           "no_exclusive_format": "This device has no format it can be opened in exclusively",
+          "exclusive_not_allowed": "Windows doesn't let apps take this device exclusively. To use this mode, in Control Panel > Sound, open this device's properties and, on the Advanced tab, turn on \"Allow applications to take exclusive control of this device\"",
           "unknown": "Couldn't read what this device supports. Choosing it tries it, and a device it doesn't open is opened in the standard shared mode"
         },
         "exclusiveCaution": "While in exclusive mode, other apps can't play sound through this device. With Windows' default settings, an app already playing through it goes silent too",
