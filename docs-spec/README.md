@@ -87,7 +87,8 @@
 | [ADR-085](./adr/ADR-085-one-copy-of-the-app-runs.md) | アプリは 1 人につき 1 つだけ動かし、2 つ目の起動は 1 つ目に渡して終わる |
 | [ADR-086](./adr/ADR-086-linux-realtime-through-rtkit.md) | Linux では音声スレッドの実時間優先度を、取れなければ rtkit に頼んで取る |
 | [ADR-087](./adr/ADR-087-windows-audio-threads-join-mmcss.md) | Windows では音声スレッドを MMCSS に登録して実時間の範囲を取る |
-| [ADR-088](./adr/ADR-088-update-before-opening-and-keep-the-previous-version.md) | 起動したら本体を開く前に更新し、入れる前の版を写して残す。入れた版が起動しなければ見届け役が前の版に戻す。リリースは各 OS で更新の訓練が通るまで公開しない |
+| [ADR-088](./adr/ADR-088-wasapi-exclusive-and-low-latency-modes.md) | Windows の WASAPI のデバイスを、排他モードと低遅延の共有モードでも開けるようにし、設定で選ばせる |
+| [ADR-089](./adr/ADR-089-update-before-opening-and-keep-the-previous-version.md) | 起動したら本体を開く前に更新し、入れる前の版を写して残す。入れた版が起動しなければ見届け役が前の版に戻す。リリースは各 OS で更新の訓練が通るまで公開しない |
 
 ---
 

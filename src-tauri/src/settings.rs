@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Mutex;
 
-use jamjam::audio::{channel_count, device_in_use, find_device, pair_in_use, AudioDevice, Devices};
+use jamjam::audio::{
+    advise, channel_count, device_in_use, find_device, is_wasapi_id, pair_in_use, read_endpoints,
+    AudioDevice, DeviceSide, Devices, Endpoints, WasapiMode, WasapiSettings,
+};
 use jamjam::config::{
     offered_buffer_sizes, AppConfig, AudioPreset, MAX_DEVICE_CHANNELS, VALID_SAMPLE_RATES,
 };
@@ -84,6 +87,11 @@ pub enum SettingChange {
     Preset {
         preset: AudioPreset,
     },
+    /// How a WASAPI device is opened on Windows (ADR-088). A running session
+    /// starts over to take it.
+    WasapiMode {
+        mode: WasapiMode,
+    },
 }
 
 /// An `Option` field that has to be in the message, as a value or `null`.
@@ -140,6 +148,10 @@ pub struct AudioSettings {
     pub buffer_sizes: Vec<u32>,
     pub sample_rate: u32,
     pub sample_rates: Vec<SampleRateInfo>,
+    /// The ways of opening a WASAPI device, with the advice on each for the
+    /// devices in use. `None` where no device on offer is a WASAPI one (off
+    /// Windows).
+    pub wasapi: Option<WasapiSettings>,
 }
 
 /// Why a change was refused. Every variant leaves the settings as they were.
@@ -309,9 +321,13 @@ pub fn plan(
                 preset.jitter_buffer_frames(),
             ));
         }
+        SettingChange::WasapiMode { mode } => {
+            next.wasapi_mode = *mode;
+        }
     }
-    let new_session =
-        next.buffer_size != config.buffer_size || next.sample_rate != config.sample_rate;
+    let new_session = next.buffer_size != config.buffer_size
+        || next.sample_rate != config.sample_rate
+        || next.wasapi_mode != config.wasapi_mode;
     Ok(Plan {
         config: next,
         session,
@@ -354,8 +370,14 @@ fn with_side(
     }
 }
 
-/// The settings `config` describes, with `devices` on offer.
-pub fn snapshot(config: &AppConfig, devices: Devices, revision: u64) -> AudioSettings {
+/// The settings `config` describes, with `devices` on offer and `endpoints`
+/// read from the WASAPI ones.
+pub fn snapshot(
+    config: &AppConfig,
+    devices: Devices,
+    endpoints: &Endpoints,
+    revision: u64,
+) -> AudioSettings {
     let input_channel_count =
         selected(&devices.input, &config.input_device_id).and_then(channel_count);
     let output_channel_count =
@@ -370,6 +392,7 @@ pub fn snapshot(config: &AppConfig, devices: Devices, revision: u64) -> AudioSet
         &config.output_device_id,
         (config.output_channel_l, config.output_channel_r),
     );
+    let wasapi = wasapi_settings(config, &devices, endpoints);
     AudioSettings {
         revision,
         input_channel_count,
@@ -391,7 +414,37 @@ pub fn snapshot(config: &AppConfig, devices: Devices, revision: u64) -> AudioSet
         buffer_sizes: offered_buffer_sizes(),
         sample_rate: config.sample_rate,
         sample_rates: config::sample_rates(),
+        wasapi,
     }
+}
+
+/// The ways of opening a WASAPI device and the advice on each, for the
+/// devices `config` puts in use
+fn wasapi_settings(
+    config: &AppConfig,
+    devices: &Devices,
+    endpoints: &Endpoints,
+) -> Option<WasapiSettings> {
+    if !devices
+        .input
+        .iter()
+        .chain(&devices.output)
+        .any(|device| is_wasapi_id(&device.id.0))
+    {
+        return None;
+    }
+    let in_use = |devices: &[AudioDevice], chosen: &Option<String>| {
+        endpoints.endpoint(selected(devices, chosen).map(|device| device.id.0.as_str()))
+    };
+    Some(WasapiSettings {
+        mode: config.wasapi_mode,
+        advice: advise(
+            in_use(&devices.input, &config.input_device_id),
+            in_use(&devices.output, &config.output_device_id),
+            config.sample_rate,
+            config.buffer_size,
+        ),
+    })
 }
 
 /// Orders the changes: one at a time from planning to announcing the result,
@@ -432,15 +485,56 @@ async fn devices_on_offer() -> Devices {
     }
 }
 
+/// What the WASAPI devices the settings can leave in use offer: the ones
+/// `config` puts in use, and the one `change` switches to. Read before a
+/// change takes its turn, like the listing: it waits for the drivers.
+async fn endpoints_on_offer(
+    config: &AppConfig,
+    devices: &Devices,
+    change: Option<&SettingChange>,
+) -> Endpoints {
+    let mut ids = Vec::new();
+    for (side, offered, chosen) in [
+        (DeviceSide::Input, &devices.input, &config.input_device_id),
+        (
+            DeviceSide::Output,
+            &devices.output,
+            &config.output_device_id,
+        ),
+    ] {
+        if let Some(device) = selected(offered, chosen) {
+            ids.push((side, device.id.0.clone()));
+        }
+    }
+    match change {
+        Some(SettingChange::InputDevice { device_id }) => {
+            ids.push((DeviceSide::Input, device_id.clone()))
+        }
+        Some(SettingChange::OutputDevice { device_id }) => {
+            ids.push((DeviceSide::Output, device_id.clone()))
+        }
+        _ => {}
+    }
+    match tauri::async_runtime::spawn_blocking(move || read_endpoints(&ids)).await {
+        Ok(endpoints) => endpoints,
+        Err(e) => {
+            tracing::warn!("Reading the WASAPI devices failed: {}", e);
+            Endpoints::default()
+        }
+    }
+}
+
 /// The audio settings in effect.
 pub async fn current<R: Runtime>(app: &AppHandle<R>) -> Result<AudioSettings, SettingsError> {
     let devices = devices_on_offer().await;
+    let endpoints = endpoints_on_offer(&app.state::<ConfigState>().get()?, &devices, None).await;
     let settings_state = app.state::<SettingsState>();
     let _changing = settings_state.changing.lock().await;
     let config = app.state::<ConfigState>().get()?;
     Ok(snapshot(
         &config,
         devices,
+        &endpoints,
         settings_state.revision.load(Ordering::SeqCst),
     ))
 }
@@ -452,6 +546,8 @@ pub async fn apply<R: Runtime>(
     change: &SettingChange,
 ) -> Result<AudioSettings, SettingsError> {
     let devices = devices_on_offer().await;
+    let endpoints =
+        endpoints_on_offer(&app.state::<ConfigState>().get()?, &devices, Some(change)).await;
     let settings_state = app.state::<SettingsState>();
     let _changing = settings_state.changing.lock().await;
 
@@ -484,7 +580,7 @@ pub async fn apply<R: Runtime>(
         change.describe(redaction_enabled())
     );
 
-    let settings = snapshot(&config, devices, revision);
+    let settings = snapshot(&config, devices, &endpoints, revision);
     if let Err(e) = app.emit(CHANGED_EVENT, &settings) {
         // The change itself is in effect; only the other windows' view of it
         // is stale until they next read the settings.
@@ -511,7 +607,9 @@ pub async fn settings_change(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jamjam::audio::{capture_attempts, DeviceId};
+    use jamjam::audio::{
+        capture_attempts, DeviceId, EndpointCaps, SharedPeriods, WasapiReason, WasapiVerdict,
+    };
 
     fn device(id: &str, channels: &[u16], is_default: bool) -> AudioDevice {
         AudioDevice {
@@ -703,7 +801,7 @@ mod tests {
         config.input_device_id = Some("alsa:builtin".to_string());
         config.output_device_id = Some("alsa:builtin".to_string());
 
-        let shown = snapshot(&config, devices, 1);
+        let shown = snapshot(&config, devices, &Endpoints::default(), 1);
 
         assert_eq!(
             (shown.input_channels.left, shown.input_channels.right),
@@ -1112,7 +1210,7 @@ mod tests {
     #[test]
     fn a_preset_is_applied_exactly_when_its_frame_size_is_a_buffer_size_on_offer() {
         let (config, devices) = setup();
-        let offered = snapshot(&config, devices.clone(), 0).buffer_sizes;
+        let offered = snapshot(&config, devices.clone(), &Endpoints::default(), 0).buffer_sizes;
         for preset in AudioPreset::all() {
             let planned = plan(
                 &config,
@@ -1148,7 +1246,7 @@ mod tests {
         let (config, devices) = setup();
 
         assert_eq!(
-            snapshot(&config, devices.clone(), 0).buffer_sizes,
+            snapshot(&config, devices.clone(), &Endpoints::default(), 0).buffer_sizes,
             vec![64, 128, 256]
         );
         assert_eq!(
@@ -1178,7 +1276,7 @@ mod tests {
         let (config, devices) = setup();
 
         assert_eq!(
-            snapshot(&config, devices, 0).buffer_sizes,
+            snapshot(&config, devices, &Endpoints::default(), 0).buffer_sizes,
             vec![32, 64, 128, 256]
         );
     }
@@ -1233,7 +1331,7 @@ mod tests {
         let (mut config, devices) = setup();
         config.output_device_id = None;
 
-        let settings = snapshot(&config, devices, 3);
+        let settings = snapshot(&config, devices, &Endpoints::default(), 3);
 
         assert_eq!(settings.input_channel_count, Some(8));
         assert_eq!(settings.output_channel_count, Some(2), "the system default");
@@ -1268,6 +1366,142 @@ mod tests {
         assert!(!SettingsError::DeviceNotOffered(id.to_string())
             .to_string()
             .contains("20221310"));
+    }
+
+    /// A Windows interface (WASAPI) whose driver keeps the shared period at
+    /// 10 ms and opens exclusively at 3 ms, next to an ASIO driver
+    fn windows_devices() -> Devices {
+        let mut asio = device("asio:Interface ASIO", &[2], false);
+        asio.is_asio = true;
+        Devices {
+            input: vec![device("wasapi:{codec-in}", &[2], true), asio.clone()],
+            output: vec![device("wasapi:{codec-out}", &[2], true), asio],
+        }
+    }
+
+    fn codec_caps() -> EndpointCaps {
+        EndpointCaps {
+            mix_rate: 48000,
+            shared_period_us: 10_000,
+            low_latency: Some(SharedPeriods {
+                default: 480,
+                fundamental: 480,
+                min: 480,
+                max: 480,
+            }),
+            exclusive_period_us: 3_000,
+            exclusive_rates: vec![48000],
+        }
+    }
+
+    /// Verifies: REQ-GUI-031
+    #[test]
+    fn choosing_a_wasapi_mode_saves_it_and_plans_a_new_session_only_when_it_differs() {
+        let (config, devices) = setup();
+        let exclusive = SettingChange::WasapiMode {
+            mode: WasapiMode::Exclusive,
+        };
+
+        let changed = plan(&config, &devices, &exclusive).unwrap();
+        let same = plan(&changed.config, &devices, &exclusive).unwrap();
+
+        assert_eq!(changed.config.wasapi_mode, WasapiMode::Exclusive);
+        assert!(changed.session.is_empty());
+        assert!(changed.new_session, "the devices open again the new way");
+        assert!(!same.new_session);
+    }
+
+    /// Verifies: REQ-GUI-031
+    #[test]
+    fn a_wasapi_mode_change_is_named_on_the_wire() {
+        let change = SettingChange::WasapiMode {
+            mode: WasapiMode::LowLatency,
+        };
+        let json = serde_json::to_value(&change).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"setting": "wasapi_mode", "mode": "low_latency"})
+        );
+        assert_eq!(
+            serde_json::from_value::<SettingChange>(json).unwrap(),
+            change
+        );
+    }
+
+    /// Verifies: REQ-GUI-031
+    #[test]
+    fn where_no_device_on_offer_is_a_wasapi_one_the_settings_have_no_wasapi_section() {
+        let (config, devices) = setup();
+
+        let settings = snapshot(&config, devices, &Endpoints::default(), 0);
+
+        assert_eq!(settings.wasapi, None);
+    }
+
+    /// Verifies: REQ-GUI-031
+    #[test]
+    fn the_wasapi_advice_is_for_the_devices_in_use() {
+        let config = AppConfig {
+            wasapi_mode: WasapiMode::LowLatency,
+            ..AppConfig::default()
+        };
+        let endpoints = Endpoints {
+            caps: [
+                ("wasapi:{codec-in}".to_string(), codec_caps()),
+                ("wasapi:{codec-out}".to_string(), codec_caps()),
+            ]
+            .into(),
+        };
+
+        let wasapi = snapshot(&config, windows_devices(), &endpoints, 0)
+            .wasapi
+            .unwrap();
+
+        assert_eq!(wasapi.mode, WasapiMode::LowLatency);
+        assert!(wasapi.advice.applies);
+        let verdicts: Vec<_> = wasapi
+            .advice
+            .modes
+            .iter()
+            .map(|advice| (advice.mode, advice.verdict, advice.reason))
+            .collect();
+        assert_eq!(
+            verdicts,
+            [
+                (
+                    WasapiMode::Shared,
+                    WasapiVerdict::NotRecommended,
+                    WasapiReason::FasterAvailable
+                ),
+                (
+                    WasapiMode::LowLatency,
+                    WasapiVerdict::NotRecommended,
+                    WasapiReason::SamePeriod
+                ),
+                (
+                    WasapiMode::Exclusive,
+                    WasapiVerdict::Recommended,
+                    WasapiReason::OpensExclusively
+                ),
+            ]
+        );
+    }
+
+    /// Verifies: REQ-GUI-031
+    #[test]
+    fn with_an_asio_driver_on_both_sides_the_wasapi_mode_does_not_apply() {
+        let config = AppConfig {
+            input_device_id: Some("asio:Interface ASIO".to_string()),
+            output_device_id: Some("asio:Interface ASIO".to_string()),
+            ..AppConfig::default()
+        };
+
+        let wasapi = snapshot(&config, windows_devices(), &Endpoints::default(), 0)
+            .wasapi
+            .unwrap();
+
+        assert!(!wasapi.advice.applies);
+        assert!(wasapi.advice.modes.is_empty());
     }
 
     mod applying {

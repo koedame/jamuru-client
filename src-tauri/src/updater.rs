@@ -17,7 +17,7 @@
 //! same bundle), and each step has a time limit, so a download that stalls or
 //! an install that never returns is given up on while the app keeps running.
 //!
-//! An update never leaves the app unable to start either (ADR-088). A start
+//! An update never leaves the app unable to start either (ADR-089). A start
 //! looks for one before the app opens (`startup`), and every install keeps the
 //! version it replaces until the new one has started (`trial`): a new version
 //! that does not start is replaced by the kept one again, and is not installed
@@ -181,7 +181,7 @@ pub(crate) fn package_updates_itself() -> bool {
 }
 
 /// Whether this package installs releases itself: one that replaces itself,
-/// where the running version can be kept to go back to (ADR-088). One that
+/// where the running version can be kept to go back to (ADR-089). One that
 /// cannot keep it - installed where the app cannot write, say - is told of a
 /// newer release instead, as a package that cannot replace itself is.
 fn installs_itself() -> bool {
@@ -321,7 +321,7 @@ pub enum Support {
     /// release (ADR-041).
     None,
     /// A package that cannot replace itself (ADR-076), or that cannot keep the
-    /// running version to go back to (ADR-088): it can say that a newer
+    /// running version to go back to (ADR-089): it can say that a newer
     /// release exists, and the person installs it by hand.
     Notice,
     /// Downloads, installs and restarts into the newer release.

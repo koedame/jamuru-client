@@ -2,7 +2,7 @@ name: Update drill
 
 # Installs real packages over each other on each system and checks that an
 # update that cannot start is taken out again, and the version before it put
-# back and started (ADR-088, scripts/update-drill.py). The release workflow
+# back and started (ADR-089, scripts/update-drill.py). The release workflow
 # runs this and publishes nothing until it passes on every system.
 on:
   workflow_call:

@@ -12,7 +12,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use jamjam::audio::DeviceProblem;
+use jamjam::audio::{opened_ways, DeviceProblem, OpenedWays};
 pub use jamjam::audio_session::LinkTarget;
 use jamjam::audio_session::{self, BandwidthSnapshot, LinkReport, Params, Shared};
 use jamjam::network::{
@@ -667,6 +667,9 @@ pub struct StreamingStatus {
     /// Devices that could not be opened. Read whether or not a session is
     /// active: one that could not open its device never became active.
     pub device_problems: Vec<DeviceProblem>,
+    /// How the session's WASAPI devices are open (Windows, ADR-088): a way
+    /// the settings ask for that did not open a device says so here
+    pub wasapi_opened: OpenedWays,
 }
 
 /// Binds the audio socket and reports the address peers should send to.
@@ -802,10 +805,12 @@ async fn start_session(
     // Which channels of a multi-channel interface are read and played on
     let input_channels = (config.input_channel_l, config.input_channel_r);
     let output_channels = (config.output_channel_l, config.output_channel_r);
+    // How a WASAPI device is opened (Windows, ADR-088)
+    let wasapi_mode = config.wasapi_mode;
 
     let redact = crate::logging::redaction_enabled();
     tracing::info!(
-        "Streaming start: input={:?} output={:?} buffer={} sample_rate={} preset={:?}",
+        "Streaming start: input={:?} output={:?} buffer={} sample_rate={} preset={:?} wasapi={:?}",
         crate::logging::redact_device_id(
             input_device_id.as_deref().unwrap_or("system default"),
             redact
@@ -816,7 +821,8 @@ async fn start_session(
         ),
         buffer_size,
         sample_rate,
-        preset
+        preset,
+        wasapi_mode
     );
 
     // Store buffer size for latency display
@@ -847,6 +853,7 @@ async fn start_session(
             buffer_size,
             preset,
             sample_rate,
+            wasapi_mode,
             transmit_channels,
             input_channels,
             output_channels,
@@ -1024,6 +1031,7 @@ pub async fn streaming_status(
             .read()
             .map(|problems| problems.clone())
             .unwrap_or_default(),
+        wasapi_opened: opened_ways(),
     })
 }
 
@@ -1570,6 +1578,7 @@ mod tests {
                 "output_level",
                 "peer_audio",
                 "peers",
+                "wasapi_opened",
             ]
         );
         assert_eq!(

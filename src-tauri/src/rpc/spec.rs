@@ -214,7 +214,7 @@ app_commands! {
     [Access::NO_HELP] "実行中の版と、このビルドで更新について何ができるかを読む" crate::updater::update_status;
     [Access::NO_HELP] "新しい版が出ているかを、いま確かめる" crate::updater::update_check;
     [Access::SCREEN_ONLY] "新しい版を入れて再起動する（セッション中は断る）" crate::updater::update_install;
-    // Before the app opens there is only the app's own screen (ADR-088). The
+    // Before the app opens there is only the app's own screen (ADR-089). The
     // main screen saying it is up is what keeps a version just installed, so
     // nothing else may say it.
     [Access::SCREEN_ONLY] "起動前の更新がどこまで進んだかを読む" crate::updater::startup::update_startup_progress;

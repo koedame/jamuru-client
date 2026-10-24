@@ -23,7 +23,7 @@ type Screen = "main" | "settings" | "help" | "help-log" | "updating";
 
 /**
  * The main window has drawn its first screen (the consent screen or the main
- * one): a version just installed has started (ADR-088).
+ * one): a version just installed has started (ADR-089).
  */
 function sayAppIsUp() {
   updateAppReady().catch((e) => console.error("Could not say the app is up:", e));

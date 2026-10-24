@@ -121,7 +121,7 @@ fn open_app(app: &tauri::AppHandle, self_updating: bool, checked_at_start: bool)
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // A watcher of an update being tried is this program run from the copy
-    // of the version the update replaced (ADR-088). It does nothing else, so
+    // of the version the update replaced (ADR-089). It does nothing else, so
     // it comes before everything.
     if let Some((store, id)) = updater::trial::watcher_args(std::env::args_os()) {
         std::process::exit(updater::trial::run_watcher(store, id));
@@ -149,7 +149,7 @@ pub fn run() {
     #[cfg(feature = "update-drill")]
     update_drill::at(update_drill::Stage::BeforeStart, &version);
     // Before anything of the app runs: a start while the version an update
-    // replaced is put back ends here (ADR-088).
+    // replaced is put back ends here (ADR-089).
     let began = if self_updating {
         updater::startup::begin(&version)
     } else {
@@ -269,7 +269,7 @@ pub fn run() {
     app.run(move |handle, event| match event {
         // Tauri does not make the main window (`create: false`): a start that
         // updates first opens it afterwards, or never, when it restarts into
-        // the update (ADR-088).
+        // the update (ADR-089).
         tauri::RunEvent::Ready => {
             if let Some(began) = began.take() {
                 updater::startup::run(handle.clone(), began, move |app, checked| {

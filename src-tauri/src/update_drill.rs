@@ -1,5 +1,5 @@
 //! Breaks a build on purpose, for the update drill (`scripts/update-drill.py`,
-//! ADR-088).
+//! ADR-089).
 //!
 //! The drill installs one build over another and checks that a release that
 //! cannot start is taken out again. `JAMJAM_UPDATE_DRILL_BREAK=<version>:<how>`

@@ -1,5 +1,5 @@
 //! Guards that no release is published before the update drill passed, and
-//! that what the drill breaks on purpose cannot ship (ADR-088).
+//! that what the drill breaks on purpose cannot ship (ADR-089).
 //!
 //! The drill itself (`scripts/update-drill.py`) installs real packages and
 //! runs on CI only (`.github/workflows/update-drill.yml`). These read what

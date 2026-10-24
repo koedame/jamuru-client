@@ -110,7 +110,7 @@ describe('App', () => {
     expect(updateAppReady).not.toHaveBeenCalled();
   });
 
-  // A version just installed is kept only once its screen is up (ADR-088).
+  // A version just installed is kept only once its screen is up (ADR-089).
   //
   // Verifies: REQ-UPD-027
   it('the main screen has mounted, the backend is told the app is up, once and after the mount', async () => {
