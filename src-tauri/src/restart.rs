@@ -7,6 +7,7 @@
 //! when it has not happened by then the new instance is started from here and
 //! the old process is ended without waiting for the main thread.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use jamjam::telemetry::{HangStage, UsageReporter};
@@ -27,9 +28,19 @@ const GRACE: Duration = Duration::from_secs(10);
 #[cfg(unix)]
 const EXIT_LIMIT: Duration = Duration::from_secs(3);
 
+static RESTARTING: AtomicBool = AtomicBool::new(false);
+
+/// Whether the app is ending to start again rather than being quit.
+pub(crate) fn is_restarting() -> bool {
+    RESTARTING.load(Ordering::SeqCst)
+}
+
 /// Restarts the app; does not return.
 pub(crate) async fn restart<R: Runtime>(app: &AppHandle<R>) {
+    RESTARTING.store(true, Ordering::SeqCst);
     stop_audio(app).await;
+    // An update installed for this restart is what starts (ADR-089).
+    crate::updater::handing_over();
     let handle = app.clone();
     let reporter = app
         .try_state::<UsageState>()

@@ -12,13 +12,22 @@ import { MainScreen } from "./screens/MainScreen";
 import { HelperScreen } from "./screens/HelperScreen";
 import { HelpLogScreen } from "./screens/HelpLogScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
-import { windowOpenSettings, configGetLanguage } from "./lib/tauri";
+import { StartupUpdateScreen, UPDATING_HASH } from "./screens/StartupUpdateScreen";
+import { windowOpenSettings, configGetLanguage, updateAppReady } from "./lib/tauri";
 import { useWindowEvent } from "./hooks/useWindowEvents";
 import { HELP_HASH } from "./lib/helperBackend";
 import { HELP_LOG_HASH } from "./screens/HelpLogScreen";
 import { ConsentGate } from "./components/Terms";
 
-type Screen = "main" | "settings" | "help" | "help-log";
+type Screen = "main" | "settings" | "help" | "help-log" | "updating";
+
+/**
+ * The main window has drawn its first screen (the consent screen or the main
+ * one): a version just installed has started (ADR-089).
+ */
+function sayAppIsUp() {
+  updateAppReady().catch((e) => console.error("Could not say the app is up:", e));
+}
 
 /**
  * The screen a Tauri window was opened for, from its URL hash. Read while
@@ -30,6 +39,7 @@ function screenFromHash(): Screen {
   const hash = window.location.hash;
   if (hash === HELP_HASH) return "help";
   if (hash === HELP_LOG_HASH) return "help-log";
+  if (hash === UPDATING_HASH) return "updating";
   return hash === "#settings" || hash.startsWith("#/settings") ? "settings" : "main";
 }
 
@@ -84,9 +94,12 @@ function App() {
   if (currentScreen === "help-log") {
     return <HelpLogScreen />;
   }
+  if (currentScreen === "updating") {
+    return <StartupUpdateScreen />;
+  }
 
   return (
-    <ConsentGate>
+    <ConsentGate onShown={sayAppIsUp}>
       <MainScreen onSettingsClick={handleOpenSettings} />
     </ConsentGate>
   );
