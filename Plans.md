@@ -44,7 +44,7 @@ Windows で ASIO ドライバ選択時にデバイス遅延 3ms 以下になる�
 
 - [!] Windows 実機 + ASIO 対応オーディオインターフェース
 - [ ] Windows 実機で手元実行（CI では回さない）
-- **補足（2026-09-27）**: アプリに ASIO の経路が無い。cpal の `asio` feature を有効にしておらず、`default_host`（Windows は WASAPI、macOS は CoreAudio）でしかデバイスを開かないので、この要求は ASIO の実装が先になる。
+- **補足（2026-09-27、2026-10-24 に直した）**: 当時は ASIO の経路が無かった。今は `azo` で ASIO ドライバの COM インターフェースを直接開く経路がある（`src/audio/asio.rs`。cpal の `asio` feature は使わない）。ASIO のドライバは、デバイス一覧に `asio:` 付きの ID で出る。cpal の `default_host`（Windows は WASAPI、macOS は CoreAudio）はそれ以外のデバイスを開く。以下の WASAPI の数値は当時の測定。
   出力を入力にケーブルで繋いだ端末のデバイスの往復は `debug.audio_roundtrip`（ADR-053）で測れる。Windows 11 の WASAPI 共有モード（USB クラス準拠の 2 チャンネルのインターフェース）は往復 40〜46 ms で、バッファを 32〜256 のどれにしても出力・入力とも 10 ms ごとの呼び出しのままで設定が効かない。macOS の CoreAudio（仮想の入出力を繋いだループ）は 1.3〜10.7 ms（バッファ 32〜256）でバッファどおり
 
 ### REQ-AUD-108: ステレオ入力の実機確認（ADR-038、ADR-049）

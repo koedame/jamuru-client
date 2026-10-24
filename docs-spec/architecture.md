@@ -53,7 +53,7 @@ jamuruの技術構成を定義する。本ドキュメントは実装の正と�
 | ロギング | tracing + tauri-plugin-log（GUI。ログファイルは [ADR-036](./adr/ADR-036-diagnostic-log-file.md)） | 実装済 |
 | エラー処理 | thiserror | 実装済 |
 | GUI（デスクトップ） | Tauri 2.0 | 実装済 |
-| 音声コーデック（Opus） | opus-rs | 予定 |
+| 音声コーデック（Opus） | opus（ビルドの任意機能 `opus-codec`。どのプリセットも使わない。[ADR-021](./adr/ADR-021-preset-codec-and-fec.md)） | 任意 |
 | 音声コーデック（FLAC） | claxon | 予定 |
 | GUI（モバイル） | Flutter + flutter_rust_bridge | 予定 |
 | 端末アイデンティティ署名（ADR-024） | ed25519-dalek | 実装済 |
@@ -134,8 +134,8 @@ ui/
 | プラットフォーム | バックエンド |
 |-----------------|-------------|
 | macOS | CoreAudio |
-| Windows | WASAPI（標準）、ASIO（対応インターフェース使用時） |
-| Linux | PipeWire（優先）、ALSA（フォールバック） |
+| Windows | WASAPI（標準）、ASIO（対応インターフェース使用時。ドライバの COM インターフェースを `azo` で直接開く。`src/audio/asio.rs`） |
+| Linux | ALSA（cpal の ALSA ホストだけを使う。PipeWire は ALSA の pipewire プラグイン越しに使う。[ADR-086](./adr/ADR-086-linux-realtime-through-rtkit.md)） |
 
 ### 4.2 音声フォーマット
 
@@ -151,7 +151,7 @@ ui/
 | コーデック | 用途 | ビットレート | 遅延特性 |
 |-----------|------|-------------|---------|
 | 非圧縮PCM | LAN内、コーデック起因遅延 0ms | 約1.5 Mbps/ch (48kHz/16bit) | 最小 |
-| Opus | インターネット越し | 64-256 kbps | 低（2.5ms フレーム対応） |
+| Opus | どのプリセットも使わない（ビルドの任意機能。[ADR-021](./adr/ADR-021-preset-codec-and-fec.md)） | 64-256 kbps | 低（2.5ms フレーム対応） |
 | FLAC | 録音用、ロスレス品質 | 可変（約800 kbps/ch） | 中 |
 
 #### 4.3.1 Opusレイテンシ詳細
@@ -180,7 +180,7 @@ Opusのレイテンシは以下の要素で構成される:
 | Opus（2.5ms frame） | 約 5-6ms |
 | Opus（10ms frame） | 約 12-15ms |
 
-LAN内は非圧縮PCM、インターネット越しはOpusという使い分けを推奨。どちらを使用するかはユーザーが選択可能とする。
+全プリセットが非圧縮PCMを使う。Opus は 120/240/480/960/1920/2880 サンプルのフレームしか受け付けず、プリセットのフレームサイズ（32/64/128/256）と合わないため、プリセットは選ばない（[ADR-021](./adr/ADR-021-preset-codec-and-fec.md)、[ADR-022](./adr/ADR-022-reconnection-and-narrowband-scope.md)）。
 
 ### 4.4 音声処理
 
@@ -348,7 +348,7 @@ CGNATによるP2P接続の困難さに対応するため、以下の設計を採
 | 非圧縮PCM | 24bit | モノラル | 1.15 Mbps |
 | 非圧縮PCM | 32bit(float) | モノラル | 1.54 Mbps |
 | 非圧縮PCM | 24bit | ステレオ | 2.3 Mbps |
-| Opus | - | モノラル | 64-256 kbps |
+| Opus（どのプリセットも使わない） | - | モノラル | 64-256 kbps |
 
 ※パケットヘッダ（12バイト/パケット）のオーバーヘッドは微小
 
@@ -372,15 +372,15 @@ CGNATによるP2P接続の困難さに対応するため、以下の設計を採
 | 非圧縮PCM | プチプチ音が発生 | かなり聞き取りづらい |
 | Opus（PLC付き） | 補間されほぼ気にならない | 多少劣化するが会話可能 |
 
-FEC（10%冗長）により軽度のパケットロスは軽減されるが、Opusの方がパケットロス耐性が高い。
+FEC（balanced は 25%、high-quality は 12.5% の冗長。[ADR-021](./adr/ADR-021-preset-codec-and-fec.md)）により軽度のパケットロスは軽減されるが、Opusの方がパケットロス耐性が高い（Opusはプリセットが使わないので、表は比較のため）。
 
 #### 5.8.4 推奨環境
 
 | 用途 | 推奨環境 | コーデック |
 |------|---------|-----------|
 | LAN内ジャムセッション | 有線LAN | 非圧縮PCM |
-| インターネット越し（日本国内） | 光回線 + 有線LAN | Opus推奨、非圧縮PCMも可 |
-| インターネット越し（海外） | 光回線 + 有線LAN | Opus必須 |
+| インターネット越し（日本国内） | 光回線 + 有線LAN | 非圧縮PCM |
+| インターネット越し（海外） | 光回線 + 有線LAN | 非圧縮PCM（光回線以外の狭帯域回線は対象外。[ADR-022](./adr/ADR-022-reconnection-and-narrowband-scope.md)） |
 
 **注意**: 音楽セッション用途では有線LAN接続を強く推奨。WiFiはジッター（遅延のばらつき）が大きく、演奏に支障をきたす可能性がある。
 
@@ -561,8 +561,8 @@ jamuru join-room --server <URL> --room <CODE>       # ルーム参加
 |-------------|---------------|-----------|--------------|------|
 | zero-latency | 0フレーム（パススルー） | 非圧縮PCM 32bit float | 32 samples | 国内光回線セッション |
 | ultra-low-latency | 1フレーム | 非圧縮PCM | 64 samples | LAN内ジャム |
-| balanced | 4フレーム | Opus 128kbps | 128 samples | 一般的なネット環境 |
-| high-quality | 8フレーム | Opus 256kbps | 256 samples | 録音・高速回線 |
+| balanced | 4フレーム | 非圧縮PCM | 128 samples | 一般的なネット環境 |
+| high-quality | 8フレーム | 非圧縮PCM | 256 samples | 録音・高速回線 |
 
 ユーザーはプリセットをベースにカスタマイズし、名前を付けて保存できる。
 
@@ -635,22 +635,22 @@ Audio Capture/Playbackスレッドでは以下を禁止する:
 | 処理 | 目標遅延 |
 |------|---------|
 | 音声キャプチャバッファ | 2.67 ms (128 samples) |
-| エンコード | < 0.5 ms |
+| エンコード | 0 ms (PCM) |
 | パケット化 | < 0.1 ms |
-| 送信バッファ | < 0.5 ms |
+| 送信バッファ | < 0.1 ms |
 | --- ネットワーク伝送 --- | （RTT/2） |
-| 受信バッファ | < 0.5 ms |
-| Jitterバッファ | 2.67 ms (最小、1フレーム) |
-| デコード | < 0.5 ms |
+| 受信バッファ | < 0.1 ms |
+| Jitterバッファ | 10.67 ms (4フレーム) |
+| デコード | 0 ms (PCM) |
 | 再生バッファ | 2.67 ms (128 samples) |
-| **合計（片道、アプリ起因）** | **< 10 ms** |
+| **合計（片道、アプリ起因）** | **< 18 ms**（設計値 16 ms ＝ 2.67 ms × 6 段。[ADR-019](./adr/ADR-019-preset-latency-budget.md)） |
 
 ### 11.4 環境別の想定総遅延
 
 | 環境 | プリセット | アプリ起因 | ネットワーク片道 | 総片道遅延 |
 |------|-----------|-----------|-----------------|-----------|
 | 国内光回線（RTT 20ms） | zero-latency | ~1.5ms | 10ms | ~12ms |
-| 国内光回線（RTT 20ms） | balanced | ~10ms | 10ms | ~20ms |
+| 国内光回線（RTT 20ms） | balanced | ~16ms | 10ms | ~26ms |
 | LAN内（RTT 1ms） | ultra-low-latency | ~5ms | 0.5ms | ~6ms |
 
 ネットワーク遅延はRTT/2として加算される。
