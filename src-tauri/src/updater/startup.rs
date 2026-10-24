@@ -114,7 +114,11 @@ fn plan(
 /// Runs once the event loop runs: updates first where [`plan`] says so, then
 /// `open` opens the app. `open` is told whether a check found what there is
 /// to find, so the background loop does not look again at once.
-pub(crate) fn run(app: AppHandle, began: Began, open: impl FnOnce(&AppHandle, bool) + Send + 'static) {
+pub(crate) fn run(
+    app: AppHandle,
+    began: Began,
+    open: impl FnOnce(&AppHandle, bool) + Send + 'static,
+) {
     let terms = app
         .try_state::<crate::terms::TermsState>()
         .is_some_and(|terms| terms.is_accepted());
@@ -155,7 +159,10 @@ fn opened_by_link(app: &AppHandle) -> bool {
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum Progress {
     Checking,
-    Downloading { received: u64, total: Option<u64> },
+    Downloading {
+        received: u64,
+        total: Option<u64>,
+    },
     /// From here it is not skipped.
     Installing,
     Restarting,
@@ -443,14 +450,18 @@ fn confirm() {
         return;
     };
     match trying.confirm() {
-        Ok(Decision::Confirmed) => {
+        Ok(Some(Decision::Confirmed)) => {
             tracing::info!("{} has started; the previous version is let go", trying.version());
             // Its lock goes with it: the trial is over.
             candidate.take();
         }
+        Ok(None) => {
+            tracing::info!("The trial of {} was closed meanwhile", trying.version());
+            candidate.take();
+        }
         // Still held: the watcher ends this process before it puts the
         // previous version back, which it must not do under a running app.
-        Ok(decided) => tracing::warn!(
+        Ok(Some(decided)) => tracing::warn!(
             "{} was {:?} before its screen had been up long enough; the previous version is put back",
             trying.version(),
             decided
@@ -527,7 +538,10 @@ mod tests {
     /// Verifies: REQ-UPD-025
     #[test]
     fn when_a_build_that_installs_releases_starts_as_usual_it_updates_before_it_opens() {
-        assert_eq!(plan(&Began::Normal, Support::Install, true, true, false), Ok(()));
+        assert_eq!(
+            plan(&Began::Normal, Support::Install, true, true, false),
+            Ok(())
+        );
     }
 
     /// Verifies: REQ-UPD-025
@@ -536,7 +550,13 @@ mod tests {
         let normal = Began::Normal;
         for (began, support, auto, terms, link) in [
             (&Began::Off, Support::Install, true, true, false),
-            (&Began::Trying("0.2.0".into()), Support::Install, true, true, false),
+            (
+                &Began::Trying("0.2.0".into()),
+                Support::Install,
+                true,
+                true,
+                false,
+            ),
             (&normal, Support::Notice, true, true, false),
             (&normal, Support::None, true, true, false),
             (&normal, Support::Install, false, true, false),
@@ -623,7 +643,11 @@ mod tests {
                 .await
                 .expect("the skip did not end the wait");
             assert_eq!(waited.unwrap(), None);
-            assert_eq!(unless_skipped(async { 7 }).await, None, "skipped stays skipped");
+            assert_eq!(
+                unless_skipped(async { 7 }).await,
+                None,
+                "skipped stays skipped"
+            );
             at(None);
             assert_eq!(unless_skipped(async { 7 }).await, Some(7));
         });

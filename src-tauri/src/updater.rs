@@ -504,8 +504,8 @@ fn held_back(version: &str) -> Option<&'static str> {
     let store = trial::Store::locate()?;
     if store.is_rejected(version) {
         Some("it did not start here before")
-    } else if store.installed_by_itself_lately(version, REINSTALL_AFTER) {
-        Some("it was installed a moment ago and is not what runs")
+    } else if store.tried_by_itself_lately(version, REINSTALL_AFTER) {
+        Some("it was tried a moment ago and is not what runs")
     } else {
         None
     }
@@ -565,6 +565,13 @@ async fn install_newer<R: Runtime>(
             tracing::info!("Not installing {} by itself: {}", update.version, reason);
             return Ok(None);
         }
+    }
+    // Not downloaded only to be refused: no update is installed over one
+    // still being tried.
+    if trial::Store::locate().is_some_and(|store| store.is_open()) {
+        return Err(UpdateError::NoWayBack(
+            "an earlier update is still being tried".into(),
+        ));
     }
     tracing::info!(
         "Release {} is out (running {}); downloading",
@@ -627,6 +634,13 @@ async fn install(
         let store = trial::Store::locate()
             .ok_or_else(|| UpdateError::NoWayBack("there is no place to keep it".into()))?;
         let package = trial::Package::running().map_err(UpdateError::NoWayBack)?;
+        if asked == Asked::ByItself {
+            // Noted before anything can fail: a release that cannot be
+            // installed here is not downloaded again at every start.
+            if let Err(e) = store.tried_by_itself(&update.version) {
+                tracing::warn!("Could not note the update tried by itself: {}", e);
+            }
+        }
         let opened = trial::open(
             &store,
             package,
@@ -636,11 +650,6 @@ async fn install(
         )
         .map_err(|e| UpdateError::NoWayBack(e.to_string()))?;
         *OPENED.lock().unwrap_or_else(|e| e.into_inner()) = Some(opened);
-        if asked == Asked::ByItself {
-            if let Err(e) = store.installed_by_itself(&update.version) {
-                tracing::warn!("Could not note the update installed by itself: {}", e);
-            }
-        }
         // On Windows this does not return once the installer has started.
         let installed = update.install(bytes);
         let mut opened = OPENED.lock().unwrap_or_else(|e| e.into_inner());
@@ -657,11 +666,11 @@ async fn install(
                 Ok(())
             }
             Err(e) => {
-                if asked == Asked::ByItself {
-                    let _ = store.forget_installed_by_itself();
-                }
                 if let Some(trying) = opened.as_mut() {
-                    match trying.abandon(true) {
+                    // On Windows the installer runs only once the app has
+                    // ended, so nothing of the package was touched; putting
+                    // it back would write over the program that runs.
+                    match trying.abandon(cfg!(not(windows))) {
                         Ok(()) => {
                             opened.take();
                         }

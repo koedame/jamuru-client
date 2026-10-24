@@ -62,13 +62,20 @@ fn no_release_is_published_before_the_update_drill_passed() {
 fn the_update_drill_runs_on_every_system_that_installs_updates_itself() {
     let workflow = read(".github/workflows/update-drill.yml");
 
-    assert!(workflow.contains("workflow_call:"), "the release cannot run the drill");
+    assert!(
+        workflow.contains("workflow_call:"),
+        "the release cannot run the drill"
+    );
     for target in [
         "x86_64-unknown-linux-gnu",
         "aarch64-apple-darwin",
         "x86_64-pc-windows-msvc",
     ] {
-        assert!(workflow.contains(target), "the drill does not run for {}", target);
+        assert!(
+            workflow.contains(target),
+            "the drill does not run for {}",
+            target
+        );
     }
     assert!(workflow.contains("scripts/update-drill.py build"));
     assert!(workflow.contains("scripts/update-drill.py run"));
@@ -93,10 +100,16 @@ fn the_drills_breaking_is_not_a_default_feature() {
         .expect("src-tauri/Cargo.toml has no default feature");
 
     assert!(
-        features.lines().any(|line| line.trim().starts_with("update-drill = ")),
+        features
+            .lines()
+            .any(|line| line.trim().starts_with("update-drill = ")),
         "the drill's feature is gone, so the guard below guards nothing"
     );
-    assert!(!default.contains("update-drill"), "every build could be broken on purpose: {}", default);
+    assert!(
+        !default.contains("update-drill"),
+        "every build could be broken on purpose: {}",
+        default
+    );
 }
 
 /// Verifies: REQ-UPD-032
@@ -108,7 +121,8 @@ fn each_release_build_is_checked_to_have_nothing_of_the_drill() {
     assert!(
         build
             .lines()
-            .any(|line| line.contains("scripts/check-update-drill.sh") && line.trim_end().ends_with("absent")),
+            .any(|line| line.contains("scripts/check-update-drill.sh")
+                && line.trim_end().ends_with("absent")),
         "the release's binaries are not checked for the drill:\n{}",
         build
     );
@@ -136,5 +150,7 @@ fn a_build_that_can_be_broken_on_purpose_does_not_pass_as_a_release() {
     assert!(check(&drill, "present").status.success());
     assert!(check(&release, "absent").status.success());
     assert!(!check(&release, "present").status.success());
-    assert!(!check(&dir.path().join("missing"), "absent").status.success());
+    assert!(!check(&dir.path().join("missing"), "absent")
+        .status
+        .success());
 }
