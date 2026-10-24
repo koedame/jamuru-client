@@ -93,13 +93,21 @@ function usToMs(us: number): number {
 }
 
 /**
- * The way the devices in use run at: the one chosen, or the standard way
- * when the one chosen does not open them (the app falls back to it).
+ * The period each device in use runs at: the one of the way chosen, or the
+ * standard way's for a device the way chosen does not open (the app opens
+ * that device the standard way).
  */
-export function wasapiModeInEffect(wasapi: WasapiSettings): WasapiModeAdvice | undefined {
-  const chosen = wasapi.advice.modes.find((advice) => advice.mode === wasapi.mode);
-  if (chosen && chosen.verdict !== "unavailable") return chosen;
-  return wasapi.advice.modes.find((advice) => advice.mode === "shared");
+export function wasapiPeriodsInEffect(wasapi: WasapiSettings): {
+  input_period_us: number | null;
+  output_period_us: number | null;
+} {
+  const of = (mode: WasapiMode) => wasapi.advice.modes.find((advice) => advice.mode === mode);
+  const chosen = of(wasapi.mode);
+  const standard = of("shared");
+  return {
+    input_period_us: chosen?.input_period_us ?? standard?.input_period_us ?? null,
+    output_period_us: chosen?.output_period_us ?? standard?.output_period_us ?? null,
+  };
 }
 
 /**
@@ -151,6 +159,11 @@ function WasapiModeField({ wasapi, disabled, onChange }: WasapiModeFieldProps) {
           const checked = wasapi.mode === advice.mode;
           const unavailable = advice.verdict === "unavailable";
           const period = unavailable ? null : periodText(advice);
+          // A saved way the devices now in use do not all open still opens
+          // the ones it can
+          const takesADevice =
+            advice.mode === "exclusive" &&
+            (!unavailable || (checked && (advice.input_period_us != null || advice.output_period_us != null)));
           const id = `wasapi-mode-${advice.mode}`;
           return (
             <label
@@ -185,7 +198,7 @@ function WasapiModeField({ wasapi, disabled, onChange }: WasapiModeFieldProps) {
                 </span>
                 <span id={`${id}-note`} className="wasapi-mode__notes">
                   <span className="wasapi-mode__reason">{t(`settings.devices.wasapi.reason.${advice.reason}`)}</span>
-                  {advice.mode === "exclusive" && !unavailable && (
+                  {takesADevice && (
                     <span className="wasapi-mode__caution">{t("settings.devices.wasapi.exclusiveCaution")}</span>
                   )}
                 </span>
@@ -261,7 +274,7 @@ export function DevicesTab({
   const sampleRateHz = parseInt(selectedSampleRate, 10);
   const bufferMs =
     bufferSamples > 0 && sampleRateHz > 0 ? (bufferSamples / sampleRateHz) * 1000 : 0;
-  const inEffect = wasapi?.advice.applies ? wasapiModeInEffect(wasapi) : undefined;
+  const inEffect = wasapi?.advice.applies ? wasapiPeriodsInEffect(wasapi) : undefined;
   const round = (ms: number) => Math.round(ms * 10) / 10;
   const inputDisp = round(oneWayLatencyMs(bufferMs, inEffect?.input_period_us));
   const outputDisp = round(oneWayLatencyMs(bufferMs, inEffect?.output_period_us));

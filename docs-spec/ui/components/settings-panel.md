@@ -241,7 +241,7 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 - 見出し「WASAPI のモード」と説明 1 行の下に、モードごとのカード（`fieldset` の中の `radio`）を 3 枚: 共有モード（標準）・共有モード（低遅延）・排他モード
 - カードの 1 行目は、モード名・判定のバッジ（推奨 `--color-success` / 非推奨 `--color-warning` / 使えません `--color-text-secondary`）・右端に周期（「周期 10.0ms」。入力と出力で違えば両方）。2 行目に判定の理由
-- 排他モードのカードには、ほかのアプリがそのデバイスで音を出せないという注意書きを `--color-warning` で添える（使えないときは出さない）
+- 排他モードのカードには、ほかのアプリがそのデバイスで音を出せないという注意書きを `--color-warning` で添える（使えないときは出さない。ただし選んだまま一部の側だけ排他モードで開くときは出す）
 - 選んでいるカードは罫線を `--color-accent` にする。使えないモードは選べない（`disabled`。保存してあるモードが使えなくなったときは、選んだまま表示する）
 - 入力も出力も ASIO のとき（`advice.applies` が false）は、カードを出さず、モードが使われないことを説明 1 行で出す
 - 選ぶと `settings_change` の `{"setting": "wasapi_mode", "mode": ...}` を渡す
@@ -251,7 +251,7 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 現在のバッファサイズ・サンプルレートからアプリ起因の片道遅延を算出して表示する。
 
 - 片道遅延[ms] = `bufferSize / sampleRate * 1000`
-- WASAPI のモードが使われるときは、側ごとに、片道遅延と選んだモードでデバイスが動く周期の長い方（選んだモードが使えないときは標準の共有モードの周期。周期が分からない側は片道遅延のまま）
+- WASAPI のモードが使われるときは、側ごとに、片道遅延と選んだモードでその側が動く周期の長い方（選んだモードで開けない側は標準の共有モードの周期。周期が分からない側は片道遅延のまま）
 - 入力遅延・出力遅延 = 上の値（各々小数第1位に丸め）
 - 合計遅延 = 丸め後の入力＋出力（表示の整合を保つ）
 - 色: 片道 ≤3ms は `--color-success`、≤6ms は `--color-warning`、それ以上は `--color-danger`。合計は常に `--color-accent`
