@@ -1118,17 +1118,23 @@ fn last_read(ids: &[(DeviceSide, String)]) -> HashMap<String, EndpointCaps> {
 }
 
 /// The period of the standard way on the device `id` (`None`: the system
-/// default), in microseconds: how often the mixer hands a stream its samples
+/// default), in microseconds: how often the mixer hands a stream its samples.
+/// Read on a thread of its own: the thread that opens a `cpal` stream has
+/// entered COM in a mode this module's apartment cannot share.
 pub(crate) fn shared_period_us(side: DeviceSide, id: Option<&DeviceId>) -> Option<u32> {
-    let _com = Com::enter().ok()?;
-    let flow = key_of(side, "").0;
     let endpoint = id.map(|id| endpoint_id(&id.0));
-    let device = device_of(flow, endpoint.as_deref()).ok()?;
-    let client: IAudioClient = activate(&device).ok()?;
-    let mut shared = 0i64;
-    // SAFETY: COM call on a thread in the apartment
-    unsafe { client.GetDevicePeriod(Some(&mut shared), None) }.ok()?;
-    Some((shared / 10) as u32)
+    let flow = key_of(side, "").0;
+    bounded("reading the standard period", LIST_TIMEOUT, move || {
+        let _com = Com::enter().ok()?;
+        let device = device_of(flow, endpoint.as_deref()).ok()?;
+        let client: IAudioClient = activate(&device).ok()?;
+        let mut shared = 0i64;
+        // SAFETY: COM call on a thread in the apartment
+        unsafe { client.GetDevicePeriod(Some(&mut shared), None) }.ok()?;
+        Some((shared / 10) as u32)
+    })
+    .ok()
+    .flatten()
 }
 
 fn probe_one(flow: Flow, endpoint: &str) -> Result<EndpointCaps, (AudioError, OpenFailure)> {
