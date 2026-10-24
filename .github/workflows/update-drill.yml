@@ -61,6 +61,7 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
+            fuse3 \
             xvfb
 
       - name: Setup Rust
@@ -108,9 +109,10 @@ jobs:
         shell: bash
         run: scripts/check-update-drill.sh "src-tauri/target/${{ matrix.target }}/release/${{ matrix.program }}" present
 
+      # Mounted with FUSE, as on a person's desktop.
       - name: Run the drill (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        run: xvfb-run -a python3 scripts/update-drill.py run --a "${RUNNER_TEMP}/drill/a" --b "${RUNNER_TEMP}/drill/b"
+        run: xvfb-run -a python3 scripts/update-drill.py run --fuse --a "${RUNNER_TEMP}/drill/a" --b "${RUNNER_TEMP}/drill/b"
 
       - name: Run the drill
         if: matrix.os != 'ubuntu-latest'

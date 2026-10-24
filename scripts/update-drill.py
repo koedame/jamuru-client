@@ -7,14 +7,17 @@ Two builds of this source are made with the `update-drill` feature: version A
 looking for updates on this machine. Each scenario installs A, serves B as the
 newer release, starts A and waits for what must follow:
 
-  good        A installs B and restarts into it; B starts and is kept.
-  crash       B ends right after starting; A is put back, started again, and
-              does not install B again by itself.
-  hang        B never says it is up; it is ended, A is put back as above.
-  never-runs  B ends before it starts at all; A is put back as above.
+  good             A installs B and restarts into it; B starts and is kept.
+  crash            B ends right after starting; A is put back, started again,
+                   and does not install B again by itself.
+  hang             B never says it is up; it is ended, A is put back as above.
+  never-runs       B ends before it starts at all; A is put back as above.
+  crash-on-screen  B's screen comes up, and B ends before it has been up long
+                   enough to count as started; A is put back as above.
 
-A scenario passes only when the installed program is exactly B's (good) or
-exactly A's again (the rest), the update's files are cleaned up, and the
+A scenario passes only when the installed package is exactly B's (good) or
+exactly A's again, every file and its mode (the rest), the version kept
+reaches its screen and stays up, the update's files are cleaned up, and the
 version given up on is remembered.
 
     # The two builds (each a `cargo tauri build` of this source):
@@ -22,6 +25,9 @@ version given up on is remembered.
 
     # The drill (on Linux, under a display: `xvfb-run -a ...`):
     scripts/update-drill.py run --a drill/a --b drill/b
+
+On Linux the AppImages unpack themselves and run, unless `--fuse` has them
+mounted as on a person's desktop (it needs /dev/fuse and fusermount).
 
 The versions are below every release, so what the drill leaves behind cannot
 hold back a real one. On Linux everything goes under a throwaway home. On
@@ -40,6 +46,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -53,14 +60,17 @@ from pathlib import Path
 VERSION_A = "0.0.1"
 VERSION_B = "0.0.2"
 DEFAULT_PORT = 18765
-SCENARIOS = ("good", "crash", "hang", "never-runs")
+SCENARIOS = ("good", "crash", "hang", "never-runs", "crash-on-screen")
 REPO = Path(__file__).resolve().parent.parent
 
 # How long each outcome may take. The watcher gives a new version 180 s to say
 # it is up, and the Windows installer runs inside the 180 s it gives a start.
-OUTCOME_LIMIT = {"good": 300, "crash": 240, "hang": 360, "never-runs": 360}
+OUTCOME_LIMIT = {"good": 300, "crash": 240, "hang": 360, "never-runs": 360, "crash-on-screen": 240}
 # How long a version put back is watched for installing the given-up one again.
 NO_REINSTALL_WATCH = 40
+# How long the version kept must stay up once its screen is: past the 10 s a
+# new version's screen must stay up to count as started.
+STAYS_UP = 20
 
 
 def say(line: str) -> None:
@@ -76,6 +86,32 @@ def sha256(path: Path) -> str:
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def package_hash(path: Path, skip: tuple[str, ...] = ()) -> str | None:
+    """What a package is: every directory, every file's bytes and mode, and
+    every link's target under `path` (the entries named in `skip` left out),
+    or None when there is nothing there."""
+    if not os.path.lexists(path):
+        return None
+    digest = hashlib.sha256()
+
+    def add(at: Path, name: str) -> None:
+        st = os.lstat(at)
+        mode = f"{stat.S_IMODE(st.st_mode):o}"
+        if stat.S_ISLNK(st.st_mode):
+            digest.update(f"L {name} -> {os.readlink(at)}\n".encode())
+        elif stat.S_ISDIR(st.st_mode):
+            digest.update(f"D {name} {mode}\n".encode())
+            for child in sorted(os.listdir(at)):
+                if not name and child in skip:
+                    continue
+                add(at / child, f"{name}/{child}" if name else child)
+        else:
+            digest.update(f"F {name} {mode} {sha256(at)}\n".encode())
+
+    add(path, "")
     return digest.hexdigest()
 
 
@@ -105,6 +141,10 @@ class Places:
     log: Path
     # Where the package is installed and how it is started.
     installed_program: Path
+    # The package as a whole: a file or a directory, and what in it is not
+    # the package (the app's data, on Windows).
+    package: Path
+    package_skip: tuple[str, ...] = ()
 
     @staticmethod
     def of(home: Path, work: Path) -> "Places":
@@ -117,6 +157,7 @@ class Places:
                 store=support / "update",
                 log=home / "Library" / "Logs" / "me.koeda.jamuru" / "jamuru.log",
                 installed_program=app / "Contents" / "MacOS" / "jamuru-app",
+                package=app,
             )
         if sys.platform == "win32":
             local = Path(os.environ["LOCALAPPDATA"])
@@ -127,6 +168,8 @@ class Places:
                 store=local / "jamuru" / "data" / "update",
                 log=local / "me.koeda.jamuru" / "logs" / "jamuru.log",
                 installed_program=local / "jamuru" / "jamuru-app.exe",
+                package=local / "jamuru",
+                package_skip=("data",),
             )
         return Places(
             home=home,
@@ -134,6 +177,7 @@ class Places:
             store=home / ".local" / "share" / "jamuru" / "update",
             log=home / ".local" / "share" / "me.koeda.jamuru" / "logs" / "jamuru.log",
             installed_program=work / "apps" / "jamuru.AppImage",
+            package=work / "apps" / "jamuru.AppImage",
         )
 
 
@@ -214,10 +258,11 @@ class Offer:
 
 
 class App:
-    def __init__(self, places: Places, builds: Builds, work: Path):
+    def __init__(self, places: Places, builds: Builds, work: Path, fuse: bool):
         self.places = places
         self.builds = builds
         self.work = work
+        self.fuse = fuse
         self.run_id = uuid.uuid4().hex
         self.output = work / "app-output.log"
 
@@ -227,8 +272,10 @@ class App:
         # The places above are the ones a home of their own gives.
         for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
             env.pop(name, None)
-        # No FUSE on a CI runner or in a container: the AppImage unpacks itself.
-        env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+        # Without FUSE (in a container) the AppImage unpacks itself.
+        env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+        if not self.fuse:
+            env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
         # Every process of this drill carries this, to be found and ended.
         env["JAMJAM_UPDATE_DRILL_RUN"] = self.run_id
         env.pop("JAMJAM_UPDATE_DRILL_BREAK", None)
@@ -287,6 +334,27 @@ class App:
                     pass
         time.sleep(2)
 
+    def running(self) -> bool:
+        """Whether the app runs, apart from a watcher."""
+        if sys.platform == "win32":
+            listed = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq jamuru-app.exe", "/NH"],
+                capture_output=True,
+                text=True,
+            ).stdout
+            return "jamuru-app.exe" in listed
+        if sys.platform == "darwin":
+            # The watcher runs from the copy in the store, not from here.
+            return subprocess.run(["pgrep", "-f", str(self.work / "apps")], capture_output=True).returncode == 0
+        for pid in self.linux_pids():
+            try:
+                arguments = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+            except OSError:
+                continue
+            if b"--update-watch" not in arguments:
+                return True
+        return False
+
     def linux_pids(self) -> list[int]:
         marker = f"JAMJAM_UPDATE_DRILL_RUN={self.run_id}".encode()
         pids = []
@@ -319,6 +387,10 @@ class Look:
         """How many times `version` got as far as the app's log."""
         return len(re.findall(rf"jamuru {re.escape(version)} starting", self.app_log()))
 
+    def screens(self) -> int:
+        """How many times a version's screen came up."""
+        return self.app_log().count("The main screen is up")
+
     def tried(self, version: str) -> int:
         """How many times `version` ran as the update being tried. A build
         broken to crash or hang does so before the app's log exists, so this
@@ -336,8 +408,7 @@ class Look:
         return json.loads(text) if text else []
 
     def installed(self) -> str | None:
-        program = self.places.installed_program
-        return sha256(program) if program.is_file() else None
+        return package_hash(self.places.package, self.places.package_skip)
 
     def report(self) -> str:
         store = self.places.store
@@ -406,8 +477,9 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
         expect(look.starts(VERSION_B) == 1, f"{VERSION_B} started once")
         expect(look.tried(VERSION_B) == 1, f"{VERSION_B} was tried once")
         expect(VERSION_B not in look.rejected(), f"{VERSION_B} is not remembered as given up on")
-        # B is the newest release: it finds nothing newer and installs nothing.
-        time.sleep(15)
+        # A found B before its window, so the one screen is B's. B is the
+        # newest release: it finds nothing newer and installs nothing.
+        stays_up(app, look, VERSION_B, screens=1)
         expect(not look.trial_open(), "B opened no trial of its own")
         expect(look.starts(VERSION_B) == 1, f"{VERSION_B} did not restart")
     else:
@@ -420,12 +492,19 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
         expect(look.installed() == a_hash, "the installed program is A's again, byte for byte")
         expect(not look.trial_open() and not look.slot_left(), "the trial is closed")
         expect(look.rejected() == [VERSION_B], f"{VERSION_B} is remembered as given up on")
-        # Broken where it was asked to break: one try, never as far as the app.
+        # Broken where it was asked to break: one try, as far as it was let.
         expect(
             look.tried(VERSION_B) == (0 if name == "never-runs" else 1),
             f"{VERSION_B} was started only by the update",
         )
-        expect(look.starts(VERSION_B) == 0, f"{VERSION_B} broke before the app opened")
+        on_screen = name == "crash-on-screen"
+        expect(
+            look.starts(VERSION_B) == int(on_screen),
+            f"{VERSION_B} broke {'on its screen' if on_screen else 'before the app opened'}",
+        )
+        # The version kept is the app the person uses again, not only a
+        # program that was started.
+        stays_up(app, look, VERSION_A, screens=1 + int(on_screen))
         # No loop: A finds B again and leaves it alone.
         time.sleep(NO_REINSTALL_WATCH)
         expect(not look.trial_open(), "A did not install B again")
@@ -437,6 +516,15 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
         expect(look.starts(VERSION_A) == 2, f"{VERSION_A} was not restarted again")
     app.end_all()
     say(f"scenario {name}: passed")
+
+
+def stays_up(app: App, look: Look, version: str, screens: int) -> None:
+    """`version` reaches its screen, as the `screens`th screen to come up, and
+    still runs a while after."""
+    wait_for(f"{version}'s screen comes up", 90, lambda: look.screens() >= screens)
+    time.sleep(STAYS_UP)
+    expect(app.running(), f"{version} still runs {STAYS_UP} s after its screen came up")
+    expect(look.screens() == screens, f"{version}'s screen came up once")
 
 
 def expect(condition: bool, what: str) -> None:
@@ -458,13 +546,20 @@ def run(args: argparse.Namespace) -> int:
     else:
         home = work / "home"
         home.mkdir()
+    if args.fuse and not (
+        Path("/dev/fuse").exists() and (shutil.which("fusermount3") or shutil.which("fusermount"))
+    ):
+        print("--fuse needs /dev/fuse and fusermount3 or fusermount", file=sys.stderr)
+        return 2
     places = Places.of(home, work)
     builds = Builds.of(Path(args.a), Path(args.b))
-    app = App(places, builds, work)
+    app = App(places, builds, work, args.fuse)
     offer = Offer(builds, args.port, work)
     say(f"A {VERSION_A}: {builds.a_package}")
     say(f"B {VERSION_B}: {builds.b_update}")
     say(f"work: {work}")
+    if sys.platform == "linux":
+        say("the AppImages are " + ("mounted with FUSE" if args.fuse else "unpacked to run"))
     failed = []
     try:
         for name in args.scenario or SCENARIOS:
@@ -563,6 +658,7 @@ def main() -> int:
     r.add_argument("--b", required=True, help=f"bundle directory of the {VERSION_B} build")
     r.add_argument("--port", type=int, default=DEFAULT_PORT)
     r.add_argument("--scenario", action="append", choices=SCENARIOS, help="only these (repeatable)")
+    r.add_argument("--fuse", action="store_true", help="on Linux, mount the AppImages instead of unpacking them")
     r.set_defaults(func=run)
     args = parser.parse_args()
     return args.func(args)

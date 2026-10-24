@@ -17,6 +17,9 @@ pub(crate) enum Stage {
     BeforeStart,
     /// The start has been seen by what decides whether this version stays.
     Started,
+    /// The main window's screen has come up, but not for long enough to
+    /// count as started.
+    ScreenUp,
 }
 
 /// Fails the start of `version` here when the drill asked for it.
@@ -51,6 +54,7 @@ fn how(asked: &str, version: &str, stage: Stage) -> Option<Break> {
         ("never-runs", Stage::BeforeStart) => Some(Break::Exit),
         ("crash", Stage::Started) => Some(Break::Crash),
         ("hang", Stage::Started) => Some(Break::Hang),
+        ("crash-on-screen", Stage::ScreenUp) => Some(Break::Crash),
         _ => None,
     }
 }
@@ -84,6 +88,26 @@ mod tests {
         assert_eq!(
             how("0.1.0-drill.2:hang", "0.1.0-drill.2", Stage::Started),
             Some(Break::Hang)
+        );
+        assert_eq!(
+            how(
+                "0.1.0-drill.2:crash-on-screen",
+                "0.1.0-drill.2",
+                Stage::ScreenUp
+            ),
+            Some(Break::Crash)
+        );
+        assert_eq!(
+            how(
+                "0.1.0-drill.2:crash-on-screen",
+                "0.1.0-drill.2",
+                Stage::Started
+            ),
+            None
+        );
+        assert_eq!(
+            how("0.1.0-drill.2:crash", "0.1.0-drill.2", Stage::ScreenUp),
+            None
         );
         assert_eq!(
             how("0.1.0-drill.2:sing", "0.1.0-drill.2", Stage::Started),

@@ -435,6 +435,12 @@ pub fn update_app_ready(window: WebviewWindow) {
     if window.label() != labels::MAIN || READY.swap(true, Ordering::SeqCst) {
         return;
     }
+    tracing::info!("The main screen is up");
+    #[cfg(feature = "update-drill")]
+    crate::update_drill::at(
+        crate::update_drill::Stage::ScreenUp,
+        &window.app_handle().package_info().version.to_string(),
+    );
     if lock(&CANDIDATE).is_none() {
         return;
     }
