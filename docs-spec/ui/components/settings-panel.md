@@ -232,18 +232,20 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 5. 見出し「音質と遅延」
 6. 送信チャンネル（`row` + セグメントトグル モノラル/ステレオ。選択側は `--color-accent` 罫線＋文字）
 7. サンプルレート / バッファサイズ（`row` + `inline` Select）
-8. WASAPI のモード（Windows で WASAPI のデバイスがあるときだけ。下記）
+8. WASAPI（Windows Audio Session API）のモード（Windows で WASAPI のデバイスがあるときだけ。下記）
 9. 遅延サマリーカード（下記）
 
 #### WASAPI のモード
 
 設定の応答に `wasapi` があるとき（Windows で、WASAPI のデバイスがあるとき）だけ出す（REQ-GUI-031、ADR-088）。
 
-- 見出し「WASAPI のモード」と説明 1 行の下に、モードごとのカード（`fieldset` の中の `radio`）を 3 枚: 共有モード（標準）・共有モード（低遅延）・排他モード
+- 見出しは「WASAPI（Windows Audio Session API）のモード」。略語だけでは何のことか分からないので、正式名称を添える
+- 見出しと説明 1 行の下に、WASAPI とは何かの説明を畳んで置く（`details`。開く文言は「WASAPI（Windows Audio Session API）とは」）。Windows に標準で入っている音の入出力の仕組みであること、ASIO 以外のデバイスはこれで開くこと、共有モードは Windows がすべてのアプリの音を決まった周期でまとめて処理するぶん遅延が増え、排他モードはその処理を通さないこと。技術の説明なので既定では閉じておく（ui-ux-guideline の「専門用語の排除」）
+- その下に、モードごとのカード（`fieldset` の中の `radio`）を 3 枚: 共有モード（標準）・共有モード（低遅延）・排他モード
 - カードの 1 行目は、モード名・判定のバッジ（推奨 `--color-success` / 非推奨 `--color-warning` / 使えません `--color-text-secondary`）・右端に周期（「周期 10.0ms」。入力と出力で違えば両方）。2 行目に判定の理由
 - 排他モードのカードには、ほかのアプリがそのデバイスで音を出せない（Windows の既定の設定では、先に鳴らしているアプリの音も止まる）という注意書きを `--color-warning` で添える（使えないときは出さない。ただし選んだまま一部の側だけ排他モードで開くときは出す）
 - 選んでいるカードは罫線を `--color-accent` にする。使えないモードは選べない（`disabled`。保存してあるモードが使えなくなったときは、選んだまま表示する）
-- 入力も出力も ASIO のとき（`advice.applies` が false）は、カードを出さず、モードが使われないことを説明 1 行で出す
+- 入力も出力も ASIO のとき（`advice.applies` が false）は、カードを出さず、モードが使われないことを説明 1 行で出す（WASAPI とは何かの畳んだ説明は残す）
 - 選ぶと `settings_change` の `{"setting": "wasapi_mode", "mode": ...}` を渡す
 
 #### 遅延サマリーカード
