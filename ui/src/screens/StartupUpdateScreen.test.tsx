@@ -1,6 +1,6 @@
 /**
  * The small window a start shows while it updates the app before opening it
- * (ADR-088): it follows how far the update is and passes on the wish to open
+ * (ADR-089): it follows how far the update is and passes on the wish to open
  * the app without waiting.
  */
 

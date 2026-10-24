@@ -71,6 +71,7 @@ import {
   type HelpEvent,
   type PeerLinkStatus,
   type DeviceProblem,
+  type StreamingStatus,
 } from "../lib/tauri";
 import {
   linkTrouble,
@@ -85,6 +86,30 @@ import "./MainScreen.css";
 
 /** How long the "buffer size adjusted" notice stays up. */
 const DELAY_NOTICE_MS = 5000;
+
+/** How long the notice that a WASAPI device was opened the standard way stays up. */
+const WASAPI_NOTICE_MS = 10000;
+
+/** A device of the session not opened the WASAPI way the settings ask for (ADR-088) */
+interface WasapiFallback {
+  side: "input" | "output";
+  asked: "low_latency" | "exclusive";
+  failure: "in_use" | "not_allowed" | "format_refused" | "other";
+}
+
+/** The devices of the session the way asked for did not open */
+export function wasapiFallbacks(status: Pick<StreamingStatus, "wasapi_opened">): WasapiFallback[] {
+  const opened = status.wasapi_opened;
+  if (!opened) return [];
+  return (["input", "output"] as const).flatMap((side) => {
+    const way = opened[side];
+    if (!way?.failure || way.asked === "shared") return [];
+    return [{ side, asked: way.asked, failure: way.failure }];
+  });
+}
+
+const fallbackKey = (fallbacks: WasapiFallback[]) =>
+  fallbacks.map((f) => `${f.side}:${f.asked}:${f.failure}`).join(",");
 
 export interface MainScreenProps {
   onSettingsClick?: () => void;
@@ -141,6 +166,10 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   const [delayAdjustments, setDelayAdjustments] = useState(0);
   const [adjustedDelayMs, setAdjustedDelayMs] = useState(0);
   const [delayNoticeVisible, setDelayNoticeVisible] = useState(false);
+  // A WASAPI device the way chosen in the settings did not open was opened
+  // the standard way; the user is told for a few seconds each time that changes.
+  const [fallbacks, setFallbacks] = useState<WasapiFallback[]>([]);
+  const [fallbackNoticeVisible, setFallbackNoticeVisible] = useState(false);
   const [inputLevel, setInputLevel] = useState(0);
   const [outputLevel, setOutputLevel] = useState(0);
   const [localSampleRate, setLocalSampleRate] = useState<number>(48000);
@@ -605,12 +634,24 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     return () => clearTimeout(timer);
   }, [delayAdjustments]);
 
+  const fallbacksShown = fallbackKey(fallbacks);
+  useEffect(() => {
+    if (fallbacksShown === "") {
+      setFallbackNoticeVisible(false);
+      return;
+    }
+    setFallbackNoticeVisible(true);
+    const timer = setTimeout(() => setFallbackNoticeVisible(false), WASAPI_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [fallbacksShown]);
+
   // Poll streaming status for latency and audio level when connected
   useEffect(() => {
     if (phase !== "connected") {
       setLinks([]);
       setDetailPeerId(null);
       setDeviceProblems([]);
+      setFallbacks([]);
       setWarnedBandwidth(null);
       setDelayAdjustments(0);
       setInputLevel(0);
@@ -633,6 +674,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         // Whether or not a session is active: one that could not open its
         // device never became active
         setDeviceProblems(status.device_problems);
+        const opened = wasapiFallbacks(status);
+        setFallbacks((shown) => (fallbackKey(shown) === fallbackKey(opened) ? shown : opened));
         // With no session there are no links: the last ones must not stay up
         setLinks(status.is_active ? status.peers : []);
         if (status.is_active) {
@@ -1155,6 +1198,16 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
               })}
             />
           ))}
+          {fallbackNoticeVisible &&
+            fallbacks.map((fallback) => (
+              <Toast
+                key={`wasapi-${fallback.side}`}
+                type="warning"
+                message={t(`notification.wasapiFallback.${fallback.failure}.${fallback.side}`, {
+                  mode: t(`notification.wasapiFallback.mode.${fallback.asked}`),
+                })}
+              />
+            ))}
           {reconnectPrompt && (
             <div className="toast-stack__row">
               <Toast type="error" message={reconnectPrompt} />

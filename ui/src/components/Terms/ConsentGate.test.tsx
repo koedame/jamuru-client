@@ -44,7 +44,7 @@ describe('the consent gate', () => {
     await waitFor(() => expect(onShown).toHaveBeenCalledTimes(1));
   });
 
-  // A version whose screen fails to draw has not started (ADR-088).
+  // A version whose screen fails to draw has not started (ADR-089).
   //
   // Verifies: REQ-UPD-027
   it('what it shows fails to draw, it does not say it is shown', async () => {

@@ -18,7 +18,7 @@ pub mod labels {
     pub const MIXER: &str = "mixer";
     pub const CHAT: &str = "chat";
     pub const SETTINGS: &str = "settings";
-    /// Shown while the app updates before it opens (ADR-088).
+    /// Shown while the app updates before it opens (ADR-089).
     pub const UPDATING: &str = "updating";
 }
 

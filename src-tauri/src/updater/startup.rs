@@ -1,4 +1,4 @@
-//! Updating before the app opens (ADR-088).
+//! Updating before the app opens (ADR-089).
 //!
 //! A start of a build that installs releases itself first looks for a newer
 //! release, before the main window opens. One that is found is downloaded and

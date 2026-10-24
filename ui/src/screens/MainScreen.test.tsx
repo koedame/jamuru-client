@@ -12,7 +12,15 @@ import { act, render, screen, waitFor, fireEvent, within } from '@testing-librar
 
 import i18n from '../i18n';
 import { MainScreen } from './MainScreen';
-import type { AudioEncryption, AudioQuality, DeviceProblem, MixerSnapshot, PeerLinkStatus, SessionSnapshot } from '../lib/tauri';
+import type {
+  AudioEncryption,
+  AudioQuality,
+  DeviceProblem,
+  MixerSnapshot,
+  PeerLinkStatus,
+  SessionSnapshot,
+  StreamingStatus,
+} from '../lib/tauri';
 
 const invoke = vi.hoisted(() => vi.fn());
 /** What the screen listens for, by event name. */
@@ -74,6 +82,8 @@ let current: SessionSnapshot | Promise<SessionSnapshot>;
 let mixerNow: MixerSnapshot;
 /** The devices the backend says it could not open, for `streaming_status`. */
 let statusDeviceProblems: DeviceProblem[];
+/** How the backend says the session's WASAPI devices were opened, for `streaming_status`. */
+let statusWasapiOpened: StreamingStatus['wasapi_opened'];
 /** Whether the backend says the audio to the peer is encrypted, for `streaming_status`; `null` while no session runs. */
 let statusEncryption: AudioEncryption | null;
 /** The audio links the backend says there are, for `streaming_status`; `null` while no session runs. */
@@ -168,6 +178,7 @@ beforeAll(async () => {
 beforeEach(() => {
   calls = [];
   statusDeviceProblems = [];
+  statusWasapiOpened = { input: null, output: null };
   statusEncryption = null;
   statusLinks = null;
   statusAudioQuality = null;
@@ -200,6 +211,7 @@ beforeEach(() => {
             is_active: true,
             peers,
             device_problems: statusDeviceProblems,
+            wasapi_opened: statusWasapiOpened,
             network: peers[0]?.network ?? null,
             latency: peers[0]?.latency ?? null,
             audio_quality: statusAudioQuality,
@@ -212,7 +224,7 @@ beforeEach(() => {
             output_level: 0,
           };
         }
-        return { is_active: false, peers: [], device_problems: statusDeviceProblems };
+        return { is_active: false, peers: [], device_problems: statusDeviceProblems, wasapi_opened: statusWasapiOpened };
       }
       case 'config_get_sample_rate':
         return 48000;
@@ -854,6 +866,63 @@ describe('MainScreen のデバイスの問題の表示', () => {
     await waitFor(() =>
       expect(screen.queryByText(/Input device isn't responding/)).not.toBeInTheDocument()
     );
+  });
+});
+
+describe('MainScreen の WASAPI のモードの知らせ', () => {
+  /** Verifies: REQ-GUI-031 */
+  it('排他モードを選んだが、ほかのアプリが入力デバイスを使っていて標準の共有モードで開いたとき、その理由を添えて知らせること', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
+    statusWasapiOpened = { input: { asked: 'exclusive', opened: 'shared', failure: 'in_use' }, output: null };
+
+    render(<MainScreen />);
+
+    expect(
+      await screen.findByText(
+        "Couldn't open the input device in exclusive mode, so it was opened in the standard shared mode. Another app is using it"
+      )
+    ).toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-GUI-031 */
+  it('サウンドの設定が排他的な制御を許していないとき、出力の問題として、オンにする場所を添えて知らせること', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
+    statusWasapiOpened = { input: null, output: { asked: 'exclusive', opened: 'shared', failure: 'not_allowed' } };
+
+    render(<MainScreen />);
+
+    const message = await screen.findByText(/Couldn't open the output device in exclusive mode/);
+    expect(message).toHaveTextContent(/Allow applications to take exclusive control of this device/);
+  });
+
+  /** Verifies: REQ-GUI-031 */
+  it('選んだモードで開けたとき、知らせを出さないこと', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
+    statusWasapiOpened = {
+      input: { asked: 'exclusive', opened: 'exclusive', failure: null },
+      output: { asked: 'exclusive', opened: 'exclusive', failure: null },
+    };
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThan(1));
+    expect(screen.queryByText(/so it was opened in the standard shared mode/)).not.toBeInTheDocument();
+  });
+
+  /** Verifies: REQ-GUI-031 */
+  it('相手のアプリが古くて開き方を返さないとき、知らせを出さず、ほかの表示も止めないこと', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
+    statusWasapiOpened = undefined;
+    statusDeviceProblems = [{ side: 'output', trouble: 'failed', device: null, sample_rate: 48000 }];
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText(/Couldn't open the output device/)).toBeInTheDocument();
+    expect(screen.queryByText(/so it was opened in the standard shared mode/)).not.toBeInTheDocument();
   });
 });
 

@@ -1,5 +1,5 @@
 //! The version that ran before an update is kept until the new one has
-//! started (ADR-088).
+//! started (ADR-089).
 //!
 //! An update replaces the app where it is installed. If the new version cannot
 //! start - it does not run on this machine, crashes while starting, or hangs

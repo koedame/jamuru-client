@@ -1,9 +1,9 @@
 ---
-sidebar_label: "ADR-088: Update Before Opening and Keep the Previous Version"
-sidebar_position: 88
+sidebar_label: "ADR-089: Update Before Opening and Keep the Previous Version"
+sidebar_position: 89
 ---
 
-# ADR-088: 起動のたびに本体を開く前に更新し、入れた版が起動するまで前の版を残す
+# ADR-089: 起動のたびに本体を開く前に更新し、入れた版が起動するまで前の版を残す
 
 ## Status
 

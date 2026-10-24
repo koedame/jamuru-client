@@ -14,6 +14,7 @@ const SETTING_LABEL_KEYS: Record<SettingChange["setting"], string> = {
   transmit_channels: "settings.devices.transmitChannels",
   buffer_size: "settings.devices.buffer",
   sample_rate: "settings.devices.sampleRate",
+  wasapi_mode: "settings.devices.wasapi.label",
   preset: "settingsHelp.setting.preset",
 };
 

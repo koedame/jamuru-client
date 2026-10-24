@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The update drill: installs real packages over each other and checks that an
-update that cannot start is taken out again (ADR-088).
+update that cannot start is taken out again (ADR-089).
 
 Two builds of this source are made with the `update-drill` feature: version A
 (0.0.1) and version B (0.0.2), both trusting a key made for the drill and

@@ -50,6 +50,7 @@ pub(super) async fn run(
         buffer_size,
         preset,
         sample_rate,
+        wasapi_mode,
         transmit_channels,
         mut input_channels,
         mut output_channels,
@@ -81,6 +82,7 @@ pub(super) async fn run(
         sample_rate,
         channels: 1,
         frame_size: buffer_size,
+        wasapi_mode,
     };
 
     // Playback config: stereo (for pan support)
@@ -88,6 +90,7 @@ pub(super) async fn run(
         sample_rate,
         channels: 2,
         frame_size: buffer_size,
+        wasapi_mode,
     };
 
     // Everyone in the room sends to the one address this app told it, so every

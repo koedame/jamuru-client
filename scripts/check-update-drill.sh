@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that a built app can be broken on purpose by the update drill only
-# when it is one of the drill's builds (ADR-088).
+# when it is one of the drill's builds (ADR-089).
 #
 # The `update-drill` feature lets an environment variable make the app fail to
 # start. It leaves the variable's name in the binary; this looks for it, so a

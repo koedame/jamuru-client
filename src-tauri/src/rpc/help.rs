@@ -374,6 +374,7 @@ pub(crate) fn settings_with_devices(ids: &[&str]) -> AudioSettings {
         buffer_sizes: vec![32, 64, 128],
         sample_rate: 48000,
         sample_rates: vec![],
+        wasapi: None,
     }
 }
 

@@ -1,6 +1,6 @@
 /**
  * StartupUpdateScreen - the small window a start shows while it updates the
- * app before opening it (ADR-088). It reads how far the update is, follows it
+ * app before opening it (ADR-089). It reads how far the update is, follows it
  * as the backend reports it, and passes on the person's wish to open the app
  * without waiting. The backend closes the window when the app opens.
  */

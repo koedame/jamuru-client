@@ -39,7 +39,7 @@ pub(crate) fn is_restarting() -> bool {
 pub(crate) async fn restart<R: Runtime>(app: &AppHandle<R>) {
     RESTARTING.store(true, Ordering::SeqCst);
     stop_audio(app).await;
-    // An update installed for this restart is what starts (ADR-088).
+    // An update installed for this restart is what starts (ADR-089).
     crate::updater::handing_over();
     let handle = app.clone();
     let reporter = app
