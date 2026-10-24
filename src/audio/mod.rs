@@ -6,6 +6,7 @@
 mod asio;
 #[cfg(any(target_os = "windows", test))]
 mod asio_roster;
+mod buffer_fit;
 mod channels;
 pub(crate) mod codec;
 mod device;
@@ -36,6 +37,7 @@ mod virtual_output;
 
 #[cfg(target_os = "windows")]
 pub use asio::AsioDuplex;
+pub use buffer_fit::opened_asio_buffer_frames;
 pub use channels::{capture_attempts, channel_count, pair_in_use, OutputRoute};
 pub use codec::{
     create_codec, AudioCodec, CodecConfig, CodecError, CodecType, OpusCodec, PcmCodec,
