@@ -473,6 +473,8 @@ export type WasapiReason =
   | "opens_exclusively"
   /** Exclusive: a device has no format it opens in exclusive mode */
   | "no_exclusive_format"
+  /** Exclusive: Windows does not let apps take a device exclusively (a setting in the device's properties) */
+  | "exclusive_not_allowed"
   /** What a device offers could not be read; choosing the way tries it */
   | "unknown";
 
