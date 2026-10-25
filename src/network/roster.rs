@@ -557,8 +557,8 @@ mod tests {
     ///
     /// Verifies: REQ-CON-020
     #[test]
-    fn more_than_fifteen_others_are_listed_links_the_first_fifteen_and_the_next_when_one_of_them_leaves()
-    {
+    fn more_than_fifteen_others_are_listed_links_the_first_fifteen_and_the_next_when_one_of_them_leaves(
+    ) {
         let mut roster = Roster::default();
         let others: Vec<PeerInfo> = (2..=17)
             .map(|n| peer(n, Some(&format!("192.0.2.{n}:5000"))))
