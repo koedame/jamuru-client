@@ -21,7 +21,7 @@ Accepted
 
 - `NetworkError::SessionFull`・`NetworkError::PeerNotFound`（`Session` だけが作っていた）
 - `Session` だけを試していたテスト。`tests/connection_test.rs` の 5 件（作る・設定・同じポートでの作り直し）と、`tests/wire_encryption_test.rs` の 3 人で暗号化を確かめる 2 件
-- 要求 REQ-CON-020（ルームの上限 10 人）・REQ-SEC-001・REQ-SEC-007 の検証は、相手ごとの `Connection` を使う `tests/mesh_connection_test.rs`（10 人のルーム・宛先の違う音声を開けない）と、`tests/wire_encryption_test.rs` の 2 者間のテストが引き続き担う
+- 要求 REQ-CON-020（ルームの上限 16 人）・REQ-SEC-001・REQ-SEC-007 の検証は、相手ごとの `Connection` を使う `tests/mesh_connection_test.rs`（16 人のルーム・宛先の違う音声を開けない）と、`tests/wire_encryption_test.rs` の 2 者間のテストが引き続き担う
 
 [ADR-064](./ADR-064-encrypt-the-audio-link.md) と [ADR-067](./ADR-067-check-the-peer-in-the-key-exchange.md) の「実装」欄が挙げる `src/network/session.rs` は、この ADR で無くなる。両 ADR の決定は `Connection` と `SecureLink` に残っており、変わらない。
 
