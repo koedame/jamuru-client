@@ -156,9 +156,9 @@ async fn three_in_a_room_each_hears_both_others_on_the_link_to_each() {
 /// Verifies: REQ-CON-020
 /// Verifies: REQ-CON-133
 #[tokio::test]
-async fn a_full_room_of_ten_has_nine_links_per_participant_and_all_of_them_carry_audio() {
+async fn a_full_room_of_sixteen_has_fifteen_links_per_participant_and_all_of_them_carry_audio() {
     let room = room_of(MAX_PEERS_PER_ROOM).await;
-    assert!(room.iter().all(|p| p.links.len() == 9));
+    assert!(room.iter().all(|p| p.links.len() == MAX_PEERS_PER_ROOM - 1));
 
     everyone_sends(&room).await;
 
