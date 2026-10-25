@@ -18,6 +18,10 @@ newer release, starts A and waits for what must follow:
                    could be kept (its latest.json does not say it reports its
                    start); A installs it without a trial, and B is kept.
 
+  plain           A is a version that cannot keep itself (a release made before
+                  the previous version could be kept); it installs B as it
+                  always did, without a trial, and B is kept.
+
 A scenario passes only when the installed package is B's (good, unwatched) or
 exactly A's again, every file and its mode (the rest), the version kept
 reaches its screen and stays up, the update's files are cleaned up, and the
@@ -26,11 +30,22 @@ version given up on is remembered.
     # The two builds (each a `cargo tauri build` of this source):
     scripts/update-drill.py build --out drill
 
+    # The same, with A made from the source of the release before this one
+    # (`--a-source previous`, or a tag), as the people who update have it:
+    scripts/update-drill.py build --out drill --a-source previous
+
     # The drill (on Linux, under a display: `xvfb-run -a ...`):
     scripts/update-drill.py run --a drill/a --b drill/b
 
 On Linux the AppImages unpack themselves and run, unless `--fuse` has them
 mounted as on a person's desktop (it needs /dev/fuse and fusermount).
+
+B is always this source. When A is the release before, what A and B say to
+each other (the records in `update/`, the signal that B has started) is what
+two different builds of the app really have between them; the scenarios
+that A's source cannot take part in are the ones that are left out (see
+`Info`), and the drill reads only the words of A's log that every version
+has (below), so rewording another line does not need a release first.
 
 The versions are below every release, so what the drill leaves behind cannot
 hold back a real one. On Linux everything goes under a throwaway home. On
@@ -52,6 +67,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -63,7 +79,10 @@ from pathlib import Path
 VERSION_A = "0.0.1"
 VERSION_B = "0.0.2"
 DEFAULT_PORT = 18765
+# What a version that can keep the one before it is put through, and what one
+# that cannot (a release made before) is.
 SCENARIOS = ("good", "crash", "hang", "never-runs", "crash-on-screen", "unwatched")
+SCENARIOS_WITHOUT_KEEPING = ("plain",)
 # Next to config.toml; the drill's builds read what to break from it
 # (src-tauri/src/update_drill.rs).
 BREAK_FILE = "jamjam-update-drill-break"
@@ -78,6 +97,7 @@ OUTCOME_LIMIT = {
     "never-runs": 360,
     "crash-on-screen": 240,
     "unwatched": 300,
+    "plain": 300,
 }
 # How long a version put back is watched for installing the given-up one again.
 NO_REINSTALL_WATCH = 40
@@ -135,12 +155,54 @@ def one(pattern: str, under: Path) -> Path:
     return found[0]
 
 
-def terms_version() -> int:
-    text = (REPO / "src" / "config.rs").read_text(encoding="utf-8")
+def terms_version(source: Path) -> int:
+    text = (source / "src" / "config.rs").read_text(encoding="utf-8")
     found = re.search(r"pub const TERMS_VERSION: u32 = (\d+);", text)
     if not found:
-        raise DrillFailed("TERMS_VERSION not found in src/config.rs")
+        raise DrillFailed(f"TERMS_VERSION not found in {source}/src/config.rs")
     return int(found.group(1))
+
+
+def keeps_previous_version(source: Path) -> bool:
+    """Whether the app of this source keeps the version it replaces until the
+    new one has started (ADR-089): it is the one that reads `reports_started`
+    from the release."""
+    return any(
+        "reports_started" in path.read_text(encoding="utf-8", errors="replace")
+        for path in (source / "src-tauri" / "src").rglob("*.rs")
+    )
+
+
+# --- what A is --------------------------------------------------------------
+
+INFO_FILE = "drill.json"
+
+
+@dataclass
+class Info:
+    """What the build of A says of itself (the build writes it next to the
+    bundles): which source it was made from, and what that source can do."""
+
+    source: str = "current"
+    keeps_previous: bool = True
+    terms_version: int = 0
+
+    @staticmethod
+    def of(a: Path) -> "Info":
+        path = a / INFO_FILE
+        if not path.exists():
+            return Info(terms_version=terms_version(REPO))
+        return Info(**json.loads(path.read_text(encoding="utf-8")))
+
+    @property
+    def this_source(self) -> bool:
+        """A is this source, so the words of its log are the ones in the code
+        the drill is next to."""
+        return self.source == "current"
+
+    @property
+    def scenarios(self) -> tuple[str, ...]:
+        return SCENARIOS if self.keeps_previous else SCENARIOS_WITHOUT_KEEPING
 
 
 # --- where things are, per system -----------------------------------------
@@ -462,29 +524,30 @@ def wait_for(what: str, limit: float, check) -> None:
 # --- the scenarios ----------------------------------------------------------
 
 
-def fresh(places: Places, app: App) -> None:
+def fresh(places: Places, app: App, info: Info) -> None:
     """Before a scenario: nothing of a previous one is left."""
     app.end_all()
     shutil.rmtree(places.store, ignore_errors=True)
     if places.log.exists():
         places.log.unlink()
     places.config.parent.mkdir(parents=True, exist_ok=True)
-    # Agreed to the terms (or the app waits on the consent screen and reaches
-    # nothing), and updating by itself, as it is by default.
-    places.config.write_text(f"terms_version = {terms_version()}\nauto_update = true\n", encoding="utf-8")
+    # Agreed to the terms A asks for (or the app waits on the consent screen
+    # and reaches nothing), and updating by itself, as it is by default. When
+    # B asks for newer terms, B's first screen is the one that asks.
+    places.config.write_text(f"terms_version = {info.terms_version}\nauto_update = true\n", encoding="utf-8")
     app.install_a()
 
 
-def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
+def run_scenario(name: str, places: Places, app: App, offer: Offer, info: Info) -> None:
     say(f"scenario {name}")
     look = Look(places)
-    fresh(places, app)
+    fresh(places, app, info)
     a_hash = look.installed()
     # What to break is read by the drill's builds from a file next to the
     # settings: the version the Windows installer starts does not carry the
     # drill's environment.
     told = places.config.parent / BREAK_FILE
-    if name in ("good", "unwatched"):
+    if name in ("good", "unwatched", "plain"):
         told.unlink(missing_ok=True)
     else:
         told.write_text(f"{VERSION_B}:{name}", encoding="utf-8")
@@ -494,12 +557,11 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
     wait_for("A starts", 60, lambda: look.starts(VERSION_A) >= 1)
 
     if name == "good":
-        wait_for(
-            f"{VERSION_B} is confirmed",
-            OUTCOME_LIMIT[name],
-            lambda: f"{VERSION_B} confirmed" in look.watch_log(),
-        )
-        wait_for("the trial is closed", 30, lambda: not look.trial_open() and not look.slot_left())
+        wait_for(f"{VERSION_B} starts", OUTCOME_LIMIT[name], lambda: look.starts(VERSION_B) >= 1)
+        # The trial is closed when B has said it is up and A's copy is gone.
+        wait_for("the trial is closed", 60, lambda: not look.trial_open() and not look.slot_left())
+        if info.this_source:
+            expect(f"{VERSION_B} confirmed" in look.watch_log(), f"{VERSION_B} is confirmed")
         expect(look.installed() not in (None, a_hash), "B is what is installed")
         expect(look.starts(VERSION_B) == 1, f"{VERSION_B} started once")
         expect(look.tried(VERSION_B) == 1, f"{VERSION_B} was tried once")
@@ -511,10 +573,11 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
         expect(look.starts(VERSION_B) == 1, f"{VERSION_B} did not restart")
     elif name == "unwatched":
         wait_for(f"{VERSION_B} starts", OUTCOME_LIMIT[name], lambda: look.starts(VERSION_B) >= 1)
-        expect(
-            f"{VERSION_B} does not say when it has started" in look.app_log(),
-            "A says it installs B without keeping itself",
-        )
+        if info.this_source:
+            expect(
+                f"{VERSION_B} does not say when it has started" in look.app_log(),
+                "A says it installs B without keeping itself",
+            )
         expect(look.installed() not in (None, a_hash), "B is what is installed")
         stays_up(app, look, VERSION_B, screens=1)
         expect(
@@ -522,13 +585,28 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
             "no trial was opened and nothing of A was kept",
         )
         expect(look.starts(VERSION_B) == 1, f"{VERSION_B} did not restart")
+    elif name == "plain":
+        # A cannot keep itself, whatever B's release says: it installs B at
+        # its own time and B, which finds no trial, simply runs.
+        wait_for(f"{VERSION_B} starts", OUTCOME_LIMIT[name], lambda: look.starts(VERSION_B) >= 1)
+        expect(look.installed() not in (None, a_hash), "B is what is installed")
+        stays_up(app, look, VERSION_B, screens=1)
+        expect(
+            not look.trial_open() and not look.slot_left() and look.rejected() == [],
+            "B found no trial to take part in and was not given up on",
+        )
+        expect(look.starts(VERSION_B) == 1, f"{VERSION_B} did not restart")
     else:
+        # The records are the watcher's (A's) to write; they are what is looked
+        # at, not the words of its notes, which only this source's A is held to.
         wait_for(
-            f"{VERSION_A} is put back",
+            f"{VERSION_B} is given up on",
             OUTCOME_LIMIT[name],
-            lambda: f"{VERSION_A} is back" in look.watch_log(),
+            lambda: look.rejected() == [VERSION_B],
         )
         wait_for(f"{VERSION_A} is started again", 60, lambda: look.starts(VERSION_A) >= 2)
+        if info.this_source:
+            expect(f"{VERSION_A} is back" in look.watch_log(), f"{VERSION_A} is put back")
         expect(look.installed() == a_hash, "the installed program is A's again, byte for byte")
         expect(not look.trial_open() and not look.slot_left(), "the trial is closed")
         expect(look.rejected() == [VERSION_B], f"{VERSION_B} is remembered as given up on")
@@ -549,10 +627,11 @@ def run_scenario(name: str, places: Places, app: App, offer: Offer) -> None:
         time.sleep(NO_REINSTALL_WATCH)
         expect(not look.trial_open(), "A did not install B again")
         expect(look.installed() == a_hash, "A is still what is installed")
-        expect(
-            f"Not installing {VERSION_B} by itself" in look.app_log(),
-            "A says it leaves B alone",
-        )
+        if info.this_source:
+            expect(
+                f"Not installing {VERSION_B} by itself" in look.app_log(),
+                "A says it leaves B alone",
+            )
         expect(look.starts(VERSION_A) == 2, f"{VERSION_A} was not restarted again")
     app.end_all()
     say(f"scenario {name}: passed")
@@ -597,16 +676,17 @@ def run(args: argparse.Namespace) -> int:
     builds = Builds.of(Path(args.a), Path(args.b))
     app = App(places, builds, work, args.fuse)
     offer = Offer(builds, args.port, work)
-    say(f"A {VERSION_A}: {builds.a_package}")
+    info = Info.of(Path(args.a))
+    say(f"A {VERSION_A}: {builds.a_package} (made from {info.source}; it " + ("keeps" if info.keeps_previous else "cannot keep") + " the version it replaces)")
     say(f"B {VERSION_B}: {builds.b_update}")
     say(f"work: {work}")
     if sys.platform == "linux":
         say("the AppImages are " + ("mounted with FUSE" if args.fuse else "unpacked to run"))
     failed = []
     try:
-        for name in args.scenario or SCENARIOS:
+        for name in args.scenario or info.scenarios:
             try:
-                run_scenario(name, places, app, offer)
+                run_scenario(name, places, app, offer, info)
             except DrillFailed as e:
                 failed.append(name)
                 say(f"scenario {name}: FAILED: {e}")
@@ -646,9 +726,46 @@ def settings(version: str, pubkey: str, port: int) -> dict:
 BUNDLE = {"darwin": ("app", "macos"), "win32": ("nsis", "nsis")}.get(sys.platform, ("appimage", "appimage"))
 
 
+def git(*arguments: str) -> list[str]:
+    result = subprocess.run(["git", *arguments], cwd=REPO, check=True, capture_output=True, text=True)
+    return result.stdout.split()
+
+
+def previous_release() -> str:
+    """The release before the one this checkout is: the nearest tag before its
+    own (a beta's is the beta before it, a stable release's the stable release
+    before it), or, for a checkout that no tag is on, the nearest tag."""
+    here = git("tag", "--points-at", "HEAD", "--list", "v*")
+    beta = any("-" in tag for tag in here)
+    for tag in git("tag", "--merged", "HEAD", "--list", "v*", "--sort=-creatordate"):
+        if tag not in here and (not here or ("-" in tag) == beta):
+            return tag
+    raise DrillFailed("there is no release before this one to take the first version from")
+
+
+def export_source(tag: str, to: Path) -> None:
+    """The source as `tag` had it, in a directory of its own."""
+    shutil.rmtree(to, ignore_errors=True)
+    to.mkdir(parents=True)
+    archive = to.with_suffix(".tar")
+    subprocess.run(["git", "archive", "--format=tar", "-o", str(archive), tag], cwd=REPO, check=True)
+    with tarfile.open(archive) as tar:
+        # Python before 3.11.4 has no filters; the archive is this repository's.
+        tar.extractall(to, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
+    archive.unlink()
+
+
 def build(args: argparse.Namespace) -> int:
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    # Where A comes from: this source, or the release before it (or one named).
+    a_source = "current"
+    a_dir = REPO
+    if args.a_source != "current":
+        a_source = previous_release() if args.a_source == "previous" else args.a_source
+        a_dir = out / "a-source"
+        say(f"A is made from the source of {a_source}")
+        export_source(a_source, a_dir)
     key = out / "drill.key"
     # A key of the drill's own: the release key never signs a build made to
     # fail.
@@ -671,19 +788,35 @@ def build(args: argparse.Namespace) -> int:
     # A release build must be given its server. The drill's builds are given
     # one that never resolves (`.invalid`, RFC 2606): they reach no one.
     env["JAMJAM_SERVER_URL"] = "https://update-drill.invalid"
-    for version, name in ((VERSION_A, "a"), (VERSION_B, "b")):
+    # A is built first: what is built last is what the workflow checks to be
+    # the drill's, so that is B, whatever A is made from.
+    for version, name, source in ((VERSION_A, "a", a_dir), (VERSION_B, "b", REPO)):
         conf = out / f"{name}.conf.json"
         conf.write_text(json.dumps(settings(version, pubkey, args.port), indent=2), encoding="utf-8")
         # Only this build's bundle is found there afterwards.
         shutil.rmtree(bundles, ignore_errors=True)
-        command = ["cargo", "tauri", "build", "--config", str(conf), "--features", "update-drill", "--bundles", flag]
+        command = ["cargo", "tauri", "build", "--config", str(conf), "--bundles", flag]
+        build_env = env
+        if source == REPO:
+            command += ["--features", "update-drill"]
+        else:
+            # An earlier source has the app to be made from and not the
+            # drill's way of breaking; it builds into this one's target
+            # directory, so what is already built of the dependencies is kept.
+            build_env = {**env, "CARGO_TARGET_DIR": str(REPO / "src-tauri" / "target")}
         if args.target:
             command += ["--target", args.target]
         say(f"building {version}: {' '.join(command)}")
-        subprocess.run(command, cwd=REPO, check=True, env=env)
+        subprocess.run(command, cwd=source, check=True, env=build_env)
         shutil.rmtree(out / name, ignore_errors=True)
         shutil.copytree(bundles / subdir, out / name / subdir, symlinks=True)
-    say(f"built: {out / 'a'} and {out / 'b'}")
+    info = Info(
+        source=a_source,
+        keeps_previous=keeps_previous_version(a_dir),
+        terms_version=terms_version(a_dir),
+    )
+    (out / "a" / INFO_FILE).write_text(json.dumps(info.__dict__), encoding="utf-8")
+    say(f"built: {out / 'a'} ({info}) and {out / 'b'}")
     return 0
 
 
@@ -693,13 +826,18 @@ def main() -> int:
     b = commands.add_parser("build", help=f"make the {VERSION_A} and {VERSION_B} builds")
     b.add_argument("--out", required=True, help="where the builds' bundles are put (<out>/a, <out>/b)")
     b.add_argument("--target", help="the Rust target, when it is not the host's")
+    b.add_argument(
+        "--a-source",
+        default="current",
+        help="where A's source is from: 'current' (this one), 'previous' (the release before this one), or a tag",
+    )
     b.add_argument("--port", type=int, default=DEFAULT_PORT)
     b.set_defaults(func=build)
     r = commands.add_parser("run", help="run the drill")
     r.add_argument("--a", required=True, help=f"bundle directory of the {VERSION_A} build")
     r.add_argument("--b", required=True, help=f"bundle directory of the {VERSION_B} build")
     r.add_argument("--port", type=int, default=DEFAULT_PORT)
-    r.add_argument("--scenario", action="append", choices=SCENARIOS, help="only these (repeatable)")
+    r.add_argument("--scenario", action="append", choices=SCENARIOS + SCENARIOS_WITHOUT_KEEPING, help="only these (repeatable)")
     r.add_argument("--fuse", action="store_true", help="on Linux, mount the AppImages instead of unpacking them")
     r.set_defaults(func=run)
     args = parser.parse_args()
