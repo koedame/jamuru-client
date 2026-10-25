@@ -501,6 +501,13 @@ fn seed_config(
             "terms_version = {}\n",
             jamjam::config::TERMS_VERSION
         ));
+        // Nor does a scenario that creates or joins a room go through the
+        // "which name to use" step the app asks before entering (REQ-CON-142):
+        // that is the person's first decision, not what the scenario is about.
+        // A scenario that wants it asks for it in `settings`.
+        if !settings.contains("ask_name_on_entry") {
+            toml.push_str("ask_name_on_entry = false\n");
+        }
     }
     if let Some(device) = input_device {
         // The app stores cpal's stable device id, not the display name a
