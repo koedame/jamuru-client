@@ -85,6 +85,29 @@ fn the_update_drill_runs_on_every_system_that_installs_updates_itself() {
     );
 }
 
+/// The first version is made from this source and from the release before
+/// it, since a change in what two versions say to each other shows only in
+/// the second.
+///
+/// Verifies: REQ-UPD-032
+#[test]
+fn the_update_drill_also_starts_from_the_release_before_this_one() {
+    let workflow = read(".github/workflows/update-drill.yml");
+
+    assert!(
+        workflow.contains("a_source: [current, previous]"),
+        "the drill does not run from both sources"
+    );
+    assert!(
+        workflow.contains("--a-source ${{ matrix.a_source }}"),
+        "the matrix is not given to the build"
+    );
+    assert!(
+        workflow.contains("fetch-depth: 0"),
+        "the release before this one is not there to be built"
+    );
+}
+
 /// Verifies: REQ-UPD-032
 #[test]
 fn the_drills_breaking_is_not_a_default_feature() {

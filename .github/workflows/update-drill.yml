@@ -4,6 +4,13 @@ name: Update drill
 # update that cannot start is taken out again, and the version before it put
 # back and started (ADR-089, scripts/update-drill.py). The release workflow
 # runs this and publishes nothing until it passes on every system.
+#
+# Each system is run twice: with the first version made from this source, and
+# with it made from the release before this one, which is the version the
+# people who update have. The second is where a change to what the two
+# versions say to each other (the records of the trial, the signal that the
+# new version has started) shows, as a new version the old one cannot
+# understand.
 on:
   workflow_call:
   pull_request:
@@ -26,12 +33,14 @@ permissions:
 
 jobs:
   drill:
-    name: Update drill (${{ matrix.os }})
+    name: Update drill (${{ matrix.os }}, first version from ${{ matrix.a_source }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        a_source: [current, previous]
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -47,7 +56,11 @@ jobs:
             python: python
 
     steps:
+      # All the tags and what is before them: the release before this one is
+      # one of them.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install system dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -103,7 +116,7 @@ jobs:
 
       - name: Build the drill's two versions
         shell: bash
-        run: ${{ matrix.python }} scripts/update-drill.py build --out "${RUNNER_TEMP}/drill" --target ${{ matrix.target }}
+        run: ${{ matrix.python }} scripts/update-drill.py build --out "${RUNNER_TEMP}/drill" --target ${{ matrix.target }} --a-source ${{ matrix.a_source }}
 
       - name: Check the drill's builds can be broken on purpose
         shell: bash
