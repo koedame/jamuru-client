@@ -548,22 +548,22 @@ mod tests {
 
     /// Verifies: REQ-CON-020
     #[test]
-    fn a_full_room_has_a_place_for_each_of_the_nine_others_and_no_more() {
+    fn a_full_room_has_a_place_for_each_of_the_fifteen_others_and_no_more() {
         const FRAME: u32 = 4;
         let others = crate::network::MAX_PEERS_PER_ROOM - 1;
         let mix = mix(others, FRAME);
         let everyone: Vec<ReceivePath> = (0..others).map(|_| participant(FRAME)).collect();
         let _heard: Vec<Heard> = everyone.iter().map(|p| add(&mix, p)).collect();
         for receive in &everyone {
-            assert!(receive.receive(0, &pcm(&frame_of(FRAME, 0.1, 0.1))));
+            assert!(receive.receive(0, &pcm(&frame_of(FRAME, 0.05, 0.05))));
         }
 
         let mut out = vec![0.0; mix.frame_samples()];
         let samples = mix.mix_into(&mut out, 100, None);
 
-        assert_eq!(others, 9);
+        assert_eq!(others, 15);
         assert!(
-            close(&out[..samples], &frame_of(FRAME, 0.9, 0.9)),
+            close(&out[..samples], &frame_of(FRAME, 0.75, 0.75)),
             "{:?}",
             &out[..samples]
         );

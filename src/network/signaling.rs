@@ -32,7 +32,7 @@ pub(super) fn signed_device_headers(identity: &DeviceIdentity) -> [(&'static str
 }
 
 /// Maximum peers per room
-pub const MAX_PEERS_PER_ROOM: usize = 10;
+pub const MAX_PEERS_PER_ROOM: usize = 16;
 
 /// The feature an app announces when it creates or joins a room to say it
 /// takes [`SignalingMessage::PeerMessage`]s (ADR-043). The server relays peer
