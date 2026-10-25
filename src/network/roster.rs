@@ -539,37 +539,37 @@ mod tests {
 
     /// Verifies: REQ-CON-020
     #[test]
-    fn nine_others_are_in_a_full_room_opens_a_link_to_each_of_them() {
+    fn fifteen_others_are_in_a_full_room_opens_a_link_to_each_of_them() {
         let mut roster = Roster::default();
-        let others: Vec<PeerInfo> = (2..=10)
+        let others: Vec<PeerInfo> = (2..=16)
             .map(|n| peer(n, Some(&format!("192.0.2.{n}:5000"))))
             .collect();
 
         let audio = roster.entered(me(), others);
 
-        assert_eq!(audio.len(), 2 + 9);
-        assert_eq!(roster.linked().len(), 9);
+        assert_eq!(audio.len(), 2 + 15);
+        assert_eq!(roster.linked().len(), 15);
     }
 
-    /// The room can list more than nine others for a while: entries of
+    /// The room can list more than fifteen others for a while: entries of
     /// connections the server has not yet found dead are not counted against
-    /// its ten. The session has nine places.
+    /// its sixteen. The session has fifteen places.
     ///
     /// Verifies: REQ-CON-020
     #[test]
-    fn more_than_nine_others_are_listed_links_the_first_nine_and_the_next_when_one_of_them_leaves()
-    {
+    fn more_than_fifteen_others_are_listed_links_the_first_fifteen_and_the_next_when_one_of_them_leaves(
+    ) {
         let mut roster = Roster::default();
-        let others: Vec<PeerInfo> = (2..=11)
+        let others: Vec<PeerInfo> = (2..=17)
             .map(|n| peer(n, Some(&format!("192.0.2.{n}:5000"))))
             .collect();
         roster.entered(me(), others);
-        assert!(!roster.linked().contains(&id(11)));
+        assert!(!roster.linked().contains(&id(17)));
 
         let audio = roster.left(id(5));
 
-        assert_eq!(audio, vec![end(5), start(11, "192.0.2.11:5000")]);
-        assert_eq!(roster.linked().len(), 9);
+        assert_eq!(audio, vec![end(5), start(17, "192.0.2.17:5000")]);
+        assert_eq!(roster.linked().len(), 15);
     }
 
     /// The microphone is heard in a room with no one else in it, so the audio
