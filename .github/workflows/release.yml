@@ -154,6 +154,15 @@ jobs:
           version=$(scripts/build-version.sh "${TAG}")
           jq -n --arg version "${version}" '{version: $version}' > "${RUNNER_TEMP}/build-version.conf.json"
 
+      # Tauri's own import (APPLE_CERTIFICATE) cannot use a self-signed
+      # certificate, see the script.
+      - name: Import the macOS signing certificate
+        if: startsWith(matrix.os, 'macos') && (needs.prepare.outputs.tag == '' || contains(needs.prepare.outputs.tag, '-'))
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: scripts/import-signing-certificate.sh "jamuru Beta Signing"
+
       - name: Build Tauri app
         env:
           # The signaling server the app dials (ADR-030). Kept out of the
@@ -167,21 +176,40 @@ jobs:
           # check them against the public key in `tauri.conf.json` (ADR-041).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # `-` is passed straight through to `codesign -s -`, i.e. an
-          # ad-hoc signature. Without any signature a hand-downloaded
-          # DMG opens as "damaged"; ad-hoc signed it lands on the
-          # "unidentified developer" dialog, which Control-click ->
-          # Open gets past. Signing also switches on the hardened
-          # runtime, which is why `src-tauri/entitlements.plist` asks
-          # for microphone input. Not a replacement for a Developer ID
+          # macOS signature. Without any, a hand-downloaded DMG opens as
+          # "damaged"; signed, it lands on the "unidentified developer"
+          # dialog, which Control-click -> Open gets past. Signing also
+          # switches on the hardened runtime, which is why
+          # `src-tauri/entitlements.plist` asks for microphone input.
+          # Everything but a stable release (a tag without a `-`) is signed
+          # with one fixed self-signed code-signing certificate: its
+          # designated requirement (bundle id + certificate) is the same in
+          # every build, so macOS keeps the microphone and local-network
+          # permissions across updates. An ad-hoc signature (`-`, passed
+          # straight to `codesign -s -`) has an empty requirement, so each
+          # build counts as a different app. The certificate is put into a
+          # keychain by the step before. Not a replacement for a Developer ID
           # signature plus notarization.
-          APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.os, 'macos') && '-' || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.os, 'macos') && ((needs.prepare.outputs.tag == '' || contains(needs.prepare.outputs.tag, '-')) && 'jamuru Beta Signing' || '-') || '' }}
         # The updater settings (public key, where to look) are given to the
         # release build only, so a build from source never replaces itself.
         # A beta (a tag with a `-`) also gets remote debugging (ADR-044), its
         # own place to look for updates and its own version (ADR-045); a
         # release and a rehearsal (no tag) do not.
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json ${{ contains(needs.prepare.outputs.tag, '-') && format('--config src-tauri/tauri.updater.beta.conf.json --config {0}/build-version.conf.json --features debug-remote', runner.temp) || '' }}
+
+      # The point of the fixed certificate is a requirement that does not
+      # change between builds. Stops the build if the app came out ad-hoc
+      # signed (empty requirement) or signed by another certificate.
+      - name: Check the macOS app carries the fixed signature
+        if: startsWith(matrix.os, 'macos') && (needs.prepare.outputs.tag == '' || contains(needs.prepare.outputs.tag, '-'))
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=$(ls -d "src-tauri/target/${{ matrix.target }}/release/bundle/macos/"*.app)
+          codesign -d -r- "${app}" 2>&1 | tee "${RUNNER_TEMP}/dr.txt"
+          grep -q 'identifier "me.koeda.jamuru" and certificate root = H"179967f919afae354831b372f82d71209c5a1904"' "${RUNNER_TEMP}/dr.txt"
+          codesign --verify --deep --strict "${app}"
 
       - name: Save cargo registry
         if: github.ref_type != 'tag' && steps.cache-registry.outputs.cache-hit != 'true'
