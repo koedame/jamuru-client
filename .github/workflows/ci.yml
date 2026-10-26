@@ -8,6 +8,9 @@ on:
       - develop
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Nothing here is run under a debugger or builds on the previous build, so

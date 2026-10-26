@@ -62,7 +62,7 @@ function fakeBackend(settings: AudioSettings) {
 
 /** The card of one way of opening, by its name */
 async function option(name: string) {
-  const radio = await screen.findByRole('radio', { name: new RegExp(name.replace(/[()]/g, '\\$&')) });
+  const radio = await screen.findByRole('radio', { name: new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) });
   return { radio: radio as HTMLInputElement, card: radio.closest('label') as HTMLElement };
 }
 
