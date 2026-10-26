@@ -10,7 +10,8 @@
 //! value, and never panics.
 
 use jamjam::network::{
-    FecDecoder, FecPacket, LinkSecurity, Opened, SecureLink, SequenceTracker, SEAL_OVERHEAD,
+    FecDecoder, FecPacket, LinkIdentity, LinkSecurity, Opened, SecureLink, SequenceTracker,
+    SEAL_OVERHEAD,
 };
 use jamjam::protocol::{
     LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, HEADER_SIZE,
@@ -170,9 +171,11 @@ fn fec_decoder_does_not_grow_without_bound() {
 
 /// Two links that have agreed keys, as two peers have once they are connected
 fn agreed_links() -> (SecureLink, SecureLink) {
-    let (a, b) = (SecureLink::new(), SecureLink::new());
-    let _ = a.open(b.key_exchange_packet());
-    let _ = b.open(a.key_exchange_packet());
+    let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
+    let a = SecureLink::for_peer(&ia, &ib.public_key()).unwrap();
+    let b = SecureLink::for_peer(&ib, &ia.public_key()).unwrap();
+    let _ = a.open(b.key_exchange_packet().unwrap());
+    let _ = b.open(a.key_exchange_packet().unwrap());
     // Each shows the other it has the keys with the first thing it sends
     let from_a = a.seal(Packet::keep_alive(0)).expect("a keep-alive goes");
     let from_b = b.seal(Packet::keep_alive(0)).expect("a keep-alive goes");
@@ -298,18 +301,29 @@ fn key_agreement_survives_hostile_public_keys() {
         },
     ];
 
+    let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
     for peer_public in hostile_keys {
-        let link = SecureLink::new();
-        let mut payload = vec![0x01, 0x01];
-        payload.extend_from_slice(&peer_public);
-        let _ = link.open(Packet::control(0, payload));
-        assert_eq!(link.security(), LinkSecurity::Negotiating);
+        // Neither a link that checks its peer nor one that answers any app takes a key it
+        // was not signed for
+        for link in [
+            SecureLink::for_peer(&ours, &theirs.public_key()).unwrap(),
+            SecureLink::answering(&ours),
+        ] {
+            for suite in [0x01, 0x02] {
+                let mut payload = vec![0x01, suite];
+                payload.extend_from_slice(&peer_public);
+                payload.resize(2 + 32 + 64, 0);
+                let _ = link.open(Packet::control(0, payload));
+            }
+            assert!(!link.has_keys());
+            assert_eq!(link.security(), LinkSecurity::Negotiating);
+        }
     }
 
     // Garbage of every length in the key-exchange packet type must not panic either.
     let mut rng = XorShift::new(0xFEED);
     for _ in 0..5_000 {
-        let link = SecureLink::new();
+        let link = SecureLink::for_peer(&ours, &theirs.public_key()).unwrap();
         let _ = link.open(Packet::control(0, rng.bytes(80)));
     }
 }

@@ -31,7 +31,6 @@ const upLink: PeerLinkStatus = {
     packets_sent: 1000,
     packets_received: 1000,
     encryption: "encrypted",
-    peer_checked: true,
     bytes_sent: 0,
     bytes_received: 0,
   },

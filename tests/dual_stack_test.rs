@@ -3,6 +3,8 @@
 //! Tests for the Happy Eyeballs-style connection establishment
 //! with multiple address candidates.
 
+mod common;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -118,6 +120,7 @@ async fn test_connect_with_candidates_empty_fails() {
     let mut conn = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");
+    common::trust_unseen_peer(&mut conn);
 
     let result = conn.connect_with_candidates(&[]).await;
 
@@ -134,6 +137,7 @@ async fn test_connect_with_candidates_single_loopback() {
     let mut conn1 = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection 1");
+    common::trust_unseen_peer(&mut conn1);
     let conn2 = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection 2");
@@ -151,6 +155,7 @@ async fn test_connect_with_candidates_selects_working() {
     let mut conn1 = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection 1");
+    common::trust_unseen_peer(&mut conn1);
     let conn2 = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection 2");
@@ -261,6 +266,7 @@ async fn test_connect_with_candidates_state_transitions() {
     let mut conn1 = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");
+    common::trust_unseen_peer(&mut conn1);
     let conn2 = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");
@@ -285,6 +291,7 @@ async fn test_connect_with_candidates_prevents_double_connect() {
     let mut conn1 = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");
+    common::trust_unseen_peer(&mut conn1);
     let conn2 = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");

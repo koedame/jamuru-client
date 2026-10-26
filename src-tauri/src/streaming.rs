@@ -545,12 +545,9 @@ pub struct NetworkStats {
     pub packets_sent: u64,
     /// Total packets received
     pub packets_received: u64,
-    /// Whether the audio to this peer is encrypted: "encrypted", "negotiating" while the
-    /// keys are being agreed, or "unencrypted" when the peer's app cannot encrypt
+    /// Whether the audio to this peer is encrypted: "encrypted", or "negotiating" while the
+    /// keys are being agreed
     pub encryption: String,
-    /// Whether the keys of the link are bound to the peer's key from the server, so the peer is
-    /// known to be who the server said. False for a peer whose app predates the check.
-    pub peer_checked: bool,
     /// Total bytes sent
     pub bytes_sent: u64,
     /// Total bytes received
@@ -1055,7 +1052,6 @@ fn network_stats(s: &ConnectionStats, bandwidth: Option<BandwidthSnapshot>) -> N
         packets_sent: s.packets_sent,
         packets_received: s.packets_received,
         encryption: s.security.as_str().to_string(),
-        peer_checked: s.peer_checked,
         bytes_sent: s.bytes_sent,
         bytes_received: s.bytes_received,
     }
@@ -1671,7 +1667,6 @@ mod tests {
                 "packet_loss_percent",
                 "packets_received",
                 "packets_sent",
-                "peer_checked",
                 "quality",
                 "required_bps",
                 "rtt_ms",
@@ -1722,7 +1717,7 @@ mod tests {
             LinkTarget {
                 peer: peer(2),
                 candidates: vec!["192.0.2.2:5000".parse().unwrap()],
-                link: None,
+                link: (jamjam::network::LinkIdentity::generate(), None),
             },
             app.state(),
             app.state(),
@@ -1758,7 +1753,7 @@ mod tests {
             LinkTarget {
                 peer: peer(2),
                 candidates: Vec::new(),
-                link: None,
+                link: (jamjam::network::LinkIdentity::generate(), None),
             },
             app.state(),
             app.state(),

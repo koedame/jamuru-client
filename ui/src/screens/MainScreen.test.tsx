@@ -12,6 +12,7 @@ import { act, render, screen, waitFor, fireEvent, within } from '@testing-librar
 
 import i18n from '../i18n';
 import { MainScreen } from './MainScreen';
+import { PEER_APP_TOO_OLD } from '../lib/tauri';
 import type {
   AudioEncryption,
   AudioQuality,
@@ -95,12 +96,13 @@ let statusAudioQuality: AudioQuality | null;
 function link(
   peerId: string,
   state: string,
-  measured?: { up: number; down: number; level?: number; encryption?: AudioEncryption }
+  measured?: { up: number; down: number; level?: number; encryption?: AudioEncryption },
+  error: string | null = null
 ): PeerLinkStatus {
   return {
     peer_id: peerId,
     connection_state: state,
-    connection_error: null,
+    connection_error: error,
     network: measured
       ? {
           rtt_ms: measured.up + measured.down,
@@ -114,7 +116,6 @@ function link(
           packets_sent: 0,
           packets_received: 10,
           encryption: measured.encryption ?? 'encrypted',
-          peer_checked: true,
           bytes_sent: 0,
           bytes_received: 0,
         }
@@ -407,46 +408,58 @@ describe('MainScreen の受信バッファ調整の知らせ', () => {
   });
 });
 
-describe('MainScreen の暗号化の表示', () => {
+describe('MainScreen の古い版の相手の表示', () => {
+  const tooOld = (peerId: string) => link(peerId, 'failed', undefined, PEER_APP_TOO_OLD);
+
   /** Verifies: REQ-SEC-006 */
-  it('相手のアプリが暗号化できないとき、この相手との音声は暗号化されていないと知らせること', async () => {
+  it('相手のアプリが古くて鍵を渡さないとき、この相手とは繋げないと知らせること', async () => {
     current = inRoom();
-    statusEncryption = 'unencrypted';
+    statusLinks = [tooOld('b')];
 
     render(<MainScreen />);
 
-    expect(await screen.findByText(/Audio with this peer is not encrypted/)).toBeInTheDocument();
+    expect(await screen.findByText(/Cannot connect to this peer/)).toBeInTheDocument();
   });
 
   it('知らせが出るとき、フッターの外の上中央の置き場に出て、フッターの接続表示を動かさないこと', async () => {
     current = inRoom();
-    statusEncryption = 'unencrypted';
+    statusLinks = [tooOld('b')];
 
     const { container } = render(<MainScreen />);
 
-    const toast = (await screen.findByText(/Audio with this peer is not encrypted/)).closest('.toast');
+    const toast = (await screen.findByText(/Cannot connect to this peer/)).closest('.toast');
     expect(toast?.closest('.toast-stack')).not.toBeNull();
     expect(container.querySelector('.main-footer')?.querySelector('.toast')).toBeNull();
   });
 
-  it('相手との音声が暗号化されているとき、暗号化についての知らせは出さないこと', async () => {
+  it('相手のアプリが古いとき、やり直しは促さないこと', async () => {
+    current = inRoom();
+    statusLinks = [tooOld('b')];
+
+    render(<MainScreen />);
+
+    await screen.findByText(/Cannot connect to this peer/);
+    expect(screen.queryByText(/Reconnect/i)).not.toBeInTheDocument();
+  });
+
+  it('相手との音声が暗号化されているとき、古い版の知らせは出さないこと', async () => {
     current = inRoom();
     statusEncryption = 'encrypted';
 
     render(<MainScreen />);
 
     await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThan(0));
-    expect(screen.queryByText(/not encrypted/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/older version/)).not.toBeInTheDocument();
   });
 
-  it('鍵を合わせている最中のとき、暗号化されていないとは知らせないこと', async () => {
+  it('鍵を合わせている最中のとき、古い版の知らせは出さないこと', async () => {
     current = inRoom();
     statusEncryption = 'negotiating';
 
     render(<MainScreen />);
 
     await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThan(0));
-    expect(screen.queryByText(/not encrypted/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/older version/)).not.toBeInTheDocument();
   });
 });
 
@@ -720,16 +733,16 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
   });
 
   /** Verifies: REQ-SEC-006 */
-  it('3 人のルームで 1 人のアプリが暗号化できないとき、誰との音声が暗号化されていないかを知らせること', async () => {
+  it('3 人のルームで 1 人のアプリが古いとき、誰とは繋げないかを知らせること', async () => {
     current = roomOfThree();
     statusLinks = [
       link('b', 'connected', { up: 4, down: 6 }),
-      link('c', 'connected', { up: 4, down: 6, encryption: 'unencrypted' }),
+      link('c', 'failed', undefined, PEER_APP_TOO_OLD),
     ];
 
     render(<MainScreen />);
 
-    expect(await screen.findByText(/Audio with Ben is not encrypted/)).toBeInTheDocument();
+    expect(await screen.findByText(/Cannot connect to Ben/)).toBeInTheDocument();
   });
 });
 

@@ -69,6 +69,7 @@ import {
   configGetEffectiveServerUrl,
   windowResizeMain,
   type HelpEvent,
+  PEER_APP_TOO_OLD,
   type PeerLinkStatus,
   type DeviceProblem,
   type StreamingStatus,
@@ -593,20 +594,26 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     return t("session.bandwidth.marginal");
   }, [worstBandwidth, links, participants.length, namesOf, t]);
 
-  // A peer's app is older than the encryption, so what is said and played between the two is
-  // not encrypted. The user is told rather than left to assume it is (REQ-SEC-006).
-  const encryptionWarning = useMemo(() => {
-    const unencrypted = links.filter((link) => link.network?.encryption === "unencrypted");
-    if (unencrypted.length === 0) return null;
+  // A peer's app is older than the signed key exchange, so no audio link is made to it. The
+  // user is told why, rather than left with a participant who is never heard (REQ-SEC-006).
+  const oldApps = useMemo(
+    () => links.filter((link) => link.connection_error === PEER_APP_TOO_OLD),
+    [links]
+  );
+  const oldAppWarning = useMemo(() => {
+    if (oldApps.length === 0) return null;
     return participants.length > 1
-      ? t("session.unencryptedWith", { names: namesOf(unencrypted) })
-      : t("session.unencrypted");
-  }, [links, participants.length, namesOf, t]);
+      ? t("session.peerAppTooOldWith", { names: namesOf(oldApps) })
+      : t("session.peerAppTooOld");
+  }, [oldApps, participants.length, namesOf, t]);
 
   // The links automatic recovery gave up on. The person is asked whether to
   // try again (REQ-CON-110); with several participants, told with whom.
   const reconnectPrompt = useMemo(() => {
-    const lost = links.filter((link) => link.connection_state === "failed");
+    // Trying again cannot help with a peer whose app is too old
+    const lost = links.filter(
+      (link) => link.connection_state === "failed" && link.connection_error !== PEER_APP_TOO_OLD
+    );
     if (lost.length === 0) return null;
     return participants.length > 1
       ? t("session.reconnect.promptWith", { names: namesOf(lost) })
@@ -1184,7 +1191,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         <ToastStack>
           {settingsHelp.toast}
           {delayNoticeVisible && <Toast type="success" message={t("notification.delayAdjusted", { ms: Number(adjustedDelayMs.toFixed(1)) })} />}
-          {encryptionWarning && <Toast type="warning" message={encryptionWarning} />}
+          {oldAppWarning && <Toast type="warning" message={oldAppWarning} />}
           {bandwidthWarning && <Toast type="warning" message={bandwidthWarning} />}
           {deviceProblems.map((problem) => (
             <Toast

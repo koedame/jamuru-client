@@ -61,6 +61,7 @@ async fn send_captured_frame(
     let peer = common::Peer::bind();
 
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
+    common::trust_peer(&mut sender, &peer);
     sender
         .set_audio_encoding(AudioEncodingConfig {
             codec_type: CodecType::Pcm,

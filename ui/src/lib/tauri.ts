@@ -568,9 +568,14 @@ export type BandwidthStatus = 'sufficient' | 'marginal' | 'insufficient' | 'no_s
  * Whether the audio to the peer is encrypted (REQ-SEC-001, REQ-SEC-004, REQ-SEC-006)
  *
  * negotiating: the keys are being agreed, which takes a moment after connecting
- * unencrypted: the peer's app is older than the encryption and cannot do it
  */
-export type AudioEncryption = 'encrypted' | 'negotiating' | 'unencrypted';
+export type AudioEncryption = 'encrypted' | 'negotiating';
+
+/**
+ * The `connection_error` of a link that was never made because the peer's app is older than
+ * the signed key exchange: it gave the server no key to check it by. Trying again cannot help.
+ */
+export const PEER_APP_TOO_OLD = 'peer_app_too_old';
 
 /**
  * Network statistics
@@ -609,8 +614,6 @@ export interface NetworkStats {
   packets_received: number;
   /** Whether the audio to the peer is encrypted */
   encryption: AudioEncryption;
-  /** Whether the peer is known to be who the server said: false for an app that predates the check */
-  peer_checked: boolean;
   /** Total bytes sent */
   bytes_sent: number;
   /** Total bytes received */

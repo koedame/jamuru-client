@@ -63,7 +63,7 @@ impl Participant {
     /// [`Participant::link_to`], handed to the caller to connect and keep
     fn new_link(&mut self, to: usize, their_key: &str) -> Connection {
         let mut link = Connection::on(&self.mux).expect("link");
-        link.verify_peer(&self.identity, Some(their_key))
+        link.verify_peer(&self.identity, their_key)
             .expect("peer key");
         link.set_audio_encoding(AudioEncodingConfig {
             channels: 2,

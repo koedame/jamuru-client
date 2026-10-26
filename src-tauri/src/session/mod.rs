@@ -345,15 +345,15 @@ impl<R: Runtime> Backend for AppBackend<R> {
         mixer::set_on_audio(app, &peer.to_string()).await;
         // The devices, buffer size and sample rate are the saved
         // settings.
-        let link = app
+        let ours = app
             .state::<SignalingState>()
             .link_identity()
-            .map(|ours| (ours, link_key));
+            .ok_or_else(|| "not in a room: there is no key to sign the link with".to_string())?;
         streaming::streaming_link(
             streaming::LinkTarget {
                 peer,
                 candidates,
-                link,
+                link: (ours, link_key),
             },
             app.state(),
             app.state(),

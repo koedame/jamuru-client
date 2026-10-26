@@ -59,7 +59,7 @@ impl Side {
         let states = self.states.clone();
         spec.open(
             Connection::on(&self.mux).expect("connection"),
-            Some((&self.identity, Some(their_key))),
+            (&self.identity, Some(their_key)),
             Arc::new(PeerGain::default()),
             Arc::new(PeerMeter::default()),
             move |state| states.lock().unwrap().push(state),

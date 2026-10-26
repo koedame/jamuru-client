@@ -10,7 +10,7 @@ use std::thread;
 use super::links::{senders_of, Link, LinkSetup, LinkStage};
 use super::shared::{LinkReport, Shared, MAX_LINKS};
 use super::stand_in::StandIns;
-use super::{send, Command, Params};
+use super::{send, Command, Params, PEER_APP_TOO_OLD};
 use crate::audio::mic_access::SystemMic;
 use crate::audio::{
     capture_or_silence, clear_device_problem, microphone_allows_input, note_device_problem,
@@ -562,6 +562,7 @@ pub(super) async fn run(
                     if let Ok(mut shared) = shared_links.write() {
                         shared.retain(|(linked, _)| *linked != peer);
                     }
+                    let peer_gave_no_key = target.link.1.is_none();
                     match link_setup.open(*target, jitter_buffer_frames) {
                         Ok(link) => {
                             if let Ok(mut shared) = shared_links.write() {
@@ -578,7 +579,14 @@ pub(super) async fn run(
                             // Told like a link that gave up, so whoever
                             // decides about the links hears of it
                             let report = Arc::new(LinkReport::default());
-                            report.set_state("failed", None);
+                            // A peer that gave no key is one whose app is too old: the
+                            // screen says so, and does not offer to try again
+                            let error = if peer_gave_no_key {
+                                PEER_APP_TOO_OLD.to_string()
+                            } else {
+                                e
+                            };
+                            report.set_state("failed", Some(error));
                             if let Ok(mut shared) = shared_links.write() {
                                 shared.push((peer, report));
                             }
