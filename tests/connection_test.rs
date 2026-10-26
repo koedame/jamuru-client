@@ -796,6 +796,7 @@ async fn when_a_peer_publishes_many_candidates_only_the_first_ones_are_sent_to()
     let mut conn = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");
+    common::trust_unseen_peer(&mut conn);
 
     conn.connect_with_candidates(&candidates).await.unwrap();
 
