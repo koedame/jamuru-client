@@ -769,3 +769,46 @@ async fn when_the_link_sends_no_fec_the_connection_has_no_recovery_count() {
     assert_eq!(stats.fec_recovered, None);
     assert!(!sequences.contains(&2), "nothing rebuilds the lost frame");
 }
+
+/// Verifies: REQ-CON-144
+#[tokio::test]
+async fn when_a_peer_publishes_many_candidates_only_the_first_ones_are_sent_to() {
+    use jamjam::network::MAX_PEER_CANDIDATES;
+
+    let silent: Vec<std::net::UdpSocket> = (0..250)
+        .map(|_| {
+            let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            socket.set_nonblocking(true).unwrap();
+            socket
+        })
+        .collect();
+    let mut candidates: Vec<std::net::SocketAddr> =
+        silent.iter().map(|s| s.local_addr().unwrap()).collect();
+    // None of these can be sent to, so the first real candidate is still the first.
+    candidates.splice(
+        0..0,
+        [
+            "224.0.0.251:5353".parse().unwrap(),
+            "255.255.255.255:5000".parse().unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+        ],
+    );
+    let mut conn = Connection::new("127.0.0.1:0")
+        .await
+        .expect("Failed to create connection");
+
+    conn.connect_with_candidates(&candidates).await.unwrap();
+
+    let mut buf = [0u8; 2048];
+    let reached: Vec<bool> = silent
+        .iter()
+        .map(|socket| socket.recv_from(&mut buf).is_ok())
+        .collect();
+    conn.disconnect();
+
+    // Those sent to are the first ones, which a peer ranks highest.
+    let expected: Vec<bool> = (0..reached.len())
+        .map(|i| i < MAX_PEER_CANDIDATES)
+        .collect();
+    assert_eq!(reached, expected);
+}
