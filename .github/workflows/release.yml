@@ -385,7 +385,9 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          # No target_commitish: the tag already exists (this job only runs for
+          # a tag push). Passing the tag's SHA made GitHub refuse the request
+          # with 403 for v0.1.0-beta.184, a commit behind the tip of develop.
           generate_release_notes: true
           # `v0.2.0-beta.7` stays off the "Latest release" badge; only a
           # plain `vX.Y.Z` tag is a real release.
