@@ -22,6 +22,7 @@ use super::fec::{FecDecoder, FecEncoder, FecPacket, RecoveredPacket};
 use super::link_facts::{route_handicap, route_preference, LinkFacts, RouteOverride};
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
+use super::signaling::usable_candidates;
 use super::transport::UdpTransport;
 use super::udp_mux::UdpMux;
 
@@ -44,6 +45,11 @@ const ROUND_INTERVAL: Duration = Duration::from_millis(80);
 /// NAT that lets in only what we have sent to, ours were dropped until the peer's own
 /// first probe opened its side, and the scheduled rounds are over by then.
 const TRIGGERED_PROBES: usize = 3;
+
+/// How long the keep-alive goes to the peer's other addresses, once the peer has gone
+/// unheard long enough to doubt the one in use. An address the peer published is not
+/// proof it is the peer's, so the probing cannot go on for as long as the silence does.
+const PROBE_OTHERS_FOR: Duration = Duration::from_secs(30);
 
 /// Number of RTT samples to keep for averaging
 const RTT_SAMPLE_COUNT: usize = 10;
@@ -135,6 +141,12 @@ struct Route {
     others: Vec<(SocketAddr, bool)>,
     /// When `current` was taken up, or the peer last answered a ping
     answered_at: Instant,
+}
+
+/// Whether the keep-alive goes to the peer's other addresses too, when the peer has
+/// not answered for `silent_for` and is doubted after `after`
+fn probes_others(silent_for: Duration, after: Duration) -> bool {
+    silent_for >= after && silent_for < after + PROBE_OTHERS_FOR
 }
 
 impl Route {
@@ -1077,6 +1089,8 @@ impl Connection {
             return Err(NetworkError::AlreadyConnected);
         }
 
+        let usable = usable_candidates(candidates.to_vec());
+        let candidates = &usable[..];
         if candidates.is_empty() {
             return Err(NetworkError::NoCandidates);
         }
@@ -2137,7 +2151,7 @@ impl Connection {
                     reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
                 let others = {
                     let route = route.lock();
-                    if route.answered_at.elapsed() >= probe_others_after {
+                    if probes_others(route.answered_at.elapsed(), probe_others_after) {
                         route.others.iter().map(|&(addr, _)| addr).collect()
                     } else {
                         Vec::new()
@@ -2562,6 +2576,21 @@ mod tests {
         route.learn_roamed(lan, Duration::ZERO);
 
         assert_eq!(route.others, vec![(vpn, false)]);
+    }
+
+    /// Verifies: REQ-CON-144
+    #[test]
+    fn when_the_peer_stays_silent_the_other_addresses_are_left_alone_after_a_while() {
+        let after = Duration::from_secs(2);
+
+        assert!(!probes_others(Duration::from_secs(1), after));
+        assert!(probes_others(after, after));
+        assert!(probes_others(
+            after + PROBE_OTHERS_FOR - Duration::from_millis(1),
+            after
+        ));
+        assert!(!probes_others(after + PROBE_OTHERS_FOR, after));
+        assert!(!probes_others(Duration::from_secs(3600), after));
     }
 
     /// Verifies: REQ-CON-114
