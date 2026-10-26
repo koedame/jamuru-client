@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted。「暗号化できない相手には平文で繋ぐ」は [ADR-090](./ADR-090-refuse-peers-that-cannot-be-checked.md) で取り消した（平文は受け付けない）。
 
 ## Context
 

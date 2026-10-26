@@ -42,7 +42,6 @@ function upLink(changes: Partial<PeerLinkStatus> = {}): PeerLinkStatus {
       packets_sent: 10,
       packets_received: 10,
       encryption: 'encrypted',
-      peer_checked: true,
       bytes_sent: 0,
       bytes_received: 0,
     },

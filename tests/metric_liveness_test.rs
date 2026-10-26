@@ -17,6 +17,8 @@
 //! field to one of these structs without adding it here leaves the same hole
 //! open, so `.claude/rules/traceability.md` requires it.
 
+mod common;
+
 use std::time::Duration;
 
 use jamjam::audio::{AudioPreset, BUDGET_SAMPLE_RATE};
@@ -36,6 +38,7 @@ async fn connection_stats_respond_to_traffic() {
         .expect("receiver socket");
     let receiver_addr = receiver.local_addr();
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
+    common::trust_each_other(&mut sender, &mut receiver);
     receiver
         .connect(sender.local_addr())
         .await

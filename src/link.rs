@@ -55,23 +55,24 @@ pub enum OpenError {
 impl LinkSpec<'_> {
     /// Sets up `connection`, made on the session's socket for one participant.
     ///
-    /// `identity` is our key in the room and the key the peer told the server it signs with
-    /// (none when it told none), which the key exchange is checked against. `on_state` is told
+    /// `identity` is our key in the room and the key the peer told the server it signs with,
+    /// which the key exchange is checked against. A peer that told none (its app is too old) is
+    /// not linked to. `on_state` is told
     /// each change of the connection's state, after the play-out buffer has been emptied for a
     /// connection that came up.
     pub fn open(
         &self,
         mut connection: Connection,
-        identity: Option<(&LinkIdentity, Option<&str>)>,
+        identity: (&LinkIdentity, Option<&str>),
         gain: Arc<PeerGain>,
         meter: Arc<PeerMeter>,
         on_state: impl Fn(ConnectionState) + Send + Sync + 'static,
     ) -> Result<Opened, OpenError> {
-        if let Some((ours, peer_key)) = identity {
-            connection
-                .verify_peer(ours, peer_key)
-                .map_err(OpenError::Identity)?;
-        }
+        let (ours, peer_key) = identity;
+        peer_key
+            .ok_or(NetworkError::PeerKeyMissing)
+            .and_then(|peer_key| connection.verify_peer(ours, peer_key))
+            .map_err(OpenError::Identity)?;
         // The codec and FEC come from the preset (ADR-021)
         connection
             .set_audio_encoding(self.encoding.clone())

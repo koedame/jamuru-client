@@ -27,10 +27,9 @@
 //! connection is `wss`, so the identities reach the ends unaltered; the server that hands
 //! them out is trusted.
 //!
-//! A link with no peer key to check (a peer whose app predates this) exchanges unsigned and
-//! does not say who the peer is:
-//! [`SecureLink::checks_peer`] tells the two apart. A link that does check the peer never
-//! falls back to plain or to an unsigned exchange, whatever arrives.
+//! There is no link without a peer to check: a peer that gave the server no key, or one that
+//! is not a key, is not connected to, and a key exchange that is not signed is never taken. A
+//! link never falls back to plain packets, whatever arrives.
 //!
 //! The echo and quality-check bots talk to many apps from one socket and cannot
 //! tell which participant an address is, so they cannot name the app in what they sign. A
@@ -38,11 +37,10 @@
 //! answers instead, which an app that checks takes as it takes one signed for its identity:
 //! a signature from the key the server gave for the peer, over the app's own fresh key and
 //! the peer's, is something no one else can make. That link does not check the app (it does
-//! not know who it is), and answers a half that is not signed with a half that is not.
+//! not know who it is), and answers a half that is not signed with nothing.
 //!
-//! A peer that knows nothing of encryption (an older app) is recognised by what it sends -
-//! plain audio and pings, never a key - and the link then carries plain packets, which
-//! [`SecureLink::security`] reports so the user can be told.
+//! A peer that knows nothing of encryption (an older app) sends plain audio and pings, never a
+//! key. Those are refused, and the link stays without keys.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -63,11 +61,8 @@ use crate::protocol::{Packet, PacketType};
 /// First byte of a control packet that carries a key exchange
 const KEY_EXCHANGE: u8 = 0x01;
 
-/// Second byte of a key exchange: X25519, HKDF-SHA256, AES-256-GCM
-const SUITE: u8 = 0x01;
-
-/// Second byte of a signed key exchange: as [`SUITE`], with the ephemeral key signed by the
-/// sender's [`LinkIdentity`]
+/// Second byte of a key exchange: X25519, HKDF-SHA256, AES-256-GCM, with the ephemeral key
+/// signed by the sender's [`LinkIdentity`]
 const SIGNED_SUITE: u8 = 0x02;
 
 /// Size of a key exchange payload: message, suite, public key
@@ -235,18 +230,14 @@ pub enum LinkSecurity {
     /// Both ends have the keys: everything is encrypted, and only encrypted packets are
     /// accepted
     Encrypted,
-    /// The peer does not encrypt (an older app), so nothing is: plain packets in both
-    /// directions
-    Unencrypted,
 }
 
 impl LinkSecurity {
-    /// The name the screen is given: `encrypted`, `negotiating` or `unencrypted`
+    /// The name the screen is given: `encrypted` or `negotiating`
     pub fn as_str(&self) -> &'static str {
         match self {
             LinkSecurity::Negotiating => "negotiating",
             LinkSecurity::Encrypted => "encrypted",
-            LinkSecurity::Unencrypted => "unencrypted",
         }
     }
 }
@@ -280,7 +271,6 @@ struct Keys {
 enum State {
     Negotiating,
     Encrypted(Box<Keys>),
-    Unencrypted,
 }
 
 /// The encryption of one link: the keys, the exchange that makes them and the packets
@@ -293,42 +283,29 @@ pub struct SecureLink {
     /// Set when the peer's identity is known, which is when its half of the exchange has to
     /// be signed by it
     peer: Option<PeerCheck>,
-    /// Set for a link that signs for whichever app it is talking to
+    /// Set for a link that signs for whichever app it is talking to. A link with neither is one
+    /// that does not know who it is for yet (see [`SecureLink::unbound`]) and agrees no keys.
     answering: Option<Answering>,
     state: Mutex<State>,
     /// Packets turned away as forged, repeated or from the wrong state
     refused: AtomicU64,
 }
 
-impl Default for SecureLink {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SecureLink {
-    /// A link with a new key pair, not yet agreed with anyone, that does not check who the
-    /// peer is
-    pub fn new() -> Self {
+    /// A link that is for nobody yet: it agrees no keys and lets no audio through. It is what
+    /// a connection has until it is told who the peer is.
+    pub(crate) fn unbound() -> Self {
         Self::with_secret(StaticSecret::random_from_rng(&mut UnwrapErr(SysRng)), None)
     }
 
     /// A link to the participant whose [`LinkIdentity::public_key`] the server gave as
     /// `peer_key`, that signs our half of the exchange with `ours` and takes only a half the
-    /// peer signed. When either is missing - the app has no identity, or the peer told none
-    /// because its app predates this - or `peer_key` is not a key, it is a link as
-    /// [`SecureLink::new`] makes and [`SecureLink::checks_peer`] is `false`.
-    pub fn for_peer(ours: Option<&LinkIdentity>, peer_key: Option<&str>) -> Self {
+    /// peer signed. `None` when `peer_key` is not a key: there is no link to such a peer.
+    pub fn for_peer(ours: &LinkIdentity, peer_key: &str) -> Option<Self> {
+        let theirs = parse_link_key(peer_key)?;
         let secret = StaticSecret::random_from_rng(&mut UnwrapErr(SysRng));
-        let check = ours.zip(peer_key).and_then(|(ours, peer_key)| {
-            let theirs = parse_link_key(peer_key)?;
-            Some(PeerCheck::new(
-                ours,
-                theirs,
-                PublicKey::from(&secret).as_bytes(),
-            ))
-        });
-        Self::with_secret(secret, check)
+        let check = PeerCheck::new(ours, theirs, PublicKey::from(&secret).as_bytes());
+        Some(Self::with_secret(secret, Some(check)))
     }
 
     /// A link for a server that talks to many apps from one socket and cannot tell which
@@ -336,7 +313,7 @@ impl SecureLink {
     /// tells the room as its [`LinkIdentity::public_key`]. It does not check who the app is.
     /// An app whose half is signed gets a half signed by `ours` for the app's ephemeral key, so
     /// an app that checks it by the key the server gave can tell it from someone on the path;
-    /// an app whose half is not signed gets one that is not.
+    /// an app whose half is not signed gets no answer.
     pub fn answering(ours: &LinkIdentity) -> Self {
         let mut link =
             Self::with_secret(StaticSecret::random_from_rng(&mut UnwrapErr(SysRng)), None);
@@ -359,9 +336,8 @@ impl SecureLink {
         }
     }
 
-    /// Whether the keys of this link are bound to the peer's identity from the server. When
-    /// they are not, the link is encrypted but anyone who can alter packets on the path while
-    /// it is being set up could be the peer.
+    /// Whether the keys of this link are bound to the peer's identity from the server. A link
+    /// that is not (an answering one, or one that is for nobody yet) is not one an app talks to.
     pub fn checks_peer(&self) -> bool {
         self.peer.is_some()
     }
@@ -373,7 +349,6 @@ impl SecureLink {
             State::Negotiating => LinkSecurity::Negotiating,
             State::Encrypted(keys) if keys.confirmed => LinkSecurity::Encrypted,
             State::Encrypted(_) => LinkSecurity::Negotiating,
-            State::Unencrypted => LinkSecurity::Unencrypted,
         }
     }
 
@@ -382,23 +357,14 @@ impl SecureLink {
         self.refused.load(Ordering::Relaxed)
     }
 
-    /// Our half of the key exchange
-    pub fn key_exchange_packet(&self) -> Packet {
+    /// Our half of the key exchange. `None` while there is nothing to send: a link for nobody
+    /// yet, or an answering one that has not heard a half to answer.
+    pub fn key_exchange_packet(&self) -> Option<Packet> {
         if let Some(check) = &self.peer {
-            return Packet::control(0, check.payload.clone());
+            return Some(Packet::control(0, check.payload.clone()));
         }
-        if let Some(payload) = self
-            .answering
-            .as_ref()
-            .and_then(|a| a.answer.lock().clone())
-        {
-            return Packet::control(0, payload);
-        }
-        let mut payload = Vec::with_capacity(KEY_EXCHANGE_LEN);
-        payload.push(KEY_EXCHANGE);
-        payload.push(SUITE);
-        payload.extend_from_slice(&self.public);
-        Packet::control(0, payload)
+        let payload = self.answering.as_ref()?.answer.lock().clone()?;
+        Some(Packet::control(0, payload))
     }
 
     /// Whether our key should be sent (again): the link has no keys, or the peer has not
@@ -407,7 +373,6 @@ impl SecureLink {
         match &*self.state.lock() {
             State::Negotiating => true,
             State::Encrypted(keys) => !keys.confirmed,
-            State::Unencrypted => false,
         }
     }
 
@@ -416,26 +381,17 @@ impl SecureLink {
         matches!(&*self.state.lock(), State::Encrypted(_))
     }
 
-    /// Whether it is settled that the link is encrypted (keys made) or is not (the peer cannot).
-    /// Until then what the peer sends decides which it is.
-    pub fn is_decided(&self) -> bool {
-        !matches!(&*self.state.lock(), State::Negotiating)
-    }
-
-    /// Whether audio and everything else but keep-alives may be sent: the link has settled
-    /// how it carries them, and the peer has shown it can take them (it has sent something
-    /// encrypted, so it has the keys; or it cannot encrypt, and takes plain)
+    /// Whether audio and everything else but keep-alives may be sent: the peer has shown it
+    /// has the keys (it has sent something encrypted)
     pub fn can_send_media(&self) -> bool {
         self.security() != LinkSecurity::Negotiating
     }
 
-    /// Prepares `packet` for the wire: encrypted when the link is, as it is when the peer
-    /// does not encrypt, and `None` when it must not go yet. Until the peer has shown it has
+    /// Prepares `packet` for the wire: encrypted, and `None` when it must not go yet. Until the peer has shown it has
     /// the keys only keep-alives go (sealed once there are keys): they hold nothing, and they
     /// are what shows the peer.
     pub fn seal(&self, mut packet: Packet) -> Option<Packet> {
         match &mut *self.state.lock() {
-            State::Unencrypted => Some(packet),
             State::Negotiating => (packet.packet_type == PacketType::KeepAlive).then_some(packet),
             State::Encrypted(keys) => {
                 if !keys.confirmed && packet.packet_type != PacketType::KeepAlive {
@@ -482,28 +438,16 @@ impl SecureLink {
     fn receive(&self, packet: Packet) -> Opened {
         let mut state = self.state.lock();
         match &mut *state {
-            State::Unencrypted if packet.flags.encrypted => {
-                Opened::Dropped("encrypted packet on an unencrypted link")
-            }
-            State::Unencrypted => Opened::Packet(packet),
             State::Negotiating if packet.flags.encrypted => {
                 Opened::Dropped("encrypted packet before the keys are agreed")
             }
             State::Negotiating if packet.packet_type == PacketType::KeepAlive => {
                 Opened::Packet(packet)
             }
-            // A peer whose identity the server gave us is an app that encrypts, so plain
-            // audio is not that peer
-            State::Negotiating if self.peer.is_some() => {
-                Opened::Dropped("plain packet from a peer that encrypts")
-            }
-            State::Negotiating => {
-                // A peer with the keys sends nothing but keep-alives plain before it has
-                // agreed them with us. One that sends more plain is one that cannot
-                // encrypt.
-                *state = State::Unencrypted;
-                Opened::Packet(packet)
-            }
+            // A peer with the keys sends nothing but keep-alives plain before it has agreed
+            // them with us. Anything more plain is not that peer, or is an app that cannot
+            // encrypt, which is not talked to.
+            State::Negotiating => Opened::Dropped("plain packet before the keys are agreed"),
             State::Encrypted(keys) => match open_encrypted(keys, packet) {
                 Ok(packet) => Opened::Packet(packet),
                 Err(reason) => Opened::Dropped(reason),
@@ -512,22 +456,18 @@ impl SecureLink {
     }
 
     fn receive_control(&self, packet: &Packet) -> Opened {
-        let (peer_public, signed) = match (&self.peer, &self.answering) {
+        let peer_public = match (&self.peer, &self.answering) {
             (Some(check), _) => match check.open(&packet.payload) {
-                Some(peer_public) => (peer_public, true),
+                Some(peer_public) => peer_public,
                 None => return Opened::Dropped("key exchange not signed by the peer"),
             },
-            // Who the app is is not known, so a signature is not checked, but how the half
-            // came tells how to answer it
-            (None, Some(_)) => match parse_any_key_exchange(&packet.payload) {
-                Some(half) => half,
-                None => return Opened::Dropped("control message of another kind"),
+            // Who the app is is not known, so the signature is not checked, but the half has
+            // to be one that is signed: it is what the answer is made for
+            (None, Some(_)) => match parse_signed_key_exchange(&packet.payload) {
+                Some(peer_public) => peer_public,
+                None => return Opened::Dropped("key exchange not signed"),
             },
-            (None, None) => match parse_key_exchange(&packet.payload) {
-                Some(peer_public) => (peer_public, false),
-                // Not a message this app knows: from a newer app
-                None => return Opened::Dropped("control message of another kind"),
-            },
+            (None, None) => return Opened::Dropped("key exchange on a link for nobody"),
         };
         if peer_public == self.public {
             return Opened::Dropped("our own key exchange played back");
@@ -535,9 +475,6 @@ impl SecureLink {
 
         let mut state = self.state.lock();
         let answer = match &*state {
-            State::Unencrypted => {
-                return Opened::Dropped("key exchange on an unencrypted link");
-            }
             State::Encrypted(keys) if keys.peer_public == peer_public => false,
             // Until the peer has shown it has our key, a key different from the one first
             // heard is as likely to be the peer's own (a stale copy of the app before it)
@@ -560,14 +497,13 @@ impl SecureLink {
                 &peer_public,
             )));
             if let Some(answering) = &self.answering {
-                *answering.answer.lock() = signed.then(|| {
-                    let text = answer_signed_text(
-                        answering.ours.verifying_key().as_bytes(),
-                        &peer_public,
-                        &self.public,
-                    );
-                    signed_payload(&answering.ours, &text, &self.public)
-                });
+                let text = answer_signed_text(
+                    answering.ours.verifying_key().as_bytes(),
+                    &peer_public,
+                    &self.public,
+                );
+                *answering.answer.lock() =
+                    Some(signed_payload(&answering.ours, &text, &self.public));
             }
         }
         Opened::KeyExchange { answer }
@@ -612,24 +548,15 @@ fn parse_link_key(text: &str) -> Option<VerifyingKey> {
     VerifyingKey::from_bytes(&bytes).ok()
 }
 
-/// The ephemeral key in a key exchange, signed or not, and whether it is signed. The
-/// signature is not looked at.
-fn parse_any_key_exchange(payload: &[u8]) -> Option<([u8; 32], bool)> {
-    let signed = match payload {
-        [KEY_EXCHANGE, SUITE, ..] if payload.len() == KEY_EXCHANGE_LEN => false,
-        [KEY_EXCHANGE, SIGNED_SUITE, ..] if payload.len() == KEY_EXCHANGE_LEN + SIGNATURE_LEN => {
-            true
-        }
-        _ => return None,
-    };
-    Some((payload[2..KEY_EXCHANGE_LEN].try_into().ok()?, signed))
-}
-
-fn parse_key_exchange(payload: &[u8]) -> Option<[u8; 32]> {
-    if payload.len() != KEY_EXCHANGE_LEN || payload[0] != KEY_EXCHANGE || payload[1] != SUITE {
+/// The ephemeral key in a signed key exchange. The signature is not looked at.
+fn parse_signed_key_exchange(payload: &[u8]) -> Option<[u8; 32]> {
+    if payload.len() != KEY_EXCHANGE_LEN + SIGNATURE_LEN
+        || payload[0] != KEY_EXCHANGE
+        || payload[1] != SIGNED_SUITE
+    {
         return None;
     }
-    payload[2..].try_into().ok()
+    payload[2..KEY_EXCHANGE_LEN].try_into().ok()
 }
 
 /// The two keys of a link. The one end whose public key is the smaller sends under the
@@ -724,24 +651,43 @@ impl ReplayWindow {
 mod tests {
     use super::*;
 
-    fn link_with(secret_byte: u8) -> SecureLink {
-        SecureLink::with_secret(StaticSecret::from([secret_byte; 32]), None)
+    /// A link to `theirs` made by `ours`, with the ephemeral secret fixed
+    fn link_with(secret_byte: u8, ours: &LinkIdentity, theirs: &LinkIdentity) -> SecureLink {
+        let secret = StaticSecret::from([secret_byte; 32]);
+        let check = PeerCheck::new(
+            ours,
+            parse_link_key(&theirs.public_key()).expect("a link key"),
+            PublicKey::from(&secret).as_bytes(),
+        );
+        SecureLink::with_secret(secret, Some(check))
     }
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    fn half(link: &SecureLink) -> Packet {
+        link.key_exchange_packet().expect("a half to send")
+    }
+
+    /// The identities of two participants, and the links each would make to the other
+    fn verified_links() -> (LinkIdentity, LinkIdentity, SecureLink, SecureLink) {
+        let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
+        let a = SecureLink::for_peer(&ia, &ib.public_key()).expect("a link key");
+        let b = SecureLink::for_peer(&ib, &ia.public_key()).expect("a link key");
+        (ia, ib, a, b)
+    }
+
     /// Two links that have exchanged keys, each told the other's, and not yet heard anything
     /// of each other that is encrypted
     fn exchanged() -> (SecureLink, SecureLink) {
-        let (a, b) = (SecureLink::new(), SecureLink::new());
+        let (_, _, a, b) = verified_links();
         assert!(matches!(
-            a.open(b.key_exchange_packet()),
+            a.open(half(&b)),
             Opened::KeyExchange { answer: true }
         ));
         assert!(matches!(
-            b.open(a.key_exchange_packet()),
+            b.open(half(&a)),
             Opened::KeyExchange { answer: true }
         ));
         (a, b)
@@ -927,7 +873,7 @@ mod tests {
     /// Verifies: REQ-SEC-005
     #[test]
     fn before_the_keys_are_agreed_only_keep_alives_may_be_sent() {
-        let link = SecureLink::new();
+        let (_, _, link, _) = verified_links();
 
         assert!(link.seal(Packet::keep_alive(0)).is_some());
         assert!(link.seal(audio(0, b"x")).is_none());
@@ -964,63 +910,52 @@ mod tests {
 
     #[test]
     fn before_the_keys_are_agreed_a_peers_keep_alive_is_taken_and_the_link_keeps_negotiating() {
-        let link = SecureLink::new();
+        let (_, _, link, _) = verified_links();
 
         assert!(opened(&link, Packet::keep_alive(1)).is_some());
         assert_eq!(link.security(), LinkSecurity::Negotiating);
     }
 
+    /// An app that cannot encrypt sends plain audio and no key. It is not talked to: the link
+    /// stays without keys and nothing it sent is passed on.
+    ///
     /// Verifies: REQ-SEC-004
     #[test]
-    fn a_peer_that_sends_plain_audio_before_any_key_cannot_encrypt_and_the_link_goes_plain() {
-        let link = SecureLink::new();
-
-        let received = opened(&link, audio(1, b"plain"));
-
-        assert_eq!(received.unwrap().payload, b"plain");
-        assert_eq!(link.security(), LinkSecurity::Unencrypted);
-        assert!(link.seal(audio(2, b"out")).unwrap().payload == b"out");
-        assert!(!link.wants_key_exchange());
-    }
-
-    #[test]
-    fn on_a_plain_link_a_key_exchange_and_an_encrypted_packet_are_refused() {
-        let link = SecureLink::new();
-        opened(&link, audio(1, b"plain"));
-        let (a, _b) = agreed();
+    fn when_a_peer_sends_plain_audio_before_any_key_the_link_does_not_go_plain() {
+        let (_, _, link, _) = verified_links();
 
         assert!(matches!(
-            link.open(a.key_exchange_packet()),
-            Opened::Dropped(_)
+            link.open(audio(1, b"plain")),
+            Opened::Dropped("plain packet before the keys are agreed")
         ));
-        let sealed = a.seal(audio(1, b"x")).unwrap();
-        assert!(opened(&link, sealed).is_none());
-        assert_eq!(link.security(), LinkSecurity::Unencrypted);
+        assert_eq!(link.security(), LinkSecurity::Negotiating);
+        assert!(link.seal(audio(2, b"out")).is_none());
+        assert!(link.wants_key_exchange());
     }
 
     #[test]
     fn the_peers_key_is_answered_once_and_repeats_of_it_are_not() {
-        let (a, b) = (SecureLink::new(), SecureLink::new());
+        let (_, _, a, b) = verified_links();
 
         assert!(matches!(
-            a.open(b.key_exchange_packet()),
+            a.open(half(&b)),
             Opened::KeyExchange { answer: true }
         ));
         assert!(matches!(
-            a.open(b.key_exchange_packet()),
+            a.open(half(&b)),
             Opened::KeyExchange { answer: false }
         ));
     }
 
     #[test]
     fn a_link_asks_for_its_key_to_be_sent_until_the_peer_has_shown_it_has_it() {
-        let (a, b) = (SecureLink::new(), SecureLink::new());
+        let (_, _, a, b) = verified_links();
         assert!(a.wants_key_exchange());
 
-        a.open(b.key_exchange_packet());
+        a.open(half(&b));
         assert!(a.wants_key_exchange(), "keys agreed, peer not heard yet");
 
-        b.open(a.key_exchange_packet());
+        b.open(half(&a));
         opened(&a, b.seal(Packet::keep_alive(1)).unwrap()).unwrap();
         assert!(!a.wants_key_exchange());
     }
@@ -1028,32 +963,36 @@ mod tests {
     /// Verifies: REQ-SEC-003
     #[test]
     fn our_own_key_played_back_to_us_is_refused() {
-        let link = SecureLink::new();
+        let (_, _, a, _) = verified_links();
 
-        assert!(matches!(
-            link.open(link.key_exchange_packet()),
-            Opened::Dropped(_)
-        ));
-        assert_eq!(link.security(), LinkSecurity::Negotiating);
+        // Signed for the peer, so it is not taken by us whoever sends it back
+        assert!(matches!(a.open(half(&a)), Opened::Dropped(_)));
+        assert_eq!(a.security(), LinkSecurity::Negotiating);
     }
 
     /// Verifies: REQ-SEC-002
     #[test]
     fn a_key_that_gives_no_secret_is_refused() {
-        let link = SecureLink::new();
-        let mut payload = vec![KEY_EXCHANGE, SUITE];
-        payload.extend_from_slice(&[0u8; 32]);
+        let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
+        let link = SecureLink::for_peer(&ia, &ib.public_key()).unwrap();
+        // Signed by the peer itself, so only the weak key is wrong with it
+        let text = signed_text(
+            ib.signing_key.verifying_key().as_bytes(),
+            ia.signing_key.verifying_key().as_bytes(),
+            &[0u8; 32],
+        );
+        let payload = signed_payload(&ib.signing_key, &text, &[0u8; 32]);
 
         assert!(matches!(
             link.open(Packet::control(0, payload)),
-            Opened::Dropped(_)
+            Opened::Dropped("key exchange with a weak key")
         ));
         assert_eq!(link.security(), LinkSecurity::Negotiating);
     }
 
     #[test]
     fn a_control_packet_that_is_not_a_key_exchange_is_ignored() {
-        let link = SecureLink::new();
+        let (_, _, link, _) = verified_links();
 
         for payload in [
             vec![],
@@ -1066,8 +1005,8 @@ mod tests {
                 Opened::Dropped(_)
             ));
         }
-        let mut with_another_suite = vec![KEY_EXCHANGE, SUITE + 1];
-        with_another_suite.extend_from_slice(&[7u8; 32]);
+        let mut with_another_suite = vec![KEY_EXCHANGE, SIGNED_SUITE + 1];
+        with_another_suite.extend_from_slice(&[7u8; 32 + SIGNATURE_LEN]);
         assert!(matches!(
             link.open(Packet::control(0, with_another_suite)),
             Opened::Dropped(_)
@@ -1077,28 +1016,35 @@ mod tests {
 
     #[test]
     fn a_different_key_before_the_peer_is_confirmed_replaces_the_first() {
-        let (a, first) = (SecureLink::new(), SecureLink::new());
-        let second = SecureLink::new();
-        a.open(first.key_exchange_packet());
+        let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
+        let a = SecureLink::for_peer(&ia, &ib.public_key()).unwrap();
+        let first = SecureLink::for_peer(&ib, &ia.public_key()).unwrap();
+        let second = SecureLink::for_peer(&ib, &ia.public_key()).unwrap();
+        a.open(half(&first));
 
         assert!(matches!(
-            a.open(second.key_exchange_packet()),
+            a.open(half(&second)),
             Opened::KeyExchange { answer: true }
         ));
-        second.open(a.key_exchange_packet());
+        second.open(half(&a));
 
         assert!(opened(&a, second.seal(Packet::keep_alive(1)).unwrap()).is_some());
     }
 
     #[test]
     fn a_different_key_after_the_peer_is_confirmed_is_refused() {
-        let (a, b) = agreed();
+        let (ia, ib, a, b) = verified_links();
+        a.open(half(&b));
+        b.open(half(&a));
+        opened(&b, a.seal(Packet::keep_alive(0)).unwrap()).unwrap();
+        opened(&a, b.seal(Packet::keep_alive(0)).unwrap()).unwrap();
         opened(&a, b.seal(audio(1, b"x")).unwrap()).unwrap();
-        let intruder = SecureLink::new();
+        // Even the peer's own identity, with a key that is not the one the link was made with
+        let again = SecureLink::for_peer(&ib, &ia.public_key()).unwrap();
 
         assert!(matches!(
-            a.open(intruder.key_exchange_packet()),
-            Opened::Dropped(_)
+            a.open(half(&again)),
+            Opened::Dropped("another key after the link was confirmed")
         ));
         assert!(opened(&a, b.seal(audio(2, b"x")).unwrap()).is_some());
     }
@@ -1122,9 +1068,10 @@ mod tests {
     /// Verifies: REQ-SEC-003
     #[test]
     fn the_sealed_bytes_for_fixed_keys_match_the_known_answer() {
-        let (a, b) = (link_with(0x11), link_with(0x22));
-        a.open(b.key_exchange_packet());
-        b.open(a.key_exchange_packet());
+        let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
+        let (a, b) = (link_with(0x11, &ia, &ib), link_with(0x22, &ib, &ia));
+        a.open(half(&b));
+        b.open(half(&a));
         // The first packet of each is the keep-alive that shows the other it has the keys
         let hello_a = a.seal(Packet::keep_alive(0)).unwrap();
         let hello_b = b.seal(Packet::keep_alive(0)).unwrap();
@@ -1146,14 +1093,6 @@ mod tests {
         assert!(opened(&a, from_b).is_some());
     }
 
-    /// The identities of two participants, and the links each would make to the other
-    fn verified_links() -> (LinkIdentity, LinkIdentity, SecureLink, SecureLink) {
-        let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
-        let a = SecureLink::for_peer(Some(&ia), Some(&ib.public_key()));
-        let b = SecureLink::for_peer(Some(&ib), Some(&ia.public_key()));
-        (ia, ib, a, b)
-    }
-
     /// Verifies: REQ-SEC-007
     #[test]
     fn when_both_ends_know_the_other_by_its_key_they_agree_keys_and_audio_goes() {
@@ -1161,11 +1100,11 @@ mod tests {
         assert!(a.checks_peer() && b.checks_peer());
 
         assert!(matches!(
-            a.open(b.key_exchange_packet()),
+            a.open(half(&b)),
             Opened::KeyExchange { answer: true }
         ));
         assert!(matches!(
-            b.open(a.key_exchange_packet()),
+            b.open(half(&a)),
             Opened::KeyExchange { answer: true }
         ));
         let from_a = a.seal(Packet::keep_alive(0)).unwrap();
@@ -1185,10 +1124,10 @@ mod tests {
         // Someone on the path makes a key of their own and signs it with an identity of theirs,
         // for a
         let stranger = LinkIdentity::generate();
-        let forged = SecureLink::for_peer(Some(&stranger), Some(&ia.public_key()));
+        let forged = SecureLink::for_peer(&stranger, &ia.public_key()).unwrap();
 
         assert!(matches!(
-            a.open(forged.key_exchange_packet()),
+            a.open(half(&forged)),
             Opened::Dropped("key exchange not signed by the peer")
         ));
         assert_eq!(a.security(), LinkSecurity::Negotiating);
@@ -1199,21 +1138,27 @@ mod tests {
     #[test]
     fn when_the_key_in_a_signed_key_exchange_is_replaced_it_is_not_taken() {
         let (_, _, a, b) = verified_links();
-        let mut packet = b.key_exchange_packet();
+        let mut packet = half(&b);
         // The signature stays, the ephemeral key it covers is the on-path attacker's
-        packet.payload[2..34].copy_from_slice(&SecureLink::new().public);
+        packet.payload[2..34].copy_from_slice(&SecureLink::unbound().public);
 
         assert!(matches!(a.open(packet), Opened::Dropped(_)));
         assert!(!a.has_keys());
     }
 
+    /// A peer that cannot sign - an older app - sends its key unsigned. It is not taken, and the
+    /// key that was sent is not answered.
+    ///
     /// Verifies: REQ-SEC-007
+    /// Verifies: REQ-SEC-008
     #[test]
-    fn when_a_peer_that_must_sign_sends_an_unsigned_key_exchange_it_is_not_taken() {
+    fn when_a_peer_sends_an_unsigned_key_exchange_it_is_not_taken() {
         let (_, _, a, _) = verified_links();
+        let mut unsigned = vec![KEY_EXCHANGE, 0x01];
+        unsigned.extend_from_slice(&SecureLink::unbound().public);
 
         assert!(matches!(
-            a.open(SecureLink::new().key_exchange_packet()),
+            a.open(Packet::control(0, unsigned)),
             Opened::Dropped("key exchange not signed by the peer")
         ));
         assert!(!a.has_keys());
@@ -1227,11 +1172,11 @@ mod tests {
         let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
         let ic = LinkIdentity::generate();
         // b signs for a. c, who also takes b to be b, is handed it
-        let b_for_a = SecureLink::for_peer(Some(&ib), Some(&ia.public_key()));
-        let c = SecureLink::for_peer(Some(&ic), Some(&ib.public_key()));
+        let b_for_a = SecureLink::for_peer(&ib, &ia.public_key()).unwrap();
+        let c = SecureLink::for_peer(&ic, &ib.public_key()).unwrap();
 
         assert!(matches!(
-            c.open(b_for_a.key_exchange_packet()),
+            c.open(half(&b_for_a)),
             Opened::Dropped("key exchange not signed by the peer")
         ));
     }
@@ -1243,45 +1188,47 @@ mod tests {
 
         assert!(matches!(
             a.open(audio(1, b"plain")),
-            Opened::Dropped("plain packet from a peer that encrypts")
+            Opened::Dropped("plain packet before the keys are agreed")
         ));
         assert_eq!(a.security(), LinkSecurity::Negotiating);
-        assert!(!a.is_decided());
+        assert!(!a.has_keys());
     }
 
+    /// There is no link to a peer whose key is not a key: the server gave none, or what it gave
+    /// is not one
+    ///
     /// Verifies: REQ-SEC-008
     #[test]
-    fn when_the_peer_told_no_key_the_link_agrees_keys_unsigned_and_says_it_does_not_check() {
-        let ours = LinkIdentity::generate();
-        let a = SecureLink::for_peer(Some(&ours), None);
-        let b = SecureLink::new();
-        assert!(!a.checks_peer() && !b.checks_peer());
-
-        assert!(matches!(
-            a.open(b.key_exchange_packet()),
-            Opened::KeyExchange { answer: true }
-        ));
-        assert!(a.has_keys());
-    }
-
-    /// Verifies: REQ-SEC-008
-    #[test]
-    fn when_the_peer_key_is_not_a_key_the_link_does_not_check_the_peer() {
+    fn when_the_peer_key_is_not_a_key_there_is_no_link_to_the_peer() {
         let ours = LinkIdentity::generate();
         for not_a_key in ["", "not base64!", "AAAA", &BASE64.encode(&[7u8; 31])] {
-            let link = SecureLink::for_peer(Some(&ours), Some(not_a_key));
-            assert!(!link.checks_peer(), "{not_a_key:?}");
+            assert!(
+                SecureLink::for_peer(&ours, not_a_key).is_none(),
+                "{not_a_key:?}"
+            );
         }
-        // And with no identity of our own there is nothing to sign with
-        let link = SecureLink::for_peer(None, Some(&ours.public_key()));
+    }
+
+    /// A link that is for nobody yet agrees no keys with anyone and sends no key
+    ///
+    /// Verifies: REQ-SEC-008
+    #[test]
+    fn a_link_for_nobody_agrees_no_keys_and_sends_none() {
+        let link = SecureLink::unbound();
+        let (_, _, _, b) = verified_links();
+
         assert!(!link.checks_peer());
+        assert!(link.key_exchange_packet().is_none());
+        assert!(matches!(link.open(half(&b)), Opened::Dropped(_)));
+        assert!(!link.has_keys());
+        assert!(link.seal(audio(0, b"x")).is_none());
     }
 
     /// An app that checks the server by the key the server gave, and a server that answers any
     /// app, with the key that server told the room
     fn app_and_answering_server() -> (LinkIdentity, LinkIdentity, SecureLink, SecureLink) {
         let (app, server) = (LinkIdentity::generate(), LinkIdentity::generate());
-        let a = SecureLink::for_peer(Some(&app), Some(&server.public_key()));
+        let a = SecureLink::for_peer(&app, &server.public_key()).unwrap();
         let s = SecureLink::answering(&server);
         (app, server, a, s)
     }
@@ -1295,11 +1242,11 @@ mod tests {
         assert!(!s.checks_peer());
 
         assert!(matches!(
-            s.open(a.key_exchange_packet()),
+            s.open(half(&a)),
             Opened::KeyExchange { answer: true }
         ));
         assert!(matches!(
-            a.open(s.key_exchange_packet()),
+            a.open(half(&s)),
             Opened::KeyExchange { answer: true }
         ));
         let from_a = a.seal(Packet::keep_alive(0)).unwrap();
@@ -1314,15 +1261,10 @@ mod tests {
 
     /// Verifies: REQ-SEC-009
     #[test]
-    fn when_a_server_that_answers_any_app_has_heard_no_key_it_sends_an_unsigned_half_that_an_app_that_checks_does_not_take(
-    ) {
-        let (_, _, a, s) = app_and_answering_server();
+    fn when_a_server_that_answers_any_app_has_heard_no_key_it_has_no_half_to_send() {
+        let (_, _, _, s) = app_and_answering_server();
 
-        assert!(matches!(
-            a.open(s.key_exchange_packet()),
-            Opened::Dropped("key exchange not signed by the peer")
-        ));
-        assert!(!a.has_keys());
+        assert!(s.key_exchange_packet().is_none());
     }
 
     /// Verifies: REQ-SEC-009
@@ -1334,10 +1276,12 @@ mod tests {
         let stranger_server = SecureLink::answering(&stranger);
         // The stranger takes the app's half as the server would and answers it, signed with
         // the identity it has, which is not the one the server told the room
-        stranger_server.open(a.key_exchange_packet());
-        let signed_by_stranger = stranger_server.key_exchange_packet();
+        stranger_server.open(half(&a));
+        let signed_by_stranger = half(&stranger_server);
         // ...and answers it unsigned
-        let unsigned = SecureLink::new().key_exchange_packet();
+        let mut unsigned = vec![KEY_EXCHANGE, 0x01];
+        unsigned.extend_from_slice(&SecureLink::unbound().public);
+        let unsigned = Packet::control(0, unsigned);
 
         for forged in [signed_by_stranger, unsigned] {
             assert!(matches!(
@@ -1355,12 +1299,11 @@ mod tests {
     #[test]
     fn when_the_answer_the_server_gave_one_app_is_passed_to_another_it_is_not_taken() {
         let (_, server, a, s) = app_and_answering_server();
-        let other =
-            SecureLink::for_peer(Some(&LinkIdentity::generate()), Some(&server.public_key()));
-        s.open(a.key_exchange_packet());
+        let other = SecureLink::for_peer(&LinkIdentity::generate(), &server.public_key()).unwrap();
+        s.open(half(&a));
 
         assert!(matches!(
-            other.open(s.key_exchange_packet()),
+            other.open(half(&s)),
             Opened::Dropped("key exchange not signed by the peer")
         ));
         assert!(!other.has_keys());
@@ -1370,9 +1313,9 @@ mod tests {
     #[test]
     fn when_the_ephemeral_key_in_the_servers_answer_is_replaced_it_is_not_taken() {
         let (_, _, a, s) = app_and_answering_server();
-        s.open(a.key_exchange_packet());
-        let mut packet = s.key_exchange_packet();
-        packet.payload[2..34].copy_from_slice(&SecureLink::new().public);
+        s.open(half(&a));
+        let mut packet = half(&s);
+        packet.payload[2..34].copy_from_slice(&SecureLink::unbound().public);
 
         assert!(matches!(a.open(packet), Opened::Dropped(_)));
         assert!(!a.has_keys());
@@ -1380,49 +1323,50 @@ mod tests {
 
     /// Verifies: REQ-SEC-009
     #[test]
-    fn when_the_app_that_the_server_answers_sends_a_half_that_is_not_signed_the_answer_is_not_signed(
-    ) {
+    fn when_the_app_that_the_server_answers_sends_a_half_that_is_not_signed_it_gets_no_answer() {
         let (_, _, _, s) = app_and_answering_server();
-        let unchecked = SecureLink::new();
+        let mut unsigned = vec![KEY_EXCHANGE, 0x01];
+        unsigned.extend_from_slice(&SecureLink::unbound().public);
 
         assert!(matches!(
-            s.open(unchecked.key_exchange_packet()),
-            Opened::KeyExchange { answer: true }
+            s.open(Packet::control(0, unsigned)),
+            Opened::Dropped("key exchange not signed")
         ));
-        assert!(matches!(
-            unchecked.open(s.key_exchange_packet()),
-            Opened::KeyExchange { answer: true }
-        ));
+        assert!(s.key_exchange_packet().is_none());
+        assert!(!s.has_keys());
     }
 
     /// Verifies: REQ-SEC-009
     #[test]
     fn when_the_app_changes_its_key_before_the_link_is_confirmed_the_server_answers_the_new_one() {
         let (app, server, first, s) = app_and_answering_server();
-        s.open(first.key_exchange_packet());
-        let restarted = SecureLink::for_peer(Some(&app), Some(&server.public_key()));
+        s.open(half(&first));
+        let restarted = SecureLink::for_peer(&app, &server.public_key()).unwrap();
 
         assert!(matches!(
-            s.open(restarted.key_exchange_packet()),
+            s.open(half(&restarted)),
             Opened::KeyExchange { answer: true }
         ));
         assert!(matches!(
-            restarted.open(s.key_exchange_packet()),
+            restarted.open(half(&s)),
             Opened::KeyExchange { answer: true }
         ));
         assert!(matches!(
-            first.open(s.key_exchange_packet()),
+            first.open(half(&s)),
             Opened::Dropped("key exchange not signed by the peer")
         ));
     }
 
     /// Verifies: REQ-SEC-009
     #[test]
-    fn a_server_that_answers_any_app_still_carries_an_app_that_sends_plain_audio() {
+    fn a_server_that_answers_any_app_does_not_carry_an_app_that_sends_plain_audio() {
         let (_, _, _, s) = app_and_answering_server();
 
-        assert!(opened(&s, audio(1, b"plain")).is_some());
-        assert_eq!(s.security(), LinkSecurity::Unencrypted);
+        assert!(matches!(
+            s.open(audio(1, b"plain")),
+            Opened::Dropped("plain packet before the keys are agreed")
+        ));
+        assert_eq!(s.security(), LinkSecurity::Negotiating);
     }
 
     #[test]

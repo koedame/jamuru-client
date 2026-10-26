@@ -102,10 +102,7 @@ impl LinkSetup<'_> {
             frame_size: self.buffer_size,
             jitter_buffer_frames,
         };
-        let identity = target
-            .link
-            .as_ref()
-            .map(|(ours, peer_key)| (ours, peer_key.as_deref()));
+        let identity = (&target.link.0, target.link.1.as_deref());
         let Opened {
             mut connection,
             receive,
@@ -442,7 +439,7 @@ mod tests {
                 LinkTarget {
                     peer: Uuid::new_v4(),
                     candidates: vec![their_addr],
-                    link: Some((ours, Some(their_key))),
+                    link: (ours, Some(their_key)),
                 },
                 AudioPreset::HighQuality.jitter_buffer_frames(),
             )
@@ -454,7 +451,7 @@ mod tests {
         );
 
         let mut ben = Connection::on(&their_mux).expect("their link");
-        ben.verify_peer(&theirs, Some(&our_key)).expect("our key");
+        ben.verify_peer(&theirs, &our_key).expect("our key");
         ben.connect(our_addr).await.expect("they answer");
         let LinkStage::Checking(checking) = &mut link.stage else {
             panic!("the link is being checked");
@@ -492,7 +489,10 @@ mod tests {
                     LinkTarget {
                         peer: Uuid::new_v4(),
                         candidates: vec!["127.0.0.1:9".parse().unwrap()],
-                        link: None,
+                        link: (
+                            LinkIdentity::generate(),
+                            Some(LinkIdentity::generate().public_key()),
+                        ),
                     },
                     preset.jitter_buffer_frames(),
                 )

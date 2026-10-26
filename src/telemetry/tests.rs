@@ -1077,6 +1077,11 @@ async fn when_a_session_ends_the_peers_address_is_nowhere_in_the_line() {
     let theirs = crate::network::Connection::new("127.0.0.1:0")
         .await
         .unwrap();
+    ours.verify_peer(
+        &crate::network::LinkIdentity::generate(),
+        &crate::network::LinkIdentity::generate().public_key(),
+    )
+    .unwrap();
     ours.connect(theirs.local_addr()).await.unwrap();
     let peer = theirs.local_addr();
 

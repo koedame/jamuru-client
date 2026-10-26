@@ -49,28 +49,31 @@ impl FakeSignaling {
         Self::start_with_residents(Vec::new())
     }
 
-    /// A server in whose every room the peer at `address` already is, with no key to check its
-    /// key exchange against (as a peer of an older version has). A room that does not exist is
-    /// made when someone joins it, as the always-open room of an echo is
-    pub fn start_with_resident_at(name: &str, address: SocketAddr) -> Self {
-        Self::start_with_residents_at(&[(name, address)])
+    /// A server in whose every room the peer at `address` already is, with `link_key` to check
+    /// its key exchange by (see `Peer::resident`). A room that does not exist is made when
+    /// someone joins it, as the always-open room of an echo is
+    pub fn start_with_resident_at(name: &str, address: SocketAddr, link_key: String) -> Self {
+        Self::start_with_residents_at(&[(name, address, link_key)])
     }
 
     /// [`FakeSignaling::start_with_resident_at`] with several peers in every room, each at its
     /// own address
-    pub fn start_with_residents_at(residents: &[(&str, SocketAddr)]) -> Self {
+    pub fn start_with_residents_at(residents: &[(&str, SocketAddr, String)]) -> Self {
         Self::start_with_residents(
             residents
                 .iter()
-                .map(|(name, address)| PeerInfo {
-                    id: Uuid::new_v4(),
-                    name: name.to_string(),
-                    candidates: vec![AddressCandidate::host(*address)],
-                    public_addr: Some(*address),
-                    local_addr: Some(*address),
-                    joined_at: 0,
-                    features: Vec::new(),
-                    link_key: None,
+                .map(|(name, address, link_key)| {
+                    let address = *address;
+                    PeerInfo {
+                        id: Uuid::new_v4(),
+                        name: name.to_string(),
+                        candidates: vec![AddressCandidate::host(address)],
+                        public_addr: Some(address),
+                        local_addr: Some(address),
+                        joined_at: 0,
+                        features: Vec::new(),
+                        link_key: Some(link_key.clone()),
+                    }
                 })
                 .collect(),
         )

@@ -3,6 +3,8 @@
 //! An app does not send audio until it has agreed keys with its peer, and takes only what it can
 //! open. A test peer that is a bare socket is therefore silent to it. [`Peer`] is a socket with
 //! the same encryption an app has, so a test can send and receive through it as a peer would.
+//! An app connects only to a peer whose key it was given, so [`Peer::link_key`] is what a test
+//! hands the connection under test (see [`trust_peer`]).
 
 #![allow(dead_code)]
 
@@ -12,14 +14,16 @@ use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use jamjam::network::{Connection, LinkSecurity, Opened, SecureLink};
+use jamjam::network::{Connection, LinkIdentity, LinkSecurity, Opened, SecureLink};
 use jamjam::protocol::Packet;
 
 /// A UDP socket that speaks the protocol like an app: it answers the key exchange, seals what it
-/// sends and opens what it receives
+/// sends and opens what it receives. It signs its answer with a key of its own, like the bots
+/// that talk to many apps from one socket.
 pub struct Peer {
     pub socket: UdpSocket,
     pub link: SecureLink,
+    identity: LinkIdentity,
 }
 
 impl Peer {
@@ -28,10 +32,23 @@ impl Peer {
         socket
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("read timeout");
+        let identity = LinkIdentity::generate();
         Self {
             socket,
-            link: SecureLink::new(),
+            link: SecureLink::answering(&identity),
+            identity,
         }
+    }
+
+    /// This peer as a resident of a fake server's rooms: its name, address and key
+    /// (`FakeSignaling::start_with_residents_at`)
+    pub fn resident<'a>(&self, name: &'a str) -> (&'a str, SocketAddr, String) {
+        (name, self.local_addr(), self.link_key())
+    }
+
+    /// The key an app is given for this peer, which its answer is checked against
+    pub fn link_key(&self) -> String {
+        self.identity.public_key()
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -78,10 +95,14 @@ impl Peer {
         }
     }
 
+    /// Sends our half of the exchange, once there is one: an answering link has none before it
+    /// has heard the app's
     pub fn send_key_exchange(&self, to: SocketAddr) {
-        self.socket
-            .send_to(&self.link.key_exchange_packet().to_bytes(), to)
-            .expect("peer send");
+        if let Some(half) = self.link.key_exchange_packet() {
+            self.socket
+                .send_to(&half.to_bytes(), to)
+                .expect("peer send");
+        }
     }
 
     /// Sends our key to `to` and reads until the keys are agreed, so what is sent next is
@@ -196,4 +217,30 @@ impl Drop for Tap {
     fn drop(&mut self) {
         self.task.abort();
     }
+}
+
+/// Has `connection` check `peer` by its key, as an app does the peer the server gave a key for.
+/// The connection has an identity of its own that nobody else is told.
+pub fn trust_peer(connection: &mut Connection, peer: &Peer) {
+    connection
+        .verify_peer(&LinkIdentity::generate(), &peer.link_key())
+        .expect("the peer's key is a key");
+}
+
+/// Has two connections check each other by the keys they would have told the server
+pub fn trust_each_other(a: &mut Connection, b: &mut Connection) {
+    let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
+    a.verify_peer(&ours, &theirs.public_key()).expect("a key");
+    b.verify_peer(&theirs, &ours.public_key()).expect("a key");
+}
+
+/// Has `connection` check a peer that is not there to answer, as it would one that has just
+/// entered the room
+pub fn trust_unseen_peer(connection: &mut Connection) {
+    connection
+        .verify_peer(
+            &LinkIdentity::generate(),
+            &LinkIdentity::generate().public_key(),
+        )
+        .expect("a key");
 }

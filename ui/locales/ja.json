@@ -110,8 +110,8 @@
       "title": "テストルーム",
       "description": "動作確認用のテストルームに接続します"
     },
-    "unencrypted": "この相手との音声は暗号化されていません（相手のアプリが古い版です）",
-    "unencryptedWith": "{{names}}との音声は暗号化されていません（相手のアプリが古い版です）",
+    "peerAppTooOld": "この相手とは繋げません（相手のアプリが古い版です）",
+    "peerAppTooOldWith": "{{names}}とは繋げません（相手のアプリが古い版です）",
     "bandwidth": {
       "insufficient": "帯域が不足しています（必要: 約{{required}}Mbps）",
       "marginal": "帯域の余裕が少なくなっています",

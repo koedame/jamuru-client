@@ -91,12 +91,7 @@ pub struct ConnectionStats {
     pub uptime_seconds: u64,
     /// Whether what this link carries is encrypted
     pub security: LinkSecurity,
-    /// Whether the keys of this link are bound to the peer's key from the signaling server.
-    /// `false` for a peer whose app tells none: the link is then encrypted but not known to be
-    /// with that peer.
-    pub peer_checked: bool,
-    /// Packets turned away because they were forged, repeated or from a peer that is not
-    /// encrypting while the link is
+    /// Packets turned away because they were forged, repeated or not encrypted
     pub packets_refused: u64,
 }
 
@@ -978,7 +973,7 @@ impl Connection {
             latency_info_callback: None,
             connection_start: Arc::new(std::sync::Mutex::new(None)),
             link_facts: Arc::new(LinkFacts::new()),
-            secure_link: Arc::new(SecureLink::new()),
+            secure_link: Arc::new(SecureLink::unbound()),
             pending_latency_info: Arc::new(Mutex::new(None)),
             secure_link_handle: None,
         })
@@ -986,18 +981,15 @@ impl Connection {
 
     /// Has the link to the peer check who the peer is: the key exchange it sends has to be
     /// signed with `peer_key`, the key the signaling server gave for it, and ours is signed
-    /// with `ours`. Without this, or with no `peer_key` (the peer's app predates it), the
-    /// link is encrypted but anyone who can alter packets on the path while it is set up
-    /// could be the peer. Called before connecting.
-    pub fn verify_peer(
-        &mut self,
-        ours: &LinkIdentity,
-        peer_key: Option<&str>,
-    ) -> Result<(), NetworkError> {
+    /// with `ours`. A connection does not connect before this is called, and a `peer_key`
+    /// that is not a key (the peer's app predates it, or the server gave none) is refused with
+    /// [`NetworkError::PeerKeyMissing`]. Called before connecting.
+    pub fn verify_peer(&mut self, ours: &LinkIdentity, peer_key: &str) -> Result<(), NetworkError> {
         if self.is_connected() {
             return Err(NetworkError::AlreadyConnected);
         }
-        self.secure_link = Arc::new(SecureLink::for_peer(Some(ours), peer_key));
+        let link = SecureLink::for_peer(ours, peer_key).ok_or(NetworkError::PeerKeyMissing)?;
+        self.secure_link = Arc::new(link);
         Ok(())
     }
 
@@ -1034,6 +1026,9 @@ impl Connection {
     pub async fn connect(&mut self, remote_addr: SocketAddr) -> Result<(), NetworkError> {
         if self.is_connected() {
             return Err(NetworkError::AlreadyConnected);
+        }
+        if !self.checks_peer() {
+            return Err(NetworkError::PeerKeyMissing);
         }
 
         let started = Instant::now();
@@ -1075,6 +1070,9 @@ impl Connection {
     ) -> Result<(), NetworkError> {
         if self.is_connected() {
             return Err(NetworkError::AlreadyConnected);
+        }
+        if !self.checks_peer() {
+            return Err(NetworkError::PeerKeyMissing);
         }
 
         if candidates.is_empty() {
@@ -1650,7 +1648,6 @@ impl Connection {
                 .map(|_| self.fec_recovered.load(Ordering::Relaxed)),
             uptime_seconds: uptime,
             security: self.secure_link.security(),
-            peer_checked: self.secure_link.checks_peer(),
             packets_refused: self.secure_link.refused(),
         }
     }
@@ -1704,7 +1701,6 @@ impl Connection {
                 }
             }
         }
-        self.note_latency_info_heard_while_probing(&bytes);
         Ok(())
     }
 
@@ -1714,27 +1710,9 @@ impl Connection {
     /// A peer that is already connected sends audio all that time. What arrives
     /// between the last read of the check and the receive loop starting would,
     /// read at once, overflow the play-out buffer (REQ-CON-116). Audio that old is
-    /// not worth playing. The peer's latency info is kept.
+    /// not worth playing.
     fn discard_audio_queued_while_probing(&self) {
-        while let Some((bytes, _)) = self.transport.try_recv_raw() {
-            self.note_latency_info_heard_while_probing(&bytes);
-        }
-    }
-
-    /// Keeps the peer's latency info if `bytes` is one, whichever way it reached the
-    /// socket while probing
-    fn note_latency_info_heard_while_probing(&self, bytes: &[u8]) {
-        if let Some(packet) = Packet::from_bytes(bytes) {
-            // An encrypted one cannot be read before the keys are agreed, and a peer that
-            // encrypts sends none until it knows we have them
-            if packet.packet_type == PacketType::LatencyInfo && !packet.flags.encrypted {
-                note_peer_latency_info(
-                    &packet.payload,
-                    &self.latency_info_callback,
-                    &self.peer_latency_info,
-                );
-            }
-        }
+        while self.transport.try_recv_raw().is_some() {}
     }
 
     fn start_receive_loop(&mut self) {
@@ -1772,13 +1750,11 @@ impl Connection {
                 // What the packet took on the wire, before it is opened
                 let wire_len = (HEADER_SIZE + packet.payload.len()) as u64;
 
-                // The keys, and whether the peer encrypts at all, are settled by what the
-                // peer sends, so only what comes from where the peer is expected may settle
-                // them. Anyone who learns our port could otherwise send one plain packet
-                // and have the link give up encrypting.
+                // The keys are settled by what the peer sends, so only what comes from where the
+                // peer is expected may settle them.
                 let from_a_peer_address = route.lock().knows(addr);
                 if !from_a_peer_address
-                    && (packet.packet_type == PacketType::Control || !secure_link.is_decided())
+                    && (packet.packet_type == PacketType::Control || !secure_link.has_keys())
                 {
                     continue;
                 }
@@ -1820,9 +1796,10 @@ impl Connection {
                     Opened::Packet(packet) => packet,
                     Opened::KeyExchange { answer } => {
                         if answer {
-                            let key = secure_link.key_exchange_packet();
-                            if let Err(e) = transport.send_to(&key, addr).await {
-                                warn!("Failed to answer the peer's key exchange: {}", e);
+                            if let Some(key) = secure_link.key_exchange_packet() {
+                                if let Err(e) = transport.send_to(&key, addr).await {
+                                    warn!("Failed to answer the peer's key exchange: {}", e);
+                                }
                             }
                             // The keys are ours now: something encrypted shows the peer it has
                             // ours too, without waiting for the next keep-alive
@@ -2185,9 +2162,10 @@ impl Connection {
                 let remote_addr = route.lock().current;
 
                 if secure_link.wants_key_exchange() {
-                    let key = secure_link.key_exchange_packet();
-                    if let Err(e) = transport.send_to(&key, remote_addr).await {
-                        warn!("Failed to send our key exchange: {}", e);
+                    if let Some(key) = secure_link.key_exchange_packet() {
+                        if let Err(e) = transport.send_to(&key, remote_addr).await {
+                            warn!("Failed to send our key exchange: {}", e);
+                        }
                     }
                     // With the keys ours, something encrypted shows the peer it has them too
                     // (the answer to its key can be lost on the way).
@@ -2217,16 +2195,36 @@ impl Drop for Connection {
 mod tests {
     use super::*;
 
+    /// A connection that has been told whose key to check its peer by, as every connection is
+    /// before it connects. Nobody holds that key, so it agrees keys with nobody unless
+    /// [`trust_each_other`] is called on it.
+    async fn conn() -> Connection {
+        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        conn.verify_peer(
+            &LinkIdentity::generate(),
+            &LinkIdentity::generate().public_key(),
+        )
+        .unwrap();
+        conn
+    }
+
+    /// Has two connections check each other by the keys they would have told the server
+    fn trust_each_other(a: &mut Connection, b: &mut Connection) {
+        let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
+        a.verify_peer(&ours, &theirs.public_key()).unwrap();
+        b.verify_peer(&theirs, &ours.public_key()).unwrap();
+    }
+
     #[tokio::test]
     async fn test_connection_creation() {
-        let conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let conn = conn().await;
         assert!(!conn.is_connected());
         assert!(conn.local_addr().port() > 0);
     }
 
     #[tokio::test]
     async fn test_connection_stats_initial() {
-        let conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let conn = conn().await;
         let stats = conn.stats();
         assert_eq!(stats.packets_sent, 0);
         assert_eq!(stats.packets_received, 0);
@@ -2234,7 +2232,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_with_candidates_empty() {
-        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn = conn().await;
         let result = conn.connect_with_candidates(&[]).await;
 
         assert!(result.is_err());
@@ -2246,8 +2244,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_with_candidates_already_connected() {
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
-        let conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn1 = conn().await;
+        let conn2 = conn().await;
 
         // First connection
         conn1.connect(conn2.local_addr()).await.unwrap();
@@ -2267,8 +2265,8 @@ mod tests {
     #[tokio::test]
     async fn test_connect_with_single_candidate() {
         // Single candidate should fall back to regular connect
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
-        let conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn1 = conn().await;
+        let conn2 = conn().await;
 
         let candidates = vec![conn2.local_addr()];
         conn1.connect_with_candidates(&candidates).await.unwrap();
@@ -2279,8 +2277,8 @@ mod tests {
     #[tokio::test]
     async fn test_connect_with_multiple_candidates_loopback() {
         // Test with multiple loopback candidates
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
-        let conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn1 = conn().await;
+        let conn2 = conn().await;
 
         // Create fake candidates, only the real one will respond
         let candidates = vec![
@@ -2297,8 +2295,8 @@ mod tests {
     /// Verifies: REQ-TEL-015
     #[tokio::test]
     async fn when_a_candidate_answers_the_link_facts_say_the_route_was_confirmed() {
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
-        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn1 = conn().await;
+        let mut conn2 = conn().await;
         // conn2 opens with a keep-alive, which conn1's probe wait takes as the answer.
         conn2.connect(conn1.local_addr()).await.unwrap();
         let candidates = vec!["127.0.0.1:59999".parse().unwrap(), conn2.local_addr()];
@@ -2314,12 +2312,13 @@ mod tests {
     }
 
     /// A peer that already sends audio while we probe is one that does not encrypt: a peer
-    /// that does holds its audio back until we have shown it we have the keys.
+    /// that does holds its audio back until we have shown it we have the keys. Nothing but a
+    /// keep-alive is taken from it, before or after the connection is up.
     ///
     /// Verifies: REQ-CON-116
     #[tokio::test]
-    async fn when_audio_arrived_while_probing_it_is_not_played_but_the_latency_info_is_kept() {
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+    async fn when_a_peer_sends_plain_audio_and_latency_info_they_are_neither_played_nor_kept() {
+        let mut conn1 = conn().await;
         let old_app = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let heard = Arc::new(AtomicU32::new(0));
         let counted = heard.clone();
@@ -2364,26 +2363,17 @@ mod tests {
             .send_to(&Packet::audio(20, 0, vec![0u8; 256]).to_bytes(), to)
             .await
             .unwrap();
-        for _ in 0..50 {
-            if heard.load(Ordering::SeqCst) > 0 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
 
-        assert_eq!(
-            heard.load(Ordering::SeqCst),
-            1,
-            "only the audio sent after the connection was up"
-        );
-        assert!(conn1.peer_latency_info().is_some());
+        assert_eq!(heard.load(Ordering::SeqCst), 0, "plain audio is not played");
+        assert!(conn1.peer_latency_info().is_none());
     }
 
     /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_every_probe_is_answered_the_connection_is_up_as_soon_as_the_probes_are_out() {
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
-        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn1 = conn().await;
+        let mut conn2 = conn().await;
         conn2.connect(conn1.local_addr()).await.unwrap();
         let candidates = vec!["127.0.0.1:59999".parse().unwrap(), conn2.local_addr()];
 
@@ -2399,7 +2389,7 @@ mod tests {
     /// Verifies: REQ-TEL-015
     #[tokio::test]
     async fn when_no_candidate_answers_the_link_facts_say_the_route_was_not_confirmed() {
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn1 = conn().await;
         let candidates = vec![
             "127.0.0.1:59998".parse().unwrap(),
             "127.0.0.1:59999".parse().unwrap(),
@@ -2567,7 +2557,7 @@ mod tests {
     /// Verifies: REQ-CON-114
     #[tokio::test]
     async fn when_no_candidate_answers_the_first_one_we_could_send_to_is_used() {
-        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn = conn().await;
         // An IPv6 address cannot be sent to from the IPv4 audio socket.
         let unreachable = addr("[::1]:59997");
         let silent = addr("127.0.0.1:59998");
@@ -2950,7 +2940,7 @@ mod tests {
         // 50 + 20 ms), so only the round trips tell the two apart.
         let slow = peer_answering_probes_after(&[60]).await;
         let fast = peer_answering_probes_after(&[20]).await;
-        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn = conn().await;
 
         conn.connect_with_candidates(&[slow, fast]).await.unwrap();
 
@@ -2967,7 +2957,7 @@ mod tests {
     ) {
         let lucky = peer_answering_probes_after(&[0, 70, 70, 70, 70]).await;
         let steady = peer_answering_probes_after(&[25]).await;
-        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn = conn().await;
 
         conn.connect_with_candidates(&[lucky, steady])
             .await
@@ -2979,8 +2969,8 @@ mod tests {
     /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_both_peers_probe_each_other_each_answers_the_others_probes_and_both_connect() {
-        let mut a = Connection::new("127.0.0.1:0").await.unwrap();
-        let mut b = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut a = conn().await;
+        let mut b = conn().await;
         let (a_addr, b_addr) = (a.local_addr(), b.local_addr());
         let nowhere = addr("127.0.0.1:59999");
 
@@ -3048,8 +3038,8 @@ mod tests {
     async fn when_a_nat_lets_the_peer_in_only_after_we_sent_to_it_both_connect_however_late_either_probes(
     ) {
         for (outside_late, inside_late) in [(0, 0), (0, 150), (0, 400), (0, 900), (400, 0)] {
-            let mut outside = Connection::new("127.0.0.1:0").await.unwrap();
-            let mut inside = Connection::new("127.0.0.1:0").await.unwrap();
+            let mut outside = conn().await;
+            let mut inside = conn().await;
             let (seen_from_outside, seen_from_inside) =
                 address_restricted_nat(inside.local_addr(), outside.local_addr()).await;
             let outside_candidates = [addr("127.0.0.1:59999"), seen_from_outside];
@@ -3081,7 +3071,7 @@ mod tests {
     /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_a_peer_that_is_already_connected_gets_a_route_probe_it_replies_with_the_token() {
-        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn = conn().await;
         let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         conn.connect(peer.local_addr().unwrap()).await.unwrap();
 
@@ -3118,7 +3108,7 @@ mod tests {
             give_up_after: Duration::from_secs(30),
             check_interval: Duration::from_millis(25),
         };
-        let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn = conn().await;
         conn.set_reconnect_config(quick);
         let states = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = states.clone();
@@ -3151,10 +3141,11 @@ mod tests {
             give_up_after: Duration::from_secs(30),
             check_interval: Duration::from_millis(50),
         };
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn1 = conn().await;
         conn1.set_reconnect_config(quick);
-        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn2 = conn().await;
         conn2.set_reconnect_config(quick);
+        trust_each_other(&mut conn1, &mut conn2);
         let silent = addr("127.0.0.1:59999");
         // Nobody answers the probes yet, so the first candidate is taken.
         conn1
@@ -3210,8 +3201,9 @@ mod tests {
             give_up_after: Duration::from_secs(30),
             check_interval: Duration::from_millis(50),
         };
-        let mut a = Connection::new("127.0.0.1:0").await.unwrap();
-        let mut b = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut a = conn().await;
+        let mut b = conn().await;
+        trust_each_other(&mut a, &mut b);
         a.set_reconnect_config(config);
         b.set_reconnect_config(config);
         let one_way = Duration::from_millis(65);
@@ -3241,7 +3233,7 @@ mod tests {
         use crate::network::SEAL_OVERHEAD;
         use crate::protocol::MAX_PAYLOAD_SIZE;
 
-        let mut sender = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut sender = conn().await;
         sender
             .set_audio_encoding(AudioEncodingConfig {
                 codec_type: CodecType::Pcm,
@@ -3252,7 +3244,8 @@ mod tests {
                 fec_group_size: None,
             })
             .unwrap();
-        let mut receiver = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut receiver = conn().await;
+        trust_each_other(&mut sender, &mut receiver);
         let heard = Arc::new(std::sync::Mutex::new(Vec::<(u32, usize, u32)>::new()));
         let record = heard.clone();
         receiver.set_audio_callback(move |sequence, payload, timestamp| {
@@ -3302,8 +3295,9 @@ mod tests {
     /// Verifies: REQ-TEL-015
     #[tokio::test]
     async fn when_audio_arrives_the_link_facts_have_a_first_audio_time() {
-        let mut conn1 = Connection::new("127.0.0.1:0").await.unwrap();
-        let mut conn2 = Connection::new("127.0.0.1:0").await.unwrap();
+        let mut conn1 = conn().await;
+        let mut conn2 = conn().await;
+        trust_each_other(&mut conn1, &mut conn2);
         conn1.connect(conn2.local_addr()).await.unwrap();
         conn2.connect(conn1.local_addr()).await.unwrap();
         assert_eq!(conn1.link_facts().snapshot().first_audio_ms, None);

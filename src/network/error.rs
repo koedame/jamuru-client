@@ -65,6 +65,11 @@ pub enum NetworkError {
     #[error("Key exchange failed: {0}")]
     KeyExchangeFailed(String),
 
+    /// The peer gave the server no key to check its key exchange by, or one that is not a key:
+    /// its app is too old to be connected to
+    #[error("The peer's app is too old to connect to: it gave no key to check it by")]
+    PeerKeyMissing,
+
     #[error("No connection candidates available")]
     NoCandidates,
 
