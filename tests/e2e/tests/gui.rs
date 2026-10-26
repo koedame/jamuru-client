@@ -754,10 +754,8 @@ impl Drop for PlayingPeer {
 fn in_a_room_with_two_peers_the_app_hears_both_and_sends_its_audio_to_both() {
     let _guard = exclusive();
     let (quiet, loud) = (common::Peer::bind(), common::Peer::bind());
-    let server = FakeSignaling::start_with_residents_at(&[
-        ("quiet", quiet.local_addr()),
-        ("loud", loud.local_addr()),
-    ]);
+    let server =
+        FakeSignaling::start_with_residents_at(&[quiet.resident("quiet"), loud.resident("loud")]);
     // A sine at 0.2 reads 14 on the meters (RMS) and one at 0.6 reads 42.
     // Played together they read 45: the two pitches do not cancel each other,
     // whatever the moment each started.
@@ -873,7 +871,7 @@ fn in_a_room_with_two_peers_the_app_hears_both_and_sends_its_audio_to_both() {
 fn a_room_entered_by_a_link_is_entered_muted_and_sends_no_audio_until_unmuted() {
     let _guard = exclusive();
     let peer = common::Peer::bind();
-    let server = FakeSignaling::start_with_residents_at(&[("friend", peer.local_addr())]);
+    let server = FakeSignaling::start_with_residents_at(&[peer.resident("friend")]);
     let peer = PlayingPeer::start(peer, 750.0, 0.2);
 
     let app = App::launch_with_server_url(server.url()).expect("the app should launch");
@@ -971,10 +969,10 @@ fn how_many_peers_the_app_takes() {
     for count in counts {
         let names: Vec<String> = (1..=count).map(|i| format!("p{i}")).collect();
         let sockets: Vec<common::Peer> = names.iter().map(|_| common::Peer::bind()).collect();
-        let residents: Vec<(&str, std::net::SocketAddr)> = names
+        let residents: Vec<(&str, std::net::SocketAddr, String)> = names
             .iter()
             .zip(&sockets)
-            .map(|(name, peer)| (name.as_str(), peer.local_addr()))
+            .map(|(name, peer)| peer.resident(name))
             .collect();
         let server = FakeSignaling::start_with_residents_at(&residents);
         let _peers: Vec<PlayingPeer> = sockets
@@ -1122,7 +1120,7 @@ fn in_a_room_with_a_peer_the_apps_console_output_holds_no_ip_address() {
     let _guard = exclusive();
     let peer = common::Peer::bind();
     let peer_addr = peer.local_addr();
-    let server = FakeSignaling::start_with_resident_at("echo", peer_addr);
+    let server = FakeSignaling::start_with_resident_at("echo", peer_addr, peer.link_key());
     let _peer = AnsweringPeer::start(peer);
 
     let app = App::launch_with_server_url(server.url()).expect("the app should launch");

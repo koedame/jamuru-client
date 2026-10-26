@@ -7,7 +7,7 @@ sidebar_position: 67
 
 ## Status
 
-Accepted
+Accepted。「相手の鍵が渡されていない接続は署名の無い鍵交換で繋ぐ」は [ADR-090](./ADR-090-refuse-peers-that-cannot-be-checked.md) で取り消した（繋がない）。
 
 ## Context
 

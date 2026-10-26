@@ -41,7 +41,6 @@ function link(
           packets_sent: 0,
           packets_received: measured.packets ?? 10,
           encryption: "encrypted",
-          peer_checked: true,
           bytes_sent: 0,
           bytes_received: 0,
         }

@@ -7,7 +7,7 @@ sidebar_position: 69
 
 ## Status
 
-Accepted
+Accepted。「署名の無い鍵交換には署名の無い鍵交換で答える」は [ADR-090](./ADR-090-refuse-peers-that-cannot-be-checked.md) で取り消した（答えない）。
 
 ## Context
 

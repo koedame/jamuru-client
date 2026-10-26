@@ -152,6 +152,7 @@ async fn test_short_outage_recovers_without_asking_the_user() {
     let mut conn = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");
+    common::trust_each_other(&mut conn, &mut peer);
     let conn_addr = conn.local_addr();
 
     // Scaled down together: loss is declared after three keep-alives, so an idle
@@ -229,6 +230,7 @@ async fn test_long_outage_hands_the_decision_to_the_user() {
     let mut conn = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");
+    common::trust_unseen_peer(&mut conn);
     conn.set_reconnect_config(ReconnectConfig {
         keep_alive_interval: Duration::from_millis(50),
         detect_after: Duration::from_millis(100),
@@ -351,6 +353,7 @@ async fn two_connections_over_a_cuttable_relay() -> (
         heard_for_callback.lock().unwrap().push(sequence);
     });
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender");
+    common::trust_each_other(&mut sender, &mut listener);
     sender.set_audio_encoding(encoding()).expect("encoding");
     sender.set_reconnect_config(config);
 
@@ -492,6 +495,7 @@ async fn test_packet_loss_is_measured_not_assumed() {
     let mut sender = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create sender");
+    common::trust_each_other(&mut sender, &mut receiver);
     receiver
         .connect(sender.local_addr())
         .await
@@ -570,6 +574,7 @@ async fn fec_groups_line_up_with_audio_sequences_across_control_packets() {
     let peer = common::Peer::bind();
 
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
+    common::trust_peer(&mut sender, &peer);
     sender
         .set_audio_encoding(AudioEncodingConfig {
             codec_type: CodecType::Pcm,
@@ -715,11 +720,12 @@ async fn send_frames_through_a_relay_that_drops_one(
         }
     });
 
+    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender");
+    common::trust_each_other(&mut sender, &mut receiver);
     receiver
         .connect(relay_addr)
         .await
         .expect("receiver starts its loop");
-    let mut sender = Connection::new("127.0.0.1:0").await.expect("sender");
     sender
         .set_audio_encoding(encoding())
         .expect("sender encoding");
@@ -790,6 +796,7 @@ async fn when_a_peer_publishes_many_candidates_only_the_first_ones_are_sent_to()
     let mut conn = Connection::new("127.0.0.1:0")
         .await
         .expect("Failed to create connection");
+    common::trust_unseen_peer(&mut conn);
 
     conn.connect_with_candidates(&candidates).await.unwrap();
 

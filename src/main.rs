@@ -1471,7 +1471,7 @@ impl AudioSession {
             .send(Command::Link(Box::new(LinkTarget {
                 peer,
                 candidates,
-                link: Some((self.identity.clone(), link_key)),
+                link: (self.identity.clone(), link_key),
             })))
             .map_err(|_| anyhow::anyhow!("the audio session has ended"))
     }
