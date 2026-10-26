@@ -2,7 +2,7 @@
 //!
 //! Handles room creation, peer discovery, and connection coordination.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
@@ -33,6 +33,11 @@ pub(super) fn signed_device_headers(identity: &DeviceIdentity) -> [(&'static str
 
 /// Maximum peers per room
 pub const MAX_PEERS_PER_ROOM: usize = 16;
+
+/// The most addresses of one peer that the app sends to. The signaling server keeps a
+/// peer to this many too, but the app does not rely on that: every address is probed,
+/// then sent keep-alives for as long as the peer is silent.
+pub const MAX_PEER_CANDIDATES: usize = 32;
 
 /// The feature an app announces when it creates or joins a room to say it
 /// takes [`SignalingMessage::PeerMessage`]s (ADR-043). The server relays peer
@@ -159,13 +164,38 @@ impl PeerInfo {
             }
         }
 
+        usable_candidates(addrs)
+    }
+}
+
+/// Whether the app may send to an address a peer published: one host and a port.
+/// Loopback and private addresses are allowed, since a peer on the same machine or
+/// LAN publishes exactly those.
+fn is_sendable_candidate(addr: SocketAddr) -> bool {
+    // An IPv4-mapped IPv6 address (`::ffff:224.0.0.1`) is sent to as the IPv4 one
+    let ip = addr.ip().to_canonical();
+    addr.port() != 0
         // The app publishes its bind address (`0.0.0.0:port`) as `local_addr`.
         // That names no host: macOS refuses the send (EHOSTUNREACH) and Linux
         // delivers it to ourselves.
-        addrs.retain(|addr| !addr.ip().is_unspecified());
+        && !ip.is_unspecified()
+        && !ip.is_multicast()
+        && ip != IpAddr::V4(Ipv4Addr::BROADCAST)
+}
 
-        addrs
+/// The addresses of a peer to send to, in the order given: those that name one host,
+/// each once, and no more than [`MAX_PEER_CANDIDATES`] of them
+pub(super) fn usable_candidates(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let mut usable: Vec<SocketAddr> = Vec::with_capacity(addrs.len().min(MAX_PEER_CANDIDATES));
+    for addr in addrs {
+        if usable.len() == MAX_PEER_CANDIDATES {
+            break;
+        }
+        if is_sendable_candidate(addr) && !usable.contains(&addr) {
+            usable.push(addr);
+        }
     }
+    usable
 }
 
 /// Room information
@@ -1482,6 +1512,92 @@ mod tests {
             peer.get_sorted_candidates()[0].ip().to_string(),
             "192.168.1.20"
         );
+    }
+
+    fn peer_with(addrs: &[&str]) -> PeerInfo {
+        PeerInfo {
+            link_key: None,
+            id: Uuid::nil(),
+            name: "peer".into(),
+            candidates: addrs
+                .iter()
+                .map(|a| AddressCandidate::host(a.parse().unwrap()))
+                .collect(),
+            public_addr: None,
+            local_addr: None,
+            joined_at: 0,
+            features: Vec::new(),
+        }
+    }
+
+    /// Verifies: REQ-CON-144
+    #[test]
+    fn when_a_candidate_names_no_one_host_and_port_it_is_not_a_destination() {
+        let peer = peer_with(&[
+            "192.168.1.20:0",
+            "224.0.0.251:5353",
+            "[ff02::fb]:5353",
+            "[::ffff:224.0.0.251]:5353",
+            "255.255.255.255:5000",
+            "0.0.0.0:5000",
+            "[::]:5000",
+            "203.0.113.9:5000",
+        ]);
+
+        assert_eq!(
+            peer.get_sorted_candidates(),
+            ["203.0.113.9:5000".parse::<SocketAddr>().unwrap()]
+        );
+    }
+
+    /// Verifies: REQ-CON-144
+    #[test]
+    fn when_a_candidate_is_on_this_machine_or_a_private_network_it_stays_a_destination() {
+        let peer = peer_with(&[
+            "127.0.0.1:5000",
+            "192.168.1.20:5000",
+            "10.0.0.2:5000",
+            "169.254.1.2:5000",
+            "[::1]:5000",
+            "[fe80::1]:5000",
+            "100.64.0.2:5000",
+        ]);
+
+        assert_eq!(peer.get_sorted_candidates().len(), 7);
+    }
+
+    /// Verifies: REQ-CON-144
+    #[test]
+    fn when_a_peer_publishes_many_candidates_the_best_ones_are_kept_up_to_the_limit() {
+        let addrs: Vec<String> = (0..250)
+            .map(|i| format!("192.168.1.20:{}", 5000 + i))
+            .collect();
+        let addrs: Vec<&str> = addrs.iter().map(String::as_str).collect();
+        let mut peer = peer_with(&addrs);
+        let best = AddressCandidate::server_reflexive("203.0.113.9:1".parse().unwrap());
+        peer.candidates.push(AddressCandidate {
+            priority: u32::MAX,
+            ..best
+        });
+        peer.public_addr = Some("203.0.113.10:1".parse().unwrap());
+
+        let sorted = peer.get_sorted_candidates();
+
+        assert_eq!(sorted.len(), MAX_PEER_CANDIDATES);
+        assert_eq!(sorted[0], "203.0.113.9:1".parse::<SocketAddr>().unwrap());
+        assert!(!sorted.contains(&"203.0.113.10:1".parse().unwrap()));
+    }
+
+    /// Verifies: REQ-CON-144
+    #[test]
+    fn when_a_candidate_is_published_twice_it_is_a_destination_once() {
+        let peer = peer_with(&[
+            "192.168.1.20:5000",
+            "192.168.1.20:5000",
+            "192.168.1.21:5000",
+        ]);
+
+        assert_eq!(peer.get_sorted_candidates().len(), 2);
     }
 
     #[test]
