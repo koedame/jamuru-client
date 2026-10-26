@@ -709,6 +709,15 @@ mod tests {
         let mut theirs = jamjam::network::Connection::new("127.0.0.1:0")
             .await
             .unwrap();
+        let (ours_key, theirs_key) = (
+            jamjam::network::LinkIdentity::generate(),
+            jamjam::network::LinkIdentity::generate(),
+        );
+        ours.verify_peer(&ours_key, &theirs_key.public_key())
+            .unwrap();
+        theirs
+            .verify_peer(&theirs_key, &ours_key.public_key())
+            .unwrap();
         ours.connect(theirs.local_addr()).await.unwrap();
         theirs.connect(ours.local_addr()).await.unwrap();
         // Audio goes once the two have agreed keys, so keep sending until one arrives.

@@ -761,7 +761,8 @@ fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
     const HOLD_MS: u64 = 200;
     let echo_peer = common::Peer::bind();
     let address = echo_peer.local_addr().to_string();
-    let server = FakeSignaling::start_with_resident_at("echo", echo_peer.local_addr());
+    let server =
+        FakeSignaling::start_with_resident_at("echo", echo_peer.local_addr(), echo_peer.link_key());
     let _echo = EchoPeer::start(echo_peer, Duration::from_millis(HOLD_MS));
 
     let home = tempfile::tempdir().expect("temp HOME");

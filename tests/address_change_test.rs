@@ -3,6 +3,8 @@
 //!
 //! The two ends are joined by a relay standing in for the NAT.
 
+mod common;
+
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -86,6 +88,7 @@ const CONFIG: ReconnectConfig = ReconnectConfig {
 async fn connected_pair() -> (Connection, Connection, Nat) {
     let mut a = Connection::new("127.0.0.1:0").await.unwrap();
     let mut b = Connection::new("127.0.0.1:0").await.unwrap();
+    common::trust_each_other(&mut a, &mut b);
     a.set_reconnect_config(CONFIG);
     b.set_reconnect_config(CONFIG);
     let n = nat(a.local_addr(), b.local_addr()).await;

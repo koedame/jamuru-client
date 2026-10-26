@@ -5,6 +5,8 @@
 //! in docs-spec/requirements.md and docs-spec/behavior/latency.feature; see
 //! ADR-018 for how the `Verifies:` annotations are enforced.
 
+mod common;
+
 use jamjam::audio::{
     AudioPreset, PcmPlc, PlayoutBuffer, PlayoutConfig, PlayoutResult, BUDGET_SAMPLE_RATE,
 };
@@ -492,6 +494,7 @@ async fn fec_recovers_a_dropped_frame_over_the_transport() {
 
     // Sender: same encoding, pointed at the receiver.
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
+    common::trust_each_other(&mut sender, &mut receiver);
     sender
         .set_audio_encoding(encoding)
         .expect("sender encoding");
@@ -653,6 +656,7 @@ async fn fec_recovers_a_dropped_frame_when_the_fec_packet_arrives_before_the_las
     });
 
     let mut sender = Connection::new("127.0.0.1:0").await.expect("sender socket");
+    common::trust_each_other(&mut sender, &mut receiver);
     sender
         .set_audio_encoding(encoding)
         .expect("sender encoding");

@@ -30,16 +30,6 @@ fn percentile(sorted: &[u128], p: f64) -> u128 {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "a measurement, run by hand"]
 async fn how_long_audio_takes_from_send_to_callback_over_loopback() {
-    measure(false).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "a measurement, run by hand"]
-async fn how_long_audio_takes_from_send_to_callback_over_loopback_with_the_peer_checked() {
-    measure(true).await;
-}
-
-async fn measure(check_peer: bool) {
     let encoding = || AudioEncodingConfig {
         channels: 2,
         frame_size: FRAME as u32,
@@ -56,15 +46,9 @@ async fn measure(check_peer: bool) {
     receiver.set_audio_callback(move |sequence, _, _| {
         sink.lock().unwrap().push((sequence, Instant::now()));
     });
-    if check_peer {
-        let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
-        sender
-            .verify_peer(&ours, Some(&theirs.public_key()))
-            .unwrap();
-        receiver
-            .verify_peer(&theirs, Some(&ours.public_key()))
-            .unwrap();
-    }
+    let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
+    sender.verify_peer(&ours, &theirs.public_key()).unwrap();
+    receiver.verify_peer(&theirs, &ours.public_key()).unwrap();
     let connecting = Instant::now();
     sender.connect(receiver.local_addr()).await.unwrap();
     receiver.connect(sender.local_addr()).await.unwrap();
@@ -83,7 +67,7 @@ async fn measure(check_peer: bool) {
         );
     }
     println!(
-        "connect -> first audio at the callback, peer checked: {check_peer}: {} ms",
+        "connect -> first audio at the callback: {} ms",
         connecting.elapsed().as_millis()
     );
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -114,7 +98,7 @@ async fn measure(check_peer: bool) {
     micros.sort_unstable();
     let lost = PACKETS - micros.len().min(PACKETS);
     println!(
-        "send -> callback over loopback, peer checked: {check_peer}, {} packets of {} bytes, \
+        "send -> callback over loopback, {} packets of {} bytes, \
          {} lost: p50 {} us, p95 {} us, p99 {} us, max {} us",
         micros.len(),
         FRAME * 2 * 4,
@@ -134,9 +118,11 @@ fn how_long_sealing_and_opening_one_packet_takes() {
     use jamjam::network::{Opened, SecureLink};
     use jamjam::protocol::Packet;
 
-    let (a, b) = (SecureLink::new(), SecureLink::new());
-    let _ = a.open(b.key_exchange_packet());
-    let _ = b.open(a.key_exchange_packet());
+    let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
+    let a = SecureLink::for_peer(&ia, &ib.public_key()).unwrap();
+    let b = SecureLink::for_peer(&ib, &ia.public_key()).unwrap();
+    let _ = a.open(b.key_exchange_packet().unwrap());
+    let _ = b.open(a.key_exchange_packet().unwrap());
     // Each shows the other it has the keys, which is when audio may go
     let hello_from_a = a.seal(Packet::keep_alive(0)).expect("a keep-alive goes");
     let hello_from_b = b.seal(Packet::keep_alive(0)).expect("a keep-alive goes");

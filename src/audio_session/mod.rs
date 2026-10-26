@@ -32,6 +32,10 @@ use crate::network::LinkIdentity;
 
 pub use shared::{BandwidthSnapshot, Flights, LinkReport, LinkReports, Shared, MAX_LINKS};
 
+/// The `connection_error` of a link that was not made because the peer gave the server no key to
+/// check its key exchange by: its app is too old. A code for the screen to recognise, not text.
+pub const PEER_APP_TOO_OLD: &str = "peer_app_too_old";
+
 /// A participant to open an audio link to
 #[derive(Debug, Clone)]
 pub struct LinkTarget {
@@ -41,19 +45,14 @@ pub struct LinkTarget {
     /// (REQ-CON-113).
     pub candidates: Vec<SocketAddr>,
     /// Our key in the room and the key the server gave for them: with them
-    /// the link is checked to be theirs (`Connection::verify_peer`). `None`
-    /// for a peer reached without a room.
-    pub link: Option<(LinkIdentity, Option<String>)>,
+    /// the link is checked to be theirs (`Connection::verify_peer`). A peer
+    /// the server gave no key for is not linked to.
+    pub link: (LinkIdentity, Option<String>),
 }
 
 impl PartialEq for LinkTarget {
     fn eq(&self, other: &Self) -> bool {
-        let keys = |target: &Self| {
-            target
-                .link
-                .as_ref()
-                .map(|(ours, theirs)| (ours.public_key(), theirs.clone()))
-        };
+        let keys = |target: &Self| (target.link.0.public_key(), target.link.1.clone());
         self.peer == other.peer && self.candidates == other.candidates && keys(self) == keys(other)
     }
 }

@@ -108,13 +108,13 @@ async fn connect(
 /// 相手との鍵交換を、サーバーが渡した相手の鍵で署名されたものだけにする
 ///
 /// - ours: 入室のときに作った鍵（`LinkIdentity::generate()`。公開鍵は `link_key` としてサーバーに知らせてある）
-/// - peer_key: そのピアの `PeerInfo::link_key`。無い（古い版）・鍵として読めないときは確かめず、
-///   署名の無い鍵交換で暗号化する（`checks_peer()` が `false`）
+/// - peer_key: そのピアの `PeerInfo::link_key`。無い（古い版）・鍵として読めないときは
+///   `PeerKeyMissing` で断る。署名の無い鍵交換で繋ぐ経路は無い（ADR-090）
 ///
-/// 接続したあとは呼べない（`AlreadyConnected`）。呼ばなければ、確かめない接続になる
-fn verify_peer(&mut self, ours: &LinkIdentity, peer_key: Option<&str>) -> Result<(), NetworkError>;
+/// 接続したあとは呼べない（`AlreadyConnected`）。呼ばずに `connect` すると `PeerKeyMissing`
+fn verify_peer(&mut self, ours: &LinkIdentity, peer_key: &str) -> Result<(), NetworkError>;
 
-/// 鍵が相手の鍵に結び付いているか
+/// 相手の鍵を知っているか（`verify_peer` を済ませたか）
 fn checks_peer(&self) -> bool;
 ```
 
@@ -463,14 +463,9 @@ struct ConnectionStats {
     packets_received: u64,
     /// 接続時間（秒）
     uptime_seconds: u64,
-    /// 音声が暗号化されているか。`Negotiating`（鍵を合わせている最中）/ `Encrypted` /
-    /// `Unencrypted`（相手のアプリが暗号化に対応していない。ADR-064）
+    /// 音声が暗号化されているか。`Negotiating`（鍵を合わせている最中）/ `Encrypted`。
+    /// 相手が本人かは、鍵交換の署名で必ず確かめる（ADR-067・ADR-090）
     security: LinkSecurity,
-    /// 鍵が、シグナリングのサーバーが渡した相手の鍵に結び付いているか（ADR-067）。
-    /// `false` は、相手のアプリが鍵を知らせない古い版のとき:
-    /// 暗号化はされるが、相手が本人かは確かめていない（echo と音質チェックのボットは鍵を知らせ、
-    /// 確かめる。ADR-069）
-    peer_checked: bool,
     /// 偽造・再送・状態に合わないものとして受け付けなかったパケット数
     packets_refused: u64,
 }

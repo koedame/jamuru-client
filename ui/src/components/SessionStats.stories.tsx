@@ -38,7 +38,6 @@ const goodNetworkStats: NetworkStats = {
   packets_sent: 54000,
   packets_received: 53950,
   encryption: 'encrypted',
-  peer_checked: true,
   bytes_sent: 12582912,
   bytes_received: 12345678,
 };
