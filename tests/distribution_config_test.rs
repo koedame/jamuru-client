@@ -580,6 +580,70 @@ fn the_release_build_makes_signed_update_bundles() {
     );
 }
 
+/// The jobs of `release.yml` as (name, text), in file order.
+fn release_jobs() -> Vec<(String, String)> {
+    let workflow =
+        std::fs::read_to_string(repo_file(".github/workflows/release.yml")).expect("release.yml");
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    let mut in_jobs = false;
+    for line in workflow.lines() {
+        if line == "jobs:" {
+            in_jobs = true;
+        } else if in_jobs {
+            if let Some(name) = line
+                .strip_prefix("  ")
+                .and_then(|l| l.strip_suffix(':'))
+                .filter(|n| !n.is_empty() && !n.starts_with([' ', '#']))
+            {
+                jobs.push((name.to_string(), String::new()));
+            } else if let Some((_, text)) = jobs.last_mut() {
+                text.push_str(line);
+                text.push('\n');
+            }
+        }
+    }
+    jobs
+}
+
+/// Verifies: REQ-DIST-009
+#[test]
+fn a_job_that_reads_a_signing_or_publishing_credential_names_its_environment() {
+    let credentials = [
+        ("secrets.APPLE_CERTIFICATE", "desktop-signing"),
+        ("secrets.APPLE_CERTIFICATE_PASSWORD", "desktop-signing"),
+        ("secrets.TAURI_SIGNING_PRIVATE_KEY", "desktop-signing"),
+        (
+            "secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+            "desktop-signing",
+        ),
+        ("secrets.TAP_GITHUB_TOKEN", "tap-publish"),
+    ];
+    let jobs = release_jobs();
+    assert!(jobs.len() >= 5, "found no jobs in release.yml: {:?}", jobs);
+    for (credential, environment) in credentials {
+        let readers: Vec<_> = jobs
+            .iter()
+            .filter(|(_, text)| text.contains(&format!("{} }}}}", credential)))
+            .collect();
+        assert!(!readers.is_empty(), "no job reads {}", credential);
+        for (name, text) in readers {
+            let named: Vec<_> = text
+                .lines()
+                .filter_map(|l| l.strip_prefix("    environment:"))
+                .map(str::trim)
+                .collect();
+            assert_eq!(
+                named,
+                [environment],
+                "job `{}` reads {} but does not name exactly the `{}` environment",
+                name,
+                credential,
+                environment
+            );
+        }
+    }
+}
+
 fn repo_file(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
 }

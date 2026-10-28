@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 321 |
-| うち must | 301 |
+| 要求 総数 | 322 |
+| うち must | 302 |
 | うち should | 20 |
-| 検証済み | 295 |
+| 検証済み | 296 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 3 |
 
@@ -138,6 +138,7 @@
 | REQ-DIST-006 | must | webview に渡す Tauri の権限は、UI が実際に呼ぶプラグインのコマンド（イベントの購読と解除、起動時の招待リンクの取得）だけに限る。リモートのページには IPC を開かない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::no_remote_page_is_given_ipc_access<br/>`tests/distribution_config_test.rs`::the_webview_is_granted_only_the_plugin_commands_the_ui_calls |
 | REQ-DIST-007 | must | インストーラーに同梱する第三者ライセンスの表示（`src-tauri/resources/LICENSES.txt`。リポジトリの `THIRD_PARTY_LICENSES.md` も同じもの）は、アプリが実際に使う Rust のクレート（全機能・リリース対象の全プラットフォーム）と UI の npm パッケージのロックファイルから生成し、各依存の著作権表示とライセンス本文を含む。MPL-2.0 の依存にはソースの入手先を添える。依存を足す・上げる・消すのにこの表示を作り直さなければ、`cargo test` と CI が落ちる。許可するライセンスは `deny.toml` の一覧だけで、GPL・AGPL・LGPL 単独・ライセンス不明の依存が入れば CI が止める | `docs-spec/requirements.md` | `tests/third_party_licenses_test.rs`::every_mpl_licensed_crate_comes_with_where_its_source_is<br/>`tests/third_party_licenses_test.rs`::the_installers_bundle_the_generated_notices<br/>`tests/third_party_licenses_test.rs`::the_notices_are_the_ones_the_current_lock_files_produce |
 | REQ-DIST-008 | must | Linux の AppImage に同梱するシステムのライブラリ（GTK・WebKitGTK・GLib など。LGPL が多い）は、ビルドした AppImage そのものから、どのパッケージのどの版かを引き、パッケージごとの著作権ファイル・それが参照するライセンス本文・ソースの入手先を書いた表示を作って、同じリリースに添える。パッケージに引けないライブラリがあればリリースを止める | `docs-spec/requirements.md` | `tests/appimage_bundled_libraries_test.rs`::when_a_library_belongs_to_two_packages_both_are_named<br/>`tests/appimage_bundled_libraries_test.rs`::when_a_library_matches_no_package_the_script_fails_and_the_notice_says_so<br/>`tests/appimage_bundled_libraries_test.rs`::when_every_library_belongs_to_a_package_the_notice_names_each_with_its_copyright_and_source |
+| REQ-DIST-009 | must | 署名の証明書・鍵と、Homebrew の tap に書き込むトークンは、environment のシークレットに置く。読むジョブは、その environment を 1 つだけ名指しする（署名は `desktop-signing`、tap の更新は `tap-publish`）。environment は決めたブランチ（`develop` と `main`。tap は `main` だけ）とリリースのタグ（`v*`）にしか開かない | `docs-spec/requirements.md` | `tests/distribution_config_test.rs`::a_job_that_reads_a_signing_or_publishing_credential_names_its_environment |
 | REQ-GUI-001 | must | 起動すると接続画面が表示され、会員登録・サインインの UI が存在しない | `docs-spec/requirements.md` | `tests/e2e/tests/gui.rs`::launching_the_app_shows_the_connection_screen<br/>`tests/e2e/tests/gui.rs`::the_connection_screen_reports_a_defined_state<br/>`tests/e2e/tests/gui.rs`::the_first_screen_asks_for_no_account |
 | REQ-GUI-002 | must | 端末識別子が利用者の見える場所に表示されない | `docs-spec/requirements.md` | `tests/e2e/tests/gui.rs`::the_device_identifier_is_never_shown_to_the_user<br/>`tests/e2e/tests/gui.rs`::the_settings_window_does_not_show_the_device_identifier |
 | REQ-GUI-003 | must | E2E 制御チャネルの `e2e-control` feature が既定で無効である | `docs-spec/requirements.md` | `tests/release_build_guard_test.rs`::e2e_control_is_not_a_default_feature<br/>`tests/release_build_guard_test.rs`::the_guard_actually_reads_the_default_feature_list |
