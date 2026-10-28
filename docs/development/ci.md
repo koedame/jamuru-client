@@ -93,6 +93,8 @@ main・develop ブランチへの push またはタグ作成時に実行され�
 
 正式版のタグでは、ビルドの前に `scripts/check-terms-for-release.sh` が、規約（`docs/terms.md`）に制定日の「○月○日」が残っていないことと、アプリが開くページ（プライバシーとお知らせ）・規約が指す LICENSE が公開された先で開けること（200）を確かめます。ベータ版のタグでは確かめません。手元でも同じコマンドで確かめられます。
 
+署名の証明書・鍵は GitHub の environment `desktop-signing`、tap へ書き込むトークンは `tap-publish` のシークレットに置き、`develop`・`main` とリリースのタグ（`v*`）の実行にだけ渡します（[ADR-091](../../docs-spec/adr/ADR-091-release-credentials-in-environments.md)）。ほかのブランチからの手動起動は署名の environment に入れないので、予行演習は develop で行います。
+
 ベータ版のタグは、動作を確かめたいコミットに開発者が打ちます。同じ X.Y.Z のベータ版では、それまでの最大の N に 1 を足します。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ベータ版のアプリは `X.Y.Z-N`（`vX.Y.Z-beta.N` の N）の版としてビルドされ、更新情報は固定タグの Release `beta-channel` の `latest.json` から読みます。ベータ版・正式版のどちらのリリースでも、より新しければその `latest.json` に置き換えます（[ADR-045](../../docs-spec/adr/ADR-045-beta-self-update.md)）。ブランチの使い分けとリリースの手順は [ADR-047](../../docs-spec/adr/ADR-047-git-flow-branching.md) にあります。
 
 ## ローカルでのCI実行
