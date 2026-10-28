@@ -1369,7 +1369,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "windows",
- "windows-core 0.62.2",
+ "windows-core 0.100.0",
  "x25519-dalek",
  "zbus",
 ]
