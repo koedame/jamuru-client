@@ -90,6 +90,7 @@
 | [ADR-088](./adr/ADR-088-wasapi-exclusive-and-low-latency-modes.md) | Windows の WASAPI のデバイスを、排他モードと低遅延の共有モードでも開けるようにし、設定で選ばせる |
 | [ADR-089](./adr/ADR-089-update-before-opening-and-keep-the-previous-version.md) | 起動したら本体を開く前に更新し、入れる前の版を写して残す。入れた版が起動しなければ見届け役が前の版に戻す。リリースは各 OS で更新の訓練が通るまで公開しない |
 | [ADR-090](./adr/ADR-090-refuse-peers-that-cannot-be-checked.md) | 相手を確かめられない接続を無くす。署名の無い鍵交換と平文への降格を廃止し、鍵を知らせない古い版のアプリとは繋がない |
+| [ADR-091](./adr/ADR-091-release-credentials-in-environments.md) | 署名の証明書・鍵と tap のトークンは environment のシークレットに置き、それを読むジョブは environment を 1 つだけ名指しする。environment は develop・main とリリースのタグにしか開かない |
 
 ---
 
