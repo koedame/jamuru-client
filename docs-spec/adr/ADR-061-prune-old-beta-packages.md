@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-092](./ADR-092-keep-only-the-newest-release-per-channel.md)
 
 ## Context
 

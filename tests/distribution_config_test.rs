@@ -644,6 +644,34 @@ fn a_job_that_reads_a_signing_or_publishing_credential_names_its_environment() {
     }
 }
 
+/// Deleting a release cannot be undone, so it waits for the new release to
+/// reach the people who install it, and never happens in a rehearsal.
+///
+/// Verifies: REQ-UPD-020
+#[test]
+fn the_job_that_deletes_old_releases_waits_for_the_publishing_and_skips_a_rehearsal() {
+    let jobs = release_jobs();
+    let (_, text) = jobs
+        .iter()
+        .find(|(name, _)| name == "prune-old-releases")
+        .expect("release.yml has no prune-old-releases job");
+
+    let needs = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("needs:"))
+        .expect("the job names no needs");
+    for job in ["release", "update-beta-channel", "update-cask"] {
+        assert!(
+            needs.contains(job),
+            "the job deletes before `{job}` is done: needs:{needs}"
+        );
+    }
+    assert!(
+        text.contains("if: needs.prepare.outputs.tag != ''"),
+        "a rehearsal (no tag) must not delete releases"
+    );
+}
+
 fn repo_file(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
 }

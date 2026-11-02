@@ -436,24 +436,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/publish-beta-channel.sh latest.json
 
-  # Once a beta is out, a previous beta's install-only packages (dmg, msi,
-  # deb) serve no purpose but letting someone install an old build (REQ-UPD-020).
-  # What the updater and the beta-channel rollback (ADR-057) still need from a
-  # past beta - its app.tar.gz, AppImage, nsis setup.exe, their signatures,
-  # and latest.json - is left alone; see scripts/prune-beta-packages.sh.
-  prune-old-beta-packages:
-    name: Prune old beta packages
-    runs-on: ubuntu-latest
-    needs: [prepare, release]
-    if: contains(needs.prepare.outputs.tag, '-')
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Delete install-only packages of older betas
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/prune-beta-packages.sh "${{ needs.prepare.outputs.tag }}"
-
   update-cask:
     name: Update Homebrew Cask
     runs-on: ubuntu-latest
@@ -551,3 +533,24 @@ jobs:
           # `--allow-empty` keeps a re-run on the same tag idempotent.
           git commit --allow-empty -m "Update ${CASK_TOKEN} cask to ${TAG#v}"
           git push
+
+  # Only the newest release of a channel stays on the releases page: an older
+  # build may carry a flaw that someone who installs it would then have (the
+  # beta is not meant to be rolled back to; a bad build is replaced by a new
+  # beta). It waits for everything that hands the new release to people - the
+  # update channel and the Homebrew cask - so a failure there leaves the old
+  # release to fall back on. A rehearsal (no tag) deletes nothing. The git tags
+  # stay (REQ-UPD-020, ADR-092).
+  prune-old-releases:
+    name: Delete the older releases
+    runs-on: ubuntu-latest
+    needs: [prepare, release, update-beta-channel, update-cask]
+    if: needs.prepare.outputs.tag != ''
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Delete the releases older than this one
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: scripts/prune-old-releases.sh "${TAG}"

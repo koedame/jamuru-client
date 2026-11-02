@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted。[ADR-045](./ADR-045-beta-self-update.md) の 2 節が持つ「より新しい版のときだけ置き換える」制約は変えない。この ADR はその制約を、明示的な操作のときだけ迂回する手段を足す。
+Superseded by [ADR-092](./ADR-092-keep-only-the-newest-release-per-channel.md)
 
 ## Context
 

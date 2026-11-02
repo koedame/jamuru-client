@@ -97,6 +97,8 @@ main・develop ブランチへの push またはタグ作成時に実行され�
 
 ベータ版のタグは、動作を確かめたいコミットに開発者が打ちます。同じ X.Y.Z のベータ版では、それまでの最大の N に 1 を足します。正式版を使う人には届きません（[インストール](../getting-started/installation.md)）。ベータ版のアプリは `X.Y.Z-N`（`vX.Y.Z-beta.N` の N）の版としてビルドされ、更新情報は固定タグの Release `beta-channel` の `latest.json` から読みます。ベータ版・正式版のどちらのリリースでも、より新しければその `latest.json` に置き換えます（[ADR-045](../../docs-spec/adr/ADR-045-beta-self-update.md)）。ブランチの使い分けとリリースの手順は [ADR-047](../../docs-spec/adr/ADR-047-git-flow-branching.md) にあります。
 
+ベータのあいだ、GitHub の Releases にはチャンネル（ベータ・正式版）ごとに一番新しい release だけを残します。release を公開し、`beta-channel` と Homebrew の cask の更新が済むと、同じチャンネルの古い release が添付ファイルごと消えます（`scripts/prune-old-releases.sh`）。git のタグと `beta-channel` は消えません。予行演習では何も消えません。壊れた版を出したときは、過去の版へ戻さず、直した版を新しいベータとして出します（[ADR-092](../../docs-spec/adr/ADR-092-keep-only-the-newest-release-per-channel.md)）。
+
 ## ローカルでのCI実行
 
 ### 手動検証
