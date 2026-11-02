@@ -315,3 +315,19 @@ fn when_there_is_no_older_release_nothing_happens() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(releases.deleted().is_empty());
 }
+
+/// Without the manifest there is no telling what installed betas still fetch.
+///
+/// Verifies: REQ-UPD-020
+#[test]
+fn when_the_beta_channel_manifest_cannot_be_read_nothing_is_deleted() {
+    let releases = Releases::new();
+    releases.seed("v0.1.0-beta.1");
+    releases.seed("v0.1.0-beta.2");
+    releases.seed("beta-channel");
+
+    let output = releases.prune("v0.1.0-beta.2");
+
+    assert!(!output.status.success());
+    assert!(releases.deleted().is_empty());
+}

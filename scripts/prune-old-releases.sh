@@ -17,7 +17,8 @@
 #   drill builds "the release before" from it, and the servers are released
 #   under the same tag.
 # - A release whose assets the beta-channel manifest still points at is kept,
-#   because installed betas would fetch their update from it.
+#   because installed betas would fetch their update from it. If that manifest
+#   cannot be read, nothing is deleted.
 #
 # `GH` names the command that talks to GitHub (the tests give it a stand-in).
 set -euo pipefail
@@ -57,7 +58,17 @@ if [ -z "$older" ]; then
   exit 0
 fi
 
-channel_manifest=$("$gh" release download beta-channel -R "$repository" -p latest.json -O - 2>/dev/null || true)
+# Without the manifest there is no telling what the betas still fetch from, so
+# a channel that exists but cannot be read stops the deletion. No channel at
+# all (nothing has been published yet) leaves nothing to protect.
+channel_manifest=
+if "$gh" release view beta-channel -R "$repository" >/dev/null 2>&1; then
+  channel_manifest=$("$gh" release download beta-channel -R "$repository" -p latest.json -O - 2>/dev/null) || channel_manifest=
+  if [ -z "$channel_manifest" ]; then
+    echo "ERROR: cannot read latest.json of beta-channel; not deleting anything" >&2
+    exit 1
+  fi
+fi
 
 while IFS= read -r old_tag; do
   [ -n "$old_tag" ] || continue
