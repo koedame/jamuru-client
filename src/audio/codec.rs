@@ -233,7 +233,7 @@ pub fn decode_pcm24(data: &[u8], output: &mut [f32]) -> Result<usize, CodecError
     }
     for (slot, bytes) in output
         .iter_mut()
-        .zip(data.chunks_exact(PCM_BYTES_PER_SAMPLE))
+        .zip(data.as_chunks::<PCM_BYTES_PER_SAMPLE>().0)
     {
         // Put the three bytes at the top of an i32 and shift back down: the shift carries the sign
         let value = i32::from_le_bytes([0, bytes[0], bytes[1], bytes[2]]) >> 8;
@@ -508,7 +508,7 @@ mod tests {
         assert_eq!(encoded.len(), values.len() * PCM_BYTES_PER_SAMPLE);
         for (value, bytes) in values
             .iter()
-            .zip(encoded.chunks_exact(PCM_BYTES_PER_SAMPLE))
+            .zip(encoded.as_chunks::<PCM_BYTES_PER_SAMPLE>().0)
         {
             assert_eq!(&value.to_le_bytes()[..3], bytes, "{value} as bytes");
         }
