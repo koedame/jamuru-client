@@ -15,7 +15,7 @@ use tokio::sync::Notify;
 use tracing::{debug, error, trace};
 
 use super::error::NetworkError;
-use super::transport::{bind_std, UdpTransport, RECV_BUFFER_SIZE};
+use super::transport::{bind_std, canonical_addr, UdpTransport, RECV_BUFFER_SIZE};
 
 /// How many datagrams a lane holds for a reader that has fallen behind. Past that they are
 /// dropped, as a socket's own buffer does.
@@ -168,7 +168,7 @@ impl UdpMux {
                     }
                     Ok((len, from)) => {
                         let lanes = routing.lock().clone();
-                        deliver(&lanes, buf[..len].to_vec(), from);
+                        deliver(&lanes, buf[..len].to_vec(), canonical_addr(from));
                     }
                     Err(e) => error!("Receive error: {}", e),
                 }

@@ -10,6 +10,7 @@ use tokio::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use super::error::NetworkError;
+use super::transport::{destination_for, IpFamilies};
 
 /// STUN message types
 const BINDING_REQUEST: u16 = 0x0001;
@@ -38,6 +39,9 @@ pub const DEFAULT_STUN_SERVERS_V6: &[&str] = &[
     "stun1.l.google.com:19302",
     "stun.cloudflare.com:3478",
 ];
+
+/// How long the other IP family is waited for once one has answered
+const OTHER_FAMILY_GRACE: Duration = Duration::from_millis(1000);
 
 /// Result of a STUN binding request
 #[derive(Debug, Clone)]
@@ -102,60 +106,188 @@ impl StunClient {
         ))
     }
 
-    /// Send a binding request to a specific STUN server
+    /// Send a binding request to a specific STUN server, over IPv4 where the socket can
+    /// (a socket that is IPv6-only asks over IPv6)
     pub async fn binding_request(&self, server: &str) -> Result<StunResult, NetworkError> {
-        // A socket can only send to its own address family, and the first
-        // address DNS returns is often IPv6 even for an IPv4 socket.
-        let local_is_ipv4 = self
-            .socket
-            .local_addr()
-            .map_err(|e| NetworkError::StunFailed(format!("Local address unavailable: {}", e)))?
-            .is_ipv4();
-        let server_addr: SocketAddr = tokio::net::lookup_host(server)
-            .await
-            .map_err(|e| NetworkError::StunFailed(format!("DNS lookup failed: {}", e)))?
-            .find(|addr| addr.is_ipv4() == local_is_ipv4)
-            .ok_or_else(|| NetworkError::StunFailed("No address found".to_string()))?;
-
-        debug!("Sending STUN binding request to {}", server_addr);
-
-        // Build STUN binding request
-        let transaction_id: [u8; 12] = rand::random();
-        let request = build_binding_request(&transaction_id);
-
-        // Send request
-        self.socket
-            .send_to(&request, server_addr)
-            .await
-            .map_err(|e| NetworkError::StunFailed(format!("Send failed: {}", e)))?;
-
-        // Wait for the response. The socket is the audio socket, so anything
-        // else that reaches it in the meantime (a peer's keep-alive) is skipped
-        // rather than ending the query.
-        let deadline = Instant::now() + Duration::from_millis(self.timeout_ms);
-        let mut buf = [0u8; 576]; // Minimum STUN message size
-        let mapped_address = loop {
-            let (len, from) = tokio::time::timeout_at(deadline, self.socket.recv_from(&mut buf))
-                .await
-                .map_err(|_| NetworkError::StunFailed("Timeout".to_string()))?
-                .map_err(|e| NetworkError::StunFailed(format!("Receive failed: {}", e)))?;
-
-            match parse_binding_response(&buf[..len], &transaction_id) {
-                Ok(addr) => break addr,
-                Err(e) => debug!(
-                    "Ignoring datagram from {} while waiting for STUN: {}",
-                    from, e
-                ),
-            }
-        };
-
+        let families = IpFamilies::of_tokio(&self.socket);
+        let server_addr = resolve(server, families.v4).await?;
+        let mut answers = self.ask(&[(server_addr, rand::random())], None).await?;
+        let (_, mapped_address) = answers
+            .pop()
+            .ok_or_else(|| NetworkError::StunFailed("Timeout".to_string()))?;
         info!("STUN discovered public address: {}", mapped_address);
-
         Ok(StunResult {
             mapped_address,
             server: server.to_string(),
         })
     }
+
+    /// The public address of each IP family in `ask`, as the first of `servers` that answers
+    /// for that family reports it: at most one IPv4 and one IPv6 address.
+    ///
+    /// A dual-stack audio socket has a NAT mapping for IPv4 and none for IPv6 (an IPv6 host
+    /// is reached at its own address, though a firewall may only let through what it has
+    /// sent to first), so the two are asked together, from the one socket, in the same
+    /// round. An address that answers shortens the wait for the other to
+    /// [`OTHER_FAMILY_GRACE`]: a host with an IPv6 address but no IPv6 route must not hold up
+    /// entering a room. The families are never asked of a socket that cannot reach them.
+    pub async fn discover_public_addresses_from(
+        &self,
+        servers: &[&str],
+        ask: IpFamilies,
+    ) -> Vec<StunResult> {
+        let reach = IpFamilies::of_tokio(&self.socket);
+        let mut want_v4 = ask.v4 && reach.v4;
+        let mut want_v6 = ask.v6 && reach.v6;
+        let mut found: Vec<StunResult> = Vec::new();
+
+        for server in servers {
+            if !want_v4 && !want_v6 {
+                break;
+            }
+            let mut targets: Vec<(SocketAddr, [u8; 12])> = Vec::new();
+            let resolved = match tokio::net::lookup_host(server).await {
+                Ok(addrs) => addrs.collect::<Vec<_>>(),
+                Err(e) => {
+                    warn!(
+                        "STUN request to {} failed: DNS lookup failed: {}",
+                        server, e
+                    );
+                    continue;
+                }
+            };
+            if want_v4 {
+                targets.extend(
+                    resolved
+                        .iter()
+                        .find(|a| a.is_ipv4())
+                        .map(|a| (*a, rand::random())),
+                );
+            }
+            if want_v6 {
+                targets.extend(
+                    resolved
+                        .iter()
+                        .find(|a| a.is_ipv6())
+                        .map(|a| (*a, rand::random())),
+                );
+            }
+            let asked_v4 = targets.iter().any(|(a, _)| a.is_ipv4());
+            let asked_v6 = targets.iter().any(|(a, _)| a.is_ipv6());
+            if targets.is_empty() {
+                continue;
+            }
+            let answers = match self.ask(&targets, Some(OTHER_FAMILY_GRACE)).await {
+                Ok(answers) => answers,
+                Err(e) => {
+                    warn!("STUN request to {} failed: {}", server, e);
+                    continue;
+                }
+            };
+            for (target, mapped) in answers {
+                if target.is_ipv4() {
+                    want_v4 = false;
+                } else {
+                    want_v6 = false;
+                }
+                info!("STUN discovered public address: {}", mapped);
+                found.push(StunResult {
+                    mapped_address: mapped,
+                    server: server.to_string(),
+                });
+            }
+            // A round that found something has had its grace: a family that was asked and
+            // did not answer is not waited for through the other servers. One this server
+            // has no address for was not asked, and goes on to the next.
+            let unasked = (want_v4 && !asked_v4) || (want_v6 && !asked_v6);
+            if !found.is_empty() && !unasked {
+                break;
+            }
+        }
+        found
+    }
+
+    /// Sends one binding request to each of `targets` and collects the answers: the
+    /// address each target reports, until all have answered or the wait is over. With a
+    /// `grace`, the wait ends that long after the first answer.
+    ///
+    /// The socket is the audio socket, so anything else that reaches it in the meantime
+    /// (a peer's keep-alive) is skipped rather than ending the query.
+    async fn ask(
+        &self,
+        targets: &[(SocketAddr, [u8; 12])],
+        grace: Option<Duration>,
+    ) -> Result<Vec<(SocketAddr, SocketAddr)>, NetworkError> {
+        let local = self
+            .socket
+            .local_addr()
+            .map_err(|e| NetworkError::StunFailed(format!("Local address unavailable: {}", e)))?;
+        // A target the socket cannot send to (no route for its family) is left out; the others
+        // are still asked.
+        let mut sent: Vec<(SocketAddr, [u8; 12])> = Vec::new();
+        let mut last_error = None;
+        for &(target, transaction_id) in targets {
+            debug!("Sending STUN binding request to {}", target);
+            match self
+                .socket
+                .send_to(
+                    &build_binding_request(&transaction_id),
+                    destination_for(local, target),
+                )
+                .await
+            {
+                Ok(_) => sent.push((target, transaction_id)),
+                Err(e) => last_error = Some(e),
+            }
+        }
+        if sent.is_empty() {
+            return Err(NetworkError::StunFailed(match last_error {
+                Some(e) => format!("Send failed: {}", e),
+                None => "No address found".to_string(),
+            }));
+        }
+        let targets = &sent[..];
+
+        let mut deadline = Instant::now() + Duration::from_millis(self.timeout_ms);
+        let mut buf = [0u8; 576]; // Minimum STUN message size
+        let mut answers: Vec<(SocketAddr, SocketAddr)> = Vec::new();
+        while answers.len() < targets.len() {
+            let received =
+                match tokio::time::timeout_at(deadline, self.socket.recv_from(&mut buf)).await {
+                    Ok(received) => received
+                        .map_err(|e| NetworkError::StunFailed(format!("Receive failed: {}", e)))?,
+                    Err(_) if answers.is_empty() => {
+                        return Err(NetworkError::StunFailed("Timeout".to_string()))
+                    }
+                    Err(_) => break,
+                };
+            let (len, from) = received;
+            let reply = targets.iter().find_map(|(target, transaction_id)| {
+                parse_binding_response(&buf[..len], transaction_id)
+                    .ok()
+                    .map(|mapped| (*target, mapped))
+            });
+            match reply {
+                Some((target, mapped)) if !answers.iter().any(|(t, _)| *t == target) => {
+                    answers.push((target, mapped));
+                    if let Some(grace) = grace {
+                        deadline = deadline.min(Instant::now() + grace);
+                    }
+                }
+                _ => debug!("Ignoring datagram from {} while waiting for STUN", from),
+            }
+        }
+        Ok(answers)
+    }
+}
+
+/// The address of `server` in the IPv4 family if `v4`, in the IPv6 one if not
+async fn resolve(server: &str, v4: bool) -> Result<SocketAddr, NetworkError> {
+    tokio::net::lookup_host(server)
+        .await
+        .map_err(|e| NetworkError::StunFailed(format!("DNS lookup failed: {}", e)))?
+        .find(|addr| addr.is_ipv4() == v4)
+        .ok_or_else(|| NetworkError::StunFailed("No address found".to_string()))
 }
 
 /// Build a STUN binding request message
@@ -478,6 +610,124 @@ mod tests {
 
         assert_eq!(result.mapped_address, reported);
         assert_eq!(result.server, answering);
+    }
+
+    /// A STUN server at `bind` that answers one binding request, reporting `reported` (of
+    /// either family) as the sender's address. Returns its `host:port`.
+    async fn server_reporting(bind: &str, reported: SocketAddr) -> String {
+        let socket = UdpSocket::bind(bind).await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 576];
+            let (len, from) = socket.recv_from(&mut buf).await.unwrap();
+            assert!(len >= 20);
+
+            let mut mask = [0u8; 16];
+            mask[..4].copy_from_slice(&MAGIC_COOKIE.to_be_bytes());
+            mask[4..].copy_from_slice(&buf[8..20]); // transaction ID
+            let mut attr = vec![0x00, if reported.is_ipv4() { 0x01 } else { 0x02 }];
+            attr.extend_from_slice(&(reported.port() ^ (MAGIC_COOKIE >> 16) as u16).to_be_bytes());
+            match reported.ip() {
+                std::net::IpAddr::V4(ip) => {
+                    attr.extend(ip.octets().iter().zip(mask).map(|(byte, mask)| byte ^ mask))
+                }
+                std::net::IpAddr::V6(ip) => {
+                    attr.extend(ip.octets().iter().zip(mask).map(|(byte, mask)| byte ^ mask))
+                }
+            }
+
+            let mut response = Vec::new();
+            response.extend_from_slice(&BINDING_RESPONSE.to_be_bytes());
+            response.extend_from_slice(&((4 + attr.len()) as u16).to_be_bytes());
+            response.extend_from_slice(&buf[4..20]); // magic cookie + transaction ID
+            response.extend_from_slice(&XOR_MAPPED_ADDRESS.to_be_bytes());
+            response.extend_from_slice(&(attr.len() as u16).to_be_bytes());
+            response.extend_from_slice(&attr);
+            socket.send_to(&response, from).await.unwrap();
+        });
+        addr.to_string()
+    }
+
+    /// The audio socket of an app: dual-stack where the system has IPv6
+    fn audio_socket() -> UdpSocket {
+        UdpSocket::from_std(super::super::bind_audio_std(0).unwrap()).unwrap()
+    }
+
+    /// Verifies: REQ-CON-145
+    #[tokio::test]
+    async fn when_the_socket_is_dual_stack_both_families_are_asked_and_each_answer_is_kept() {
+        let socket = audio_socket();
+        if !IpFamilies::of_tokio(&socket).v6 {
+            return; // no IPv6 here: the next test covers the IPv4-only socket
+        }
+        let reported_v4: SocketAddr = "203.0.113.7:40000".parse().unwrap();
+        let reported_v6: SocketAddr = "[2001:db8::7]:41000".parse().unwrap();
+        let v4_server = server_reporting("127.0.0.1:0", reported_v4).await;
+        let v6_server = server_reporting("[::1]:0", reported_v6).await;
+
+        let client = StunClient::with_timeout(socket, 1000);
+        let found = client
+            .discover_public_addresses_from(
+                &[v4_server.as_str(), v6_server.as_str()],
+                IpFamilies { v4: true, v6: true },
+            )
+            .await;
+
+        let mut addresses: Vec<SocketAddr> = found.iter().map(|r| r.mapped_address).collect();
+        addresses.sort();
+        assert_eq!(addresses, vec![reported_v4, reported_v6]);
+    }
+
+    /// Verifies: REQ-CON-145
+    #[tokio::test]
+    async fn when_one_family_answers_and_the_other_is_silent_the_answer_waits_only_the_grace() {
+        let socket = audio_socket();
+        if !IpFamilies::of_tokio(&socket).v6 {
+            return; // no IPv6 here
+        }
+        let reported: SocketAddr = "203.0.113.7:40000".parse().unwrap();
+        let v4_server: SocketAddr = server_reporting("127.0.0.1:0", reported)
+            .await
+            .parse()
+            .unwrap();
+        // Takes the request and never answers, like a host with an IPv6 address and no route
+        let silent = UdpSocket::bind("[::1]:0").await.unwrap();
+        let silent_addr = silent.local_addr().unwrap();
+
+        let client = StunClient::with_timeout(socket, 5000);
+        let started = Instant::now();
+        let answers = client
+            .ask(
+                &[(v4_server, [1; 12]), (silent_addr, [2; 12])],
+                Some(OTHER_FAMILY_GRACE),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(answers, vec![(v4_server, reported)]);
+        assert!(
+            started.elapsed() < OTHER_FAMILY_GRACE + Duration::from_millis(1500),
+            "the IPv4 answer waited {:?} for the silent IPv6 one",
+            started.elapsed()
+        );
+    }
+
+    /// Verifies: REQ-CON-145
+    #[tokio::test]
+    async fn when_the_socket_is_ipv4_only_the_ipv6_family_is_not_asked() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let reported_v6: SocketAddr = "[2001:db8::7]:41000".parse().unwrap();
+        let v6_server = server_reporting("[::1]:0", reported_v6).await;
+
+        let client = StunClient::with_timeout(socket, 300);
+        let found = client
+            .discover_public_addresses_from(
+                &[v6_server.as_str()],
+                IpFamilies { v4: true, v6: true },
+            )
+            .await;
+
+        assert!(found.is_empty());
     }
 
     #[tokio::test]
