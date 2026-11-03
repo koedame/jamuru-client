@@ -73,6 +73,33 @@ async fn test_gather_candidates_match_socket_family() {
     }
 }
 
+/// Test: a dual-stack audio socket is offered only addresses a peer can send to
+///
+/// The machine may have no global IPv6 address (a CI container), so no IPv6 candidate is
+/// required; those that are offered must be global unicast: a link-local, unique-local or
+/// loopback address names no host to a peer elsewhere.
+///
+/// Verifies: REQ-CON-145
+#[tokio::test]
+async fn test_dual_stack_socket_is_offered_addresses_a_peer_can_send_to() {
+    let std_socket = jamjam::network::bind_audio_std(0).expect("bind audio socket");
+    let socket = Arc::new(tokio::net::UdpSocket::from_std(std_socket).unwrap());
+    let port = socket.local_addr().unwrap().port();
+
+    let candidates = gather_candidates_using(&socket, &[]).await;
+
+    for c in &candidates {
+        assert_eq!(c.address.port(), port, "{:?}", c);
+        match c.address.ip() {
+            std::net::IpAddr::V4(ip) => assert!(!ip.is_loopback(), "{:?}", c),
+            std::net::IpAddr::V6(ip) => assert_eq!(ip.segments()[0] & 0xe000, 0x2000, "{:?}", c),
+        }
+    }
+    for pair in candidates.windows(2) {
+        assert!(pair[0].priority >= pair[1].priority);
+    }
+}
+
 /// Test: AddressCandidate host priority is higher than server reflexive
 #[test]
 fn test_candidate_priority_host_over_srflx() {

@@ -4,7 +4,7 @@
 
 ## Status
 
-Accepted
+Accepted（候補の族については [ADR-093](./ADR-093-one-dual-stack-audio-socket.md) が改めた）
 
 ## Context
 
@@ -113,6 +113,7 @@ sequenceDiagram
 
 候補は IPv4 のみを優先度順に使う。`gather_candidates` は IPv6 リンクローカル（`fe80::`）も返すが、
 `0.0.0.0` にバインドした IPv4 ソケットからは送信できず `EINVAL` になる。
+（[ADR-093](./ADR-093-one-dual-stack-audio-socket.md) で音声ソケットがデュアルスタックになり、IPv6 のグローバルアドレスも候補に入る。リンクローカルは今も入れない。）
 また候補が空になる環境（ネットワークインターフェースが無い CI コンテナ等）では
 ループバック `127.0.0.1:<port>` をフォールバックとして加える。実機には必ず非ループバックの候補が
 あるため実運用の挙動は変わらない。
