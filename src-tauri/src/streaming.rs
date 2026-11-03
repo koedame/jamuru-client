@@ -354,6 +354,10 @@ pub enum SessionSetting {
     OutputChannels(u32, Option<u32>),
     /// 1 (mono) or 2 (stereo)
     TransmitChannels(u32),
+    /// Whether what is sent is held at 0 dBFS (ADR-094)
+    InputLimiter(bool),
+    /// Whether what is played is held at 0 dBFS (ADR-094)
+    OutputLimiter(bool),
     /// Receive jitter buffer depth (ADR-020)
     JitterBufferFrames(u32),
 }
@@ -517,6 +521,8 @@ impl StreamingState {
                 StreamingCommand::SetOutputChannels(left, right)
             }
             SessionSetting::TransmitChannels(count) => StreamingCommand::SetTransmitChannels(count),
+            SessionSetting::InputLimiter(on) => StreamingCommand::SetInputLimiter(on),
+            SessionSetting::OutputLimiter(on) => StreamingCommand::SetOutputLimiter(on),
             SessionSetting::JitterBufferFrames(frames) => {
                 StreamingCommand::SetJitterBufferFrames(frames)
             }
@@ -574,6 +580,10 @@ pub struct NetworkStats {
 pub struct AudioQuality {
     /// Number of buffer underruns (audio glitches due to CPU/scheduling)
     pub underrun_count: u64,
+    /// Number of frames the limiter on what is sent brought down this session
+    pub input_limited_frames: u64,
+    /// Number of frames the limiter on what is played brought down this session
+    pub output_limited_frames: u64,
     /// Number of times the play-out delay was grown automatically. The UI
     /// tells the user when this goes up (REQ-LAT-108).
     pub delay_adjustments: u64,
@@ -821,6 +831,8 @@ async fn start_session(
     // Transmit channel count, told to the peers so their mixers can show
     // whether we're sending mono or stereo.
     let transmit_channels = config.transmit_channels;
+    // Whether what is sent and what is played are held at 0 dBFS (ADR-094)
+    let (input_limiter, output_limiter) = (config.input_limiter, config.output_limiter);
     // Which channels of a multi-channel interface are read and played on
     let input_channels = (config.input_channel_l, config.input_channel_r);
     let output_channels = (config.output_channel_l, config.output_channel_r);
@@ -874,6 +886,8 @@ async fn start_session(
             sample_rate,
             wasapi_mode,
             transmit_channels,
+            input_limiter,
+            output_limiter,
             input_channels,
             output_channels,
             input_signal,
@@ -1017,6 +1031,8 @@ pub async fn streaming_status(
     let audio_quality = if is_active {
         Some(AudioQuality {
             underrun_count: state.shared.underrun_count.load(Ordering::Relaxed),
+            input_limited_frames: state.shared.input_limited_frames.load(Ordering::Relaxed),
+            output_limited_frames: state.shared.output_limited_frames.load(Ordering::Relaxed),
             delay_adjustments: state.shared.delay_adjustments.load(Ordering::Relaxed),
             adjusted_delay_ms: state.shared.adjusted_delay_us.load(Ordering::Relaxed) as f32
                 / 1000.0,

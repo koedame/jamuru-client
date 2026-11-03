@@ -144,6 +144,10 @@ pub struct Shared {
     /// What went wrong with the audio received on each link and when. The last session's stay
     /// until the next one starts, so a debug call can still read them.
     pub flights: Arc<Flights>,
+    /// How many frames the limiter on what is sent brought down this session (ADR-094)
+    pub input_limited_frames: Arc<AtomicU64>,
+    /// How many frames the limiter on what is played brought down this session (ADR-094)
+    pub output_limited_frames: Arc<AtomicU64>,
     /// Master output volume (0-200, 100 = unity gain)
     pub master_volume: Arc<AtomicU32>,
     /// Local (microphone) input volume (0-200, 100 = unity gain)
@@ -178,6 +182,8 @@ impl Shared {
             silence_giveups: Arc::new(AtomicU64::new(0)),
             link_facts: Arc::new(RwLock::new(None)),
             flights: Arc::new(RwLock::new(Vec::new())),
+            input_limited_frames: Arc::new(AtomicU64::new(0)),
+            output_limited_frames: Arc::new(AtomicU64::new(0)),
             master_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             local_volume: Arc::new(AtomicU32::new(100)),  // 100 = unity gain
             local_pan: Arc::new(AtomicI32::new(0)),       // 0 = centre
@@ -195,6 +201,8 @@ impl Shared {
         self.input_level.store(0, Ordering::SeqCst);
         self.output_level.store(0, Ordering::SeqCst);
         self.underrun_count.store(0, Ordering::SeqCst);
+        self.input_limited_frames.store(0, Ordering::SeqCst);
+        self.output_limited_frames.store(0, Ordering::SeqCst);
         self.delay_adjustments.store(0, Ordering::SeqCst);
         self.adjusted_delay_us.store(0, Ordering::SeqCst);
         self.reconnect_count.store(0, Ordering::SeqCst);

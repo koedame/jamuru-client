@@ -131,6 +131,10 @@ fn default_transmit_channels() -> u32 {
     2
 }
 
+fn default_limiter() -> bool {
+    true
+}
+
 /// Application configuration
 ///
 /// Contains all persistent settings for the jamuru application.
@@ -190,6 +194,16 @@ pub struct AppConfig {
     /// Transmit channel count (1 for mono, 2 for stereo)
     #[serde(default = "default_transmit_channels")]
     pub transmit_channels: u32,
+
+    /// Whether what is sent is held at 0 dBFS (ADR-094). On unless the user
+    /// turns it off in Settings.
+    #[serde(default = "default_limiter")]
+    pub input_limiter: bool,
+
+    /// Whether what is played is held at 0 dBFS (ADR-094). On unless the
+    /// user turns it off in Settings.
+    #[serde(default = "default_limiter")]
+    pub output_limiter: bool,
 
     /// How a WASAPI device is opened on Windows (ADR-088). The standard
     /// shared way unless the user picks another in Settings.
@@ -255,6 +269,8 @@ impl Default for AppConfig {
             output_channel_l: 1,
             output_channel_r: Some(2),
             transmit_channels: 2,
+            input_limiter: true,
+            output_limiter: true,
             wasapi_mode: WasapiMode::default(),
             language: None,
             usage_reporting: false,

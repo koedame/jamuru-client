@@ -78,6 +78,13 @@ export interface DevicesTabProps {
   onTransmitChannelsChange: (value: string) => void;
   /** WASAPI mode change handler */
   onWasapiModeChange?: (mode: WasapiMode) => void;
+  /** Whether what is sent is held at 0 dBFS */
+  inputLimiter?: boolean;
+  /** Whether what is played is held at 0 dBFS */
+  outputLimiter?: boolean;
+  /** Called when the person switches a limiter; the switches are left out when absent */
+  onInputLimiterChange?: (enabled: boolean) => void;
+  onOutputLimiterChange?: (enabled: boolean) => void;
 }
 
 /** One-way latency tone class based on app-induced buffer latency (ms). */
@@ -253,6 +260,10 @@ export function DevicesTab({
   onBufferSizeChange,
   onTransmitChannelsChange,
   onWasapiModeChange = () => {},
+  inputLimiter = true,
+  outputLimiter = true,
+  onInputLimiterChange,
+  onOutputLimiterChange,
 }: DevicesTabProps) {
   const { t } = useTranslation();
 
@@ -465,6 +476,54 @@ export function DevicesTab({
           <span className="latency-card__value latency-card__value--total">{totalDisp.toFixed(1)}ms</span>
         </div>
       </div>
+
+      {onInputLimiterChange && onOutputLimiterChange && (
+        <>
+          <div className="tab-content__divider" />
+
+          <h2 className="tab-content__title">{t("settings.devices.limiter.title", "Limiter")}</h2>
+
+          <label className="tab-content__switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={inputLimiter}
+              disabled={isLoading}
+              onChange={(e) => onInputLimiterChange(e.target.checked)}
+              data-testid="devices-input-limiter-toggle"
+            />
+            <span>
+              {t("settings.devices.limiter.input", "Input limiter")}
+              <span className="tab-content__switch-hint">
+                {t(
+                  "settings.devices.limiter.inputHint",
+                  "Keeps the sound you send from going over 0 dBFS. Adds no delay"
+                )}
+              </span>
+            </span>
+          </label>
+
+          <label className="tab-content__switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={outputLimiter}
+              disabled={isLoading}
+              onChange={(e) => onOutputLimiterChange(e.target.checked)}
+              data-testid="devices-output-limiter-toggle"
+            />
+            <span>
+              {t("settings.devices.limiter.output", "Output limiter")}
+              <span className="tab-content__switch-hint">
+                {t(
+                  "settings.devices.limiter.outputHint",
+                  "Keeps the sound you hear from going over 0 dBFS, even when everyone plays at once. Adds no delay"
+                )}
+              </span>
+            </span>
+          </label>
+        </>
+      )}
     </div>
   );
 }
