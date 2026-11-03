@@ -231,6 +231,18 @@ mod tests {
             .collect()
     }
 
+    /// The wire carries 24-bit integers, so a sample comes back to within
+    /// half a step of 2^-23 rather than bit-for-bit.
+    fn assert_within_24_bit_step(got: &[f32], want: &[f32], message: &str) {
+        assert_eq!(got.len(), want.len(), "{message}: length");
+        for (i, (g, w)) in got.iter().zip(want).enumerate() {
+            assert!(
+                (g - w).abs() <= 0.5 / 8_388_608.0 + 1e-7,
+                "{message}: sample {i} is {g}, expected {w}"
+            );
+        }
+    }
+
     #[test]
     fn zero_latency_preset_is_sample_synchronous() {
         let sample_rate = 48_000;
@@ -247,9 +259,10 @@ mod tests {
             0,
             "passthrough must not underrun"
         );
-        assert_eq!(
-            output, input,
-            "with a passthrough buffer and PCM the output must be bit-identical"
+        assert_within_24_bit_step(
+            &output,
+            &input,
+            "with a passthrough buffer and PCM the output must equal the input to 24 bits",
         );
     }
 
@@ -285,10 +298,10 @@ mod tests {
             output[..expected_delay_samples].iter().all(|&s| s == 0.0),
             "the priming period must be silence"
         );
-        assert_eq!(
+        assert_within_24_bit_step(
             &output[expected_delay_samples..expected_delay_samples + frame],
             &input[..frame],
-            "after the priming delay the original signal must appear unaltered"
+            "after the priming delay the original signal must appear unaltered to 24 bits",
         );
     }
 
