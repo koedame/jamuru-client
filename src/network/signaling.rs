@@ -17,6 +17,7 @@ use super::device_identity::DeviceIdentity;
 use super::discovery::discover_signaling_url;
 use super::error::{NetworkError, SignalingFailure};
 use super::link_facts::route_preference;
+use super::transport::IpFamilies;
 use crate::telemetry::{AppStart, AudioEnv};
 
 /// The four `X-Device-*` handshake headers proving `identity` to a server
@@ -181,6 +182,20 @@ fn is_sendable_candidate(addr: SocketAddr) -> bool {
         && !ip.is_unspecified()
         && !ip.is_multicast()
         && ip != IpAddr::V4(Ipv4Addr::BROADCAST)
+        // A link-local IPv6 address names a host only together with the interface it is on
+        // (`fe80::1%en0`), which an address on the wire does not carry.
+        && !is_v6_link_local(ip)
+}
+
+/// Whether `ip` is an IPv6 link-local address (`fe80::/10`)
+fn is_v6_link_local(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V6(v6) if (v6.segments()[0] & 0xffc0) == 0xfe80)
+}
+
+/// Whether `ip` is an IPv6 global unicast address (`2000::/3`): one a host elsewhere on the
+/// Internet can send to
+fn is_v6_global(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V6(v6) if (v6.segments()[0] & 0xe000) == 0x2000)
 }
 
 /// The addresses of a peer to send to, in the order given: those that name one host,
@@ -191,6 +206,8 @@ pub(super) fn usable_candidates(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
         if usable.len() == MAX_PEER_CANDIDATES {
             break;
         }
+        // An IPv4-mapped address and the IPv4 one are one host
+        let addr = super::transport::canonical_addr(addr);
         if is_sendable_candidate(addr) && !usable.contains(&addr) {
             usable.push(addr);
         }
@@ -744,9 +761,11 @@ fn is_of_unknown_type(text: &str) -> bool {
 /// Gather all address candidates for the local peer
 ///
 /// This function collects:
-/// 1. Local host addresses of the interfaces that `audio_socket`'s address
-///    family can use, each with the socket's port
-/// 2. The server reflexive address via STUN (public IP/port mapping)
+/// 1. Local host addresses of the interfaces that `audio_socket`'s IP families can use
+///    (IPv4 addresses, and IPv6 global unicast ones for an IPv6 socket), each with the
+///    socket's port
+/// 2. The server reflexive address via STUN (public IP/port mapping), for IPv4 and, when
+///    the host has a global IPv6 address, for IPv6
 ///
 /// STUN is asked through `audio_socket` itself. The mapping a NAT creates is
 /// per source socket, and NATs that renumber ports give a different socket a
@@ -794,28 +813,59 @@ pub async fn gather_candidates_using(
         }
     };
 
-    candidates.extend(gather_host_candidates(local_addr.port()));
-    // Only the socket's own family can be used to reach it.
-    candidates.retain(|c| c.address.is_ipv4() == local_addr.is_ipv4());
+    // Only the families the socket can send to and receive from can be used to reach it.
+    let families = IpFamilies::of_tokio(audio_socket);
+    candidates.extend(gather_host_candidates_for(local_addr.port(), families));
 
+    // A host with no global IPv6 address has no IPv6 route to ask through.
+    let ask = IpFamilies {
+        v4: families.v4,
+        v6: families.v6 && candidates.iter().any(|c| is_v6_global(c.address.ip())),
+    };
     let stun = super::stun::StunClient::new(audio_socket.clone());
-    match stun.discover_public_address_from(stun_servers).await {
-        Ok(result) => {
-            let addr = result.mapped_address;
-            candidates.push(AddressCandidate::server_reflexive(addr));
-            info!("Added server reflexive candidate: {}", addr);
-        }
-        Err(e) => warn!("No server reflexive candidate: {}", e),
+    let reflexive = stun.discover_public_addresses_from(stun_servers, ask).await;
+    if reflexive.is_empty() {
+        warn!("No server reflexive candidate");
     }
+    for result in reflexive {
+        let addr = result.mapped_address;
+        candidates.push(AddressCandidate::server_reflexive(addr));
+        info!("Added server reflexive candidate: {}", addr);
+    }
+
+    keep_the_ipv6_address_stun_saw(&mut candidates);
 
     // Sort by priority (highest first)
     candidates.sort_by_key(|c| std::cmp::Reverse(c.priority));
 
-    // Remove duplicates (same address)
-    candidates.dedup_by(|a, b| a.address == b.address);
+    // One candidate per address, the highest priority kept: an IPv6 host has no NAT, so STUN
+    // reports its own address back.
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|c| seen.insert(c.address));
 
     info!("Gathered {} address candidates", candidates.len());
     candidates
+}
+
+/// Drops the IPv6 host candidates other than the address STUN saw, when it saw one.
+///
+/// An IPv6 interface commonly has several global addresses (a stable one and temporary ones
+/// the system rotates), and the system sends from one of them. The address STUN saw is that
+/// one: a firewall that lets in only what was first sent out opens for it alone, so the others
+/// are paths that do not work, and each would add a probe to the connectivity check and one
+/// more address to what the room is told. With no answer from STUN, all the addresses stay.
+fn keep_the_ipv6_address_stun_saw(candidates: &mut Vec<AddressCandidate>) {
+    let seen: Vec<SocketAddr> = candidates
+        .iter()
+        .filter(|c| c.candidate_type == CandidateType::ServerReflexive && c.address.is_ipv6())
+        .map(|c| c.address)
+        .collect();
+    if seen.is_empty() {
+        return;
+    }
+    candidates.retain(|c| {
+        c.candidate_type != CandidateType::Host || !c.address.is_ipv6() || seen.contains(&c.address)
+    });
 }
 
 /// Host candidates: every non-loopback interface address, at `local_port`.
@@ -823,20 +873,34 @@ pub async fn gather_candidates_using(
 /// Needs no STUN, so it is all that can be offered when the audio socket is
 /// not available to ask through.
 pub fn gather_host_candidates(local_port: u16) -> Vec<AddressCandidate> {
+    gather_host_candidates_for(local_port, IpFamilies { v4: true, v6: true })
+}
+
+/// [`gather_host_candidates`] for the interface addresses of `families` only
+pub fn gather_host_candidates_for(local_port: u16, families: IpFamilies) -> Vec<AddressCandidate> {
     let mut candidates = Vec::new();
     if let Ok(addrs) = local_ip_address::list_afinet_netifas() {
-        for (_, ip) in addrs {
-            // Skip loopback addresses
-            if ip.is_loopback() {
-                continue;
-            }
-
-            let addr = SocketAddr::new(ip, local_port);
-            candidates.push(AddressCandidate::host(addr));
-            debug!("Added host candidate: {}", addr);
-        }
+        candidates = host_candidates_of(addrs.into_iter().map(|(_, ip)| ip), local_port, families);
+    }
+    for c in &candidates {
+        debug!("Added host candidate: {}", c.address);
     }
     candidates
+}
+
+/// The host candidates for interface addresses `ips`: those a peer can send to, in the
+/// families `families` takes. IPv4 loopback and link-local IPv6 are left out; so is any IPv6
+/// address that is not global unicast (a unique-local one names a host only inside one
+/// network, where its IPv4 address does as well).
+fn host_candidates_of(
+    ips: impl Iterator<Item = IpAddr>,
+    local_port: u16,
+    families: IpFamilies,
+) -> Vec<AddressCandidate> {
+    ips.filter(|ip| !ip.is_loopback() && families.reach(*ip))
+        .filter(|ip| ip.is_ipv4() || is_v6_global(*ip))
+        .map(|ip| AddressCandidate::host(SocketAddr::new(ip, local_port)))
+        .collect()
 }
 
 /// Get sorted addresses from candidates for connection attempts
@@ -847,6 +911,150 @@ pub fn candidates_to_addrs(candidates: &[AddressCandidate]) -> Vec<SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ips(list: &[&str]) -> Vec<IpAddr> {
+        list.iter().map(|ip| ip.parse().unwrap()).collect()
+    }
+
+    fn both() -> IpFamilies {
+        IpFamilies { v4: true, v6: true }
+    }
+
+    fn addresses(candidates: &[AddressCandidate]) -> Vec<String> {
+        candidates.iter().map(|c| c.address.to_string()).collect()
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_the_socket_is_dual_stack_the_global_ipv6_addresses_are_host_candidates_too() {
+        let candidates = host_candidates_of(
+            ips(&["192.168.1.10", "2001:db8::10", "127.0.0.1", "::1"]).into_iter(),
+            5000,
+            both(),
+        );
+
+        assert_eq!(
+            addresses(&candidates),
+            vec!["192.168.1.10:5000", "[2001:db8::10]:5000"]
+        );
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_an_ipv6_address_cannot_be_sent_to_from_elsewhere_it_is_not_a_host_candidate() {
+        let candidates = host_candidates_of(
+            ips(&[
+                "fe80::1",
+                "fd7a:115c:a1e0::1",
+                "fc00::1",
+                "ff02::1",
+                "::",
+                "64:ff9b::c000:201",
+            ])
+            .into_iter(),
+            5000,
+            both(),
+        );
+
+        assert!(candidates.is_empty(), "{:?}", addresses(&candidates));
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_the_socket_is_ipv4_only_no_ipv6_address_is_a_host_candidate() {
+        let candidates = host_candidates_of(
+            ips(&["192.168.1.10", "2001:db8::10"]).into_iter(),
+            5000,
+            IpFamilies::V4_ONLY,
+        );
+
+        assert_eq!(addresses(&candidates), vec!["192.168.1.10:5000"]);
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_stun_saw_an_ipv6_address_the_other_ipv6_host_addresses_are_dropped() {
+        let host = |a: &str| AddressCandidate::host(a.parse().unwrap());
+        let mut candidates = vec![
+            host("192.168.1.10:5000"),
+            host("[2001:db8::10]:5000"),
+            host("[2001:db8::99]:5000"),
+            AddressCandidate::server_reflexive("[2001:db8::99]:5000".parse().unwrap()),
+            AddressCandidate::server_reflexive("203.0.113.5:41000".parse().unwrap()),
+        ];
+
+        keep_the_ipv6_address_stun_saw(&mut candidates);
+
+        assert_eq!(
+            addresses(&candidates),
+            vec![
+                "192.168.1.10:5000",
+                "[2001:db8::99]:5000",
+                "[2001:db8::99]:5000",
+                "203.0.113.5:41000"
+            ]
+        );
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_stun_saw_no_ipv6_address_every_ipv6_host_address_stays() {
+        let host = |a: &str| AddressCandidate::host(a.parse().unwrap());
+        let mut candidates = vec![
+            host("[2001:db8::10]:5000"),
+            host("[2001:db8::99]:5000"),
+            AddressCandidate::server_reflexive("203.0.113.5:41000".parse().unwrap()),
+        ];
+
+        keep_the_ipv6_address_stun_saw(&mut candidates);
+
+        assert_eq!(candidates.len(), 3);
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_a_peer_publishes_ipv6_candidates_they_are_used_in_the_order_given() {
+        let usable = usable_candidates(vec![
+            "[2001:db8::1]:5000".parse().unwrap(),
+            "192.0.2.1:5000".parse().unwrap(),
+        ]);
+
+        assert_eq!(
+            usable,
+            vec![
+                "[2001:db8::1]:5000".parse::<SocketAddr>().unwrap(),
+                "192.0.2.1:5000".parse().unwrap()
+            ]
+        );
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_a_peer_publishes_an_ipv4_mapped_address_it_is_the_ipv4_address_once() {
+        let usable = usable_candidates(vec![
+            "[::ffff:192.0.2.1]:5000".parse().unwrap(),
+            "192.0.2.1:5000".parse().unwrap(),
+        ]);
+
+        assert_eq!(
+            usable,
+            vec!["192.0.2.1:5000".parse::<SocketAddr>().unwrap()]
+        );
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_a_peer_publishes_a_link_local_ipv6_address_it_is_not_sent_to() {
+        let usable = usable_candidates(vec![
+            "[fe80::1]:5000".parse().unwrap(),
+            "[2001:db8::1]:5000".parse().unwrap(),
+        ]);
+
+        assert_eq!(
+            usable,
+            vec!["[2001:db8::1]:5000".parse::<SocketAddr>().unwrap()]
+        );
+    }
 
     /// A server on this machine whose clock reads `now - behind_secs`: it
     /// answers the question of where its signaling is, and refuses the
@@ -1559,7 +1767,7 @@ mod tests {
             "10.0.0.2:5000",
             "169.254.1.2:5000",
             "[::1]:5000",
-            "[fe80::1]:5000",
+            "[fd00::1]:5000",
             "100.64.0.2:5000",
         ]);
 

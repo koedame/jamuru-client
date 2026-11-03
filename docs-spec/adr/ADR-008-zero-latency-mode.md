@@ -29,7 +29,7 @@
 |-----------|-----|------|
 | フレームサイズ | 32 samples | 0.67ms（入出力各） |
 | ジッタバッファ | パススルー（0フレーム） | 0ms |
-| コーデック | PCM（ワイヤ上は24-bit整数。[ADR-093](./ADR-093-send-pcm-as-24-bit-integers.md)で32-bit floatから変更） | 0ms |
+| コーデック | PCM（ワイヤ上は24-bit整数。[ADR-094](./ADR-094-send-pcm-as-24-bit-integers.md)で32-bit floatから変更） | 0ms |
 | FEC | 無効 | 0ms |
 | PLC | 即時繰り返し（ルックアヘッドなし） | 0ms |
 

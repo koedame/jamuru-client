@@ -1,4 +1,4 @@
-# ADR-093: PCM は 24-bit 符号付き整数で送る
+# ADR-094: PCM は 24-bit 符号付き整数で送る
 
 ## Status
 

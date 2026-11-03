@@ -1,9 +1,9 @@
 //! UDP transport layer
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
-use socket2::{Domain, Protocol, Socket, Type};
+use socket2::{Domain, Protocol, SockRef, Socket, Type};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace};
@@ -29,12 +29,81 @@ pub struct UdpTransport {
     lane: Option<Lane>,
 }
 
+/// The IP families a socket can send to and receive from
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IpFamilies {
+    pub v4: bool,
+    pub v6: bool,
+}
+
+impl IpFamilies {
+    /// An IPv4 socket
+    pub const V4_ONLY: Self = Self {
+        v4: true,
+        v6: false,
+    };
+
+    /// What a socket bound to `local` can reach. An IPv6 socket reaches IPv4 hosts too (as
+    /// IPv4-mapped addresses) unless it is IPv6-only.
+    pub fn of_local(local: SocketAddr, only_v6: bool) -> Self {
+        Self {
+            v4: local.is_ipv4() || !only_v6,
+            v6: local.is_ipv6(),
+        }
+    }
+
+    /// What `socket` can reach
+    pub fn of_std(socket: &std::net::UdpSocket) -> Self {
+        match socket.local_addr() {
+            Ok(local) => Self::of_local(local, SockRef::from(socket).only_v6().unwrap_or(true)),
+            Err(_) => Self::V4_ONLY,
+        }
+    }
+
+    /// What `socket` can reach
+    pub fn of_tokio(socket: &UdpSocket) -> Self {
+        match socket.local_addr() {
+            Ok(local) => Self::of_local(local, SockRef::from(socket).only_v6().unwrap_or(true)),
+            Err(_) => Self::V4_ONLY,
+        }
+    }
+
+    /// Whether a socket of these families can send to `addr`
+    pub fn reach(&self, addr: IpAddr) -> bool {
+        match addr.to_canonical() {
+            IpAddr::V4(_) => self.v4,
+            IpAddr::V6(_) => self.v6,
+        }
+    }
+}
+
+/// `addr` as the system reports a datagram's sender: an IPv4-mapped address
+/// (`::ffff:192.0.2.1`), which a dual-stack socket reports for an IPv4 peer, is the IPv4
+/// address itself. One address has one spelling everywhere the app compares or shows it.
+pub fn canonical_addr(addr: SocketAddr) -> SocketAddr {
+    SocketAddr::new(addr.ip().to_canonical(), addr.port())
+}
+
+/// `addr` as a socket bound to `local` takes it: an IPv6 socket, dual-stack or not, is given
+/// an IPv4 destination as an IPv4-mapped address (Linux alone accepts a plain IPv4 one).
+pub(super) fn destination_for(local: SocketAddr, addr: SocketAddr) -> SocketAddr {
+    match (local, addr) {
+        (SocketAddr::V6(_), SocketAddr::V4(v4)) => {
+            SocketAddr::new(IpAddr::V6(v4.ip().to_ipv6_mapped()), v4.port())
+        }
+        _ => addr,
+    }
+}
+
 /// Binds a UDP socket with the options this transport needs, without
 /// touching Tokio.
 ///
 /// Exposed so a caller can bind early - to learn its port and advertise it -
 /// and hand the socket to whichever runtime will actually poll it
 /// ([`UdpTransport::from_std`]). See ADR-026.
+///
+/// An unspecified IPv6 address (`[::]:port`) gives a dual-stack socket - one that takes IPv4
+/// peers too - on every system (Windows makes it IPv6-only unless told otherwise).
 pub fn bind_std(addr: &str) -> Result<std::net::UdpSocket, NetworkError> {
     let parsed_addr: SocketAddr = addr.parse()?;
 
@@ -45,6 +114,9 @@ pub fn bind_std(addr: &str) -> Result<std::net::UdpSocket, NetworkError> {
     };
     let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
 
+    if parsed_addr.is_ipv6() && parsed_addr.ip().is_unspecified() {
+        socket.set_only_v6(false)?;
+    }
     // SO_REUSEADDR so a quick rejoin after leaving a session can rebind its port. Not for a
     // port the system picks: it then gives the same port to every socket that asks with the
     // option, and the datagrams of all of them go to whichever bound last.
@@ -56,6 +128,20 @@ pub fn bind_std(addr: &str) -> Result<std::net::UdpSocket, NetworkError> {
     socket.bind(&parsed_addr.into())?;
 
     Ok(socket.into())
+}
+
+/// Binds the socket the audio of a whole session goes through: one dual-stack socket, so
+/// that a peer is reached over IPv6 when both ends have it and over IPv4 otherwise (ADR-093).
+/// Falls back to an IPv4 socket where the system has no IPv6 or will not make a socket take
+/// both.
+pub fn bind_audio_std(port: u16) -> Result<std::net::UdpSocket, NetworkError> {
+    match bind_std(&format!("[::]:{port}")) {
+        Ok(socket) => Ok(socket),
+        Err(e) => {
+            info!("No dual-stack audio socket ({e}); using IPv4 only");
+            bind_std(&format!("0.0.0.0:{port}"))
+        }
+    }
 }
 
 impl UdpTransport {
@@ -128,7 +214,9 @@ impl UdpTransport {
     /// Send a packet to a remote address
     pub async fn send_to(&self, packet: &Packet, addr: SocketAddr) -> Result<(), NetworkError> {
         let data = packet.to_bytes();
-        self.socket.send_to(&data, addr).await?;
+        self.socket
+            .send_to(&data, destination_for(self.local_addr, addr))
+            .await?;
         trace!("Sent {} bytes to {}", data.len(), addr);
         Ok(())
     }
@@ -148,7 +236,7 @@ impl UdpTransport {
                     return Err(NetworkError::InvalidPacket);
                 }
                 buf.truncate(len);
-                (buf, addr)
+                (buf, canonical_addr(addr))
             }
         };
 
@@ -167,7 +255,7 @@ impl UdpTransport {
         let (len, addr) = self.socket.recv_from(&mut buf).await?;
         buf.truncate(len);
         trace!("Received {} raw bytes from {}", len, addr);
-        Ok((buf, addr))
+        Ok((buf, canonical_addr(addr)))
     }
 
     /// Receive raw bytes if a datagram is already waiting, without blocking
@@ -178,7 +266,7 @@ impl UdpTransport {
         let mut buf = vec![0u8; RECV_BUFFER_SIZE];
         let (len, addr) = self.socket.try_recv_from(&mut buf).ok()?;
         buf.truncate(len);
-        Some((buf, addr))
+        Some((buf, canonical_addr(addr)))
     }
 
     /// Start a receive loop that sends packets to a channel
@@ -323,5 +411,124 @@ mod tests {
             assert!(transport.is_ok(), "Rebind attempt {} should succeed", i + 1);
             drop(transport);
         }
+    }
+
+    fn ip6_loopback_is_usable() -> bool {
+        bind_std("[::1]:0").is_ok()
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_the_system_has_ipv6_the_audio_socket_is_dual_stack() {
+        let socket = bind_audio_std(0).unwrap();
+
+        let families = IpFamilies::of_std(&socket);
+
+        if ip6_loopback_is_usable() {
+            assert!(socket.local_addr().unwrap().is_ipv6());
+            assert_eq!(families, IpFamilies { v4: true, v6: true });
+        } else {
+            assert_eq!(families, IpFamilies::V4_ONLY);
+        }
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_the_address_is_ipv6_unspecified_the_socket_takes_ipv4_peers_too() {
+        if !ip6_loopback_is_usable() {
+            return;
+        }
+
+        let socket = bind_std("[::]:0").unwrap();
+
+        assert!(IpFamilies::of_std(&socket).v4);
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_a_socket_is_ipv6_only_it_does_not_reach_ipv4_hosts() {
+        let families = IpFamilies::of_local("[::1]:5000".parse().unwrap(), true);
+
+        assert!(families.v6);
+        assert!(!families.reach("192.0.2.1".parse().unwrap()));
+        assert!(families.reach("2001:db8::1".parse().unwrap()));
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_an_address_is_ipv4_mapped_it_is_the_ipv4_address() {
+        let mapped: SocketAddr = "[::ffff:192.0.2.1]:5000".parse().unwrap();
+
+        assert_eq!(
+            canonical_addr(mapped),
+            "192.0.2.1:5000".parse::<SocketAddr>().unwrap()
+        );
+        assert_eq!(
+            canonical_addr("[2001:db8::1]:5000".parse().unwrap()),
+            "[2001:db8::1]:5000".parse::<SocketAddr>().unwrap()
+        );
+    }
+
+    /// Verifies: REQ-CON-145
+    #[test]
+    fn when_an_ipv6_socket_sends_to_ipv4_the_destination_is_ipv4_mapped() {
+        let v6: SocketAddr = "[::]:5000".parse().unwrap();
+        let v4: SocketAddr = "192.0.2.1:6000".parse().unwrap();
+
+        assert_eq!(
+            destination_for(v6, v4),
+            "[::ffff:192.0.2.1]:6000".parse::<SocketAddr>().unwrap()
+        );
+        assert_eq!(destination_for("0.0.0.0:5000".parse().unwrap(), v4), v4);
+        let v6_peer: SocketAddr = "[2001:db8::1]:6000".parse().unwrap();
+        assert_eq!(destination_for(v6, v6_peer), v6_peer);
+    }
+
+    /// Verifies: REQ-CON-145
+    #[tokio::test]
+    async fn when_a_dual_stack_socket_talks_to_an_ipv4_peer_both_see_ipv4_addresses() {
+        if !ip6_loopback_is_usable() {
+            return;
+        }
+        let audio = UdpTransport::from_std(bind_audio_std(0).unwrap()).unwrap();
+        let peer = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+        let audio_at = SocketAddr::from(([127, 0, 0, 1], audio.local_addr().port()));
+
+        audio
+            .send_to(&Packet::keep_alive(1), peer.local_addr())
+            .await
+            .unwrap();
+        let (_, heard_by_peer) = peer.recv_from().await.unwrap();
+        peer.send_to(&Packet::keep_alive(2), audio_at)
+            .await
+            .unwrap();
+        let (_, heard_by_audio) = audio.recv_from().await.unwrap();
+
+        assert_eq!(heard_by_peer, audio_at);
+        assert_eq!(heard_by_audio, peer.local_addr());
+    }
+
+    /// Verifies: REQ-CON-145
+    #[tokio::test]
+    async fn when_a_dual_stack_socket_talks_to_an_ipv6_peer_the_audio_arrives() {
+        if !ip6_loopback_is_usable() {
+            return;
+        }
+        let audio = UdpTransport::from_std(bind_audio_std(0).unwrap()).unwrap();
+        let peer = UdpTransport::bind("[::1]:0").await.unwrap();
+        let audio_at = SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, audio.local_addr().port()));
+
+        audio
+            .send_to(&Packet::keep_alive(1), peer.local_addr())
+            .await
+            .unwrap();
+        let (_, heard_by_peer) = peer.recv_from().await.unwrap();
+        peer.send_to(&Packet::keep_alive(2), audio_at)
+            .await
+            .unwrap();
+        let (_, heard_by_audio) = audio.recv_from().await.unwrap();
+
+        assert_eq!(heard_by_peer, audio_at);
+        assert_eq!(heard_by_audio, peer.local_addr());
     }
 }
