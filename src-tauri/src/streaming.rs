@@ -63,6 +63,19 @@ struct MuteHold {
 }
 
 impl StreamingState {
+    /// Records the room (ADR-095)
+    pub fn recorder(&self) -> &jamjam::audio::RoomRecorder {
+        &self.shared.recorder
+    }
+
+    /// Whether an audio session runs, and the sample rate it runs at
+    pub fn running_sample_rate(&self) -> Option<u32> {
+        self.shared
+            .is_active
+            .load(Ordering::SeqCst)
+            .then(|| self.sample_rate.load(Ordering::SeqCst))
+    }
+
     pub fn new() -> Self {
         Self {
             cmd_tx: Mutex::new(None),

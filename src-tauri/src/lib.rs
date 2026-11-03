@@ -20,6 +20,7 @@ mod help_record;
 mod logging;
 mod menu;
 mod mixer;
+mod recording;
 mod report_problem;
 mod restart;
 mod rpc;

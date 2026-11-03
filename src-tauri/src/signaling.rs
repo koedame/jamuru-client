@@ -23,6 +23,7 @@ use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
+use jamjam::network::recording_notice::RecordingNotice;
 use jamjam::network::settings_help::{
     notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
 };
@@ -115,6 +116,12 @@ pub struct SignalingState {
     /// The key this app signs its audio key exchanges with in the room it entered last. A new
     /// one is made each time a room is created or joined.
     link_identity: std::sync::Mutex<Option<LinkIdentity>>,
+    /// What the room was last told about this app recording it, and over which
+    /// connection (a new connection is a new room entry: the room has not been
+    /// told anything over it).
+    recording_told: std::sync::Mutex<Option<(u32, bool)>>,
+    /// The participants who said they record the room (ADR-095), by id
+    recording_peers: std::sync::Mutex<HashSet<String>>,
 }
 
 impl SignalingState {
@@ -127,7 +134,41 @@ impl SignalingState {
             help_conn: std::sync::Mutex::new(None),
             queued_events: std::sync::Mutex::new(Vec::new()),
             link_identity: std::sync::Mutex::new(None),
+            recording_told: std::sync::Mutex::new(None),
+            recording_peers: std::sync::Mutex::new(HashSet::new()),
         }
+    }
+
+    /// The participants who have said they record the room, by id
+    pub fn recording_peers(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .recording_peers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    fn set_peer_recording(&self, peer: &str, on: bool) {
+        let mut peers = self
+            .recording_peers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if on {
+            peers.insert(peer.to_string());
+        } else {
+            peers.remove(peer);
+        }
+    }
+
+    fn forget_recording_peers(&self) {
+        self.recording_peers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// The key this app signs its key exchanges with in the room it is in
@@ -510,6 +551,7 @@ pub async fn signaling_leave_room(
     conn.send(SignalingMessage::LeaveRoom)
         .await
         .map_err(|e| e.to_string())?;
+    state.forget_recording_peers();
     // The others hear that this app left; any help with them is over.
     let ended = help_events(lock_help(&state).reset());
     queue_events(&state, ended);
@@ -774,6 +816,16 @@ pub async fn signaling_poll_events(
         None => return Ok(events), // No connection, return empty
     };
 
+    // The room is told when this app starts or stops recording it, however that came about
+    // (the button, the disk filling, the session ending).
+    sync_recording_notice(
+        conn,
+        &state,
+        conn_id,
+        streaming.recorder().report().recording,
+    )
+    .await;
+
     // Poll with 50ms timeout to avoid blocking too long
     loop {
         match timeout(Duration::from_millis(50), conn.recv()).await {
@@ -802,6 +854,10 @@ pub async fn signaling_poll_events(
 
                         usage.participant_joined();
                         tracing::info!("Peer {} joined the room", peer.id);
+                        // Someone who comes in while this app records is told on arrival
+                        if recording_told(&state, conn_id) {
+                            send_recording_notice(conn, Some(peer.id), true).await;
+                        }
                         events.push(SignalingEvent::PeerJoined { peer });
                     }
                     SignalingMessage::PeerLeft { peer_id } => {
@@ -829,6 +885,7 @@ pub async fn signaling_poll_events(
 
                         usage.participant_left();
                         tracing::info!("Peer {} left the room", peer_id);
+                        state.set_peer_recording(&peer_id.to_string(), false);
                         events.push(SignalingEvent::PeerLeft {
                             peer_id: peer_id.to_string(),
                         });
@@ -885,19 +942,35 @@ pub async fn signaling_poll_events(
                         ..
                     } => {
                         // A topic this app does not know is from a newer app.
-                        let Ok(PeerBody::SettingsHelp(message)) =
-                            serde_json::from_value(serde_json::Value::Object(body))
+                        let Ok(body) =
+                            serde_json::from_value::<PeerBody>(serde_json::Value::Object(body))
                         else {
                             tracing::debug!("Skipping a peer message this app does not know");
                             continue;
                         };
-                        *state.help_conn.lock().unwrap_or_else(|e| e.into_inner()) = Some(conn_id);
-                        let outs = lock_help(&state).receive(
-                            from,
-                            from_name.as_deref().unwrap_or_default(),
-                            message,
-                        );
-                        events.extend(carry_out(conn, &state, outs).await);
+                        match body {
+                            PeerBody::SettingsHelp(message) => {
+                                *state.help_conn.lock().unwrap_or_else(|e| e.into_inner()) =
+                                    Some(conn_id);
+                                let outs = lock_help(&state).receive(
+                                    from,
+                                    from_name.as_deref().unwrap_or_default(),
+                                    message,
+                                );
+                                events.extend(carry_out(conn, &state, outs).await);
+                            }
+                            PeerBody::Recording(RecordingNotice { on }) => {
+                                events.extend(
+                                    recording_notice_received(
+                                        &state,
+                                        from,
+                                        from_name.as_deref().unwrap_or_default(),
+                                        on,
+                                    )
+                                    .await,
+                                );
+                            }
+                        }
                     }
                     _ => {
                         // Ignore other message types during polling (a peer
@@ -924,6 +997,7 @@ pub async fn signaling_poll_events(
                     let mut room_state = state.room_state.lock().await;
                     *room_state = None;
                     drop(room_state);
+                    state.forget_recording_peers();
                     // Before the loss: the window stops reading the batch there.
                     events.extend(help_events(lock_help(&state).reset()));
                     events.push(SignalingEvent::ConnectionLost {
@@ -1041,6 +1115,111 @@ async fn send_help(conn: &mut SignalingConnection, to: Option<Uuid>, message: He
     if let Err(e) = sent {
         tracing::warn!("Could not send a settings help message: {}", e);
     }
+}
+
+/// Whether the room has been told, over `conn_id`, that this app records it.
+fn recording_told(state: &SignalingState, conn_id: u32) -> bool {
+    matches!(
+        *state
+            .recording_told
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()),
+        Some((conn, true)) if conn == conn_id
+    )
+}
+
+/// Tells the room that this app records it, or no longer does, if it was not
+/// told so already over this connection.
+async fn sync_recording_notice(
+    conn: &mut SignalingConnection,
+    state: &SignalingState,
+    conn_id: u32,
+    recording: bool,
+) {
+    let told = {
+        let mut told = state
+            .recording_told
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let already = match *told {
+            Some((conn, on)) if conn == conn_id => on,
+            // Nothing was said over a connection that is new: the room is taken to know no recording
+            _ => false,
+        };
+        if already == recording {
+            return;
+        }
+        *told = Some((conn_id, recording));
+        already
+    };
+    tracing::info!("Telling the room that recording went from {told} to {recording}");
+    send_recording_notice(conn, None, recording).await;
+}
+
+/// Sends the recording notice to `to`, or to everyone in the room. A failed send
+/// is logged only: a lost connection surfaces on the next poll.
+async fn send_recording_notice(conn: &mut SignalingConnection, to: Option<Uuid>, on: bool) {
+    let body = match serde_json::to_value(PeerBody::Recording(RecordingNotice { on })) {
+        Ok(serde_json::Value::Object(body)) => body,
+        other => {
+            tracing::error!(
+                "A recording notice did not encode as an object: {:?}",
+                other
+            );
+            return;
+        }
+    };
+    let sent = conn
+        .send(SignalingMessage::PeerMessage {
+            to,
+            from: None,
+            from_name: None,
+            body,
+        })
+        .await;
+    if let Err(e) = sent {
+        tracing::warn!("Could not send a recording notice: {}", e);
+    }
+}
+
+/// A participant said they record the room, or have stopped: noted for the
+/// participant list, and a line in the chat.
+async fn recording_notice_received(
+    state: &SignalingState,
+    from: Uuid,
+    from_name: &str,
+    on: bool,
+) -> Vec<SignalingEvent> {
+    let mut room = state.room_state.lock().await;
+    let Some(room) = room.as_mut() else {
+        return Vec::new();
+    };
+    state.set_peer_recording(&from.to_string(), on);
+    let name = room
+        .name_of(&from.to_string())
+        .unwrap_or(from_name)
+        .to_string();
+    let message = ChatMessage {
+        id: Uuid::new_v4().to_string(),
+        sender_id: String::new(),
+        sender_name: name,
+        content: String::new(),
+        timestamp: current_timestamp(),
+        is_system: true,
+        system_kind: Some(
+            if on {
+                "recording_started"
+            } else {
+                "recording_stopped"
+            }
+            .to_string(),
+        ),
+        helper_name: None,
+        setting: None,
+        reactions: vec![],
+    };
+    room.chat_messages.push(message.clone());
+    vec![SignalingEvent::ChatMessageReceived { message }]
 }
 
 /// The chat line for a notice. Carries no text: each app writes the sentence
@@ -1651,5 +1830,170 @@ mod tests {
             Some("settings_help_changed")
         );
         assert_eq!(lines[0].setting.as_deref(), Some("buffer_size"));
+    }
+
+    /// A server that passes on to `received` the text of each message the
+    /// client sends after the handshake, and sends `to_send` first.
+    async fn spawn_server_listening(
+        to_send: Vec<String>,
+        received: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> String {
+        use futures_util::{SinkExt, StreamExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut ws = answer_question_then_accept(listener).await;
+            for message in to_send {
+                ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                    message.into(),
+                ))
+                .await
+                .unwrap();
+            }
+            while let Some(Ok(message)) = ws.next().await {
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = message {
+                    let _ = received.send(text.to_string());
+                }
+            }
+        });
+        format!("{TEST_HTTP_SCHEME}{addr}")
+    }
+
+    async fn next_recording_notice(
+        received: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+    ) -> Option<bool> {
+        loop {
+            let text = tokio::time::timeout(Duration::from_millis(800), received.recv())
+                .await
+                .ok()??;
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            if let Some(on) = value["data"]["body"]["recording"]["on"].as_bool() {
+                return Some(on);
+            }
+        }
+    }
+
+    /// Verifies: REQ-CON-034
+    #[tokio::test]
+    async fn when_this_app_starts_and_stops_recording_the_room_is_told_once_each() {
+        let (tx, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let url = spawn_server_listening(vec![], tx).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[]);
+        let poll = || async {
+            signaling_poll_events(
+                1,
+                app.state::<SignalingState>(),
+                app.state::<UsageState>(),
+                app.state::<StreamingState>(),
+            )
+            .await
+            .unwrap()
+        };
+        let dir = tempfile::tempdir().unwrap();
+
+        poll().await;
+        assert_eq!(
+            next_recording_notice(&mut received).await,
+            None,
+            "nothing is said while nothing records"
+        );
+
+        app.state::<StreamingState>()
+            .recorder()
+            .start(dir.path(), "room", 48_000, false)
+            .unwrap();
+        poll().await;
+        poll().await;
+        assert_eq!(next_recording_notice(&mut received).await, Some(true));
+        assert_eq!(
+            next_recording_notice(&mut received).await,
+            None,
+            "it is said once, not on every poll"
+        );
+
+        app.state::<StreamingState>()
+            .recorder()
+            .stop(jamjam::audio::RecordingEnd::Stopped);
+        poll().await;
+        assert_eq!(next_recording_notice(&mut received).await, Some(false));
+    }
+
+    /// Verifies: REQ-CON-034
+    #[tokio::test]
+    async fn when_someone_comes_in_while_this_app_records_they_are_told_on_arrival() {
+        let newcomer = Uuid::new_v4();
+        let (tx, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let joined = format!(
+            r#"{{"type":"PeerJoined","data":{{"peer":{{"id":"{newcomer}","name":"Bo","candidates":[],"public_addr":null,"local_addr":null,"joined_at":0,"features":["peer_message"]}}}}}}"#
+        );
+        // Sent after the app has been told it records: the first poll comes before it
+        let url = spawn_server_listening(vec![joined], tx).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[]);
+        let dir = tempfile::tempdir().unwrap();
+        app.state::<StreamingState>()
+            .recorder()
+            .start(dir.path(), "room", 48_000, false)
+            .unwrap();
+        // The room has been told over this connection already
+        *app.state::<SignalingState>().recording_told.lock().unwrap() = Some((1, true));
+
+        poll_until_events(&app).await;
+
+        let text = tokio::time::timeout(Duration::from_secs(2), received.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let sent: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(sent["data"]["to"], newcomer.to_string());
+        assert_eq!(sent["data"]["body"]["recording"]["on"], true);
+    }
+
+    /// Verifies: REQ-CON-034
+    #[tokio::test]
+    async fn when_a_participant_says_they_record_it_is_noted_and_a_line_goes_in_the_chat() {
+        let sender = Uuid::new_v4();
+        let said = |on: bool| {
+            format!(
+                r#"{{"type":"PeerMessage","data":{{"from":"{sender}","from_name":"Bo","body":{{"recording":{{"on":{on}}}}}}}}}"#
+            )
+        };
+        let url = spawn_server_sending(vec![said(true)]).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[(sender, "Bo")]);
+
+        let events = poll_until_events(&app).await;
+
+        let SignalingEvent::ChatMessageReceived { message } = &events[0] else {
+            panic!("not a chat line: {events:?}");
+        };
+        assert_eq!(message.system_kind.as_deref(), Some("recording_started"));
+        assert_eq!(message.sender_name, "Bo");
+        assert_eq!(
+            app.state::<SignalingState>().recording_peers(),
+            vec![sender.to_string()]
+        );
+
+        // They stop, or leave
+        app.state::<SignalingState>()
+            .set_peer_recording(&sender.to_string(), false);
+        assert!(app.state::<SignalingState>().recording_peers().is_empty());
     }
 }
