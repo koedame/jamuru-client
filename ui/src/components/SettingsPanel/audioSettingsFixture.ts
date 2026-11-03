@@ -16,6 +16,8 @@ export function audioSettings(overrides: Partial<AudioSettings> = {}): AudioSett
     input_channels: { left: 1, right: 2 },
     output_channels: { left: 1, right: 2 },
     transmit_channels: 2,
+    input_limiter: true,
+    output_limiter: true,
     buffer_size: 64,
     buffer_sizes: [32, 64, 128, 256],
     sample_rate: 48000,

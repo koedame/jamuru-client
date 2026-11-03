@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// Protocol version
 ///
-/// 2: PCM audio is 24-bit integers, not 32-bit floats (ADR-094). The two have no
+/// 2: PCM audio is 24-bit integers, not 32-bit floats (ADR-095). The two have no
 /// marker on the wire, and a payload of one read as the other is loud noise, so a
 /// peer of the other version has to be refused rather than decoded.
 pub const PROTOCOL_VERSION: u8 = 2;

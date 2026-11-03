@@ -400,7 +400,13 @@ describe('MainScreen の受信バッファ調整の知らせ', () => {
   it('受信バッファが自動で調整されたとき、設定のバッファサイズと取り違えない言い方で、調整後の ms を知らせること', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
-    statusAudioQuality = { underrun_count: 0, delay_adjustments: 1, adjusted_delay_ms: 5.33 };
+    statusAudioQuality = {
+      underrun_count: 0,
+      input_limited_frames: 0,
+      output_limited_frames: 0,
+      delay_adjustments: 1,
+      adjusted_delay_ms: 5.33,
+    };
 
     render(<MainScreen />);
 

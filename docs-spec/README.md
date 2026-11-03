@@ -93,7 +93,8 @@
 | [ADR-091](./adr/ADR-091-release-credentials-in-environments.md) | 署名の証明書・鍵と tap のトークンは environment のシークレットに置き、それを読むジョブは environment を 1 つだけ名指しする。environment は develop・main とリリースのタグにしか開かない |
 | [ADR-092](./adr/ADR-092-keep-only-the-newest-release-per-channel.md) | ベータのあいだは、チャンネル（ベータ・正式版）ごとに一番新しい release だけを GitHub に残し、公開と配り先の更新が済んだら古い release を丸ごと消す。git のタグは残す。過去の版へ戻すロールバックはやめる |
 | [ADR-093](./adr/ADR-093-one-dual-stack-audio-socket.md) | 音声ソケットは `[::]` の 1 本のデュアルスタックにして、IPv4 と IPv6 の両方の相手と同じソケットで送受信する。候補に IPv6 のグローバルアドレスを足し、STUN は IPv4・IPv6 の両方に問い合わせる。アドレスの綴りは IPv4 に正規化する。経路は今までどおり往復時間を測って選ぶ |
-| [ADR-094](./adr/ADR-094-send-pcm-as-24-bit-integers.md) | PCM は 24-bit 符号付き整数で送る（32-bit float をやめ、帯域を約 22 % 減らす）。±1.0 を超えるサンプルは切り詰めて数える。取り違えを防ぐためプロトコル版を 2 に上げる |
+| [ADR-094](./adr/ADR-094-limiters-on-what-is-sent-and-what-is-played.md) | 送る音と聞こえる音に、遅延を足さない（先読みしない）リミッターを付ける。天井は 0 dBFS で、それ以下の音はビット単位で変えない。既定は両方 ON（ADR-005 の「既定は常に OFF」をこれにだけ当てはめない） |
+| [ADR-095](./adr/ADR-095-send-pcm-as-24-bit-integers.md) | PCM は 24-bit 符号付き整数で送る（32-bit float をやめ、帯域を約 22 % 減らす）。±1.0 を超えるサンプルは切り詰めて数える。取り違えを防ぐためプロトコル版を 2 に上げる |
 
 ---
 

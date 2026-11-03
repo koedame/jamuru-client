@@ -370,6 +370,8 @@ pub(crate) fn settings_with_devices(ids: &[&str]) -> AudioSettings {
             right: Some(2),
         },
         transmit_channels: 2,
+        input_limiter: true,
+        output_limiter: true,
         buffer_size: 64,
         buffer_sizes: vec![32, 64, 128],
         sample_rate: 48000,

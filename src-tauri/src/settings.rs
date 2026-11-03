@@ -75,6 +75,14 @@ pub enum SettingChange {
     TransmitChannels {
         count: u32,
     },
+    /// Hold what is sent at 0 dBFS, or stop doing so (ADR-094)
+    InputLimiter {
+        enabled: bool,
+    },
+    /// Hold what is played at 0 dBFS, or stop doing so (ADR-094)
+    OutputLimiter {
+        enabled: bool,
+    },
     /// Frame size in samples. A running session starts over to take it.
     BufferSize {
         samples: u32,
@@ -144,6 +152,10 @@ pub struct AudioSettings {
     pub input_channels: ChannelPair,
     pub output_channels: ChannelPair,
     pub transmit_channels: u32,
+    /// Whether what is sent is held at 0 dBFS
+    pub input_limiter: bool,
+    /// Whether what is played is held at 0 dBFS
+    pub output_limiter: bool,
     pub buffer_size: u32,
     pub buffer_sizes: Vec<u32>,
     pub sample_rate: u32,
@@ -299,6 +311,14 @@ pub fn plan(
             next.transmit_channels = *count;
             session.push(SessionSetting::TransmitChannels(*count));
         }
+        SettingChange::InputLimiter { enabled } => {
+            next.input_limiter = *enabled;
+            session.push(SessionSetting::InputLimiter(*enabled));
+        }
+        SettingChange::OutputLimiter { enabled } => {
+            next.output_limiter = *enabled;
+            session.push(SessionSetting::OutputLimiter(*enabled));
+        }
         SettingChange::BufferSize { samples } => {
             if !offered_buffer_sizes().contains(samples) {
                 return Err(SettingsError::InvalidBufferSize(*samples));
@@ -410,6 +430,8 @@ pub fn snapshot(
             right: output_pair.1,
         },
         transmit_channels: config.transmit_channels,
+        input_limiter: config.input_limiter,
+        output_limiter: config.output_limiter,
         buffer_size: config.buffer_size,
         buffer_sizes: offered_buffer_sizes(),
         sample_rate: config.sample_rate,
@@ -1075,6 +1097,51 @@ mod tests {
         assert_eq!(plan.session, vec![SessionSetting::TransmitChannels(1)]);
     }
 
+    /// Verifies: REQ-AUD-048
+    #[test]
+    fn the_limiters_are_on_until_the_user_switches_them_off() {
+        let (config, _devices) = setup();
+
+        assert!(config.input_limiter);
+        assert!(config.output_limiter);
+    }
+
+    /// Verifies: REQ-AUD-048
+    #[test]
+    fn switching_the_input_limiter_off_plans_to_save_it_and_to_tell_a_running_session() {
+        let (config, devices) = setup();
+
+        let plan = plan(
+            &config,
+            &devices,
+            &SettingChange::InputLimiter { enabled: false },
+        )
+        .unwrap();
+
+        assert!(!plan.config.input_limiter);
+        assert!(plan.config.output_limiter);
+        assert_eq!(plan.session, vec![SessionSetting::InputLimiter(false)]);
+        assert!(!plan.new_session);
+    }
+
+    /// Verifies: REQ-AUD-048
+    #[test]
+    fn switching_the_output_limiter_off_plans_to_save_it_and_to_tell_a_running_session() {
+        let (config, devices) = setup();
+
+        let plan = plan(
+            &config,
+            &devices,
+            &SettingChange::OutputLimiter { enabled: false },
+        )
+        .unwrap();
+
+        assert!(plan.config.input_limiter);
+        assert!(!plan.config.output_limiter);
+        assert_eq!(plan.session, vec![SessionSetting::OutputLimiter(false)]);
+        assert!(!plan.new_session);
+    }
+
     /// Verifies: REQ-GUI-024
     #[test]
     fn a_transmit_channel_count_other_than_mono_or_stereo_is_refused() {
@@ -1563,6 +1630,32 @@ mod tests {
                 StreamingCommand::SetTransmitChannels(1)
             );
             assert_eq!(*announced.lock().unwrap(), vec![settings]);
+        }
+
+        /// Verifies: REQ-AUD-048
+        #[tokio::test]
+        async fn a_limiter_switched_during_a_session_is_saved_and_reaches_the_session() {
+            let dir = tempfile::tempdir().unwrap();
+            let app = app(&dir, AppConfig::default());
+            let session = app
+                .state::<StreamingState>()
+                .attach_session_for_test()
+                .await;
+
+            let settings = apply(
+                app.handle(),
+                &SettingChange::OutputLimiter { enabled: false },
+            )
+            .await
+            .unwrap();
+
+            assert!(!settings.output_limiter);
+            assert!(settings.input_limiter);
+            assert!(!saved(&dir).output_limiter);
+            assert_eq!(
+                session.try_recv().unwrap(),
+                StreamingCommand::SetOutputLimiter(false)
+            );
         }
 
         /// The failure of the ticket: the driver stops answering, and every
