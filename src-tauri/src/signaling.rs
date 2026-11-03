@@ -76,6 +76,12 @@ pub struct ChatMessage {
     pub reactions: Vec<Reaction>,
 }
 
+/// How many chat lines a room keeps. Anyone in the room can make this app
+/// add a line (by chatting, or by repeating a notice), so the list is bounded:
+/// past this, the oldest line goes first. The chat panel reads the whole list
+/// on every poll, so what is kept is also what is shown.
+const MAX_CHAT_MESSAGES: usize = 1000;
+
 /// Current room state
 struct RoomState {
     _room_id: String,
@@ -89,6 +95,16 @@ struct RoomState {
 }
 
 impl RoomState {
+    /// Adds a line to the chat history, dropping the oldest ones past
+    /// `MAX_CHAT_MESSAGES`. Every line goes in through here.
+    fn push_chat(&mut self, message: ChatMessage) {
+        self.chat_messages.push(message);
+        if self.chat_messages.len() > MAX_CHAT_MESSAGES {
+            let excess = self.chat_messages.len() - MAX_CHAT_MESSAGES;
+            self.chat_messages.drain(..excess);
+        }
+    }
+
     fn name_of(&self, peer_id: &str) -> Option<&str> {
         if peer_id == self.peer_id {
             return Some(&self.peer_name);
@@ -597,7 +613,7 @@ pub async fn signaling_send_chat(
     // Add own message to chat_messages immediately for display
     let mut room_state_guard = state.room_state.lock().await;
     if let Some(ref mut rs) = *room_state_guard {
-        rs.chat_messages.push(ChatMessage {
+        rs.push_chat(ChatMessage {
             id: uuid::Uuid::new_v4().to_string(),
             sender_id,
             sender_name,
@@ -831,7 +847,7 @@ pub async fn signaling_poll_events(
                         let mut room_state = state.room_state.lock().await;
                         if let Some(ref mut rs) = *room_state {
                             rs.peer_names.insert(peer.id.to_string(), peer.name.clone());
-                            rs.chat_messages.push(ChatMessage {
+                            rs.push_chat(ChatMessage {
                                 id: Uuid::new_v4().to_string(),
                                 sender_id: String::new(),
                                 sender_name: peer.name.clone(),
@@ -862,7 +878,7 @@ pub async fn signaling_poll_events(
                                 .name_of(&peer_id.to_string())
                                 .map(String::from)
                                 .unwrap_or_default();
-                            rs.chat_messages.push(ChatMessage {
+                            rs.push_chat(ChatMessage {
                                 id: Uuid::new_v4().to_string(),
                                 sender_id: String::new(),
                                 sender_name: name,
@@ -923,7 +939,7 @@ pub async fn signaling_poll_events(
 
                         // Store in room state
                         if let Some(ref mut rs) = *room_state {
-                            rs.chat_messages.push(chat_msg.clone());
+                            rs.push_chat(chat_msg.clone());
                         }
                         drop(room_state);
 
@@ -1077,7 +1093,7 @@ async fn carry_out(
                     continue;
                 };
                 let message = help_chat_line(event, helper_name.to_string(), helped_name, setting);
-                room.chat_messages.push(message.clone());
+                room.push_chat(message.clone());
                 events.push(SignalingEvent::ChatMessageReceived { message });
             }
             Out::Event(event) => events.push(SignalingEvent::SettingsHelp { event }),
@@ -1226,7 +1242,7 @@ async fn recording_notice_received(
         setting: None,
         reactions: vec![],
     };
-    room.chat_messages.push(message.clone());
+    room.push_chat(message.clone());
     vec![SignalingEvent::ChatMessageReceived { message }]
 }
 
@@ -1695,6 +1711,82 @@ mod tests {
                 .map(|(id, name)| (id.to_string(), name.to_string()))
                 .collect(),
         });
+    }
+
+    fn chat_line(n: usize) -> ChatMessage {
+        ChatMessage {
+            id: n.to_string(),
+            sender_id: "someone".to_string(),
+            sender_name: "Someone".to_string(),
+            content: format!("line {n}"),
+            timestamp: n as u64,
+            is_system: false,
+            system_kind: None,
+            helper_name: None,
+            setting: None,
+            reactions: vec![],
+        }
+    }
+
+    fn empty_room() -> RoomState {
+        RoomState {
+            _room_id: "room".to_string(),
+            peer_id: "me".to_string(),
+            peer_name: "Me".to_string(),
+            chat_messages: vec![],
+            peer_names: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn when_more_lines_arrive_than_the_chat_keeps_the_oldest_are_dropped() {
+        let mut room = empty_room();
+        let total = MAX_CHAT_MESSAGES + 25;
+
+        for n in 0..total {
+            room.push_chat(chat_line(n));
+        }
+
+        assert_eq!(room.chat_messages.len(), MAX_CHAT_MESSAGES);
+        assert_eq!(room.chat_messages.first().unwrap().id, "25");
+        assert_eq!(
+            room.chat_messages.last().unwrap().id,
+            (total - 1).to_string()
+        );
+    }
+
+    #[test]
+    fn when_the_chat_is_under_its_limit_every_line_is_kept_in_order() {
+        let mut room = empty_room();
+
+        for n in 0..MAX_CHAT_MESSAGES {
+            room.push_chat(chat_line(n));
+        }
+
+        assert_eq!(room.chat_messages.len(), MAX_CHAT_MESSAGES);
+        assert_eq!(room.chat_messages.first().unwrap().id, "0");
+    }
+
+    /// Alternating on and off is a change every time, so the repeat check
+    /// does not stop it; the limit does.
+    #[tokio::test]
+    async fn when_a_participant_flips_recording_on_and_off_over_and_over_the_chat_stays_within_its_limit(
+    ) {
+        let app = tauri::test::mock_app();
+        app.manage(SignalingState::new());
+        let state = app.state::<SignalingState>();
+        *state.room_state.try_lock().unwrap() = Some(empty_room());
+        let from = Uuid::new_v4();
+
+        for n in 0..(MAX_CHAT_MESSAGES * 2) {
+            recording_notice_received(&state, from, "Bo", n % 2 == 0).await;
+        }
+
+        let room = state.room_state.try_lock().unwrap();
+        assert_eq!(
+            room.as_ref().unwrap().chat_messages.len(),
+            MAX_CHAT_MESSAGES
+        );
     }
 
     /// The window stops reading a batch of events at the connection dropping,
