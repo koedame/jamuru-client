@@ -4,7 +4,7 @@
 
 ## Status
 
-Accepted。「実装方針」の既定（Opus）とプリセットごとのコーデックは [ADR-021](./ADR-021-preset-codec-and-fec.md) で置き換えた（全プリセットが非圧縮 PCM。Opus は選択可能なコーデック種別として残るだけ）。
+Accepted。「実装方針」の既定（Opus）とプリセットごとのコーデックは [ADR-021](./ADR-021-preset-codec-and-fec.md) で置き換えた（全プリセットが非圧縮 PCM。Opus は選択可能なコーデック種別として残るだけ）。PCM のワイヤ上の形式は 32-bit float から 24-bit 整数に変えた（[ADR-096](./ADR-096-send-pcm-as-24-bit-integers.md)）。
 
 ## Context
 

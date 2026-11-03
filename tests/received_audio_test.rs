@@ -10,10 +10,12 @@ const SAMPLE_RATE: u32 = 48_000;
 const FRAMES_SENT: usize = 20;
 
 /// Stereo samples that differ from each other and from one frame to the next,
-/// so a sample lost or moved anywhere shows as a mismatch.
+/// so a sample lost or moved anywhere shows as a mismatch. Each is a whole number of
+/// 24-bit steps, which is all the wire carries, so what is played can equal what was sent.
 fn signal(samples: usize) -> Vec<f32> {
     (0..samples)
         .map(|i| (i as f32 * 0.001).sin() * 0.5 + (i % 7) as f32 * 0.01)
+        .map(|s| (s * 8_388_608.0).round() / 8_388_608.0)
         .collect()
 }
 

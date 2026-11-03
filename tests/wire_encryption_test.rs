@@ -26,7 +26,9 @@ fn known_signal() -> Vec<f32> {
 }
 
 fn bytes_of(signal: &[f32]) -> Vec<u8> {
-    signal.iter().flat_map(|s| s.to_le_bytes()).collect()
+    let mut bytes = Vec::new();
+    jamjam::audio::encode_pcm24(signal, &mut bytes);
+    bytes
 }
 
 fn contains(datagram: &[u8], needle: &[u8]) -> bool {

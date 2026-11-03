@@ -40,6 +40,8 @@ pub(super) struct Link {
     bandwidth_estimator: BandwidthEstimator,
     bandwidth_verdict: BandwidthVerdict,
     last_bandwidth_status: Option<BandwidthStatus>,
+    /// Whether the log has already said that the input went past 0 dBFS on this link
+    clipping_logged: bool,
     /// The play-out delay the display and the peer have been told about. The
     /// loop compares it with the buffer's own and reports the difference, so
     /// a preset switch, an adaptation and a reconnect all reach the display
@@ -155,6 +157,7 @@ impl LinkSetup<'_> {
             bandwidth_estimator: BandwidthEstimator::default(),
             bandwidth_verdict: BandwidthVerdict::default(),
             last_bandwidth_status: None,
+            clipping_logged: false,
             announced_delay_frames: jitter_buffer_frames,
             // Told when the link comes up
             announced_channel_count: 0,
@@ -326,6 +329,17 @@ impl Link {
                 }
                 self.last_bandwidth_status = status;
             }
+        }
+
+        // Said once: the count keeps growing in the statistics, and a line for every
+        // poll would bury the log under a hot input
+        if conn_stats.samples_clipped > 0 && !self.clipping_logged {
+            tracing::warn!(
+                "The audio sent to {} went past 0 dBFS and was clipped ({} samples so far)",
+                peer,
+                conn_stats.samples_clipped
+            );
+            self.clipping_logged = true;
         }
 
         if let Ok(mut stats) = self.report.stats.write() {

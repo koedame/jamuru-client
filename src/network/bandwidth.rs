@@ -22,15 +22,15 @@
 
 use std::time::{Duration, Instant};
 
-use crate::audio::AudioPreset;
+use crate::audio::{AudioPreset, PCM_BYTES_PER_SAMPLE};
 use crate::protocol::{HEADER_SIZE, MAX_PAYLOAD_SIZE};
 
 use super::encryption::SEAL_OVERHEAD;
 
 /// Bits in a byte, spelled out so the bitrate arithmetic reads clearly
 const BITS_PER_BYTE: f64 = 8.0;
-/// Bytes per 32-bit float sample (ADR-003: PCM f32 is the default codec)
-const BYTES_PER_SAMPLE: f64 = 4.0;
+/// Bytes per sample on the wire: 24-bit PCM (ADR-096)
+const BYTES_PER_SAMPLE: f64 = PCM_BYTES_PER_SAMPLE as f64;
 /// UDP + IP header bytes per packet on IPv4: 20 + 8. What the socket counts
 /// is the jamuru packet; the link carries these on top.
 pub const UDP_IP_OVERHEAD_BYTES: u64 = 20 + 8;
@@ -50,7 +50,7 @@ const PACKET_OVERHEAD_BYTES: f64 =
 /// 256 stereo frames (2048 bytes) go as two packets of 128.
 pub fn samples_per_audio_packet(total_samples: usize, channels: usize) -> usize {
     let channels = channels.max(1);
-    let max_samples = (MAX_PAYLOAD_SIZE - SEAL_OVERHEAD) / std::mem::size_of::<f32>();
+    let max_samples = (MAX_PAYLOAD_SIZE - SEAL_OVERHEAD) / PCM_BYTES_PER_SAMPLE;
     let packets = total_samples.div_ceil(max_samples).max(1);
     total_samples.div_ceil(packets).next_multiple_of(channels)
 }
@@ -353,24 +353,24 @@ impl BandwidthVerdict {
 mod tests {
     use super::*;
 
-    /// PCM's requirement is fixed by the sample rate and width, and ADR-003
-    /// records it as roughly 1.5 Mbps per channel.
+    /// PCM's requirement is fixed by the sample rate and width: 24 bits a sample
+    /// is 1.152 Mbps of audio per channel (ADR-096).
     ///
     /// Verifies: REQ-NET-020
     #[test]
     fn pcm_requirement_matches_the_documented_figure() {
-        // Mono, no FEC: 48000 * 4 * 8 = 1.536 Mbps plus header overhead.
+        // Mono, no FEC: 48000 * 3 * 8 = 1.152 Mbps plus header overhead.
         let mono = required_bps(&AudioPreset::ZeroLatency, 48_000, 1);
         assert!(
-            mono > 1_536_000.0,
+            mono > 1_152_000.0,
             "{} must exceed the payload-only figure once headers count",
             mono
         );
-        // The smallest frames carry the most overhead: 40 bytes of headers and 24 of encryption
-        // on 128 bytes of audio.
+        // The smallest frames carry the most overhead: 64 bytes of headers and encryption
+        // on 96 bytes of audio.
         assert!(
             mono < 2_400_000.0,
-            "{} is implausibly far above 1.5 Mbps for one channel",
+            "{} is implausibly far above 1.2 Mbps for one channel",
             mono
         );
 
@@ -432,10 +432,10 @@ mod tests {
                 "cut between frames, not between channels"
             );
             assert!(
-                per_packet * 4 + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE,
+                per_packet * PCM_BYTES_PER_SAMPLE + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE,
                 "{} frames: {} bytes a packet is too many",
                 preset.frame_size(),
-                per_packet * 4
+                per_packet * PCM_BYTES_PER_SAMPLE
             );
         }
         // What fits goes whole; 256 stereo frames, the one preset that does not, go as two.
