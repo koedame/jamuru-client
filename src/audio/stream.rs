@@ -763,7 +763,20 @@ mod tests {
     use super::*;
 
     fn pcm(samples: &[f32]) -> Vec<u8> {
-        samples.iter().flat_map(|s| s.to_le_bytes()).collect()
+        let mut bytes = Vec::new();
+        crate::audio::encode_pcm24(samples, &mut bytes);
+        bytes
+    }
+
+    /// What came through the 24-bit wire is what went in, to within 24 bits
+    fn assert_close(played: &[f32], sent: &[f32]) {
+        assert_eq!(played.len(), sent.len());
+        for (played, sent) in played.iter().zip(sent) {
+            assert!(
+                (played - sent).abs() <= 0.5 / 8_388_608.0,
+                "{played} is not {sent}"
+            );
+        }
     }
 
     fn stereo_frame(frame_size: u32, value: f32) -> Vec<f32> {
@@ -792,7 +805,7 @@ mod tests {
             let read = path.read_into(&mut out);
 
             assert_eq!(read.result, PlayoutResult::Played { sequence: 0 });
-            assert_eq!(&out[..read.samples], &sent[..]);
+            assert_close(&out[..read.samples], &sent);
         }
     }
 
@@ -841,19 +854,22 @@ mod tests {
         let mut out = stereo_frame(64, 9.0);
 
         for sequence in 0..2 {
-            assert!(path.receive(sequence, &pcm(&stereo_frame(64, sequence as f32 + 1.0))));
+            assert!(path.receive(
+                sequence,
+                &pcm(&stereo_frame(64, (sequence as f32 + 1.0) / 4.0))
+            ));
             assert_eq!(path.read_into(&mut out).result, PlayoutResult::Priming);
             assert!(out.iter().all(|&s| s == 0.0), "priming must be silent");
         }
 
-        assert!(path.receive(2, &pcm(&stereo_frame(64, 3.0))));
+        assert!(path.receive(2, &pcm(&stereo_frame(64, 0.75))));
         let read = path.read_into(&mut out);
         assert_eq!(read.result, PlayoutResult::Played { sequence: 0 });
         assert_eq!(read.samples, 128);
         // The start rises from silence (see `Seam`); the rest is the frame
         assert_eq!(
             out[2 * SEAM_FRAMES..],
-            stereo_frame(64, 1.0)[2 * SEAM_FRAMES..],
+            stereo_frame(64, 0.25)[2 * SEAM_FRAMES..],
             "the oldest frame plays first"
         );
         assert_eq!(path.stats().frames_played, 1);
@@ -900,7 +916,7 @@ mod tests {
     fn an_undecodable_payload_is_not_stored() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available");
 
-        assert!(!path.receive(0, &[1, 2, 3]));
+        assert!(!path.receive(0, &[1, 2, 3, 4]));
         assert_eq!(path.stats().frames_written, 0);
     }
 

@@ -222,6 +222,8 @@ fn send_audio(&self, data: &[u8], timestamp: u64) -> Result<(), NetworkError>;
 
 音声パケットのシーケンス番号は、制御パケット（keep-alive・レイテンシ情報）とは**別の連番**で 0 から振る。受信側は番号の欠けをロスとして数え、FEC グループを `sequence / group_size` で決めるため、音声の番号に制御パケットの穴があるとロス率が水増しされ、送信側と受信側で FEC グループの境界がずれて無関係なフレームの XOR を「復元」してしまう。FEC エンコーダへの登録は番号の採番と同じロックの中で行い、送信の失敗で両者がずれないようにする。
 
+PCM の 1 サンプルは 24-bit 符号付き整数（リトルエンディアン 3 バイト）で送る。32-bit float で送る古い版と取り違えると大きな雑音になるので、プロトコル版を 2 に上げ、版の違うパケットは受け付けない（[ADR-096](../adr/ADR-096-send-pcm-as-24-bit-integers.md)、REQ-AUD-044）。
+
 暗号化後に 1 パケットが `MAX_PAYLOAD_SIZE`（1460 バイト）を超える PCM のフレーム（256 フレームのステレオ）は、フレーム境界で等分した複数のパケット（128 フレーム × 2）に分けて送る。分けたそれぞれが連番を 1 つずつ取り、タイムスタンプはそのパケットの音が始まる位置になる（[ADR-070](../adr/ADR-070-split-audio-frames-that-do-not-fit-a-packet.md)、REQ-NET-029）。受信バッファの深さはパケットの数なので、画面と相手に知らせる遅延は、深さにパケット 1 つの長さ（`audio_packet_duration_ms`）を掛けて出す。
 
 ### 4.2 受信
@@ -468,6 +470,9 @@ struct ConnectionStats {
     security: LinkSecurity,
     /// 偽造・再送・状態に合わないものとして受け付けなかったパケット数
     packets_refused: u64,
+    /// 送った音のうち、0 dBFS（±1.0）を超えて切り詰めたサンプルの数（累計。NaN・無限大も数える。
+    /// ADR-096、REQ-AUD-045）
+    samples_clipped: u64,
 }
 ```
 

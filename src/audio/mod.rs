@@ -45,7 +45,8 @@ pub use asio::AsioDuplex;
 pub use buffer_fit::opened_asio_buffer_frames;
 pub use channels::{capture_attempts, channel_count, pair_in_use, OutputRoute};
 pub use codec::{
-    create_codec, AudioCodec, CodecConfig, CodecError, CodecType, OpusCodec, PcmCodec,
+    create_codec, decode_pcm24, encode_pcm24, AudioCodec, CodecConfig, CodecError, CodecType,
+    OpusCodec, PcmCodec, PCM_BYTES_PER_SAMPLE,
 };
 pub(crate) use device::stable_device_id;
 pub use device::{

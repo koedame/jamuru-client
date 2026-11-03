@@ -5,7 +5,7 @@
 use jamjam::audio::{
     capture_to_wire, create_resampler, pan_received, AudioCodec, AudioConfig, AudioEngine,
     AudioPreset, BitDepth, CaptureConfig, CodecConfig, CodecType, LocalMonitor, PcmCodec,
-    PlaybackConfig, WIRE_CHANNELS,
+    PlaybackConfig, PCM_BYTES_PER_SAMPLE, WIRE_CHANNELS,
 };
 mod common;
 
@@ -126,6 +126,7 @@ async fn test_mono_input() {
 /// Then 2-channel audio is transmitted
 /// And the receiving side plays it in stereo
 /// Verifies: REQ-AUD-108
+/// Verifies: REQ-AUD-044
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_stereo_input() {
     // Left and right carry different audio, so mixing them across would show.
@@ -135,9 +136,10 @@ async fn test_stereo_input() {
 
     assert_eq!(
         payload_bytes,
-        captured.len() * std::mem::size_of::<f32>(),
+        captured.len() * PCM_BYTES_PER_SAMPLE,
         "both channels are on the wire"
     );
+    // Every value here is a multiple of 2^-23, so 24 bits hold it exactly
     assert_eq!(
         decoded, captured,
         "the receiving side gets each side as it was captured"
@@ -433,7 +435,7 @@ fn test_capture_callback_accepts_non_sync_types() {
 
 /// Given a link with at least 10 Mbps of bandwidth
 /// When the codec is set to uncompressed PCM
-/// Then audio is sent uncompressed at ~1.5 Mbps per channel with 0ms of codec delay
+/// Then audio is sent uncompressed at ~1.15 Mbps per channel (24 bits a sample) with 0ms of codec delay
 ///
 /// Verifies: REQ-CORE-002
 /// Verifies: REQ-AUD-101
@@ -452,30 +454,31 @@ fn test_pcm_codec_is_uncompressed() {
     let samples = vec![0.25f32; config.frame_size as usize];
     let encoded = codec.encode(&samples).expect("PCM encode should not fail");
 
-    // Uncompressed f32: exactly 4 bytes per sample, no framing overhead.
+    // Uncompressed 24-bit: exactly 3 bytes per sample, no framing overhead.
     assert_eq!(
         encoded.len(),
-        samples.len() * 4,
+        samples.len() * PCM_BYTES_PER_SAMPLE,
         "PCM must not compress: {} samples should produce {} bytes",
         samples.len(),
-        samples.len() * 4
+        samples.len() * PCM_BYTES_PER_SAMPLE
     );
 
-    // 48000 samples/s * 4 bytes * 8 bits = 1.536 Mbps per channel.
-    let bitrate_bps = config.sample_rate as f64 * 4.0 * 8.0;
+    // 48000 samples/s * 3 bytes * 8 bits = 1.152 Mbps per channel.
+    let bitrate_bps = config.sample_rate as f64 * PCM_BYTES_PER_SAMPLE as f64 * 8.0;
     assert!(
-        (bitrate_bps - 1_536_000.0).abs() < 1.0,
-        "PCM bitrate {:.0} bps is not the expected ~1.5 Mbps/ch",
+        (bitrate_bps - 1_152_000.0).abs() < 1.0,
+        "PCM bitrate {:.0} bps is not the expected ~1.15 Mbps/ch",
         bitrate_bps
     );
 }
 
-/// PCM encoding is a byte reinterpretation, so decoding must return the exact
-/// same sample values - no dithering, no requantisation.
+/// PCM encoding rounds to 24 bits once and nothing else: decoding returns a sample that was
+/// already 24-bit exactly, and any other to within half a step of 24 bits - no dithering, no
+/// noise shaping, no requantisation on the way.
 ///
 /// Verifies: REQ-AUD-020
 #[test]
-fn test_pcm_codec_round_trip_is_bit_exact() {
+fn test_pcm_codec_round_trip_is_exact_to_24_bits() {
     let config = CodecConfig {
         codec_type: CodecType::Pcm,
         channels: 1,
@@ -484,26 +487,36 @@ fn test_pcm_codec_round_trip_is_bit_exact() {
     };
     let mut codec = PcmCodec::new(&config);
 
-    let samples: Vec<f32> = vec![
-        0.0,
-        1.0,
-        -1.0,
-        0.5,
-        -0.5,
+    let step = 1.0 / 8_388_608.0;
+    let exact: Vec<f32> = vec![0.0, -1.0, 0.5, -0.5, 0.25, step, -step, 1.0 - step];
+    let encoded = codec.encode(&exact).expect("encode");
+    assert_eq!(
+        codec.decode(&encoded).expect("decode"),
+        exact,
+        "a sample that is already 24-bit must come back as it was"
+    );
+
+    let others: Vec<f32> = vec![
         f32::MIN_POSITIVE,
         0.123_456_79,
         -0.9,
+        1.0,
+        0.999_999_9,
+        0.3,
+        -0.7,
+        0.01,
     ];
-    let encoded = codec.encode(&samples).expect("encode");
-    let decoded = codec.decode(&encoded).expect("decode");
+    let encoded = codec.encode(&others).expect("encode");
+    for (sent, played) in others.iter().zip(codec.decode(&encoded).expect("decode")) {
+        assert!(
+            (sent - played).abs() <= step,
+            "{sent} came back as {played}, more than a 24-bit step away"
+        );
+    }
+    assert_eq!(codec.clipped_samples(), 0, "nothing here is past 0 dBFS");
 
-    assert_eq!(
-        decoded, samples,
-        "PCM round trip must preserve every sample bit-for-bit"
-    );
-
-    // Truncated payloads must be rejected rather than silently mangled.
-    assert!(codec.decode(&[0u8; 3]).is_err());
+    // A payload that is not whole samples must be rejected rather than silently mangled.
+    assert!(codec.decode(&[0u8; 4]).is_err());
 }
 
 /// An audio packet must survive serialisation to the wire and back unchanged.
@@ -559,9 +572,45 @@ fn test_audio_is_transmitted_without_processing() {
     let received_packet = Packet::from_bytes(&wire).expect("parse");
     let played = receiver.decode(&received_packet.payload).expect("decode");
 
-    assert_eq!(
-        played, captured,
-        "the full capture -> encode -> packet -> decode path must not alter a single sample"
+    // 24 bits are what an audio interface resolves: the error is under half a 24-bit step, which
+    // is 144 dB below full scale and below the noise floor of any converter.
+    assert_eq!(played.len(), captured.len());
+    for (sent, played) in captured.iter().zip(&played) {
+        assert!(
+            (sent - played).abs() <= 0.5 / 8_388_608.0,
+            "the capture -> encode -> packet -> decode path altered {sent} to {played}"
+        );
+    }
+}
+
+/// What the 24-bit wire does to a full-scale tone, measured: the noise it adds is the rounding
+/// to 24 bits and nothing more, about 146 dB below the tone, which is quieter than the noise
+/// floor of the best audio interface (about 120 dB below full scale).
+///
+/// Verifies: REQ-AUD-020
+#[test]
+fn test_24_bit_wire_adds_no_audible_noise() {
+    let mut codec = PcmCodec::new(&CodecConfig::default());
+    // Seconds of a tone that is not a whole number of samples to a period, so the rounding
+    // error does not repeat; amplitude 0.99 keeps it inside 0 dBFS
+    let tone: Vec<f32> = (0..48_000 * 4)
+        .map(|i| 0.99 * ((i as f64 * 1_000.37 * std::f64::consts::TAU / 48_000.0).sin() as f32))
+        .collect();
+
+    let encoded = codec.encode(&tone).expect("encode");
+    let played = codec.decode(&encoded).expect("decode");
+
+    let signal: f64 = tone.iter().map(|&s| f64::from(s).powi(2)).sum();
+    let noise: f64 = tone
+        .iter()
+        .zip(&played)
+        .map(|(&s, &p)| (f64::from(s) - f64::from(p)).powi(2))
+        .sum();
+    let snr_db = 10.0 * (signal / noise).log10();
+    println!("24-bit wire, 0.99 FS tone: signal to rounding noise {snr_db:.1} dB");
+    assert!(
+        snr_db > 140.0,
+        "{snr_db:.1} dB is more noise than 24 bits make"
     );
 }
 

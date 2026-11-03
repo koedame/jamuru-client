@@ -136,7 +136,7 @@ impl PlayoutConfig {
 /// audio packet. A frame that does not fit is cut into packets on frame
 /// boundaries (ADR-070), and each packet is played as a frame of its own.
 pub const WIDEST_PACKET_SAMPLES: usize =
-    crate::protocol::MAX_PAYLOAD_SIZE / std::mem::size_of::<f32>();
+    crate::protocol::MAX_PAYLOAD_SIZE / super::codec::PCM_BYTES_PER_SAMPLE;
 
 /// How many samples the longest frame held by a buffer of `frame_samples`
 /// frames can have, which is what a slot holds and what a reader's buffer has

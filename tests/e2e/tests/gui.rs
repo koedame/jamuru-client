@@ -703,14 +703,15 @@ impl PlayingPeer {
                     next_frame_at = now;
                 }
                 while next_frame_at <= now {
-                    let samples: Vec<u8> = (0..Self::FRAMES)
+                    let tone: Vec<f32> = (0..Self::FRAMES)
                         .flat_map(|i| {
                             let at = (sequence as usize * Self::FRAMES + i) as f32 / 48_000.0;
                             let sample = amplitude * (at * hz * std::f32::consts::TAU).sin();
                             [sample, sample]
                         })
-                        .flat_map(f32::to_le_bytes)
                         .collect();
+                    let mut samples = Vec::new();
+                    jamjam::audio::encode_pcm24(&tone, &mut samples);
                     let timestamp = sequence.wrapping_mul(Self::FRAMES as u32);
                     peer.send(Packet::audio(sequence, timestamp, samples), app);
                     sequence = sequence.wrapping_add(1);
