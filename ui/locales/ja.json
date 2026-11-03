@@ -173,13 +173,32 @@
       "leftUnknown": "参加者が退出しました",
       "settingsHelpStarted": "{{helper}}さんが{{helped}}さんの音声の設定の手伝いを始めました",
       "settingsHelpChanged": "{{helper}}さんが{{helped}}さんの{{setting}}設定を変更しました",
-      "settingsHelpEnded": "{{helper}}さんによる{{helped}}さんの設定の手伝いが終わりました"
+      "settingsHelpEnded": "{{helper}}さんによる{{helped}}さんの設定の手伝いが終わりました",
+      "recordingStarted": "{{name}}さんがルームの音の録音を始めました",
+      "recordingStopped": "{{name}}さんがルームの音の録音を止めました"
     },
     "reaction": {
       "quick": "クイックリアクション",
       "react": "{{emoji}} でリアクション",
       "more": "その他のリアクション",
       "label_other": "{{emoji}} のリアクション、{{count}}人"
+    }
+  },
+  "recording": {
+    "title": "録音",
+    "on": "録音中",
+    "start": "ルームの音を録音",
+    "stop": "録音を止める",
+    "withSelf": "自分のマイクも別ファイルに録る",
+    "notice": "始めると、参加者全員に録音中と伝わります。",
+    "openFolder": "フォルダを開く",
+    "endedNotice": "{{why}}（{{file}}）",
+    "ended": {
+      "stopped": "保存しました（{{time}}）",
+      "sessionEnded": "ルームを出たため、録音を終えました",
+      "sizeLimit": "ファイルが上限の大きさになったため、録音を終えました",
+      "writeFailed": "ディスクに書けなくなったため、録音を終えました",
+      "dropped": "書き込みが追いつかず、音の一部が欠けています"
     }
   },
   "mixer": {

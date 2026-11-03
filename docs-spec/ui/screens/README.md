@@ -174,7 +174,9 @@ graph TB
 #### コンポーネント
 
 - ChannelStrip × 参加者数
-- MasterSection（マスター出力 + 退室ボタン）
+- MasterSection（マスター出力）
+- RecordingPanel（ルームの音の録音。REQ-GUI-032、[ADR-095](../../adr/ADR-095-record-the-room-to-wav.md)）
+- 退室ボタン
 - 設定ボタン
 
 ---
