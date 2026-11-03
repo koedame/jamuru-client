@@ -16,7 +16,8 @@ use crate::audio::{
     capture_or_silence, clear_device_problem, microphone_allows_input, note_device_problem,
     note_trouble, opened_ways, playout_source, start_capture_ring, start_playout, AudioConfig,
     AudioEngine, CaptureRing, DeviceId, DeviceSide, DeviceSlot, DeviceTrouble, FlightKind,
-    LocalMonitor, PeerMix, RecordingFeed, Verdict, ADAPT_INTERVAL, MIC_ANSWER_WAIT, WIRE_CHANNELS,
+    LocalMonitor, PeerMix, RecordingFeed, SwitchedLimiter, Verdict, ADAPT_INTERVAL,
+    MIC_ANSWER_WAIT, WIRE_CHANNELS,
 };
 #[cfg(target_os = "windows")]
 use crate::audio::{open_asio, shared_asio_driver, AsioDuplex, AsioSwitch};
@@ -55,6 +56,8 @@ pub(super) async fn run(
         sample_rate,
         wasapi_mode,
         transmit_channels,
+        input_limiter,
+        output_limiter,
         mut input_channels,
         mut output_channels,
         input_signal,
@@ -77,8 +80,18 @@ pub(super) async fn run(
         delay_adjustments,
         adjusted_delay_us,
         recorder,
+        input_limited_frames,
+        output_limited_frames,
         ..
     } = shared;
+
+    // What the user switched on, read by the audio callbacks and the send thread
+    let input_limiter_on = Arc::new(AtomicBool::new(input_limiter));
+    let output_limiter = SwitchedLimiter::new(
+        sample_rate,
+        Arc::new(AtomicBool::new(output_limiter)),
+        output_limited_frames.clone(),
+    );
 
     // Capture config: mono (for network transmission)
     // Sample rate from config (ADR-013: user-selectable)
@@ -196,6 +209,7 @@ pub(super) async fn run(
             mix.clone(),
             master_volume.clone(),
             output_level.clone(),
+            output_limiter.fresh(),
             recording_feed.as_deref(),
         ) {
             Ok((session, ring)) => {
@@ -274,6 +288,7 @@ pub(super) async fn run(
                         master_volume.clone(),
                         output_level.clone(),
                         monitor.clone(),
+                        output_limiter.fresh(),
                         None,
                         probe.clone(),
                     );
@@ -291,6 +306,7 @@ pub(super) async fn run(
                                 master_volume.clone(),
                                 output_level.clone(),
                                 monitor.clone(),
+                                output_limiter.fresh(),
                                 recording_feed
                                     .as_deref()
                                     .map(|feed| (feed.tap_b(), feed.tap_c())),
@@ -359,6 +375,7 @@ pub(super) async fn run(
         let master_volume = master_volume.clone();
         let output_level = output_level.clone();
         let monitor = monitor.clone();
+        let output_limiter = output_limiter.fresh();
         let recording_feed = recording_feed.clone();
         let probe = probe.clone();
         move |engine: &mut AudioEngine| {
@@ -369,6 +386,7 @@ pub(super) async fn run(
                     master_volume.clone(),
                     output_level.clone(),
                     monitor.clone(),
+                    output_limiter.fresh(),
                     recording_feed
                         .as_deref()
                         .map(|feed| (feed.tap_b(), feed.tap_c())),
@@ -430,6 +448,8 @@ pub(super) async fn run(
         is_muted: is_muted_for_send.clone(),
         local_volume: local_volume_for_send.clone(),
         local_pan: local_pan_for_send.clone(),
+        limiter_on: input_limiter_on.clone(),
+        limited_frames: input_limited_frames.clone(),
         running: send_thread_running.clone(),
         frame_size: buffer_size as usize,
         sample_rate,
@@ -511,6 +531,14 @@ pub(super) async fn run(
                 tracing::info!("Setting input channels to: {} / {:?}", left, right);
                 input_channels = (left, right);
                 reopen_capture = Some(capture.device().cloned());
+            }
+            Ok(Command::SetInputLimiter(on)) => {
+                tracing::info!("Setting the limiter on what is sent to: {}", on);
+                input_limiter_on.store(on, Ordering::Relaxed);
+            }
+            Ok(Command::SetOutputLimiter(on)) => {
+                tracing::info!("Setting the limiter on what is played to: {}", on);
+                output_limiter.set_on(on);
             }
             Ok(Command::SetMute(muted)) => {
                 tracing::info!("Setting mute state to: {}", muted);
@@ -650,6 +678,7 @@ pub(super) async fn run(
                 let mix = mix.clone();
                 let master_volume = master_volume.clone();
                 let output_level = output_level.clone();
+                let output_limiter = output_limiter.fresh();
                 let recording_feed = recording_feed.clone();
                 let frame_samples = mix.frame_samples();
                 let wanted = wanted_channels;
@@ -674,6 +703,7 @@ pub(super) async fn run(
                         mix,
                         master_volume,
                         output_level,
+                        output_limiter,
                         recording_feed.as_deref(),
                     )
                 });

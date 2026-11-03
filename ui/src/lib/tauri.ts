@@ -489,6 +489,10 @@ export interface AudioSettings {
   input_channels: ChannelPair;
   output_channels: ChannelPair;
   transmit_channels: number;
+  /** Whether what is sent is held at 0 dBFS */
+  input_limiter: boolean;
+  /** Whether what is played is held at 0 dBFS */
+  output_limiter: boolean;
   buffer_size: number;
   buffer_sizes: number[];
   sample_rate: number;
@@ -569,6 +573,8 @@ export type SettingChange =
   | { setting: "input_channel"; side: ChannelSide; channel: number | null }
   | { setting: "output_channel"; side: ChannelSide; channel: number | null }
   | { setting: "transmit_channels"; count: number }
+  | { setting: "input_limiter"; enabled: boolean }
+  | { setting: "output_limiter"; enabled: boolean }
   | { setting: "buffer_size"; samples: number }
   | { setting: "sample_rate"; hz: number }
   | { setting: "wasapi_mode"; mode: WasapiMode }
@@ -710,6 +716,10 @@ export interface DetailedLatency {
 export interface AudioQuality {
   /** Number of buffer underruns (audio glitches due to CPU/scheduling) */
   underrun_count: number;
+  /** Frames the limiter on what is sent brought down this session */
+  input_limited_frames: number;
+  /** Frames the limiter on what is played brought down this session */
+  output_limited_frames: number;
   /** Times the play-out delay was adjusted automatically (REQ-LAT-108) */
   delay_adjustments: number;
   /** The play-out delay in ms that the latest adjustment left the adjusted link with */

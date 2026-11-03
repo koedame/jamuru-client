@@ -17,6 +17,7 @@ mod error;
 pub mod fault;
 mod flight;
 mod heartbeat;
+mod limiter;
 mod listing;
 pub mod mic_access;
 mod monitor;
@@ -63,6 +64,9 @@ pub use flight::{
     CAPACITY as FLIGHT_CAPACITY,
 };
 pub use heartbeat::{Heartbeat, StallGuard, Verdict, MAX_REOPENS, STALL_AFTER};
+pub use limiter::{
+    Limiter, SwitchedLimiter, CEILING as LIMITER_CEILING, RELEASE_MS as LIMITER_RELEASE_MS,
+};
 pub use listing::{
     a_listing_is_hung, input_devices, observe_listed_devices, output_devices, Devices,
 };

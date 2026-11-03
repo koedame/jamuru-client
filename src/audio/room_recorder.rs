@@ -641,7 +641,7 @@ mod tests {
         assert!((finished.seconds - 0.01).abs() < 1e-4);
     }
 
-    /// Verifies: REQ-AUD-048
+    /// Verifies: REQ-AUD-049
     #[test]
     fn when_nothing_records_a_tap_takes_nothing_so_a_later_recording_starts_clean() {
         let dir = tempfile::tempdir().unwrap();
@@ -825,7 +825,7 @@ mod tests {
         assert_eq!(samples.len(), 200);
     }
 
-    /// Verifies: REQ-AUD-048
+    /// Verifies: REQ-AUD-049
     #[test]
     fn when_the_writer_falls_behind_the_callback_does_not_wait_and_the_loss_is_counted() {
         let dir = tempfile::tempdir().unwrap();
@@ -909,7 +909,7 @@ mod tests {
     /// The cost on the audio callback while nothing records is what the
     /// session pays for having the feature: one relaxed load.
     ///
-    /// Verifies: REQ-AUD-048
+    /// Verifies: REQ-AUD-049
     #[test]
     fn when_nothing_records_a_push_is_cheap_and_leaves_no_trace() {
         let recorder = RoomRecorder::new();

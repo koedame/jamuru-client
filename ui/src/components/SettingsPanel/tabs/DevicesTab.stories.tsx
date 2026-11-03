@@ -66,6 +66,10 @@ const baseArgs = {
   selectedBufferSize: "64",
   transmitChannelOptions,
   selectedTransmitChannels: "2",
+  inputLimiter: true,
+  outputLimiter: true,
+  onInputLimiterChange: () => {},
+  onOutputLimiterChange: () => {},
   onInputDeviceChange: () => {},
   onOutputDeviceChange: () => {},
   onInputChannelLChange: () => {},
@@ -79,6 +83,14 @@ const baseArgs = {
 
 export const Default: Story = {
   args: baseArgs,
+};
+
+export const LimitersOff: Story = {
+  args: {
+    ...baseArgs,
+    inputLimiter: false,
+    outputLimiter: false,
+  },
 };
 
 export const Empty: Story = {

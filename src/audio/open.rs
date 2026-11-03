@@ -16,7 +16,7 @@ use super::taps::taps;
 use super::{
     capture_attempts, input_devices, output_devices, pair_in_use, rms_level, AudioEngine,
     AudioError, BurstProbe, DeviceId, Devices, LocalMonitor, MonitorTap, OutputRoute, PeerMix,
-    RecordingFeed, RecordingTap,
+    RecordingFeed, RecordingTap, SwitchedLimiter,
 };
 #[cfg(target_os = "windows")]
 use super::{AsioDuplex, OPEN_TIMEOUT};
@@ -190,11 +190,15 @@ pub fn clear_device_problem(problems: &RwLock<Vec<DeviceProblem>>, side: DeviceS
 /// contended buffer costs one concealed frame rather than a stalled device.
 /// The mixer gains are applied here rather than on the way in, so a volume or
 /// pan change is heard on the very next frame.
+///
+/// `limiter` holds what is played at 0 dBFS (ADR-094): last, after the monitor
+/// is mixed in, so that what the recording output `C` carries is what is heard.
 pub fn playout_source(
     mix: PeerMix,
     master_volume: Arc<AtomicU32>,
     output_level: Arc<AtomicU32>,
     monitor: LocalMonitor,
+    mut limiter: SwitchedLimiter,
     recording: Option<(RecordingTap, RecordingTap)>,
     probe: Option<Arc<BurstProbe>>,
 ) -> impl FnMut(&mut [f32]) -> usize + Send + 'static {
@@ -223,6 +227,7 @@ pub fn playout_source(
         // Added after the peers, whatever they did this frame: hearing yourself
         // must not wait for, or depend on, anyone being connected (ADR-033).
         monitor.mix_into(&mut out[..samples]);
+        limiter.process(&mut out[..samples], 2);
         // C is what is actually heard: post-fader, self included.
         if let Some(tap) = c_tap {
             tap.push_stereo(&out[..samples]);
@@ -468,6 +473,7 @@ pub fn open_asio(
     mix: PeerMix,
     master_volume: Arc<AtomicU32>,
     output_level: Arc<AtomicU32>,
+    limiter: SwitchedLimiter,
     recording: Option<&RecordingFeed>,
 ) -> Result<(AsioDuplex, CaptureRing), AudioError> {
     let chosen_in = input_id.map(|id| id.0.clone());
@@ -510,6 +516,7 @@ pub fn open_asio(
             master_volume,
             output_level,
             monitor,
+            limiter,
             recording.map(|feed| (feed.tap_b(), feed.tap_c())),
             None,
         ),
@@ -732,6 +739,58 @@ mod tests {
         samples.iter().flat_map(|s| s.to_le_bytes()).collect()
     }
 
+    fn limiter_on(on: bool) -> SwitchedLimiter {
+        SwitchedLimiter::new(
+            48_000,
+            Arc::new(std::sync::atomic::AtomicBool::new(on)),
+            Arc::new(AtomicU64::new(0)),
+        )
+    }
+
+    fn limiter_off() -> SwitchedLimiter {
+        limiter_on(false)
+    }
+
+    /// What the output callback plays for one participant who sends 0.9 on both
+    /// channels, played at 200 percent: twice what the device can take
+    fn played_too_loud(limiter: SwitchedLimiter) -> Vec<f32> {
+        const FRAME: u32 = 4;
+        let (mix, receive, _voice) = mix_of_one(FRAME, 100);
+        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.9_f32, 0.9_f32]).collect();
+        assert!(receive.receive(0, &pcm(&sent)));
+        let mut source = playout_source(
+            mix,
+            Arc::new(AtomicU32::new(200)),
+            Arc::new(AtomicU32::new(0)),
+            LocalMonitor::new(FRAME),
+            limiter,
+            None,
+            None,
+        );
+        let mut out = vec![0.0f32; receive.frame_samples() * 3];
+        let samples = source(&mut out);
+        out.truncate(samples);
+        out
+    }
+
+    /// Verifies: REQ-AUD-048
+    #[test]
+    fn playout_source_holds_a_mix_that_is_too_loud_at_the_ceiling_when_the_limiter_is_on() {
+        let out = played_too_loud(limiter_on(true));
+
+        assert!(!out.is_empty());
+        assert!(out.iter().all(|s| s.abs() <= 1.0), "{out:?}");
+        assert!(out.iter().any(|s| *s > 0.99), "not silenced: {out:?}");
+    }
+
+    /// Verifies: REQ-AUD-048
+    #[test]
+    fn playout_source_leaves_a_mix_that_is_too_loud_as_it_is_when_the_limiter_is_off() {
+        let out = played_too_loud(limiter_on(false));
+
+        assert!(out.iter().all(|s| (*s - 1.8).abs() < 1e-5), "{out:?}");
+    }
+
     /// A mix with one participant in it, who sends stereo frames of `frame`
     /// samples per channel and is played at `volume` percent
     fn mix_of_one(frame: u32, volume: u32) -> (PeerMix, ReceivePath, VoiceHandle) {
@@ -781,6 +840,7 @@ mod tests {
             Arc::new(AtomicU32::new(100)),
             Arc::new(AtomicU32::new(0)),
             monitor,
+            limiter_off(),
             Some((b_tap, c_tap)),
             None,
         );
@@ -824,6 +884,7 @@ mod tests {
             Arc::new(AtomicU32::new(100)),
             Arc::new(AtomicU32::new(0)),
             monitor,
+            limiter_off(),
             None,
             None,
         );

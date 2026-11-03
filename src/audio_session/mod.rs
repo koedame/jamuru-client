@@ -69,6 +69,10 @@ pub enum Command {
     /// Play on these output device channels (1-based settings) from now on
     SetOutputChannels(u32, Option<u32>),
     SetOutputDevice(Option<String>),
+    /// Hold what is sent at 0 dBFS, or stop doing so (ADR-094)
+    SetInputLimiter(bool),
+    /// Hold what is played at 0 dBFS, or stop doing so (ADR-094)
+    SetOutputLimiter(bool),
     SetMute(bool),
     SetMonitoring(bool),
     SetMasterVolume(f32),
@@ -108,6 +112,10 @@ pub struct Params {
     pub wasapi_mode: WasapiMode,
     /// How many channels are sent: 1 (mono) or 2 (stereo)
     pub transmit_channels: u32,
+    /// Whether what is sent is held at 0 dBFS (ADR-094)
+    pub input_limiter: bool,
+    /// Whether what is played is held at 0 dBFS (ADR-094)
+    pub output_limiter: bool,
     /// Which channels of a multi-channel interface are read (1-based)
     pub input_channels: (u32, Option<u32>),
     /// Which channels of a multi-channel interface are played on (1-based)

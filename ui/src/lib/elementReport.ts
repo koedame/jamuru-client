@@ -216,6 +216,7 @@ function audioLines(audio: AudioSettings | null | undefined): string[] {
     `output device: ${deviceName(audio.output_devices, audio.output_device_id)}`,
     `output channels: ${pair(audio.output_channels)} of ${audio.output_channel_count ?? "?"}`,
     `transmit channels: ${audio.transmit_channels}`,
+    `limiter: input ${audio.input_limiter ? "on" : "off"}, output ${audio.output_limiter ? "on" : "off"}`,
     `buffer size: ${audio.buffer_size} frames`,
     `sample rate: ${audio.sample_rate} Hz`,
     ...(audio.wasapi ? [`wasapi mode: ${audio.wasapi.mode}${audio.wasapi.advice.applies ? "" : " (not used: asio)"}`] : []),

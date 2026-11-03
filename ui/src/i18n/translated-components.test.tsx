@@ -384,7 +384,7 @@ describe('components without hard-coded text', () => {
     expect(screen.getAllByText(fill(bundle.settings.devices.bufferOption, { samples: 64, ms: '1.33' })).length).toBeGreaterThan(0);
     expect(screen.getAllByText(`48 kHz (${bundle.preset.recommended})`).length).toBeGreaterThan(0);
     if (language === 'ja') {
-      expect(latinWords(container, ['Mic', 'Speaker', 'kHz', 'ms', 'Ch', 'ASIO', 'MONO', 'CPU'])).toEqual([]);
+      expect(latinWords(container, ['Mic', 'Speaker', 'kHz', 'ms', 'dBFS', 'Ch', 'ASIO', 'MONO', 'CPU'])).toEqual([]);
     }
   });
 

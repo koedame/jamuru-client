@@ -55,7 +55,7 @@ beforeEach(async () => {
 });
 
 describe("the recording card", () => {
-  // Verifies: REQ-GUI-032
+  // Verifies: REQ-GUI-033
   it("nothing records, the card offers to start and says everyone is told", () => {
     const props = panel();
 
@@ -66,7 +66,7 @@ describe("the recording card", () => {
     expect(screen.queryByTestId("recording-stop")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-032
+  // Verifies: REQ-GUI-033
   it("the microphone's own file is asked for with the checkbox", () => {
     const props = panel();
 
@@ -75,7 +75,7 @@ describe("the recording card", () => {
     expect(props.onWithSelfChange).toHaveBeenCalledWith(true);
   });
 
-  // Verifies: REQ-GUI-032
+  // Verifies: REQ-GUI-033
   it("a recording runs, the card shows the time and the file and offers to stop", () => {
     const props = panel({ recording: true, seconds: 75, fileName: "jamuru-x.wav" });
 
@@ -87,7 +87,7 @@ describe("the recording card", () => {
     expect(props.onStop).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-GUI-032
+  // Verifies: REQ-GUI-033
   it("a recording that the person stopped, the card says it is saved, where, and opens the folder", () => {
     const props = panel({ last: ended("stopped") });
 
@@ -98,7 +98,7 @@ describe("the recording card", () => {
     expect(props.onOpenFolder).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-GUI-032
+  // Verifies: REQ-GUI-033
   it.each([
     ["session_ended", en.recording.ended.sessionEnded],
     ["size_limit", en.recording.ended.sizeLimit],
@@ -109,21 +109,21 @@ describe("the recording card", () => {
     expect(screen.getByTestId("recording-result")).toHaveTextContent(text);
   });
 
-  // Verifies: REQ-GUI-032
+  // Verifies: REQ-GUI-033
   it("frames were lost to a slow disk, the card says part of the sound is missing", () => {
     panel({ last: ended("stopped", { dropped_frames: 4800 }) });
 
     expect(screen.getByTestId("recording-dropped")).toHaveTextContent(en.recording.ended.dropped);
   });
 
-  // Verifies: REQ-GUI-032
+  // Verifies: REQ-GUI-033
   it("a start fails, the card shows what the app said", () => {
     panel({ error: "A recording is already running" });
 
     expect(screen.getByTestId("recording-error")).toHaveTextContent("A recording is already running");
   });
 
-  // Verifies: REQ-GUI-032
+  // Verifies: REQ-GUI-033
   it("the time is shown as minutes and seconds, and with hours past an hour", () => {
     expect(formatDuration(0)).toBe("0:00");
     expect(formatDuration(75.9)).toBe("1:15");

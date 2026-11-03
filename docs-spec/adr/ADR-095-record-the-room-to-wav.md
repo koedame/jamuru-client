@@ -86,4 +86,4 @@ Accepted
 ## References
 
 - [ADR-043](./ADR-043-remote-operation-rpc.md): ピア間メッセージ
-- REQ-AUD-046〜048、REQ-CON-034、REQ-GUI-032（[requirements.md](../requirements.md)）
+- REQ-AUD-046・047・049、REQ-CON-034、REQ-GUI-033（[requirements.md](../requirements.md)）

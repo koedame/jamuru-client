@@ -280,6 +280,13 @@
       "latencyTotal": "合計遅延",
       "bufferOption": "{{samples}} サンプル ({{ms}}ms)",
       "channelOption": "チャンネル {{channel}}",
+      "limiter": {
+        "title": "リミッター",
+        "input": "入力リミッター",
+        "inputHint": "送る音が 0 dBFS を超えないようにします。遅延は増えません",
+        "output": "出力リミッター",
+        "outputHint": "聞こえる音が 0 dBFS を超えないようにします。全員が同時に弾いても割れません。遅延は増えません"
+      },
       "wasapi": {
         "label": "WASAPI（Windows Audio Session API）のモード",
         "about": "WASAPI（Windows Audio Session API）とは",
