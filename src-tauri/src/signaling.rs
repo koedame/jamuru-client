@@ -152,15 +152,16 @@ impl SignalingState {
         ids
     }
 
-    fn set_peer_recording(&self, peer: &str, on: bool) {
+    /// Notes whether `peer` records. True when that is a change.
+    fn set_peer_recording(&self, peer: &str, on: bool) -> bool {
         let mut peers = self
             .recording_peers
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         if on {
-            peers.insert(peer.to_string());
+            peers.insert(peer.to_string())
         } else {
-            peers.remove(peer);
+            peers.remove(peer)
         }
     }
 
@@ -1194,7 +1195,12 @@ async fn recording_notice_received(
     let Some(room) = room.as_mut() else {
         return Vec::new();
     };
-    state.set_peer_recording(&from.to_string(), on);
+    // A notice that says what is already known (a participant's app announces
+    // itself again on a new connection) adds nothing, and a participant cannot
+    // fill the chat by repeating it
+    if !state.set_peer_recording(&from.to_string(), on) {
+        return Vec::new();
+    }
     let name = room
         .name_of(&from.to_string())
         .unwrap_or(from_name)
@@ -1995,5 +2001,30 @@ mod tests {
         app.state::<SignalingState>()
             .set_peer_recording(&sender.to_string(), false);
         assert!(app.state::<SignalingState>().recording_peers().is_empty());
+    }
+
+    /// Verifies: REQ-CON-034
+    #[tokio::test]
+    async fn when_a_participant_repeats_what_is_already_known_the_chat_does_not_grow() {
+        let sender = Uuid::new_v4();
+        let url = spawn_server_sending(vec![]).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[(sender, "Bo")]);
+        let state = app.state::<SignalingState>();
+
+        let first = recording_notice_received(&state, sender, "Bo", true).await;
+        let again = recording_notice_received(&state, sender, "Bo", true).await;
+        let stopped = recording_notice_received(&state, sender, "Bo", false).await;
+        let stopped_again = recording_notice_received(&state, sender, "Bo", false).await;
+
+        assert_eq!(first.len(), 1);
+        assert!(again.is_empty());
+        assert_eq!(stopped.len(), 1);
+        assert!(stopped_again.is_empty());
     }
 }
