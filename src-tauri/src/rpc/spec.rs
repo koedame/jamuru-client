@@ -157,6 +157,11 @@ app_commands! {
     [Access::ALL] "自分のマイクをミュートする・戻す" crate::streaming::streaming_set_mute;
     [Access::SCREEN_ONLY] "確認を出している間、マイクをミュートし相手の音を止めておく・やめて元に戻す" crate::streaming::streaming_hold_mute;
     [Access::ALL] "自分のマイクのミュートの状態を読む" crate::streaming::streaming_get_mute;
+    // Whoever is in the room hears what a recording takes, so only the person at the screen starts one.
+    [Access::SCREEN_ONLY] "ルームの音の録音を始める" crate::recording::recording_start;
+    [Access::SCREEN_ONLY] "ルームの音の録音を止める" crate::recording::recording_stop;
+    [Access::SCREEN_ONLY] "録音の状態（経過時間・保存したファイル名）を読む" crate::recording::recording_status;
+    [Access::SCREEN_ONLY] "録音を保存したフォルダを開く" crate::recording::recording_open_folder;
     [Access::ALL] "自分の音のモニターを切り替える" crate::streaming::streaming_set_monitoring;
     [Access::ALL] "入力のレベルを読む" crate::streaming::streaming_get_input_level;
     // Where the faders stand is the mixer's: a helper's screen draws the same

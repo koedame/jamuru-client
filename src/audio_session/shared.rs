@@ -12,7 +12,9 @@ use std::sync::{Arc, RwLock};
 
 use uuid::Uuid;
 
-use crate::audio::{DeviceProblem, FlightRecorder, PeerGain, PeerMeter, PlayoutStats};
+use crate::audio::{
+    DeviceProblem, FlightRecorder, PeerGain, PeerMeter, PlayoutStats, RoomRecorder,
+};
 use crate::network::{
     BandwidthStatus, ConnectionStats, LinkFacts, LinkHealth, PeerLatencyInfo, MAX_PEERS_PER_ROOM,
 };
@@ -154,6 +156,9 @@ pub struct Shared {
     pub local_volume: Arc<AtomicU32>,
     /// Local (microphone) input pan (-100 = full left, 0 = centre, 100 = full right)
     pub local_pan: Arc<AtomicI32>,
+    /// Records the room to files. It outlives a session: the session's callbacks are wired to it
+    /// as they start, and the session's end ends the recording.
+    pub recorder: RoomRecorder,
 }
 
 impl Default for Shared {
@@ -187,6 +192,7 @@ impl Shared {
             master_volume: Arc::new(AtomicU32::new(100)), // 100 = unity gain
             local_volume: Arc::new(AtomicU32::new(100)),  // 100 = unity gain
             local_pan: Arc::new(AtomicI32::new(0)),       // 0 = centre
+            recorder: RoomRecorder::new(),
         }
     }
 

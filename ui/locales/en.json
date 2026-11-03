@@ -174,7 +174,9 @@
       "leftUnknown": "A participant left",
       "settingsHelpStarted": "{{helper}} started helping {{helped}} with audio settings",
       "settingsHelpChanged": "{{helper}} changed {{helped}}'s {{setting}} setting",
-      "settingsHelpEnded": "{{helper}} is no longer helping {{helped}} with audio settings"
+      "settingsHelpEnded": "{{helper}} is no longer helping {{helped}} with audio settings",
+      "recordingStarted": "{{name}} started recording the room",
+      "recordingStopped": "{{name}} stopped recording the room"
     },
     "reaction": {
       "quick": "Quick reactions",
@@ -182,6 +184,23 @@
       "more": "More reactions",
       "label_one": "{{emoji}} reaction, {{count}} person",
       "label_other": "{{emoji}} reaction, {{count}} people"
+    }
+  },
+  "recording": {
+    "title": "Recording",
+    "on": "Recording",
+    "start": "Record the room",
+    "stop": "Stop recording",
+    "withSelf": "Record my microphone to its own file too",
+    "notice": "Everyone in the room is told you are recording.",
+    "openFolder": "Open folder",
+    "endedNotice": "{{why}} ({{file}})",
+    "ended": {
+      "stopped": "Saved ({{time}})",
+      "sessionEnded": "Recording ended because you left the room",
+      "sizeLimit": "Recording ended because the file reached its size limit",
+      "writeFailed": "Recording ended because the disk could not be written",
+      "dropped": "Writing fell behind, so part of the sound is missing"
     }
   },
   "mixer": {

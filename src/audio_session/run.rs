@@ -79,6 +79,7 @@ pub(super) async fn run(
         underrun_count,
         delay_adjustments,
         adjusted_delay_us,
+        recorder,
         input_limited_frames,
         output_limited_frames,
         ..
@@ -157,14 +158,17 @@ pub(super) async fn run(
 
     // Recording/streaming virtual output (rm:1068): self (A) / peer (B) / mix
     // (C) as one 6ch device a DAW or OBS can pick as a recording input.
-    // `None` where the platform or environment cannot provide one; the
-    // session runs the same either way.
-    // Not with stand-ins for the devices: they run where there is no sound card.
-    let recording_feed = if input_signal.is_some() || output_file.is_some() {
-        None
-    } else {
-        RecordingFeed::start(sample_rate).map(Arc::new)
-    };
+    // Where the platform or environment cannot provide one, or with stand-ins
+    // for the devices (they run where there is no sound card), the session
+    // runs the same without it. The feed also hands A and C to the recording
+    // of the room to files, so it is there either way.
+    let recording_feed = Some(Arc::new(
+        if input_signal.is_some() || output_file.is_some() {
+            RecordingFeed::without_virtual_output(sample_rate, recorder.clone())
+        } else {
+            RecordingFeed::start(sample_rate, recorder.clone())
+        },
+    ));
 
     // Start audio capture with level metering. Mono or stereo follows the
     // transmit channel setting (REQ-AUD-107/108).

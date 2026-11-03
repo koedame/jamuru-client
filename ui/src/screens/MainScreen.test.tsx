@@ -235,6 +235,8 @@ beforeEach(() => {
         return 'test-server';
       case 'signaling_get_chat_messages':
         return [];
+      case 'recording_status':
+        return { recording: false, seconds: 0, dropped_frames: 0, file_name: null, last: null, peers: [] };
       default:
         return undefined;
     }
