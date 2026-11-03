@@ -125,7 +125,8 @@
     },
     "signalingReconnect": {
       "inProgress": "サーバーに再接続しています...",
-      "failed": "サーバーに再接続できませんでした: {{reason}}"
+      "failed": "サーバーに再接続できませんでした: {{reason}}",
+      "failedAudioGoesOn": "サーバーに再接続できませんでした: {{reason}}。相手との音声は止まっていません"
     },
     "notConnected": {
       "reason": "まだサーバーに接続できていません"

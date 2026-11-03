@@ -66,6 +66,10 @@ pub enum Audio {
     /// Close the audio link to `peer`. The audio with the others goes on, on
     /// the address the room already has.
     End { peer: Uuid },
+    /// The audio link to `from` goes on as the link to `to`: the room knows them under
+    /// another id since they entered it again, and they are at the address the link is on.
+    /// The audio does not stop.
+    Relink { from: Uuid, to: Uuid },
     /// Leave the room and enter it again, as a new participant with a new
     /// audio address.
     ///
@@ -89,9 +93,25 @@ const MAX_REJOINS: u32 = 3;
 #[derive(Debug)]
 struct Link {
     peer: Uuid,
+    /// Their name when the link was started
+    name: String,
     /// The addresses the link was started with.
     started_with: Vec<SocketAddr>,
     health: LinkHealth,
+    /// The room no longer lists them (they left it, or entered it again as someone new) but
+    /// their audio still arrives. The link is kept for as long as it is heard: it goes on as
+    /// the link to whoever enters under their name at the address it is on, and ends when
+    /// their audio stops.
+    departed: bool,
+}
+
+impl Link {
+    /// Whether `peer` is who this link goes to under another id: of the same name, at the
+    /// addresses the link was started with
+    fn is_at(&self, peer: &PeerInfo) -> bool {
+        let candidates = peer.get_sorted_candidates();
+        !candidates.is_empty() && peer.name == self.name && candidates == self.started_with
+    }
 }
 
 /// The other participants in the room, and whom there is an audio link to.
@@ -122,7 +142,11 @@ impl Roster {
     /// The participants there is an audio link to, in the order the links
     /// were opened.
     pub fn linked(&self) -> Vec<Uuid> {
-        self.links.iter().map(|link| link.peer).collect()
+        self.links
+            .iter()
+            .filter(|link| !link.departed)
+            .map(|link| link.peer)
+            .collect()
     }
 
     /// This app, as `own`, is in a room with `peers` (it just created, joined
@@ -132,7 +156,25 @@ impl Roster {
     /// Entries of this app's earlier ids are not peers: sending audio to one
     /// is sending it to an address nothing listens on.
     pub fn entered(&mut self, own: Uuid, peers: Vec<PeerInfo>) -> Vec<Audio> {
-        self.links.clear();
+        self.entered_again(own, peers, &[])
+    }
+
+    /// [`Roster::entered`], for entering the room again after the connection to the server was
+    /// lost while the audio went on. `healths` is how each audio link is doing now (none when no
+    /// audio session runs).
+    ///
+    /// The server gives whoever enters a new id, so the room may list the participants an audio
+    /// link goes to under other ids. A link whose audio is heard goes on, for the participant
+    /// with its id, or else the one with its name at the addresses it is on; it is kept for
+    /// whoever of that name appears at them (see [`Roster::updated`]) if there is none yet. A
+    /// link that is not heard is ended and opened again, as is every link when no audio runs.
+    pub fn entered_again(
+        &mut self,
+        own: Uuid,
+        peers: Vec<PeerInfo>,
+        healths: &[(Uuid, LinkHealth)],
+    ) -> Vec<Audio> {
+        let kept = std::mem::take(&mut self.links);
         self.rejoining = false;
         if !self.own_ids.contains(&own) {
             self.own_ids.push(own);
@@ -141,7 +183,46 @@ impl Roster {
             .into_iter()
             .filter(|p| !self.own_ids.contains(&p.id))
             .collect();
+
+        let kept_ids: Vec<Uuid> = kept.iter().map(|link| link.peer).collect();
+        let mut ended = Vec::new();
+        let mut relinked = Vec::new();
+        for mut link in kept {
+            // What the audio session does not have is not there to carry on
+            let Some((_, health)) = healths.iter().find(|(peer, _)| *peer == link.peer) else {
+                continue;
+            };
+            link.health = *health;
+            if link.health != LinkHealth::Heard {
+                ended.push(Audio::End { peer: link.peer });
+                continue;
+            }
+            let now = self.peers.iter().find(|p| p.id == link.peer).or_else(|| {
+                self.peers.iter().find(|p| {
+                    !kept_ids.contains(&p.id)
+                        && !self.links.iter().any(|other| other.peer == p.id)
+                        && link.is_at(p)
+                })
+            });
+            match now.map(|p| p.id) {
+                Some(id) => {
+                    if id != link.peer {
+                        relinked.push(Audio::Relink {
+                            from: link.peer,
+                            to: id,
+                        });
+                        link.peer = id;
+                    }
+                    link.departed = false;
+                }
+                None => link.departed = true,
+            }
+            self.links.push(link);
+        }
+
         let mut audio = vec![Audio::Advertise, Audio::Open];
+        audio.extend(ended);
+        audio.extend(relinked);
         audio.extend(self.open_links());
         audio
     }
@@ -169,7 +250,24 @@ impl Roster {
         if self.links.iter().any(|link| link.peer == id) {
             return self.follow(id);
         }
-        self.open_links()
+        let Some(info) = self.peers.iter().find(|p| p.id == id) else {
+            return Vec::new();
+        };
+        let departed = self
+            .links
+            .iter_mut()
+            .find(|link| link.departed && link.is_at(info));
+        let mut audio = Vec::new();
+        if let Some(link) = departed {
+            audio.push(Audio::Relink {
+                from: link.peer,
+                to: id,
+            });
+            link.peer = id;
+            link.departed = false;
+        }
+        audio.extend(self.open_links());
+        audio
     }
 
     /// How the link to `peer` is doing now. Something is done about it only
@@ -188,6 +286,13 @@ impl Roster {
             return Vec::new();
         }
         link.health = health;
+        if link.departed {
+            // Nobody in the room is on the other end: kept for as long as it is heard
+            return match health {
+                LinkHealth::Silent | LinkHealth::Failed => self.end_link(peer),
+                LinkHealth::Starting | LinkHealth::Heard => Vec::new(),
+            };
+        }
         match health {
             LinkHealth::Starting => Vec::new(),
             LinkHealth::Heard => {
@@ -206,17 +311,28 @@ impl Roster {
         }
     }
 
-    /// A peer left: the link to them ends, and whoever had no link for want of
-    /// room gets one. When that was the last link the audio session goes on
-    /// with none, on the address the room has, so the microphone is still heard
-    /// and whoever joins next finds the audio where it was.
+    /// A peer left. Their link goes on while their audio is heard: the server says someone
+    /// left when it loses their connection, which says nothing of the audio, that goes
+    /// between the two apps directly. Without that the link ends, and whoever had no link for
+    /// want of room gets one. When that was the last link the audio session goes on with none,
+    /// on the address the room has, so the microphone is still heard and whoever joins next
+    /// finds the audio where it was.
     pub fn left(&mut self, peer_id: Uuid) -> Vec<Audio> {
         self.peers.retain(|p| p.id != peer_id);
-        let Some(at) = self.links.iter().position(|link| link.peer == peer_id) else {
+        let Some(link) = self.links.iter_mut().find(|link| link.peer == peer_id) else {
             return Vec::new();
         };
-        self.links.remove(at);
-        let mut audio = vec![Audio::End { peer: peer_id }];
+        if link.health == LinkHealth::Heard {
+            link.departed = true;
+            return Vec::new();
+        }
+        self.end_link(peer_id)
+    }
+
+    /// Ends the link to `peer`, and opens the links whoever had none for want of room gets.
+    fn end_link(&mut self, peer: Uuid) -> Vec<Audio> {
+        self.links.retain(|link| link.peer != peer);
+        let mut audio = vec![Audio::End { peer }];
         let opened = self.open_links();
         if opened.is_empty() {
             // Whoever is left may be someone the link gave up on
@@ -271,8 +387,10 @@ impl Roster {
             }
             self.links.push(Link {
                 peer: peer.id,
+                name: peer.name.clone(),
                 started_with: candidates.clone(),
                 health: LinkHealth::Starting,
+                departed: false,
             });
             audio.push(Audio::Start {
                 peer: peer.id,
@@ -390,6 +508,19 @@ mod tests {
         for peer in ids {
             assert_eq!(roster.link_is(id(*peer), LinkHealth::Heard), vec![]);
         }
+        roster
+    }
+
+    /// A room this app entered where `ids` have each published an address, and nothing has
+    /// been heard of them yet
+    fn linked_to(ids: &[u128]) -> Roster {
+        let mut roster = Roster::default();
+        roster.entered(
+            me(),
+            ids.iter()
+                .map(|id| peer(*id, Some(&format!("192.0.2.{id}:5000"))))
+                .collect(),
+        );
         roster
     }
 
@@ -578,8 +709,9 @@ mod tests {
     ///
     /// Verifies: REQ-CON-140
     #[test]
-    fn the_only_peer_there_is_a_link_to_leaves_ends_the_link_and_keeps_the_audio_session() {
-        let mut roster = hearing(&[2]);
+    fn the_only_peer_there_is_a_link_to_leaves_and_is_not_heard_ends_the_link_and_keeps_the_audio_session(
+    ) {
+        let mut roster = linked_to(&[2]);
 
         let audio = roster.left(id(2));
 
@@ -603,8 +735,9 @@ mod tests {
     ///
     /// Verifies: REQ-CON-133
     #[test]
-    fn one_of_two_linked_peers_leaves_ends_the_link_to_them_and_touches_nothing_else() {
-        let mut roster = hearing(&[2, 3]);
+    fn one_of_two_linked_peers_leaves_and_is_not_heard_ends_the_link_to_them_and_touches_nothing_else(
+    ) {
+        let mut roster = linked_to(&[2, 3]);
 
         let audio = roster.left(id(2));
 
@@ -871,11 +1004,13 @@ mod tests {
 
     /// Verifies: REQ-CON-134
     #[test]
-    fn the_heard_peer_leaves_and_the_one_left_is_one_the_link_gave_up_on_enters_the_room_again() {
+    fn the_heard_peer_stops_being_heard_after_leaving_and_the_one_left_is_one_the_link_gave_up_on_enters_the_room_again(
+    ) {
         let mut roster = hearing(&[2, 3]);
         roster.link_is(id(2), LinkHealth::Failed);
+        roster.left(id(3));
 
-        let audio = roster.left(id(3));
+        let audio = roster.link_is(id(3), LinkHealth::Silent);
 
         assert_eq!(audio, vec![end(3), Audio::Rejoin]);
     }
@@ -994,5 +1129,238 @@ mod tests {
         let candidates = started_with(&mut roster, peer);
 
         assert_eq!(candidates, vec![addr("203.0.113.7:5000")]);
+    }
+
+    // ---- The audio goes on without the server (REQ-CON-150) ----
+
+    /// The server says someone left when it loses their connection, which says nothing of
+    /// the audio: that goes between the two apps directly.
+    ///
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_leaves_while_their_audio_is_heard_does_not_end_the_link() {
+        let mut roster = hearing(&[2]);
+
+        let audio = roster.left(id(2));
+
+        assert_eq!(audio, vec![]);
+        assert!(
+            roster.peers().is_empty(),
+            "they are not listed as in the room"
+        );
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_and_their_audio_stops_ends_the_link() {
+        for stopped in [LinkHealth::Silent, LinkHealth::Failed] {
+            let mut roster = hearing(&[2]);
+            roster.left(id(2));
+
+            let audio = roster.link_is(id(2), stopped);
+
+            assert_eq!(audio, vec![end(2)], "{stopped:?}");
+            assert_eq!(roster.linked(), Vec::<Uuid>::new());
+        }
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_and_the_same_name_publishes_the_same_addresses_goes_on_with_the_link_as_the_new_id(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+        roster.link_is(id(2), LinkHealth::Heard);
+        roster.left(id(2));
+        roster.joined(named(12, "Ben", None));
+
+        let audio = roster.updated(named(12, "Ben", Some("192.0.2.2:5000")));
+
+        assert_eq!(
+            audio,
+            vec![Audio::Relink {
+                from: id(2),
+                to: id(12)
+            }]
+        );
+        assert_eq!(roster.linked(), vec![id(12)]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_and_the_same_name_publishes_other_addresses_starts_a_link_to_them() {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+        roster.link_is(id(2), LinkHealth::Heard);
+        roster.left(id(2));
+        roster.joined(named(12, "Ben", None));
+
+        let audio = roster.updated(named(12, "Ben", Some("192.0.2.2:6000")));
+
+        assert_eq!(audio, vec![start(12, "192.0.2.2:6000")]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_and_another_name_publishes_the_same_addresses_starts_a_link_to_them()
+    {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+        roster.link_is(id(2), LinkHealth::Heard);
+        roster.left(id(2));
+        roster.joined(named(12, "Cleo", None));
+
+        let audio = roster.updated(named(12, "Cleo", Some("192.0.2.2:5000")));
+
+        assert_eq!(audio, vec![start(12, "192.0.2.2:5000")]);
+    }
+
+    /// The room may list us again before the others have published: whoever the link goes to
+    /// is found when they do.
+    ///
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_has_the_same_id_keeps_their_link(
+    ) {
+        let mut roster = hearing(&[2]);
+
+        let audio = roster.entered_again(
+            id(11),
+            vec![peer(2, Some("192.0.2.2:5000"))],
+            &[(id(2), LinkHealth::Heard)],
+        );
+
+        assert_eq!(audio, vec![Audio::Advertise, Audio::Open]);
+        assert_eq!(roster.linked(), vec![id(2)]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_is_listed_as_a_new_id_with_their_name_and_addresses_goes_on_with_the_link_as_the_new_id(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+
+        let audio = roster.entered_again(
+            id(11),
+            vec![named(12, "Ben", Some("192.0.2.2:5000"))],
+            &[(id(2), LinkHealth::Heard)],
+        );
+
+        assert_eq!(
+            audio,
+            vec![
+                Audio::Advertise,
+                Audio::Open,
+                Audio::Relink {
+                    from: id(2),
+                    to: id(12)
+                }
+            ]
+        );
+        assert_eq!(roster.linked(), vec![id(12)]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_is_listed_as_a_new_id_with_other_addresses_starts_a_link_to_them(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+
+        let audio = roster.entered_again(
+            id(11),
+            vec![named(12, "Ben", Some("192.0.2.9:7000"))],
+            &[(id(2), LinkHealth::Heard)],
+        );
+
+        assert_eq!(
+            audio,
+            vec![Audio::Advertise, Audio::Open, start(12, "192.0.2.9:7000")]
+        );
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_is_listed_as_a_new_id_with_another_name_starts_a_link_to_them(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+
+        let audio = roster.entered_again(
+            id(11),
+            vec![named(12, "Cleo", Some("192.0.2.2:5000"))],
+            &[(id(2), LinkHealth::Heard)],
+        );
+
+        assert_eq!(
+            audio,
+            vec![Audio::Advertise, Audio::Open, start(12, "192.0.2.2:5000")]
+        );
+    }
+
+    /// Their entry is not there yet (they have not published): the link waits for them, as it
+    /// does for one who left.
+    ///
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_has_not_published_yet_goes_on_with_the_link_as_the_new_id_once_they_do(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+        let audio = roster.entered_again(
+            id(11),
+            vec![named(12, "Ben", None)],
+            &[(id(2), LinkHealth::Heard)],
+        );
+        assert_eq!(audio, vec![Audio::Advertise, Audio::Open]);
+
+        let audio = roster.updated(named(12, "Ben", Some("192.0.2.2:5000")));
+
+        assert_eq!(
+            audio,
+            vec![Audio::Relink {
+                from: id(2),
+                to: id(12)
+            }]
+        );
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn this_app_enters_again_while_the_audio_is_not_heard_ends_the_link_and_starts_it_again() {
+        for health in [LinkHealth::Starting, LinkHealth::Silent, LinkHealth::Failed] {
+            let mut roster = linked_to(&[2]);
+
+            let audio = roster.entered_again(
+                id(11),
+                vec![peer(2, Some("192.0.2.2:5000"))],
+                &[(id(2), health)],
+            );
+
+            assert_eq!(
+                audio,
+                vec![
+                    Audio::Advertise,
+                    Audio::Open,
+                    end(2),
+                    start(2, "192.0.2.2:5000")
+                ],
+                "{health:?}"
+            );
+        }
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn this_app_enters_again_and_no_audio_runs_starts_the_links_from_nothing() {
+        let mut roster = hearing(&[2]);
+
+        let audio = roster.entered_again(id(11), vec![peer(2, Some("192.0.2.2:5000"))], &[]);
+
+        assert_eq!(
+            audio,
+            vec![Audio::Advertise, Audio::Open, start(2, "192.0.2.2:5000")]
+        );
     }
 }

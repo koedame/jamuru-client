@@ -126,7 +126,8 @@
     },
     "signalingReconnect": {
       "inProgress": "Reconnecting to the server...",
-      "failed": "Couldn't reconnect to the server: {{reason}}"
+      "failed": "Couldn't reconnect to the server: {{reason}}",
+      "failedAudioGoesOn": "Couldn't reconnect to the server: {{reason}}. Your audio with the others has not stopped"
     },
     "notConnected": {
       "reason": "Not connected to the server yet"

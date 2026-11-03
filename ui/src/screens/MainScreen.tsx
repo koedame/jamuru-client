@@ -1257,9 +1257,13 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
             <div className="toast-stack__row">
               <Toast
                 type="error"
-                message={t("session.signalingReconnect.failed", {
-                  reason: session.signaling_reconnect_error ?? "",
-                })}
+                message={t(
+                  // The audio runs between the apps, not through the server (REQ-CON-150)
+                  links.some((link) => link.connection_state === "connected")
+                    ? "session.signalingReconnect.failedAudioGoesOn"
+                    : "session.signalingReconnect.failed",
+                  { reason: session.signaling_reconnect_error ?? "" }
+                )}
               />
               <button
                 type="button"

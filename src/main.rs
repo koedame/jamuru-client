@@ -1314,6 +1314,13 @@ impl Backend for CliBackend {
         Ok(())
     }
 
+    async fn relink(&self, from: Uuid, to: Uuid) -> Result<(), String> {
+        if let Some(session) = self.audio().as_mut() {
+            session.relink(from, to);
+        }
+        Ok(())
+    }
+
     fn announce(&self, _snapshot: &jamjam::network::room_session::Snapshot) {}
 }
 
@@ -1486,6 +1493,16 @@ impl AudioSession {
     fn unlink(&mut self, peer: Uuid) {
         self.told_up.remove(&peer);
         let _ = self.controls.commands.send(Command::Unlink(peer));
+    }
+
+    fn relink(&mut self, from: Uuid, to: Uuid) {
+        if let Some(name) = self.names.get(&from).cloned() {
+            self.names.insert(to, name);
+        }
+        if self.told_up.remove(&from) {
+            self.told_up.insert(to);
+        }
+        let _ = self.controls.commands.send(Command::Relink { from, to });
     }
 
     fn unlink_all(&mut self) {

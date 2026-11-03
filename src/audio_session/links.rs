@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::shared::{BandwidthSnapshot, LinkReport, Shared};
 use super::LinkTarget;
-use crate::audio::{AudioPreset, PeerMix, ReceivePath, VoiceHandle, WIRE_CHANNELS};
+use crate::audio::{AudioPreset, PeerGain, PeerMix, ReceivePath, VoiceHandle, WIRE_CHANNELS};
 use crate::link::{LinkSpec, Opened};
 use crate::network::{
     audio_packet_duration_ms, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
@@ -28,6 +28,8 @@ pub(super) enum LinkStage {
 pub(super) struct Link {
     pub(super) peer: Uuid,
     pub(super) report: Arc<LinkReport>,
+    /// Where their fader and pan stand, the one the mix reads
+    pub(super) gain: Arc<PeerGain>,
     /// Their audio, from payload to the mix
     pub(super) receive: ReceivePath,
     /// Their place in the mix: they are heard for as long as the link is held
@@ -86,6 +88,7 @@ impl LinkSetup<'_> {
         report.set_state("connecting", None);
 
         let gain = self.shared.gain_of(peer);
+        let link_gain = gain.clone();
 
         let report_for_state = report.clone();
         let reconnect_count = self.shared.reconnect_count.clone();
@@ -148,6 +151,7 @@ impl LinkSetup<'_> {
         Ok(Link {
             peer,
             report,
+            gain: link_gain,
             receive,
             _voice: voice,
             stage: LinkStage::Checking(checking),
