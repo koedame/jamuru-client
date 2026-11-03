@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use tokio::time::Duration;
 
 use jamjam::network::{
-    gather_host_candidates, AddressCandidate, ClientInfo, EnterError, EnterRequest, Entered,
+    gather_host_candidates_for, AddressCandidate, ClientInfo, EnterError, EnterRequest, Entered,
     LinkIdentity, NetworkError, PeerInfo, RoomEntry, RoomInfo, SignalingClient,
     SignalingConnection, SignalingMessage, PEER_MESSAGE_FEATURE,
 };
@@ -478,17 +478,12 @@ pub async fn signaling_publish_local_candidates(
 
 /// Address candidates for `local_port` that a peer can actually send to.
 ///
-/// The audio socket is bound to `0.0.0.0`, so it is IPv4-only: `sendto` an IPv6
-/// destination fails with EINVAL, and IPv6 link-local also needs a scope id
-/// (`fe80::1%en0`) that the wire format does not carry. `gather_candidates`
-/// therefore offers IPv4 only, ordered by the candidate priority (host before
-/// server-reflexive, which prefers a LAN path over hairpinning through the
-/// public address).
-///
-/// `architecture.md` describes IPv4/IPv6 dual-stack with Happy Eyeballs. The
-/// transport does not implement it yet - it binds `0.0.0.0`. Advertising what
-/// the socket can actually receive beats addresses only a future dual-stack
-/// transport could use (ADR-026).
+/// The audio socket is dual-stack (ADR-093): it takes IPv4 and IPv6 peers on one port, so
+/// `gather_candidates` offers the host addresses of both families (IPv6 global unicast only:
+/// a link-local one needs a scope id (`fe80::1%en0`) that the wire format does not carry),
+/// ordered by the candidate priority (host before server-reflexive, which prefers a LAN path
+/// over hairpinning through the public address). On a system that gave only an IPv4 socket,
+/// only IPv4 addresses are offered.
 ///
 /// The public address is asked of STUN through the audio socket, so it carries
 /// the port the NAT really assigned to it (ADR-035). If that socket is no
@@ -504,10 +499,8 @@ async fn local_candidates(streaming: &StreamingState, local_port: u16) -> Vec<Ad
                  advertising host addresses only",
                 local_port
             );
-            let mut hosts: Vec<AddressCandidate> = gather_host_candidates(local_port)
-                .into_iter()
-                .filter(|c| c.address.is_ipv4())
-                .collect();
+            let mut hosts: Vec<AddressCandidate> =
+                gather_host_candidates_for(local_port, streaming.audio_families());
             hosts.sort_by_key(|c| std::cmp::Reverse(c.priority));
             hosts
         }

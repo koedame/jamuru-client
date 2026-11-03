@@ -22,8 +22,8 @@ use jamjam::audio::{
 use jamjam::audio_session::{self, Command, InputSignal, LinkTarget, Params, Running, Shared};
 use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, Timing};
 use jamjam::network::{
-    bind_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate, ConnectionStats,
-    EnterError, EnterRequest, Entered, LatencyBreakdown, LinkHealth, LinkIdentity,
+    bind_audio_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate,
+    ConnectionStats, EnterError, EnterRequest, Entered, LatencyBreakdown, LinkHealth, LinkIdentity,
     LocalLatencyInfo, NetworkError, PeerLatencyInfo, RoomEntry, RoomInfo, SignalingClient,
     SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
 };
@@ -1390,7 +1390,7 @@ impl AudioSession {
         // STUN is asked through the socket before anything reads it: the reply would be taken
         // for a datagram of a peer. One socket for the whole session, so every link shares
         // the address the room is told.
-        let socket = bind_std("0.0.0.0:0")?;
+        let socket = bind_audio_std(0)?;
         let local_addr = socket.local_addr()?;
         info!("Local UDP socket: {}", local_addr);
         let candidates = gather_candidates_on(&socket).await.unwrap_or_default();

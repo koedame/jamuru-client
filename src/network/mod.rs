@@ -61,13 +61,13 @@ pub use roster::{LinkHealth, Roster};
 pub use sequence_tracker::SequenceTracker;
 pub use signaling::{
     candidates_to_addrs, ensure_crypto_provider_installed, gather_candidates, gather_candidates_on,
-    gather_candidates_using, gather_host_candidates, invite_url, parse_invite_url,
-    AddressCandidate, CandidateType, ClientInfo, InvalidInviteCode, InviteCode, PeerInfo, RoomInfo,
-    SignalingClient, SignalingConnection, SignalingMessage, DEVICE_ID_HEADER, DEVICE_PUBKEY_HEADER,
-    DEVICE_SIGNATURE_HEADER, DEVICE_TIMESTAMP_HEADER, INVITE_URL_SCHEME, MAX_PEERS_PER_ROOM,
-    MAX_PEER_CANDIDATES, PEER_MESSAGE_FEATURE,
+    gather_candidates_using, gather_host_candidates, gather_host_candidates_for, invite_url,
+    parse_invite_url, AddressCandidate, CandidateType, ClientInfo, InvalidInviteCode, InviteCode,
+    PeerInfo, RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, DEVICE_ID_HEADER,
+    DEVICE_PUBKEY_HEADER, DEVICE_SIGNATURE_HEADER, DEVICE_TIMESTAMP_HEADER, INVITE_URL_SCHEME,
+    MAX_PEERS_PER_ROOM, MAX_PEER_CANDIDATES, PEER_MESSAGE_FEATURE,
 };
 pub use stun::{StunClient, StunResult, DEFAULT_STUN_SERVERS};
-pub use transport::{bind_std, UdpTransport};
+pub use transport::{bind_audio_std, bind_std, canonical_addr, IpFamilies, UdpTransport};
 pub use udp_mux::UdpMux;
 pub use wifi::default_route_is_wifi;
