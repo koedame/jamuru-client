@@ -50,7 +50,15 @@ impl Limiter {
     /// Limits `samples` (interleaved, `channels` to a frame) in place.
     pub fn process(&mut self, samples: &mut [f32], channels: usize) {
         for frame in samples.chunks_exact_mut(channels.max(1)) {
-            let peak = frame.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+            // A peer's bytes can decode to NaN or infinity, which no gain brings under
+            // the ceiling (infinity times a gain of 0 is NaN). They are silence here
+            let mut peak = 0.0f32;
+            for sample in frame.iter_mut() {
+                if !sample.is_finite() {
+                    *sample = 0.0;
+                }
+                peak = peak.max(sample.abs());
+            }
             let needed = if peak > CEILING {
                 1.0 - CEILING / peak
             } else {
@@ -262,6 +270,16 @@ mod tests {
         let mut quiet = vec![0.5f32, -0.5];
         limiter.process(&mut quiet, 2);
         assert_eq!(quiet, vec![0.5, -0.5]);
+    }
+
+    // Verifies: REQ-AUD-048
+    #[test]
+    fn samples_that_are_not_numbers_or_are_infinite_come_out_as_silence_and_hold_nothing_down() {
+        let mut limiter = Limiter::new(RATE);
+        let mut samples = vec![f32::INFINITY, 0.25, f32::NAN, f32::NEG_INFINITY, 0.5, -0.5];
+        limiter.process(&mut samples, 2);
+        assert_eq!(samples, vec![0.0, 0.25, 0.0, 0.0, 0.5, -0.5]);
+        assert_eq!(limiter.limited_frames(), 0);
     }
 
     // Verifies: REQ-AUD-048
