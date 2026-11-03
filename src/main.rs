@@ -273,6 +273,9 @@ struct AudioSettings {
     monitor: bool,
     /// How many channels are sent (1 mono, 2 stereo), as the app saves it
     transmit_channels: u32,
+    /// Whether what is sent and what is played are held at 0 dBFS, as the app saves it
+    input_limiter: bool,
+    output_limiter: bool,
     /// How a WASAPI device is opened (Windows), as the app saves it
     wasapi_mode: jamjam::audio::WasapiMode,
     /// Which channels of a multi-channel interface are read and played on (1-based), as
@@ -334,6 +337,8 @@ impl AudioArgs {
             output_file: self.output_file.clone(),
             monitor: self.monitor,
             transmit_channels: config.transmit_channels,
+            input_limiter: config.input_limiter,
+            output_limiter: config.output_limiter,
             wasapi_mode: config.wasapi_mode,
             input_channels: (config.input_channel_l, config.input_channel_r),
             output_channels: (config.output_channel_l, config.output_channel_r),
@@ -1419,6 +1424,8 @@ impl AudioSession {
                 sample_rate: settings.sample_rate,
                 wasapi_mode: settings.wasapi_mode,
                 transmit_channels: settings.transmit_channels,
+                input_limiter: settings.input_limiter,
+                output_limiter: settings.output_limiter,
                 input_channels: settings.input_channels,
                 output_channels: settings.output_channels,
                 input_signal,
@@ -1807,6 +1814,8 @@ mod tests {
             output_file: None,
             monitor: false,
             transmit_channels: 1,
+            input_limiter: true,
+            output_limiter: true,
             wasapi_mode: Default::default(),
             input_channels: (1, Some(2)),
             output_channels: (1, Some(2)),

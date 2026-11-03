@@ -258,12 +258,14 @@ pub async fn capture_baseline<R: Runtime>(app: &AppHandle<R>) -> Option<Baseline
 }
 
 /// The order settings are put back in: a device before the channels of it.
-const RESTORE_ORDER: [&str; 9] = [
+const RESTORE_ORDER: [&str; 11] = [
     "input_device",
     "output_device",
     "input_channel",
     "output_channel",
     "transmit_channels",
+    "input_limiter",
+    "output_limiter",
     "preset",
     "buffer_size",
     "sample_rate",
@@ -326,6 +328,12 @@ fn restoring(baseline: &Baseline, changed: &[String]) -> Vec<Restoration> {
                 ]),
                 "transmit_channels" => Ok(vec![SettingChange::TransmitChannels {
                     count: before.transmit_channels,
+                }]),
+                "input_limiter" => Ok(vec![SettingChange::InputLimiter {
+                    enabled: before.input_limiter,
+                }]),
+                "output_limiter" => Ok(vec![SettingChange::OutputLimiter {
+                    enabled: before.output_limiter,
                 }]),
                 "preset" => Ok(vec![SettingChange::Preset {
                     preset: baseline.preset.clone(),

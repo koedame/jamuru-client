@@ -119,6 +119,12 @@ export interface SettingsPanelProps {
   onTransmitChannelsChange?: (value: string) => void;
   /** WASAPI mode change handler */
   onWasapiModeChange?: (mode: WasapiMode) => void;
+  /** Whether what is sent / played is held at 0 dBFS */
+  inputLimiter?: boolean;
+  outputLimiter?: boolean;
+  /** Limiter switch handlers; the switches are left out when absent */
+  onInputLimiterChange?: (enabled: boolean) => void;
+  onOutputLimiterChange?: (enabled: boolean) => void;
   /** Run diagnostics handler */
   onRunDiagnostics?: () => void;
   /** Cancel diagnostics handler (shows a cancel button while running) */
@@ -227,6 +233,10 @@ export function SettingsPanel({
   onBufferSizeChange = () => {},
   onTransmitChannelsChange = () => {},
   onWasapiModeChange,
+  inputLimiter,
+  outputLimiter,
+  onInputLimiterChange,
+  onOutputLimiterChange,
   onRunDiagnostics,
   onCancelDiagnostics,
   onApplyPreset,
@@ -317,6 +327,10 @@ export function SettingsPanel({
             onBufferSizeChange={onBufferSizeChange}
             onTransmitChannelsChange={onTransmitChannelsChange}
             onWasapiModeChange={onWasapiModeChange}
+            inputLimiter={inputLimiter}
+            outputLimiter={outputLimiter}
+            onInputLimiterChange={onInputLimiterChange}
+            onOutputLimiterChange={onOutputLimiterChange}
           />
         );
       case "privacy":

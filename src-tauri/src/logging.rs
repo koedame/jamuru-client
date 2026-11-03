@@ -371,7 +371,8 @@ fn summarize_config(config: &AppConfig) -> String {
     };
     redact_secrets(&format!(
         "server={} input={:?} output={:?} buffer={} sample_rate={} preset={:?} \
-         input_channels={} output_channels={} transmit_channels={}",
+         input_channels={} output_channels={} transmit_channels={} \
+         input_limiter={} output_limiter={}",
         strip_userinfo(config.effective_server_url()),
         device(&config.input_device_id),
         device(&config.output_device_id),
@@ -381,6 +382,8 @@ fn summarize_config(config: &AppConfig) -> String {
         channel(config.input_channel_l, config.input_channel_r),
         channel(config.output_channel_l, config.output_channel_r),
         config.transmit_channels,
+        config.input_limiter,
+        config.output_limiter,
     ))
 }
 

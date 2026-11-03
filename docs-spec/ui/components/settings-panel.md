@@ -234,6 +234,8 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 7. サンプルレート / バッファサイズ（`row` + `inline` Select）
 8. WASAPI（Windows Audio Session API）のモード（Windows で WASAPI のデバイスがあるときだけ。下記）
 9. 遅延サマリーカード（下記）
+10. 区切り線
+11. 見出し「リミッター」と、「入力リミッター」「出力リミッター」のスイッチ 2 つ（`tab-content__switch`。各スイッチの下に 1 行の説明。REQ-GUI-032、ADR-094）
 
 #### WASAPI のモード
 
@@ -421,4 +423,5 @@ Storybook は i18n を初期化しないため、各 `t(key, fallback)` の fall
 
 - [design-tokens.md](../design-tokens.md) - カラー・スペーシング定義
 - [ADR-008](../../adr/ADR-008-zero-latency-mode.md) - 遅延目標
+- [ADR-094](../../adr/ADR-094-limiters-on-what-is-sent-and-what-is-played.md) - リミッター（入力・出力）
 - UI Component Design Rules (`.claude/rules/ui-component-rules.md`)

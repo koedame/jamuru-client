@@ -263,6 +263,13 @@
       "latencyTotal": "Total Latency",
       "bufferOption": "{{samples}} samples ({{ms}}ms)",
       "channelOption": "Ch {{channel}}",
+      "limiter": {
+        "title": "Limiter",
+        "input": "Input limiter",
+        "inputHint": "Keeps the sound you send from going over 0 dBFS. Adds no delay",
+        "output": "Output limiter",
+        "outputHint": "Keeps the sound you hear from going over 0 dBFS, even when everyone plays at once. Adds no delay"
+      },
       "wasapi": {
         "label": "WASAPI (Windows Audio Session API) mode",
         "about": "What is WASAPI (Windows Audio Session API)?",

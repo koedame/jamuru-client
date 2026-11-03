@@ -1,10 +1,11 @@
 //! The thread that sends what is captured.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::audio::{
-    capture_to_wire, discard_queued, taps, BurstProbe, CaptureRing, GainRamp, WIRE_CHANNELS,
+    capture_to_wire, discard_queued, taps, BurstProbe, CaptureRing, GainRamp, SwitchedLimiter,
+    WIRE_CHANNELS,
 };
 use crate::link::Senders;
 
@@ -17,6 +18,10 @@ pub(super) struct SendFeed {
     pub is_muted: Arc<AtomicBool>,
     pub local_volume: Arc<AtomicU32>,
     pub local_pan: Arc<AtomicI32>,
+    /// Whether what is sent is held at 0 dBFS
+    pub limiter_on: Arc<AtomicBool>,
+    /// Counts the frames the limiter brought down
+    pub limited_frames: Arc<AtomicU64>,
     /// Cleared to stop the thread
     pub running: Arc<AtomicBool>,
     pub frame_size: usize,
@@ -36,6 +41,8 @@ pub(super) fn spawn(feed: SendFeed) -> std::thread::JoinHandle<()> {
             is_muted,
             local_volume,
             local_pan,
+            limiter_on,
+            limited_frames,
             running,
             frame_size: send_buffer_size,
             sample_rate,
@@ -57,6 +64,7 @@ pub(super) fn spawn(feed: SendFeed) -> std::thread::JoinHandle<()> {
         // Muting fades the microphone out (and unmuting in) rather than cutting
         // it, so the other side does not hear a click.
         let mut mute_ramp = GainRamp::new(sample_rate);
+        let mut limiter = SwitchedLimiter::new(sample_rate, limiter_on, limited_frames);
 
         // Capture opened before this thread started, so the ring holds what
         // was captured meanwhile. Sent, that would be a burst of old audio
@@ -115,6 +123,9 @@ pub(super) fn spawn(feed: SendFeed) -> std::thread::JoinHandle<()> {
                         &mut stereo_send_buffer,
                     );
                     mute_ramp.apply(&mut stereo_send_buffer, WIRE_CHANNELS, mute_target);
+                    // Last, so that nothing after the volume, the pan and the fade can
+                    // put a sample over what the wire carries
+                    limiter.process(&mut stereo_send_buffer, WIRE_CHANNELS);
                     if let Some(taps) = taps() {
                         taps.sent(&mut stereo_send_buffer);
                     }
