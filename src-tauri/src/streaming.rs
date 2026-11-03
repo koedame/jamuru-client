@@ -42,6 +42,9 @@ pub struct StreamingState {
     /// Address `prepared_socket` is bound to, kept so repeated prepares report
     /// the same one.
     prepared_addr: Mutex<Option<SocketAddr>>,
+    /// The IP families of the audio socket last prepared. Kept after the socket is handed to
+    /// the session, so the addresses offered to the room stay those the socket can use.
+    audio_families: std::sync::Mutex<jamjam::network::IpFamilies>,
     /// While the microphone is held muted behind a question put to the person
     /// (REQ-CON-138), what lifting the hold goes back to. `None` when nothing
     /// holds it.
@@ -72,6 +75,7 @@ impl StreamingState {
             sample_rate: Arc::new(AtomicU32::new(jamjam::config::DEFAULT_SAMPLE_RATE)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
+            audio_families: std::sync::Mutex::new(jamjam::network::IpFamilies::V4_ONLY),
             mute_hold: std::sync::Mutex::new(None),
             #[cfg(test)]
             stand_ins: std::sync::Mutex::new(None),
@@ -215,19 +219,17 @@ impl StreamingState {
         }
 
         // Port 0 lets the OS choose; the bound address is what we advertise.
-        self.bind_prepared(&mut addr_lock, "0.0.0.0:0").await
+        self.bind_prepared(&mut addr_lock).await
     }
 
-    async fn bind_prepared(
-        &self,
-        addr_lock: &mut Option<SocketAddr>,
-        bind: &str,
-    ) -> Result<SocketAddr, String> {
-        let socket = jamjam::network::bind_std(bind)
+    async fn bind_prepared(&self, addr_lock: &mut Option<SocketAddr>) -> Result<SocketAddr, String> {
+        let socket = jamjam::network::bind_audio_std(0)
             .map_err(|e| format!("Failed to bind the audio socket: {}", e))?;
         let addr = socket
             .local_addr()
             .map_err(|e| format!("Failed to read the audio socket address: {}", e))?;
+        *self.audio_families.lock().unwrap_or_else(|e| e.into_inner()) =
+            jamjam::network::IpFamilies::of_std(&socket);
 
         *self.prepared_socket.lock().await = Some(socket);
         *addr_lock = Some(addr);
@@ -267,6 +269,11 @@ impl StreamingState {
     /// links were opened.
     pub fn link_healths(&self) -> Vec<(Uuid, LinkHealth)> {
         self.shared.link_healths()
+    }
+
+    /// The IP families the audio socket can use: IPv4 and IPv6 for the dual-stack socket
+    pub fn audio_families(&self) -> jamjam::network::IpFamilies {
+        *self.audio_families.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Address candidates for the prepared audio socket, with the public
