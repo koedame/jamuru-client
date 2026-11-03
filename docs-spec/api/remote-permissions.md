@@ -86,6 +86,10 @@
 | `settings_help_stop` | 設定の手伝いを止める |
 | `streaming_reconnect` | 音声の接続を張り直す |
 | `streaming_hold_mute` | 確認を出している間、マイクをミュートし相手の音を止めておく・やめて元に戻す |
+| `recording_start` | ルームの音の録音を始める |
+| `recording_stop` | ルームの音の録音を止める |
+| `recording_status` | 録音の状態（経過時間・保存したファイル名）を読む |
+| `recording_open_folder` | 録音を保存したフォルダを開く |
 | `app_environment` | アプリの版・ビルドの種類・OS・メモリ・音声ホストを読む |
 | `config_load` | 設定ファイルの全体を読む |
 | `config_set_usage_reporting` | 利用状況の送信をオン・オフする |

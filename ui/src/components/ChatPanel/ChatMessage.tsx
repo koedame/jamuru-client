@@ -19,7 +19,9 @@ export type ChatSystemKind =
   | "leave"
   | "settings_help_started"
   | "settings_help_changed"
-  | "settings_help_ended";
+  | "settings_help_ended"
+  | "recording_started"
+  | "recording_stopped";
 
 export interface ChatMessageProps {
   /** Message type determines visual style */
@@ -135,6 +137,14 @@ function SlidersIcon() {
   );
 }
 
+function RecordIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="12" cy="12" r="6" />
+    </svg>
+  );
+}
+
 function LogOutIcon() {
   return (
     <svg
@@ -191,12 +201,24 @@ export function ChatMessage({
       text = t("chat.system.settingsHelpChanged", { ...names, setting: settingLabel(setting, t) });
     } else if (systemKind === "settings_help_ended") {
       text = t("chat.system.settingsHelpEnded", names);
+    } else if (systemKind === "recording_started") {
+      text = t("chat.system.recordingStarted", { name: senderName });
+    } else if (systemKind === "recording_stopped") {
+      text = t("chat.system.recordingStopped", { name: senderName });
     }
     return (
       <div className="chat-message chat-message--system" data-system-kind={kind ?? undefined}>
         {kind && (
           <span className="chat-message__system-icon">
-            {kind === "join" ? <LogInIcon /> : kind === "leave" ? <LogOutIcon /> : <SlidersIcon />}
+            {kind === "join" ? (
+              <LogInIcon />
+            ) : kind === "leave" ? (
+              <LogOutIcon />
+            ) : kind === "recording_started" || kind === "recording_stopped" ? (
+              <RecordIcon />
+            ) : (
+              <SlidersIcon />
+            )}
           </span>
         )}
         <span className="chat-message__system-content">{text}</span>

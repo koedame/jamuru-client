@@ -29,7 +29,7 @@ use super::encryption::SEAL_OVERHEAD;
 
 /// Bits in a byte, spelled out so the bitrate arithmetic reads clearly
 const BITS_PER_BYTE: f64 = 8.0;
-/// Bytes per sample on the wire: 24-bit PCM (ADR-095)
+/// Bytes per sample on the wire: 24-bit PCM (ADR-096)
 const BYTES_PER_SAMPLE: f64 = PCM_BYTES_PER_SAMPLE as f64;
 /// UDP + IP header bytes per packet on IPv4: 20 + 8. What the socket counts
 /// is the jamuru packet; the link carries these on top.
@@ -354,7 +354,7 @@ mod tests {
     use super::*;
 
     /// PCM's requirement is fixed by the sample rate and width: 24 bits a sample
-    /// is 1.152 Mbps of audio per channel (ADR-095).
+    /// is 1.152 Mbps of audio per channel (ADR-096).
     ///
     /// Verifies: REQ-NET-020
     #[test]

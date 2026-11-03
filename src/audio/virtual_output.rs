@@ -40,6 +40,7 @@ use std::time::Duration;
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use super::error::AudioError;
+use super::room_recorder::{FileTap, RoomRecorder};
 
 /// How many stereo sources [`RecordingFeed`] combines: `A` (self), `B`
 /// (peer), `C` (mix).
@@ -163,26 +164,39 @@ impl Drop for VirtualOutputSink {
 /// The writer thread keeps reading from the same slot throughout.
 struct RecordingSource {
     consumer: Arc<Mutex<Consumer<f32>>>,
+    /// Whether there is a virtual output to feed. Without one the taps push
+    /// nothing to it.
+    live: bool,
 }
 
 impl RecordingSource {
-    fn new() -> Self {
+    fn new(live: bool) -> Self {
         let (_, consumer) = RingBuffer::new(RING_FRAMES * 2);
         Self {
             consumer: Arc::new(Mutex::new(consumer)),
+            live,
         }
     }
 
     /// The producer-side handle. Move it into the audio callback that
     /// produces this source's stereo frames.
     fn tap(&self) -> RecordingTap {
+        if !self.live {
+            return RecordingTap {
+                producer: None,
+                file: None,
+            };
+        }
         let (producer, consumer) = RingBuffer::new(RING_FRAMES * 2);
         // Blocking here is fine: this runs on the thread that (re)starts the
         // callback, never on the callback itself.
         if let Ok(mut guard) = self.consumer.lock() {
             *guard = consumer;
         }
-        RecordingTap { producer }
+        RecordingTap {
+            producer: Some(producer),
+            file: None,
+        }
     }
 }
 
@@ -190,7 +204,10 @@ impl RecordingSource {
 /// sources. Move it into the audio callback that captures or renders that
 /// source.
 pub struct RecordingTap {
-    producer: Producer<f32>,
+    /// The virtual output's ring; `None` where there is no virtual output
+    producer: Option<Producer<f32>>,
+    /// The recording to a file's, while the recorder takes this source
+    file: Option<FileTap>,
 }
 
 impl RecordingTap {
@@ -203,7 +220,13 @@ impl RecordingTap {
     /// PipeWire daemon.
     pub fn for_wiring_tests() -> (Self, Consumer<f32>) {
         let (producer, consumer) = RingBuffer::new(RING_FRAMES * 2);
-        (Self { producer }, consumer)
+        (
+            Self {
+                producer: Some(producer),
+                file: None,
+            },
+            consumer,
+        )
     }
 
     /// Pushes a stereo (2-channel interleaved) frame.
@@ -212,7 +235,13 @@ impl RecordingTap {
     /// ring (the writer thread fell behind) drops the frame rather than
     /// block the device.
     pub fn push_stereo(&mut self, stereo: &[f32]) {
-        let Ok(mut chunk) = self.producer.write_chunk(stereo.len()) else {
+        if let Some(file) = self.file.as_mut() {
+            file.push_stereo(stereo);
+        }
+        let Some(producer) = self.producer.as_mut() else {
+            return;
+        };
+        let Ok(mut chunk) = producer.write_chunk(stereo.len()) else {
             return;
         };
         let (first, second) = chunk.as_mut_slices();
@@ -226,7 +255,13 @@ impl RecordingTap {
     /// yet, so a mono source plays the same on `left` and `right` rather than
     /// picking one arbitrarily.
     pub fn push_mono(&mut self, mono: &[f32]) {
-        let Ok(mut chunk) = self.producer.write_chunk(mono.len() * 2) else {
+        if let Some(file) = self.file.as_mut() {
+            file.push_mono(mono);
+        }
+        let Some(producer) = self.producer.as_mut() else {
+            return;
+        };
+        let Ok(mut chunk) = producer.write_chunk(mono.len() * 2) else {
             return;
         };
         let (first, second) = chunk.as_mut_slices();
@@ -241,7 +276,8 @@ impl RecordingTap {
 
 /// Feeds the self (`A`) / peer (`B`) / mix (`C`) audio into a
 /// [`VirtualOutputSink`] on a dedicated writer thread, so a DAW or OBS can
-/// record or monitor them independently (rm:1068).
+/// record or monitor them independently (rm:1068), and hands `A` and `C` to
+/// the [`RoomRecorder`] that records the room to files.
 ///
 /// Each source is dry-run push-only from wherever it is produced; this type
 /// owns none of the audio pipeline, only the combination into 6ch and the
@@ -252,50 +288,72 @@ pub struct RecordingFeed {
     a: RecordingSource,
     b: RecordingSource,
     c: RecordingSource,
+    recorder: RoomRecorder,
+    sample_rate: u32,
 }
 
 impl RecordingFeed {
-    /// Starts the virtual device and its writer thread. Returns `None` where
-    /// the platform or environment cannot provide a virtual device (logged
-    /// once), so a caller runs the session without recording/streaming
-    /// output rather than failing the session over it.
-    pub fn start(sample_rate: u32) -> Option<Self> {
+    /// Starts the virtual device and its writer thread, where the platform
+    /// and environment can provide a virtual device (if not, logged once, and
+    /// the session runs without recording/streaming output rather than
+    /// failing over it). The taps always feed `recorder`.
+    pub fn start(sample_rate: u32, recorder: RoomRecorder) -> Self {
         let sink = match VirtualOutputSink::start(sample_rate) {
-            Ok(sink) => sink,
+            Ok(sink) => Some(sink),
             Err(e) => {
                 tracing::info!("Recording/streaming virtual output not started: {e}");
-                return None;
+                None
             }
         };
+        Self::with_sink(sample_rate, recorder, sink)
+    }
 
-        let a = RecordingSource::new();
-        let b = RecordingSource::new();
-        let c = RecordingSource::new();
+    /// A feed with no virtual output, for a session that runs on stand-ins
+    /// for its devices: it records to files only.
+    pub fn without_virtual_output(sample_rate: u32, recorder: RoomRecorder) -> Self {
+        Self::with_sink(sample_rate, recorder, None)
+    }
+
+    fn with_sink(
+        sample_rate: u32,
+        recorder: RoomRecorder,
+        sink: Option<VirtualOutputSink>,
+    ) -> Self {
+        let live = sink.is_some();
+        let a = RecordingSource::new(live);
+        let b = RecordingSource::new(live);
+        let c = RecordingSource::new(live);
         let stop = Arc::new(AtomicBool::new(false));
 
-        let block_frames = (sample_rate as f32 * POLL_INTERVAL.as_secs_f32()).round() as usize;
-        let writer = std::thread::Builder::new()
-            .name("jamuru-recording-writer".into())
-            .spawn({
-                let stop = stop.clone();
-                let sources = [a.consumer.clone(), b.consumer.clone(), c.consumer.clone()];
-                move || writer_loop(sink, sources, block_frames.max(1), stop)
-            })
-            .ok();
+        let writer = sink.and_then(|sink| {
+            let block_frames = (sample_rate as f32 * POLL_INTERVAL.as_secs_f32()).round() as usize;
+            std::thread::Builder::new()
+                .name("jamuru-recording-writer".into())
+                .spawn({
+                    let stop = stop.clone();
+                    let sources = [a.consumer.clone(), b.consumer.clone(), c.consumer.clone()];
+                    move || writer_loop(sink, sources, block_frames.max(1), stop)
+                })
+                .ok()
+        });
 
-        Some(Self {
+        Self {
             stop,
             writer,
             a,
             b,
             c,
-        })
+            recorder,
+            sample_rate,
+        }
     }
 
     /// A fresh handle for the self (dry) audio. Call again after a capture
     /// device switch rebuilds the callback.
     pub fn tap_a(&self) -> RecordingTap {
-        self.a.tap()
+        let mut tap = self.a.tap();
+        tap.file = Some(self.recorder.tap_self(self.sample_rate));
+        tap
     }
 
     /// A fresh handle for the peer (dry, pre-fader) audio. Call again after a
@@ -307,7 +365,9 @@ impl RecordingFeed {
     /// A fresh handle for the mix (post-fader, what is actually heard) audio.
     /// Call again after a playback device switch rebuilds the callback.
     pub fn tap_c(&self) -> RecordingTap {
-        self.c.tap()
+        let mut tap = self.c.tap();
+        tap.file = Some(self.recorder.tap_mix(self.sample_rate));
+        tap
     }
 }
 
@@ -480,10 +540,11 @@ mod tests {
             return;
         }
 
-        let Some(feed) = RecordingFeed::start(48_000) else {
+        let feed = RecordingFeed::start(48_000, RoomRecorder::new());
+        if feed.writer.is_none() {
             eprintln!("skipping: RecordingFeed did not start");
             return;
-        };
+        }
         let mut a = feed.tap_a();
         let mut b = feed.tap_b();
         let mut c = feed.tap_c();
@@ -541,7 +602,10 @@ mod tests {
     #[test]
     fn test_pushing_a_mono_frame_is_heard_the_same_on_both_sides() {
         let (producer, mut consumer) = RingBuffer::<f32>::new(16);
-        let mut tap = RecordingTap { producer };
+        let mut tap = RecordingTap {
+            producer: Some(producer),
+            file: None,
+        };
 
         tap.push_mono(&[0.5, -0.25]);
 
@@ -553,7 +617,10 @@ mod tests {
     #[test]
     fn test_pushing_a_stereo_frame_keeps_left_and_right_separate() {
         let (producer, mut consumer) = RingBuffer::<f32>::new(16);
-        let mut tap = RecordingTap { producer };
+        let mut tap = RecordingTap {
+            producer: Some(producer),
+            file: None,
+        };
 
         tap.push_stereo(&[0.5, -0.5, 0.25, -0.25]);
 
@@ -565,7 +632,10 @@ mod tests {
     #[test]
     fn test_pushing_to_a_full_tap_drops_the_frame_rather_than_panicking() {
         let (producer, _consumer) = RingBuffer::<f32>::new(2);
-        let mut tap = RecordingTap { producer };
+        let mut tap = RecordingTap {
+            producer: Some(producer),
+            file: None,
+        };
         tap.push_stereo(&[1.0, 1.0]);
 
         tap.push_stereo(&[2.0, 2.0]);
@@ -573,7 +643,7 @@ mod tests {
 
     #[test]
     fn test_retapping_a_recording_source_moves_the_writer_to_the_new_ring() {
-        let source = RecordingSource::new();
+        let source = RecordingSource::new(true);
         let mut old_tap = source.tap();
         old_tap.push_stereo(&[9.0, 9.0]);
 

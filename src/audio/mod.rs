@@ -29,6 +29,7 @@ mod preset;
 pub(crate) mod priority;
 mod probe;
 mod resampler;
+mod room_recorder;
 mod slot;
 mod stream;
 mod taps;
@@ -88,6 +89,10 @@ pub use probe::{BurstProbe, BurstSignal, DelayStats, RoundTripReport};
 pub use resampler::{
     create_resampler, create_resampler_with_channels, AudioResampler, CaptureResampler,
     FastResampler, PassthroughResampler, ResamplerError,
+};
+pub use room_recorder::{
+    EndReason as RecordingEnd, FileTap, Finished as FinishedRecording, Report as RecordingReport,
+    RoomRecorder, StartError as RecordingStartError, MAX_DATA_BYTES as MAX_RECORDING_BYTES,
 };
 #[cfg(target_os = "windows")]
 pub use slot::AsioSwitch;

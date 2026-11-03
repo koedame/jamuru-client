@@ -62,7 +62,9 @@ export type SystemKind =
   | "leave"
   | "settings_help_started"
   | "settings_help_changed"
-  | "settings_help_ended";
+  | "settings_help_ended"
+  | "recording_started"
+  | "recording_stopped";
 
 // ============================================================================
 // Helping with settings (ADR-044 §5)
@@ -334,6 +336,60 @@ export async function sessionJoin(
 /** Leave the room and go back to the room list */
 export async function sessionLeave(): Promise<SessionSnapshot> {
   return invoke("session_leave");
+}
+
+// ============================================================================
+// Recording the room (ADR-095)
+// ============================================================================
+
+/** How a recording that ended came to an end */
+export type RecordingEndedBy = "stopped" | "session_ended" | "size_limit" | "write_failed";
+
+/** A recording that ended. Files are named, not given as paths. */
+export interface RecordingEnded {
+  /** A new number for each recording that ends */
+  id: number;
+  file_name: string;
+  /** The microphone's file, if it was recorded on its own */
+  self_file_name: string | null;
+  seconds: number;
+  /** Stereo frames missing from the file because the disk writer fell behind */
+  dropped_frames: number;
+  ended_by: RecordingEndedBy;
+  /** What went wrong, for "write_failed" */
+  error: string | null;
+}
+
+/** How the recording is doing */
+export interface RecordingStatus {
+  recording: boolean;
+  seconds: number;
+  dropped_frames: number;
+  file_name: string | null;
+  /** The latest recording that ended, until the next one starts */
+  last: RecordingEnded | null;
+  /** The participants who say they record the room, by id */
+  peers: string[];
+}
+
+/** Start recording what the person hears; with `withSelf`, their microphone too, in a file of its own */
+export async function recordingStart(withSelf: boolean): Promise<RecordingStatus> {
+  return invoke("recording_start", { withSelf });
+}
+
+/** Stop the recording, if one runs */
+export async function recordingStop(): Promise<RecordingStatus> {
+  return invoke("recording_stop");
+}
+
+/** How the recording is doing */
+export async function recordingStatus(): Promise<RecordingStatus> {
+  return invoke("recording_status");
+}
+
+/** Open the folder the recordings are in */
+export async function recordingOpenFolder(): Promise<void> {
+  return invoke("recording_open_folder");
 }
 
 /** Try again to get the signaling connection back and rejoin the room, after every attempt failed */

@@ -20,6 +20,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ConnectionPanel, type ConnectionState, type ConnectionErrorKind } from "../components/ConnectionPanel";
 import { MixerPanel, MasterSection, type Channel } from "../components/MixerPanel";
+import { RecordingMark, RecordingPanel, useRoomRecording } from "../components/RecordingPanel";
 import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
 import { PeerLinkDialog } from "../components/PeerLinkDialog";
@@ -521,6 +522,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // Helping with settings (ADR-043). Its events come from the backend as the
   // room's events are read.
   const settingsHelp = useSettingsHelp(connectionId, participants);
+  // A helper's window shows the helped app's room: it does not record it
+  const recording = useRoomRecording(phase === "connected" && !helping);
   const settingsHelpEventRef = useRef(settingsHelp.onEvent);
   settingsHelpEventRef.current = settingsHelp.onEvent;
   const handleSettingsHelpEvent = useCallback(
@@ -1065,6 +1068,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                       </span>
                       <span className="participant__name">{peerName}</span>
                     </span>
+                    {recording.status.recording && <RecordingMark />}
                   </span>
                 </li>
                 {participants.map((participant) => {
@@ -1095,6 +1099,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                         </span>
                         <span className="participant__name">{participant.name}</span>
                       </span>
+                      {recording.status.peers.includes(participant.id) && <RecordingMark />}
                       {trouble !== null && (
                         <span
                           className={`participant__link participant__link--${trouble}`}
@@ -1144,6 +1149,22 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
             <MasterSection levelL={outputLevel} levelR={outputLevel} />
 
+            {!helping && (
+              <RecordingPanel
+                recording={recording.status.recording}
+                seconds={recording.status.seconds}
+                fileName={recording.status.file_name}
+                withSelf={recording.withSelf}
+                last={recording.status.last}
+                error={recording.error}
+                busy={recording.busy}
+                onWithSelfChange={recording.setWithSelf}
+                onStart={recording.start}
+                onStop={recording.stop}
+                onOpenFolder={recording.openFolder}
+              />
+            )}
+
             {/* Leaving is the helped person's own (ADR-044 §3). */}
             {!helping && (
               <button
@@ -1190,6 +1211,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
         <ToastStack>
           {settingsHelp.toast}
+          {recording.toast}
           {delayNoticeVisible && <Toast type="success" message={t("notification.delayAdjusted", { ms: Number(adjustedDelayMs.toFixed(1)) })} />}
           {oldAppWarning && <Toast type="warning" message={oldAppWarning} />}
           {bandwidthWarning && <Toast type="warning" message={bandwidthWarning} />}

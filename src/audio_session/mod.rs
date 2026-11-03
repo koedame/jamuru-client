@@ -173,6 +173,8 @@ pub fn start(
                 let _ = ready_tx.send(Err(e.clone()));
             }
             on_end(&result);
+            // What was heard in the room ended with the session
+            shared.recorder.session_ended();
             // The links ended with the session
             if let Ok(mut links) = shared.links.write() {
                 links.clear();

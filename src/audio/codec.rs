@@ -1,7 +1,7 @@
 //! Audio codec abstraction for encoding/decoding audio frames
 //!
 //! Provides a unified interface for different audio codecs (PCM, Opus).
-//! PCM goes on the wire as 24-bit signed integers (ADR-095).
+//! PCM goes on the wire as 24-bit signed integers (ADR-096).
 //! Opus support requires the `opus-codec` feature. It builds a bundled libopus, which needs cmake.
 
 use thiserror::Error;
