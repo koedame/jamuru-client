@@ -716,6 +716,8 @@ mod tests {
                     channel: Some(2)
                 },
                 SettingChange::TransmitChannels { count: 1 },
+                SettingChange::InputLimiter { enabled: true },
+                SettingChange::OutputLimiter { enabled: true },
                 SettingChange::Preset {
                     preset: AudioPreset::default()
                 },

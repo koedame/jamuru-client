@@ -1642,9 +1642,12 @@ mod tests {
                 .attach_session_for_test()
                 .await;
 
-            let settings = apply(app.handle(), &SettingChange::OutputLimiter { enabled: false })
-                .await
-                .unwrap();
+            let settings = apply(
+                app.handle(),
+                &SettingChange::OutputLimiter { enabled: false },
+            )
+            .await
+            .unwrap();
 
             assert!(!settings.output_limiter);
             assert!(settings.input_limiter);

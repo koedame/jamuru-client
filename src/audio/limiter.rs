@@ -225,7 +225,10 @@ mod tests {
         limiter.process(&mut samples, 2);
         let last = samples[samples.len() - 1];
         // After one release time 1/e of the 6 dB reduction is left
-        assert!(last > 0.5 * 0.5 + 0.5 * 0.5 * 0.6, "gain at the end: {last}");
+        assert!(
+            last > 0.5 * 0.5 + 0.5 * 0.5 * 0.6,
+            "gain at the end: {last}"
+        );
         assert!(last <= 0.5);
     }
 

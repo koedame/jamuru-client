@@ -63,12 +63,33 @@ fn how_much_the_limiter_distorts_a_signal_that_goes_over_full_scale() {
         let clipped: Vec<f32> = original.iter().map(|s| s.clamp(-1.0, 1.0)).collect();
         // The first half second is the limiter finding its gain; the steady state is what is heard
         let from = RATE as usize;
-        let show = |db: f64| if db < -200.0 { "  exact".to_string() } else { format!("{db:7.1}") };
-        let limited_db = if amplitude <= 1.0 { f64::NEG_INFINITY } else { residual_db(&limited[from * 2..]) };
-        let clipped_db = if amplitude <= 1.0 { f64::NEG_INFINITY } else { residual_db(&clipped[from * 2..]) };
-        println!("{amplitude:9.1}  {}      {}", show(limited_db), show(clipped_db));
+        let show = |db: f64| {
+            if db < -200.0 {
+                "  exact".to_string()
+            } else {
+                format!("{db:7.1}")
+            }
+        };
+        let limited_db = if amplitude <= 1.0 {
+            f64::NEG_INFINITY
+        } else {
+            residual_db(&limited[from * 2..])
+        };
+        let clipped_db = if amplitude <= 1.0 {
+            f64::NEG_INFINITY
+        } else {
+            residual_db(&clipped[from * 2..])
+        };
+        println!(
+            "{amplitude:9.1}  {}      {}",
+            show(limited_db),
+            show(clipped_db)
+        );
         if amplitude <= 1.0 {
-            assert_eq!(limited, original, "at or under 0 dBFS the audio is left as it is");
+            assert_eq!(
+                limited, original,
+                "at or under 0 dBFS the audio is left as it is"
+            );
         }
     }
 }
@@ -78,7 +99,10 @@ fn how_much_the_limiter_distorts_a_signal_that_goes_over_full_scale() {
 fn how_long_one_call_takes() {
     let mut buffer = sine(0.5, 1);
     let mut loud = sine(3.0, 1);
-    for (name, samples) in [("at or under 0 dBFS", &mut buffer), ("over 0 dBFS", &mut loud)] {
+    for (name, samples) in [
+        ("at or under 0 dBFS", &mut buffer),
+        ("over 0 dBFS", &mut loud),
+    ] {
         let mut limiter = Limiter::new(RATE);
         let calls = samples.len() / (FRAME * 2);
         let started = Instant::now();
