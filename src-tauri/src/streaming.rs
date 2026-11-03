@@ -222,14 +222,19 @@ impl StreamingState {
         self.bind_prepared(&mut addr_lock).await
     }
 
-    async fn bind_prepared(&self, addr_lock: &mut Option<SocketAddr>) -> Result<SocketAddr, String> {
+    async fn bind_prepared(
+        &self,
+        addr_lock: &mut Option<SocketAddr>,
+    ) -> Result<SocketAddr, String> {
         let socket = jamjam::network::bind_audio_std(0)
             .map_err(|e| format!("Failed to bind the audio socket: {}", e))?;
         let addr = socket
             .local_addr()
             .map_err(|e| format!("Failed to read the audio socket address: {}", e))?;
-        *self.audio_families.lock().unwrap_or_else(|e| e.into_inner()) =
-            jamjam::network::IpFamilies::of_std(&socket);
+        *self
+            .audio_families
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = jamjam::network::IpFamilies::of_std(&socket);
 
         *self.prepared_socket.lock().await = Some(socket);
         *addr_lock = Some(addr);
@@ -273,7 +278,10 @@ impl StreamingState {
 
     /// The IP families the audio socket can use: IPv4 and IPv6 for the dual-stack socket
     pub fn audio_families(&self) -> jamjam::network::IpFamilies {
-        *self.audio_families.lock().unwrap_or_else(|e| e.into_inner())
+        *self
+            .audio_families
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// Address candidates for the prepared audio socket, with the public
