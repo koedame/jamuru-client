@@ -726,10 +726,11 @@ mod tests {
         );
     }
 
-    /// A PCM payload as `ReceivePath::receive` expects it: `f32` samples as
-    /// little-endian bytes (matches `PcmCodec::encode`).
+    /// A PCM payload as `ReceivePath::receive` expects it (matches `PcmCodec::encode`)
     fn pcm(samples: &[f32]) -> Vec<u8> {
-        samples.iter().flat_map(|s| s.to_le_bytes()).collect()
+        let mut bytes = Vec::new();
+        crate::audio::encode_pcm24(samples, &mut bytes);
+        bytes
     }
 
     /// A mix with one participant in it, who sends stereo frames of `frame`
@@ -764,7 +765,7 @@ mod tests {
     fn playout_source_feeds_its_c_tap_the_same_audio_it_plays() {
         const FRAME: u32 = 4;
         let (mix, receive, _voice) = mix_of_one(FRAME, 50);
-        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.8_f32, 0.2_f32]).collect();
+        let sent: Vec<f32> = (0..FRAME).flat_map(|_| [0.75_f32, 0.25_f32]).collect();
         assert!(receive.receive(0, &pcm(&sent)));
 
         let monitor = LocalMonitor::new(FRAME);

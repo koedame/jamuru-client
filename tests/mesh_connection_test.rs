@@ -21,11 +21,14 @@ const FRAME: usize = 64;
 
 /// A stereo frame that says who sent it: every sample is the sender's number
 fn signal_of(sender: usize) -> Vec<f32> {
-    vec![sender as f32 + 0.5; FRAME * 2]
+    // Within 0 dBFS, and a multiple of 1/64 so that 24 bits hold it exactly
+    vec![(sender as f32 + 1.0) / 64.0; FRAME * 2]
 }
 
 fn bytes_of(signal: &[f32]) -> Vec<u8> {
-    signal.iter().flat_map(|s| s.to_le_bytes()).collect()
+    let mut bytes = Vec::new();
+    jamjam::audio::encode_pcm24(signal, &mut bytes);
+    bytes
 }
 
 /// The payloads one link was handed, in the order they came

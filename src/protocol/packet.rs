@@ -10,7 +10,11 @@
 use serde::{Deserialize, Serialize};
 
 /// Protocol version
-pub const PROTOCOL_VERSION: u8 = 1;
+///
+/// 2: PCM audio is 24-bit integers, not 32-bit floats (ADR-093). The two have no
+/// marker on the wire, and a payload of one read as the other is loud noise, so a
+/// peer of the other version has to be refused rather than decoded.
+pub const PROTOCOL_VERSION: u8 = 2;
 
 /// Header size in bytes
 pub const HEADER_SIZE: usize = 12;
@@ -665,6 +669,17 @@ mod tests {
     #[test]
     fn test_invalid_packet_too_short() {
         let data = vec![0u8; HEADER_SIZE - 1];
+        assert!(Packet::from_bytes(&data).is_none());
+    }
+
+    /// A peer that sends 32-bit float audio has to be refused, not decoded as 24-bit.
+    ///
+    /// Verifies: REQ-AUD-044
+    #[test]
+    fn a_packet_of_the_version_that_sent_32_bit_float_is_refused() {
+        let mut data = Packet::audio(1, 0, vec![0u8; 12]).to_bytes();
+        assert!(Packet::from_bytes(&data).is_some());
+        data[0] = 1;
         assert!(Packet::from_bytes(&data).is_none());
     }
 

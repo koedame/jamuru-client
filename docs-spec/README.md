@@ -92,6 +92,7 @@
 | [ADR-090](./adr/ADR-090-refuse-peers-that-cannot-be-checked.md) | 相手を確かめられない接続を無くす。署名の無い鍵交換と平文への降格を廃止し、鍵を知らせない古い版のアプリとは繋がない |
 | [ADR-091](./adr/ADR-091-release-credentials-in-environments.md) | 署名の証明書・鍵と tap のトークンは environment のシークレットに置き、それを読むジョブは environment を 1 つだけ名指しする。environment は develop・main とリリースのタグにしか開かない |
 | [ADR-092](./adr/ADR-092-keep-only-the-newest-release-per-channel.md) | ベータのあいだは、チャンネル（ベータ・正式版）ごとに一番新しい release だけを GitHub に残し、公開と配り先の更新が済んだら古い release を丸ごと消す。git のタグは残す。過去の版へ戻すロールバックはやめる |
+| [ADR-093](./adr/ADR-093-send-pcm-as-24-bit-integers.md) | PCM は 24-bit 符号付き整数で送る（32-bit float をやめ、帯域を約 22 % 減らす）。±1.0 を超えるサンプルは切り詰めて数える。取り違えを防ぐためプロトコル版を 2 に上げる |
 
 ---
 

@@ -29,7 +29,7 @@
 |-----------|-----|------|
 | フレームサイズ | 32 samples | 0.67ms（入出力各） |
 | ジッタバッファ | パススルー（0フレーム） | 0ms |
-| コーデック | PCM 32-bit float | 0ms |
+| コーデック | PCM（ワイヤ上は24-bit整数。[ADR-093](./ADR-093-send-pcm-as-24-bit-integers.md)で32-bit floatから変更） | 0ms |
 | FEC | 無効 | 0ms |
 | PLC | 即時繰り返し（ルックアヘッドなし） | 0ms |
 
@@ -75,7 +75,7 @@ zero-latency:
 
 ### デメリット・トレードオフ
 
-- **帯域増加**: PCM 32-bit float は ~1.54 Mbps/ch 必要
+- **帯域増加**: PCM 24-bit は ~1.15 Mbps/ch 必要（当初の 32-bit float は ~1.54 Mbps/ch）
 - **ジッタ耐性なし**: ネットワークの揺らぎが直接音声途切れに繋がる
 - **ハードウェア要件**: 32samples対応のASIO/CoreAudioインターフェースが必要
 - **WiFi非対応**: 事実上、有線LAN必須

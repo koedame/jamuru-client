@@ -64,7 +64,7 @@ stateDiagram-v2
 AGENTS.md の最優先要件は次を定めている。
 
 - 帯域効率より遅延削減を優先する
-- 音質は非圧縮 PCM（32-bit float）をデフォルトとする
+- 音質は非圧縮 PCM（当時は 32-bit float、いまは 24-bit 整数。ADR-093）をデフォルトとする
 - 日本国内光回線（RTT 10-25ms）での使用を主な対象とする
 
 非圧縮 PCM ステレオの所要帯域は約 3.1 Mbps（ヘッダと FEC を含む）であり、対象とする光回線では問題にならない。一方、`audio-quality.feature` と `latency.feature` が記述する帯域適応（1Mbps 級の回線で Opus のビットレートを段階的に下げる）は次の 3 点と両立しない。
