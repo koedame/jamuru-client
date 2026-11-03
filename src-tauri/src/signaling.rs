@@ -1130,19 +1130,22 @@ fn recording_told(state: &SignalingState, conn_id: u32) -> bool {
 }
 
 /// Tells the room that this app records it, or no longer does, if it was not
-/// told so already over this connection.
+/// told so already over this connection. A notice that could not be sent is
+/// tried again on the next poll: the room is not taken to know until it was
+/// sent.
 async fn sync_recording_notice(
     conn: &mut SignalingConnection,
     state: &SignalingState,
     conn_id: u32,
     recording: bool,
 ) {
-    let told = {
+    let (before, already) = {
         let mut told = state
             .recording_told
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let already = match *told {
+        let before = *told;
+        let already = match before {
             Some((conn, on)) if conn == conn_id => on,
             // Nothing was said over a connection that is new: the room is taken to know no recording
             _ => false,
@@ -1151,15 +1154,20 @@ async fn sync_recording_notice(
             return;
         }
         *told = Some((conn_id, recording));
-        already
+        (before, already)
     };
-    tracing::info!("Telling the room that recording went from {told} to {recording}");
-    send_recording_notice(conn, None, recording).await;
+    tracing::info!("Telling the room that recording went from {already} to {recording}");
+    if !send_recording_notice(conn, None, recording).await {
+        *state
+            .recording_told
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = before;
+    }
 }
 
-/// Sends the recording notice to `to`, or to everyone in the room. A failed send
-/// is logged only: a lost connection surfaces on the next poll.
-async fn send_recording_notice(conn: &mut SignalingConnection, to: Option<Uuid>, on: bool) {
+/// Sends the recording notice to `to`, or to everyone in the room. Whether it
+/// was sent.
+async fn send_recording_notice(conn: &mut SignalingConnection, to: Option<Uuid>, on: bool) -> bool {
     let body = match serde_json::to_value(PeerBody::Recording(RecordingNotice { on })) {
         Ok(serde_json::Value::Object(body)) => body,
         other => {
@@ -1167,7 +1175,7 @@ async fn send_recording_notice(conn: &mut SignalingConnection, to: Option<Uuid>,
                 "A recording notice did not encode as an object: {:?}",
                 other
             );
-            return;
+            return false;
         }
     };
     let sent = conn
@@ -1178,9 +1186,10 @@ async fn send_recording_notice(conn: &mut SignalingConnection, to: Option<Uuid>,
             body,
         })
         .await;
-    if let Err(e) = sent {
+    if let Err(e) = &sent {
         tracing::warn!("Could not send a recording notice: {}", e);
     }
+    sent.is_ok()
 }
 
 /// A participant said they record the room, or have stopped: noted for the
@@ -2026,5 +2035,35 @@ mod tests {
         assert!(again.is_empty());
         assert_eq!(stopped.len(), 1);
         assert!(stopped_again.is_empty());
+    }
+
+    /// Verifies: REQ-CON-034
+    #[tokio::test]
+    async fn when_the_notice_cannot_be_sent_the_room_is_not_taken_to_know_and_it_is_sent_again() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            // Answers, accepts, and hangs up
+            let _ = answer_question_then_accept(listener).await;
+        });
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let mut conn = SignalingClient::new(&format!("{TEST_HTTP_SCHEME}{addr}"), identity)
+            .connect()
+            .await
+            .unwrap();
+        let state = SignalingState::new();
+        // Until the hang-up is noticed, a send can still go into the socket
+        let broken = async {
+            while send_recording_notice(&mut conn, None, true).await {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(3), broken)
+            .await
+            .expect("the hang-up was never noticed");
+
+        sync_recording_notice(&mut conn, &state, 1, true).await;
+
+        assert!(!recording_told(&state, 1), "told, though nothing was sent");
     }
 }
