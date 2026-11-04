@@ -776,10 +776,15 @@ impl BufferRequests {
 }
 
 /// Whether an ask holds the buffer no longer and no harder than one the user
-/// already accepted: not a higher cap, and not a fixed buffer where the one
-/// accepted followed the link.
+/// already accepted: not a higher cap, not a fixed buffer where the one accepted
+/// followed the link, and not a stricter count of missing frames where both follow it.
 fn goes_no_further(ask: BufferTerms, accepted: BufferTerms) -> bool {
-    ask.max_ms10 <= accepted.max_ms10 && (ask.auto || !accepted.auto)
+    ask.max_ms10 <= accepted.max_ms10
+        && match (ask.auto, accepted.auto) {
+            (true, true) => ask.tolerance_tenths >= accepted.tolerance_tenths,
+            (false, true) => false,
+            (_, false) => true,
+        }
 }
 
 fn reply(answer: Answer, applied: Option<GrantView>) -> BufferMessage {
@@ -1198,7 +1203,16 @@ mod tests {
             ..following
         };
 
-        for (accepted, ask) in [(terms(), longer), (following, held_fixed)] {
+        let stricter = BufferTerms {
+            tolerance_tenths: following.tolerance_tenths - 5,
+            ..following
+        };
+
+        for (accepted, ask) in [
+            (terms(), longer),
+            (following, held_fixed),
+            (following, stricter),
+        ] {
             let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
             room.ask(accepted, t0);
             let outs = room.listener.accept(room.asker_id, accepted, t0).unwrap();
