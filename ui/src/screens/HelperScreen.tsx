@@ -36,7 +36,7 @@ export function HelperScreen() {
     (reason: HelpRefusal) => t(`settingsHelp.helper.refused.${reason}`, { name: name ?? "" }),
     [name, t]
   );
-  const { devicesTab, note, changing } = useAudioSettingsPanel(describeRefusal);
+  const { devicesTab, note, changing } = useAudioSettingsPanel(describeRefusal, true);
 
   // Where this window's person points and focuses is shown to the helped person,
   // and where they do is shown here.

@@ -104,4 +104,4 @@ Accepted。受信バッファの段数をプリセットで全員に同じにし
 
 - [ADR-031](./ADR-031-live-playout-delay.md): 受信バッファの適応
 - [ADR-043](./ADR-043-remote-operation-rpc.md): 相手とのやり取りはシグナリングサーバーが中継し、知らない種類は読み飛ばす（§4・§5）
-- REQ-LAT-030〜032・REQ-CON-035・036・REQ-GUI-034・035（[requirements.md](../requirements.md)）
+- REQ-LAT-030〜032・REQ-CON-036・036・REQ-GUI-034・035（[requirements.md](../requirements.md)）

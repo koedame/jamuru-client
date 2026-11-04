@@ -9,6 +9,7 @@ mod asio_roster;
 mod buffer_fit;
 mod channels;
 pub(crate) mod codec;
+pub mod delay_meter;
 mod device;
 pub mod device_loop;
 mod driver;

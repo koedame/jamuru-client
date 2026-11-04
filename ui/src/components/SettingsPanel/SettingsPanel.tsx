@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { VerticalTabs, Tab } from "./VerticalTabs";
 import { GeneralTab, Language } from "./tabs/GeneralTab";
 import { DevicesTab, DeviceInfo } from "./tabs/DevicesTab";
+import type { DeviceDelayProps } from "./tabs/DeviceDelayField";
 import { PrivacyTab } from "./tabs/PrivacyTab";
 import { DiagnosticsTab, DiagnosticsState, ReportProblemState } from "./tabs/DiagnosticsTab";
 import { AboutTab } from "./tabs/AboutTab";
@@ -125,6 +126,8 @@ export interface SettingsPanelProps {
   /** Limiter switch handlers; the switches are left out when absent */
   onInputLimiterChange?: (enabled: boolean) => void;
   onOutputLimiterChange?: (enabled: boolean) => void;
+  /** The delay measurement of the devices in use; the section is left out when absent */
+  delay?: DeviceDelayProps;
   /** Run diagnostics handler */
   onRunDiagnostics?: () => void;
   /** Cancel diagnostics handler (shows a cancel button while running) */
@@ -237,6 +240,7 @@ export function SettingsPanel({
   outputLimiter,
   onInputLimiterChange,
   onOutputLimiterChange,
+  delay,
   onRunDiagnostics,
   onCancelDiagnostics,
   onApplyPreset,
@@ -331,6 +335,7 @@ export function SettingsPanel({
             outputLimiter={outputLimiter}
             onInputLimiterChange={onInputLimiterChange}
             onOutputLimiterChange={onOutputLimiterChange}
+            delay={delay}
           />
         );
       case "privacy":

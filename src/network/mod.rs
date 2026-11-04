@@ -6,6 +6,7 @@ mod bandwidth;
 pub mod buffer_request;
 mod clock;
 mod connection;
+pub mod device_delay_notice;
 mod device_identity;
 mod discovery;
 mod encryption;
