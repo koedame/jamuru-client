@@ -18,7 +18,7 @@
 
 ### デザイン
 
-jamuru ブランドガイド準拠（ui.pen Screens/JoinRoom、2026-07-18 刷新）:
+jamuru ブランドガイド準拠（2026-07-18 刷新）:
 - 背景は黒3階調（`bg-page` < `bg-card` < 逆に `bg-row` が最暗）、アクセントは `accent-blue`
 - 見出し・本文は Inter、コード表示は Roboto Mono
 - 1px ボーダー、`--radius-control`（8px）角丸
@@ -153,7 +153,7 @@ interface ConnectionPanelProps {
 
 | 項目 | 値 |
 |------|-----|
-| 画面サイズ（参照） | 600 x 700 px（ui.pen Screens/JoinRoom） |
+| 画面サイズ（参照） | 600 x 700 px（Storybook `Windows/Connection`） |
 | ヘッダー高さ | 48px、画面幅いっぱい |
 | フォーム幅 | 400px（中央寄せ、画面内で可変） |
 | コード入力+参加ボタンの行高さ | 48px（入力は可変幅、参加ボタンは固定100px） |

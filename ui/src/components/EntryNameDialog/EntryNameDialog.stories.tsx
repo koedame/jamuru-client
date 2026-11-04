@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { EntryNameDialog } from "./EntryNameDialog";
 
 const meta = {
-  title: "Components/EntryNameDialog",
+  title: "Components/Room/EntryNameDialog",
   component: EntryNameDialog,
   parameters: {
     layout: "fullscreen",

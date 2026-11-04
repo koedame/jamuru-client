@@ -1,6 +1,6 @@
 /**
  * ChatMessage - Single chat message display
- * jamuru brand guide (ui.pen Screens/Main chatPanel): flat layout with a
+ * jamuru brand guide: flat layout with a
  * sender/timestamp header row above the message body, and system (join/leave)
  * messages shown inline with a lucide log-in/log-out icon.
  */

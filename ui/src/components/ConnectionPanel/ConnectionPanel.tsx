@@ -1,6 +1,6 @@
 /**
  * ConnectionPanel - Session connection interface
- * jamuru brand guide compliant (ui.pen Screens/JoinRoom), no Tauri dependencies
+ * jamuru brand guide compliant, no Tauri dependencies
  */
 import { useState, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";

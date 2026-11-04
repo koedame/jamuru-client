@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { PresenceMarks } from "./PresenceMarks";
 
 const meta = {
-  title: "Components/SettingsHelp/PresenceMarks",
+  title: "Components/Settings/Help/PresenceMarks",
   component: PresenceMarks,
   decorators: [
     (Story) => (

@@ -302,8 +302,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     document.documentElement.lang = i18n.language;
   }, [i18n.language]);
 
-  // Resize the main window to match ui.pen's JoinRoom frame (600x700) while
-  // disconnected, and to ui.pen's Screens/Main (1134 wide) once connected.
+  // Resize the main window to match the join screen (600x700) while
+  // disconnected, and the connected screen (1134 wide) once connected.
   // Gated on the derived boolean (not the phase directly) so the handful of
   // non-connected phases a single connect attempt passes through
   // (connecting_server -> server_connected -> creating/joining) don't each
@@ -774,7 +774,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   useWindowEvent<string>(MENU_ACTION, handleMenuAction);
 
   // Confirm leaving from the leave dialog. Keeps the dialog open in its
-  // "pending" (ui.pen Dialog/LeaveConfirm Loading) state until the leave
+  // "pending" state until the leave
   // completes - the connected screen (and this dialog with it) then
   // unmounts naturally once the phase flips away from "connected".
   const handleConfirmLeave = async () => {
@@ -1009,7 +1009,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
   // Render the connected session screen: a 3-column layout
   // (room sidebar | mixer | chat) with a header and status footer,
-  // matching ui.pen Screens/Main.
+  // (Storybook: Screens/Main).
   const renderConnectedState = () => {
     if (phase !== "connected") return null;
 

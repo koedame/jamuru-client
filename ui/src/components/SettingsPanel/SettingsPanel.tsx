@@ -1,7 +1,7 @@
 /**
  * SettingsPanel - Settings panel with header and vertical tabs
  *
- * Design: jamuru brand (ui.pen Screens/Settings). Header bar + left sidebar of
+ * Design: jamuru brand. Header bar + left sidebar of
  * icon tabs (General / Audio / Privacy / Diagnostics and support / About)
  * + content area.
  */

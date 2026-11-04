@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { MuteButton } from "./MuteButton";
 
 const meta = {
-  title: "Components/MuteButton",
+  title: "Components/Mixer/MuteButton",
   component: MuteButton,
   parameters: {
     layout: "centered",

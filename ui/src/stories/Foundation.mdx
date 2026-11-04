@@ -1,0 +1,27 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="Foundation/Introduction" />
+
+# jamuru のデザインシステム
+
+このページから、デザインの正本をたどれる。デザインファイル（旧 `ui.pen`）は無く、**Storybook とそのコードが正本**。
+
+| 見たいもの | 場所 |
+|---|---|
+| 色・文字・余白・角丸・影・動き・重なり・幅のトークン | `Foundation/Design Tokens`（値の正本は `ui/src/styles/tokens.css`。ここの一覧はその CSS から作る） |
+| 部品（コンポーネント）と、その状態 | `Components/` の下（`Chat` `Mixer` `Room` `Settings` `Terms` `Common`） |
+| 画面ごとの見た目と状態 | `Screens/`（画面単位）と `Windows/`（ウィンドウに組んだ見た目） |
+| 状態のそろえ方 | [デザインガイド「状態のデザイン規則」](https://github.com/koedame/jamuru-client/blob/develop/docs-spec/ui/design-guide.md#状態のデザイン規則) |
+
+## 文書（複製せず、元をたどる）
+
+- [デザインガイド（原則・状態・レイアウト）](https://github.com/koedame/jamuru-client/blob/develop/docs-spec/ui/design-guide.md)
+- [デザイントークンの仕様](https://github.com/koedame/jamuru-client/blob/develop/docs-spec/ui/design-tokens.md)
+- [画面の仕様](https://github.com/koedame/jamuru-client/blob/develop/docs-spec/ui/screens/README.md)
+- [部品の仕様](https://github.com/koedame/jamuru-client/blob/develop/docs-spec/ui/components/README.md)
+
+## 状態の見方
+
+hover・pressed・focus は CSS の疑似状態なので、Storybook の画面でマウスを乗せる・押す・Tab で移ると見られる。
+disabled・error・loading・empty などコードで決まる状態は、部品ごとの Story に並べてある。
+ツールバーで言語（English / 日本語）を切り替えられる。
