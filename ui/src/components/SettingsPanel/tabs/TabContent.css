@@ -1,5 +1,5 @@
 /**
- * TabContent shared styles - jamuru brand (ui.pen Screens/Settings).
+ * TabContent shared styles - jamuru brand.
  */
 
 .tab-content {
@@ -9,7 +9,7 @@
   padding: var(--space-lg);
 }
 
-/* Section heading (Space Grotesk, ui.pen DeviceTitle / GeneralTitle). */
+/* Section heading (DeviceTitle / GeneralTitle). */
 .tab-content__title {
   margin: 0;
   font-family: var(--font-family-heading);

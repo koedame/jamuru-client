@@ -1,6 +1,6 @@
 /**
  * MixerPanel - Root component for the audio mixing console
- * jamuru brand (ui.pen Screens/Main mixerPanel): the local ("input") channel
+ * jamuru brand: the local ("input") channel
  * and the remote ("output") channels grouped either side of a vertical divider.
  */
 

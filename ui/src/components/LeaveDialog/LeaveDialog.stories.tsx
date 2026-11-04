@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { LeaveDialog } from "./LeaveDialog";
 
 const meta = {
-  title: "Components/LeaveDialog",
+  title: "Components/Room/LeaveDialog",
   component: LeaveDialog,
   parameters: {
     layout: "fullscreen",

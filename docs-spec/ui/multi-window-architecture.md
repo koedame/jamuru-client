@@ -65,13 +65,13 @@ stateDiagram-v2
 
 ### 1. 接続画面ウィンドウ (ConnectionWindow)
 
-セッション参加/作成のシンプルなUI。ui.pen の Screens/JoinRoom に準拠。
+セッション参加/作成のシンプルなUI。Storybook の `Windows/Connection` と `Screens/Main` が見た目の正本。
 
 #### 仕様
 
 | 項目 | 値 |
 |------|-----|
-| デフォルトサイズ | 600 x 700 px（ui.pen Screens/JoinRoom に合わせる） |
+| デフォルトサイズ | 600 x 700 px |
 | 最小サイズ | 600 x 500 px |
 | リサイズ | 可 |
 | 閉じる動作 | アプリ終了 |
@@ -92,9 +92,9 @@ stateDiagram-v2
 （`JOIN_WINDOW_SIZE`/`JOIN_MIN_SIZE`/`MIXER_WINDOW_SIZE`/`MIXER_MIN_SIZE`）。
 別ウィンドウ方式への移行は将来のタスクとする。
 
-**接続後のレイアウト（現在の実装 / ui.pen Screens/Main）**: 接続済み状態では、以下の
+**接続後のレイアウト（現在の実装 / Storybook `Screens/Main`）**: 接続済み状態では、以下の
 専用ウィンドウ（ミキサー / チャット）を別々に開くのではなく、単一のメインウィンドウ
-（1134x700、ui.pen の 1134x666 アートボードに合わせる）を 3 カラム構成で描画する:
+（1134x700）を 3 カラム構成で描画する:
 
 - 左（幅 240px）: ルームサイドバー = ルームコード表示（コピー可）・参加者一覧
   （自分=黄アイコン、参加者=緑アイコン + ↑/↓ レイテンシ）・マスター水平メーター・退出ボタン

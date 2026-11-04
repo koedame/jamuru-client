@@ -8,6 +8,8 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/setupTests.ts"],
+    // Vitest leaves CSS empty; the token catalog's test reads tokens.css itself.
+    css: { include: [/tokens\.css/] },
   },
   // Vite options tailored for Tauri development
   clearScreen: false,

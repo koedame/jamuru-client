@@ -373,7 +373,7 @@ pub fn window_focus(app: AppHandle, label: String) -> Result<(), String> {
 /// The app currently renders the connection screen and the connected
 /// (mixer/chat) view inside a single main window rather than the separate
 /// Connection/Mixer windows described above, so it resizes itself between
-/// the two instead: compact to match ui.pen's JoinRoom frame while
+/// the two instead: compact for the join screen while
 /// disconnected, wider once a session is active.
 ///
 /// `min_width`/`min_height` must be passed in (rather than hardcoded here)

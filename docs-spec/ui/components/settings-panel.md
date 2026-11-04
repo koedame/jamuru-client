@@ -3,7 +3,7 @@
 アプリケーション設定を管理するコンポーネント。
 一般（プロフィール・言語・サーバー）・オーディオ・プライバシー・診断とサポート・アプリについて、の 5 つのタブを提供する。タブの分け方は [ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)。
 
-デザインは `ui.pen`（Pencil schema 2.14）の `Screens/Settings` 系を正とする。
+デザインは Storybook の `Screens/Settings`（タブごと）と `Windows/Settings` を正とする。
 配色・タイポグラフィは `ui/src/styles/tokens.css` のトークンのみを使用する（ハードコード禁止）。
 
 ---
@@ -138,10 +138,10 @@ type ReportProblemState = "idle" | "loading" | "ready" | "sending" | "sent" | "e
 type Language = "ja" | "en";
 ```
 
-**テーマ選択は廃止した。** jamuru は現状ダーク専用ブランドであり（`tokens.css` の light は dark を複製）、`ui.pen` の一般タブも言語のみを持つ。このため `theme` / `onThemeChange` は SettingsPanel から削除した。
+**テーマ選択は廃止した。** jamuru は現状ダーク専用ブランドであり（`tokens.css` の light は dark を複製）、一般タブも言語のみを持つ。このため `theme` / `onThemeChange` は SettingsPanel から削除した。
 
 タブは次の 5 つで、並びは使う頻度の順（よく触る設定 → 送信の判断 → 困ったとき → 情報）。各タブにアイコンを表示する。
-`ui.pen` の設定画面（`Screens/Settings` の各フレーム）もこの 5 タブに合わせてある（[ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)）。
+Storybook の `Screens/Settings` もこの 5 タブに合わせてある（[ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)）。
 初期表示タブは一覧の並び順とは独立に `オーディオ`（`initialTab` のデフォルト値。設定ウィンドウは `一般` で開く）。
 `legal`（規約などを開く関数）を渡さないとき、アプリについてのタブは出さない。
 

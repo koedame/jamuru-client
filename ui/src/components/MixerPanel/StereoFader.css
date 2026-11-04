@@ -1,6 +1,6 @@
 /**
  * StereoFader styles
- * jamuru brand (ui.pen Molecules/Fader/Stereo): recessed 4px track, green glow
+ * jamuru brand: recessed 4px track, green glow
  * fill from the bottom, light rectangular thumb, 0 dB reference line.
  */
 
@@ -18,7 +18,7 @@
   pointer-events: none;
 }
 
-/* Recessed vertical track (the only place ui.pen uses a 2px radius). */
+/* Recessed vertical track (the only place a 2px radius is used). */
 .stereo-fader__track {
   position: relative;
   width: 4px;

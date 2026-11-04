@@ -98,7 +98,7 @@ graph TB
 
 **役割**: セッション参加/作成の入口
 
-**サイズ**: 600 x 700 px（`ui.pen` Screens/JoinRoom 準拠。旧仕様の400x300から拡大、詳細は
+**サイズ**: 600 x 700 px（Storybook `Screens/Main` の Lobby。旧仕様の400x300から拡大、詳細は
 [connection-panel.md](../components/connection-panel.md) 参照）
 
 #### レイアウト

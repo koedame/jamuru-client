@@ -52,7 +52,7 @@ const devicesTab: AudioSettingsTabProps = {
 };
 
 const meta = {
-  title: "Components/SettingsHelp/SettingsHelpPanel",
+  title: "Components/Settings/Help/SettingsHelpPanel",
   component: SettingsHelpPanel,
   decorators: [
     (Story) => (
