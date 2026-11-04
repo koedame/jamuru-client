@@ -2,7 +2,7 @@
  * ChatPanelAdapter - Docks the Props-based ChatPanel as the connected screen's
  * right-hand column and wires it to the Tauri backend for real-time chat.
  */
-import { useState, useEffect, useCallback, useRef } from "react";
+import { memo, useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "../../lib/invoke";
 import { ChatPanel } from "./ChatPanel";
 import type { ChatMessageData } from "./ChatMessageList";
@@ -99,7 +99,7 @@ function addToRecentEmojis(emoji: string, current: string[]): string[] {
   return updated;
 }
 
-export function ChatPanelAdapter({
+function ChatPanelAdapterImpl({
   connId,
   myPeerId,
 }: ChatPanelAdapterProps) {
@@ -214,5 +214,12 @@ export function ChatPanelAdapter({
     />
   );
 }
+
+/**
+ * The connected screen redraws itself on every audio-status poll (100ms) while
+ * this column's props stay the same; memo keeps the whole history from being
+ * redrawn each time.
+ */
+export const ChatPanelAdapter = memo(ChatPanelAdapterImpl);
 
 export default ChatPanelAdapter;

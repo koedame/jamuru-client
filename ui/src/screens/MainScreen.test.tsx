@@ -30,6 +30,20 @@ const listeners = vi.hoisted(() => new Map<string, (event: { payload: unknown })
 const openUrl = vi.hoisted(() => ({ handler: null as null | ((urls: string[]) => void) }));
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
+/** How many times the chat panel has been drawn. */
+const chatPanelDraws = vi.hoisted(() => ({ count: 0 }));
+vi.mock('../components/ChatPanel/ChatPanel', async () => {
+  const actual = await vi.importActual<typeof import('../components/ChatPanel/ChatPanel')>(
+    '../components/ChatPanel/ChatPanel'
+  );
+  return {
+    ...actual,
+    ChatPanel: (props: Parameters<typeof actual.ChatPanel>[0]) => {
+      chatPanelDraws.count += 1;
+      return actual.ChatPanel(props);
+    },
+  };
+});
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn((name: string, handler: (event: { payload: unknown }) => void) => {
     listeners.set(name, handler);
@@ -178,6 +192,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  chatPanelDraws.count = 0;
   calls = [];
   statusDeviceProblems = [];
   statusWasapiOpened = { input: null, output: null };
@@ -1631,5 +1646,60 @@ describe('MainScreen のメニューバーからの操作', () => {
     chooseFromMenu('create_room');
 
     expect(callsTo('session_create')).toHaveLength(0);
+  });
+});
+
+describe('MainScreen のチャット欄の描き直し', () => {
+  /** `streaming_status` and the chat answer with new objects at every call, as the real IPC does. */
+  function answerWithNewObjects(chat: () => unknown[]) {
+    const answer = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'signaling_get_chat_messages') return chat();
+      return structuredClone(await answer(cmd, args));
+    });
+  }
+
+  const message = (id: string) => ({
+    id,
+    sender_id: 'b',
+    sender_name: 'Aki',
+    content: `hello ${id}`,
+    timestamp: 1,
+    is_system: false,
+    reactions: [],
+  });
+
+  // Verifies: REQ-GUI-030
+  it('音声の状態の取得が毎回新しい配列を返すとき、チャット欄が描き直されないこと', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
+    answerWithNewObjects(() => [message('m1')]);
+
+    render(<MainScreen />);
+    expect(await screen.findByText('hello m1')).toBeInTheDocument();
+    await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThanOrEqual(2));
+    const drawn = chatPanelDraws.count;
+    const polls = callsTo('streaming_status').length;
+
+    await waitFor(() => expect(callsTo('streaming_status').length).toBeGreaterThanOrEqual(polls + 10), {
+      timeout: 4000,
+    });
+
+    expect(chatPanelDraws.count).toBe(drawn);
+  });
+
+  // Verifies: REQ-GUI-030
+  it('新しいメッセージが届いたとき、チャット欄が描き直されて表示されること', async () => {
+    current = inRoom();
+    statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
+    let messages = [message('m1')];
+    answerWithNewObjects(() => structuredClone(messages));
+
+    render(<MainScreen />);
+    expect(await screen.findByText('hello m1')).toBeInTheDocument();
+
+    messages = [message('m1'), message('m2')];
+
+    expect(await screen.findByText('hello m2', {}, { timeout: 3000 })).toBeInTheDocument();
   });
 });
