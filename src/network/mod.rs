@@ -14,6 +14,7 @@ mod error;
 mod fec;
 mod latency;
 mod link_facts;
+mod priority;
 mod quality;
 pub mod recording_notice;
 mod remote;
@@ -53,6 +54,7 @@ pub use latency::{
     NetworkLatencyInfo, UpstreamLatency,
 };
 pub use link_facts::{LinkFacts, LinkRoute, LinkSnapshot};
+pub use priority::VoicePriority;
 pub use quality::{ConnectionQuality, QualityChange, QualityMonitor};
 pub use remote::{
     connect_remote, discover_remote_enrollment, help_relay_url, is_help_session, new_help_session,

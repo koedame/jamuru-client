@@ -58,6 +58,7 @@ pub(super) async fn run(
         transmit_channels,
         input_limiter,
         output_limiter,
+        voice_priority,
         mut input_channels,
         mut output_channels,
         input_signal,
@@ -112,8 +113,11 @@ pub(super) async fn run(
 
     // Everyone in the room sends to the one address this app told it, so every
     // link goes through that socket (the one `streaming_prepare` bound).
-    let mux = UdpMux::from_std(prepared_socket)
+    let mut mux = UdpMux::from_std(prepared_socket)
         .map_err(|e| format!("Failed to adopt the prepared audio socket: {}", e))?;
+    if voice_priority {
+        mux.mark_voice();
+    }
 
     // Create separate audio engines for capture (mono) and playback (stereo)
     let mut capture_engine = AudioEngine::new(capture_config.clone());

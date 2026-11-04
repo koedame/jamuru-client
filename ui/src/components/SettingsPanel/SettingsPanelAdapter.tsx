@@ -11,6 +11,7 @@ import {
   configLoad,
   configSetUsageReporting,
   configSetAskNameOnEntry,
+  configSetVoicePriority,
   bufferRequestSetPolicy,
   type BufferAskPolicy,
   configGetPeerName,
@@ -117,6 +118,9 @@ export function SettingsPanelAdapter({
   // Whether the name is confirmed before entering a room (on until turned off)
   const [askNameOnEntry, setAskNameOnEntry] = useState(true);
 
+  // Whether the audio packets are marked as voice (on until turned off)
+  const [voicePriority, setVoicePriority] = useState(true);
+
   // Whether asks to buffer someone's audio for longer are put to the person (ADR-097)
   const [bufferAsks, setBufferAsks] = useState<BufferAskPolicy>("ask");
   const bufferAsksRef = useRef(bufferAsks);
@@ -205,6 +209,7 @@ export function SettingsPanelAdapter({
       .then((config) => {
         setUsageReporting(config?.usage_reporting === true);
         setAskNameOnEntry(config?.ask_name_on_entry !== false);
+        setVoicePriority(config?.voice_priority !== false);
         setBufferAsks(config?.buffer_asks === "never" ? "never" : "ask");
       })
       .catch((err) => console.error("Failed to read the usage reporting setting:", err));
@@ -389,6 +394,16 @@ export function SettingsPanelAdapter({
     }
   }, []);
 
+  const handleVoicePriorityChange = useCallback(async (enabled: boolean) => {
+    setVoicePriority(enabled);
+    try {
+      await configSetVoicePriority(enabled);
+    } catch (err) {
+      console.error("Failed to save whether to mark the audio as voice:", err);
+      setVoicePriority(!enabled);
+    }
+  }, []);
+
   const handleUsageReportingChange = useCallback(
     async (enabled: boolean) => {
       setUsageReporting(enabled);
@@ -488,6 +503,8 @@ export function SettingsPanelAdapter({
       onDisplayNameChange={handleDisplayNameChange}
       askNameOnEntry={askNameOnEntry}
       onAskNameOnEntryChange={handleAskNameOnEntryChange}
+      voicePriority={voicePriority}
+      onVoicePriorityChange={handleVoicePriorityChange}
       bufferAsks={bufferAsks}
       onBufferAsksChange={handleBufferAsksChange}
       diagnosticsState={diagnosticsState}

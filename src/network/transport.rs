@@ -11,6 +11,7 @@ use tracing::{debug, error, info, trace};
 use crate::protocol::Packet;
 
 use super::error::NetworkError;
+use super::priority::VoicePriority;
 use super::udp_mux::Lane;
 
 /// Bytes a datagram is read into. A packet is the 12-byte header and its
@@ -27,6 +28,8 @@ pub struct UdpTransport {
     /// ([`super::UdpMux`]): what this transport's peer sends arrives here
     /// instead of being read off the socket.
     lane: Option<Lane>,
+    /// Marks what goes to each peer as voice (see [`super::VoicePriority`])
+    priority: Option<Arc<VoicePriority>>,
 }
 
 /// The IP families a socket can send to and receive from
@@ -171,15 +174,22 @@ impl UdpTransport {
             socket: Arc::new(socket),
             local_addr,
             lane: None,
+            priority: None,
         })
     }
 
     /// A transport that sends through `socket` and receives through `lane`
-    pub(super) fn sharing(socket: Arc<UdpSocket>, local_addr: SocketAddr, lane: Lane) -> Self {
+    pub(super) fn sharing(
+        socket: Arc<UdpSocket>,
+        local_addr: SocketAddr,
+        lane: Lane,
+        priority: Option<Arc<VoicePriority>>,
+    ) -> Self {
         Self {
             socket,
             local_addr,
             lane: Some(lane),
+            priority,
         }
     }
 
@@ -214,6 +224,9 @@ impl UdpTransport {
     /// Send a packet to a remote address
     pub async fn send_to(&self, packet: &Packet, addr: SocketAddr) -> Result<(), NetworkError> {
         let data = packet.to_bytes();
+        if let Some(priority) = &self.priority {
+            priority.sending_to(&self.socket, addr);
+        }
         self.socket
             .send_to(&data, destination_for(self.local_addr, addr))
             .await?;

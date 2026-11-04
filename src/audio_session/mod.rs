@@ -122,6 +122,8 @@ pub struct Params {
     pub input_limiter: bool,
     /// Whether what is played is held at 0 dBFS (ADR-094)
     pub output_limiter: bool,
+    /// Whether the audio packets are marked as voice (ADR-098)
+    pub voice_priority: bool,
     /// Which channels of a multi-channel interface are read (1-based)
     pub input_channels: (u32, Option<u32>),
     /// Which channels of a multi-channel interface are played on (1-based)
