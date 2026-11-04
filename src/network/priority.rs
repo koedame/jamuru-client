@@ -9,8 +9,9 @@
 //! The mark is set once, on the session's audio socket, and every packet then carries it:
 //!
 //! - Linux: `IP_TOS` / `IPV6_TCLASS` to EF, and `SO_PRIORITY` 6 for the local queue.
-//! - macOS: `SO_NET_SERVICE_TYPE` to voice, which sets both the DSCP and the Wi-Fi queue. If
-//!   the system refuses it, `IP_TOS` / `IPV6_TCLASS`.
+//! - macOS: `IP_TOS` / `IPV6_TCLASS`. `SO_NET_SERVICE_TYPE` (voice), the system's own way, was
+//!   tried first: it leaves the IP header unmarked on a tunnel and, in a measured session,
+//!   made the sent audio drop out (ADR-110).
 //! - Windows: `IP_TOS` / `IPV6_TCLASS`. qWAVE, the system's QoS service, cannot do this job: it
 //!   marks a flow per destination, refuses an IPv6 socket that sends to an IPv4 address (the
 //!   audio socket is dual-stack, ADR-093), and gives voice 56 (CS7), not 46.
@@ -23,13 +24,6 @@ use tracing::{info, warn};
 
 /// EF (46) in the upper six bits of the byte
 const EF_TRAFFIC_CLASS: u32 = 46 << 2;
-
-/// How `SO_NET_SERVICE_TYPE` is spelled in `<sys/socket.h>`, and the value of
-/// `NET_SERVICE_TYPE_VO` (libc has neither)
-#[cfg(target_os = "macos")]
-const SO_NET_SERVICE_TYPE: libc::c_int = 0x1116;
-#[cfg(target_os = "macos")]
-const NET_SERVICE_TYPE_VO: libc::c_int = 4;
 
 /// Marks what `socket` sends as voice, and logs how. Returns what was used, or `None` where the
 /// system does not take it (the reason is logged): audio goes unmarked then.
@@ -108,30 +102,7 @@ fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
     })
 }
 
-#[cfg(target_os = "macos")]
-fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
-    use std::os::fd::AsRawFd;
-
-    let value = NET_SERVICE_TYPE_VO;
-    // SAFETY: a valid descriptor, and a pointer to a c_int of the size given
-    let result = unsafe {
-        libc::setsockopt(
-            socket.as_raw_fd(),
-            libc::SOL_SOCKET,
-            SO_NET_SERVICE_TYPE,
-            std::ptr::addr_of!(value).cast(),
-            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-        )
-    };
-    if result == 0 {
-        return Ok("SO_NET_SERVICE_TYPE");
-    }
-    let refused = std::io::Error::last_os_error();
-    info!("SO_NET_SERVICE_TYPE was refused ({refused}); using IP_TOS");
-    mark_traffic_class(socket).map(|()| "IP_TOS and IPV6_TCLASS")
-}
-
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
     mark_traffic_class(socket).map(|()| "IP_TOS and IPV6_TCLASS")
 }

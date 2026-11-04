@@ -25,7 +25,7 @@ OS ごとの付け方:
 | OS | 付け方 | 理由 |
 |----|--------|------|
 | Linux | `IP_TOS` と `IPV6_TCLASS` を 0xB8、`SO_PRIORITY` を 6 | IPv6 のソケットは IPv4 の相手へ IPv4 の見出しで送るので、両方に付ける。`SO_PRIORITY` は手元の Wi-Fi ドライバの待ち行列に載せる（0〜6 は特権が要らない） |
-| macOS | `SO_NET_SERVICE_TYPE` を `NET_SERVICE_TYPE_VO` | DSCP と Wi-Fi の待ち行列の両方が音声になる（Apple の推奨）。拒まれたときだけ `IP_TOS` / `IPV6_TCLASS` |
+| macOS | `IP_TOS` と `IPV6_TCLASS` を 0xB8 | Apple の `SO_NET_SERVICE_TYPE`（`NET_SERVICE_TYPE_VO`）は使わない。付けると Mac から送る音声に無音区間が出た（下の「測定」） |
 | Windows | `IP_TOS` と `IPV6_TCLASS` を 0xB8 | Windows 11（ビルド 26200）で、レジストリの `DisableUserTOSSetting` が無い既定のまま、`IP_TOS` を付けた UDP のパケットが 0xB8 で届くことを測った（下の「測定」）。管理者の権限は要らない |
 
 Windows で qWAVE（`QOSCreateHandle` → `QOSAddSocketToFlow` に `QOSTrafficTypeVoice`）を使わない理由:
