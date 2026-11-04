@@ -53,6 +53,12 @@ updates:
       # Move it together with webkit2gtk, by hand.
       - dependency-name: "cairo-rs"
         update-types: ["version-update:semver-major"]
+      # windows-core has to stay on the same line as the `windows` crate the app
+      # and webview2-com are built on (0.62): `windows::core::implement` expands
+      # to `windows_core` paths, and a second line makes the generated types
+      # unrelated. Move it together with `windows`, by hand.
+      - dependency-name: "windows-core"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     target-branch: "develop"
