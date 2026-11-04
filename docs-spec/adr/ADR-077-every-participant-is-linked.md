@@ -109,15 +109,15 @@ sequenceDiagram
 ### 6. 送信は、取り込んだ 1 フレームを全員の接続へ送る
 
 暗号化は接続ごと（相手ごとの鍵）なので、同じフレームを相手の数だけ封をして送る。上りと下りの帯域は相手の数に比例する。
-1 本あたりの必要帯域（`required_bps`。48 kHz・ステレオ）はプリセットで 3.5〜4.1 Mbps なので、16 人のルームでは 1 人あたり
-上り・下りとも 52〜61 Mbps になる。回線が足りない相手は、これまでどおり相手ごとの帯域の判定（REQ-LAT-127）で画面に出る。
+1 本あたりの必要帯域（`required_bps`。48 kHz・ステレオ）はプリセットで 2.7〜3.1 Mbps なので、16 人のルームでは 1 人あたり
+上り・下りとも 40〜47 Mbps になる（PCM を 24-bit で送るようにして、3.5〜4.1 Mbps・52〜61 Mbps から減った。[ADR-096](./ADR-096-send-pcm-as-24-bit-integers.md)）。回線が足りない相手は、これまでどおり相手ごとの帯域の判定（REQ-LAT-127）で画面に出る。
 
 | プリセット | 1 本あたり | 3 人（2 本） | 16 人（15 本） |
 |-----------|-----------|-------------|--------------|
-| zero-latency | 3.84 Mbps | 7.7 Mbps | 57.6 Mbps |
-| ultra-low-latency | 3.46 Mbps | 6.9 Mbps | 51.9 Mbps |
-| balanced | 4.08 Mbps | 8.2 Mbps | 61.2 Mbps |
-| high-quality | 3.67 Mbps | 7.3 Mbps | 55.1 Mbps |
+| zero-latency | 3.07 Mbps | 6.1 Mbps | 46.1 Mbps |
+| ultra-low-latency | 2.69 Mbps | 5.4 Mbps | 40.3 Mbps |
+| balanced | 3.12 Mbps | 6.2 Mbps | 46.8 Mbps |
+| high-quality | 2.81 Mbps | 5.6 Mbps | 42.1 Mbps |
 
 ### 7. 相手との音声が途切れたら、その相手だけを扱う（REQ-CON-134）
 

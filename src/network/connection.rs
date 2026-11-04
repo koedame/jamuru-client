@@ -10,7 +10,7 @@ use parking_lot::{Mutex, RwLock};
 use tokio::time::interval;
 use tracing::{debug, info, trace, warn};
 
-use crate::audio::{create_codec, AudioCodec, CodecConfig, CodecType};
+use crate::audio::{create_codec, AudioCodec, CodecConfig, CodecType, PcmCodec};
 use crate::protocol::{
     LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, HEADER_SIZE,
 };
@@ -99,6 +99,9 @@ pub struct ConnectionStats {
     pub security: LinkSecurity,
     /// Packets turned away because they were forged, repeated or not encrypted
     pub packets_refused: u64,
+    /// Samples sent that did not fit the audio format and were clipped (cumulative):
+    /// the input went past 0 dBFS
+    pub samples_clipped: u64,
 }
 
 impl ConnectionStats {
@@ -867,7 +870,7 @@ pub struct Connection {
     audio_callback: Option<Arc<AudioCallback>>,
     /// Encoder for outgoing audio. `None` until `set_audio_encoding` is called,
     /// in which case PCM is used inline for backward compatibility.
-    encoder: Option<Arc<std::sync::Mutex<Box<dyn AudioCodec>>>>,
+    encoder: Arc<std::sync::Mutex<Box<dyn AudioCodec>>>,
     /// FEC encoder for outgoing audio, when the preset enables FEC
     fec_encoder: Option<Arc<std::sync::Mutex<FecEncoder>>>,
     /// FEC decoder for incoming audio, shared with the receive loop
@@ -969,7 +972,9 @@ impl Connection {
             last_received: Arc::new(std::sync::Mutex::new(Instant::now())),
             retry_at: Arc::new(std::sync::Mutex::new(Instant::now())),
             audio_callback: None,
-            encoder: None,
+            encoder: Arc::new(std::sync::Mutex::new(Box::new(PcmCodec::new(
+                &CodecConfig::default(),
+            )))),
             fec_encoder: None,
             fec_decoder: None,
             fec_group_size: None,
@@ -1367,7 +1372,7 @@ impl Connection {
         let codec = create_codec(&codec_config)
             .map_err(|e| NetworkError::Configuration(format!("Audio codec: {}", e)))?;
 
-        self.encoder = Some(Arc::new(std::sync::Mutex::new(codec)));
+        self.encoder = Arc::new(std::sync::Mutex::new(codec));
         self.audio_channels = config.channels.max(1) as usize;
 
         match config.fec_group_size {
@@ -1530,16 +1535,12 @@ impl Connection {
     /// timestamped as the frame it is a part of. The receiver plays them as frames of
     /// their own; nothing on the wire says they were one.
     pub async fn send_audio(&self, data: &[f32], timestamp: u32) -> Result<(), NetworkError> {
-        let splittable = match self.encoder {
-            Some(ref encoder) => {
-                encoder
-                    .lock()
-                    .map_err(|_| NetworkError::Configuration("Codec lock poisoned".into()))?
-                    .codec_type()
-                    == CodecType::Pcm
-            }
-            None => true,
-        };
+        let splittable = self
+            .encoder
+            .lock()
+            .map_err(|_| NetworkError::Configuration("Codec lock poisoned".into()))?
+            .codec_type()
+            == CodecType::Pcm;
         if !splittable || data.is_empty() {
             return self.send_audio_packet(data, timestamp).await;
         }
@@ -1562,19 +1563,14 @@ impl Connection {
             return Ok(());
         }
 
-        // Encode with the configured codec. Without `set_audio_encoding` this
-        // falls back to inline PCM so existing callers keep working.
-        let bytes = match self.encoder {
-            Some(ref encoder) => {
-                let mut codec = encoder
-                    .lock()
-                    .map_err(|_| NetworkError::Configuration("Codec lock poisoned".into()))?;
-                codec
-                    .encode(data)
-                    .map_err(|e| NetworkError::Configuration(format!("Audio encode: {}", e)))?
-            }
-            None => data.iter().flat_map(|&s| s.to_le_bytes()).collect(),
-        };
+        // Encode with the configured codec. Without `set_audio_encoding` the codec
+        // is PCM, so existing callers keep working.
+        let bytes = self
+            .encoder
+            .lock()
+            .map_err(|_| NetworkError::Configuration("Codec lock poisoned".into()))?
+            .encode(data)
+            .map_err(|e| NetworkError::Configuration(format!("Audio encode: {}", e)))?;
 
         // The receiver files a packet under group `sequence / group_size`, and
         // the encoder groups packets in the order it is given them. The two
@@ -1663,6 +1659,11 @@ impl Connection {
             uptime_seconds: uptime,
             security: self.secure_link.security(),
             packets_refused: self.secure_link.refused(),
+            samples_clipped: self
+                .encoder
+                .lock()
+                .map(|codec| codec.clipped_samples())
+                .unwrap_or(0),
         }
     }
 
@@ -3298,7 +3299,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         heard.lock().unwrap().clear();
 
-        // 256 stereo frames: 2048 bytes, more than a packet carries.
+        // 256 stereo frames: 1536 bytes, more than a packet carries.
         sender.send_audio(&[0.25f32; 512], 1000).await.unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             while heard.lock().unwrap().len() < 2 {
@@ -3312,7 +3313,7 @@ mod tests {
         assert_eq!(heard.len(), 2, "256 frames go as two packets: {:?}", heard);
         let (first, second) = (heard[0], heard[1]);
         assert_eq!(second.0, first.0 + 1, "numbered one after the other");
-        assert_eq!((first.1, second.1), (1024, 1024), "128 stereo frames each");
+        assert_eq!((first.1, second.1), (768, 768), "128 stereo frames each");
         assert_eq!(
             (first.2, second.2),
             (1000, 1128),

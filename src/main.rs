@@ -624,6 +624,7 @@ fn network_json(stats: &ConnectionStats) -> serde_json::Value {
         "packet_loss_rate": rounded(f64::from(stats.packet_loss_rate)),
         "packets_sent": stats.packets_sent,
         "packets_received": stats.packets_received,
+        "samples_clipped": stats.samples_clipped,
     })
 }
 

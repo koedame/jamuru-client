@@ -255,7 +255,9 @@ mod tests {
 
     /// A PCM payload as `ReceivePath::receive` expects it
     fn pcm(samples: &[f32]) -> Vec<u8> {
-        samples.iter().flat_map(|s| s.to_le_bytes()).collect()
+        let mut bytes = Vec::new();
+        crate::audio::encode_pcm24(samples, &mut bytes);
+        bytes
     }
 
     fn mix(capacity: usize, frame: u32) -> PeerMix {

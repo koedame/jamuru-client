@@ -31,6 +31,7 @@ use jamjam::protocol::Packet;
 /// Every field of `ConnectionStats` that describes traffic must respond to traffic.
 ///
 /// Verifies: REQ-NET-026
+/// Verifies: REQ-AUD-045
 #[tokio::test]
 async fn connection_stats_respond_to_traffic() {
     let mut receiver = Connection::new("127.0.0.1:0")
@@ -71,10 +72,25 @@ async fn connection_stats_respond_to_traffic() {
         .send_audio(&[0.1f32; 64], 0)
         .await
         .expect("send audio");
+    assert_eq!(
+        sender.stats().samples_clipped,
+        0,
+        "audio inside 0 dBFS was counted as clipped"
+    );
+    // Past 0 dBFS: 1.5 and -2.0 do not fit 24 bits, nor does a NaN. 1.0 and 0.5 do.
+    sender
+        .send_audio(&[1.5f32, -2.0, f32::NAN, 1.0, 0.5], 0)
+        .await
+        .expect("send hot audio");
 
     tokio::time::sleep(Duration::from_millis(250)).await;
 
     let after = sender.stats();
+    assert_eq!(
+        after.samples_clipped, 3,
+        "samples_clipped did not count the three samples that went past 0 dBFS - \
+         it is a constant again"
+    );
     let received = receiver.stats();
 
     assert!(
