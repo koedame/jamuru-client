@@ -807,6 +807,7 @@ where
     // A device frame that is already the frame wanted goes through as is
     let whole_frame = resampler.is_none() && picks.iter().copied().eq(0..device_channels);
     let mut picked = Vec::with_capacity(frame_size as usize * picks.len().max(1) * 4);
+    let mut muted = Vec::with_capacity(frame_size as usize * device_channels.max(1) * 4);
     let mut sample_count = 0u64;
     Ok(move |data: &[f32]| {
         if fault::stream_stalled(serial) {
@@ -815,6 +816,14 @@ where
         heartbeat.beat();
         let started = crate::perf::start();
         super::device_loop::on_input(data, device_channels);
+        let data = if super::delay_meter::on_input(data, device_channels, device_rate) {
+            // A delay measurement is under way: the session hears silence
+            muted.clear();
+            muted.resize(data.len(), 0.0);
+            &muted[..]
+        } else {
+            data
+        };
         if whole_frame {
             let timestamp = sample_count;
             sample_count += data.len() as u64;
@@ -978,6 +987,7 @@ impl<F: FnMut(&mut [f32]) -> usize> RoutedPuller<F> {
         if self.device_channels == 2 && self.route.is_default() {
             self.puller.fill(data);
             super::device_loop::on_output(data, self.sample_rate);
+            super::delay_meter::on_output(data, self.sample_rate);
             return;
         }
         let stereo_len = data.len() / self.device_channels * 2;
@@ -987,6 +997,7 @@ impl<F: FnMut(&mut [f32]) -> usize> RoutedPuller<F> {
         let stereo = &mut self.stereo[..stereo_len];
         self.puller.fill(stereo);
         super::device_loop::on_output(stereo, self.sample_rate);
+        super::delay_meter::on_output(stereo, self.sample_rate);
         place_stereo(stereo, data, self.device_channels, self.route);
     }
 }

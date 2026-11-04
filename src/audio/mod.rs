@@ -10,6 +10,7 @@ mod buffer_fit;
 mod channels;
 pub(crate) mod codec;
 mod device;
+pub mod delay_meter;
 pub mod device_loop;
 mod driver;
 mod engine;
