@@ -19,7 +19,7 @@
 //! one answer in [`REPLY_INTERVAL`], so peers cannot make this app exceed the
 //! server's message limit and lose the room.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -235,8 +235,9 @@ pub struct BufferRequests {
     policy: Policy,
     asking: HashMap<Uuid, Asking>,
     heard: HashMap<Uuid, Heard>,
-    /// Participants whose ask this app's user accepted in this session
-    accepted_before: HashSet<Uuid>,
+    /// What this app's user accepted from each participant in this session: a
+    /// later ask that does not go beyond it is taken without asking again
+    accepted_before: HashMap<Uuid, BufferTerms>,
     /// When each participant was last answered unasked
     answered_at: HashMap<Uuid, Instant>,
     /// Participants the buffer was put back for, the messages saying so still to go and when
@@ -377,7 +378,7 @@ impl BufferRequests {
         let Some(Heard::Prompting { terms, .. }) = self.heard.get(&peer).cloned() else {
             return Err(BufferRequestError::NotActive);
         };
-        self.accepted_before.insert(peer);
+        self.accepted_before.insert(peer, terms);
         Ok(self.take(peer, terms, now))
     }
 
@@ -513,7 +514,7 @@ impl BufferRequests {
                 } else {
                     self.let_go(from, Release::Withdrawn)
                 };
-                if !out.is_empty() {
+                if !out.is_empty() && self.may_answer(from, now) {
                     out.push(Out::Send {
                         to: from,
                         message: reply(Answer::Withdrawn, None),
@@ -590,7 +591,11 @@ impl BufferRequests {
             }
             _ => {}
         }
-        if self.accepted_before.contains(&from) {
+        if self
+            .accepted_before
+            .get(&from)
+            .is_some_and(|accepted| goes_no_further(terms, *accepted))
+        {
             return self.take(from, terms, now);
         }
         self.heard.insert(
@@ -752,6 +757,13 @@ impl BufferRequests {
         self.repeat_restored.clear();
         out
     }
+}
+
+/// Whether an ask holds the buffer no longer and no harder than one the user
+/// already accepted: not a higher cap, and not a fixed buffer where the one
+/// accepted followed the link.
+fn goes_no_further(ask: BufferTerms, accepted: BufferTerms) -> bool {
+    ask.max_ms10 <= accepted.max_ms10 && (ask.auto || !accepted.auto)
 }
 
 fn reply(answer: Answer, applied: Option<GrantView>) -> BufferMessage {
@@ -1128,20 +1140,21 @@ mod tests {
 
     /// Verifies: REQ-CON-036
     #[test]
-    fn when_a_participant_was_accepted_once_their_next_ask_is_taken_without_asking_the_user() {
+    fn when_a_participant_was_accepted_once_a_next_ask_that_goes_no_further_is_taken_without_asking_the_user(
+    ) {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
         let outs = room.listener.accept(room.asker_id, t0).unwrap();
         room.run(false, outs, t0);
-        let longer = BufferTerms {
-            max_ms10: 500,
+        let shorter = BufferTerms {
+            max_ms10: terms().max_ms10 - 50,
             ..terms()
         };
 
-        room.ask(longer, seconds(t0, 5));
+        room.ask(shorter, seconds(t0, 5));
 
-        assert_eq!(room.applies, [Some(terms()), Some(longer)]);
-        assert_eq!(room.listener.held(), [(room.asker_id, longer)]);
+        assert_eq!(room.applies, [Some(terms()), Some(shorter)]);
+        assert_eq!(room.listener.held(), [(room.asker_id, shorter)]);
         assert!(
             !room
                 .listener_events
@@ -1150,6 +1163,72 @@ mod tests {
                 .any(|e| matches!(e, BufferEvent::Asked { .. })),
             "the user was asked once"
         );
+    }
+
+    /// Verifies: REQ-CON-036
+    #[test]
+    fn when_a_participant_accepted_once_asks_for_more_the_user_is_asked_again_and_nothing_changes_until_they_answer(
+    ) {
+        let following = BufferTerms {
+            auto: true,
+            ..terms()
+        };
+        let longer = BufferTerms {
+            max_ms10: terms().max_ms10 + 50,
+            ..following
+        };
+        let held_fixed = BufferTerms {
+            auto: false,
+            ..following
+        };
+
+        for (accepted, ask) in [(terms(), longer), (following, held_fixed)] {
+            let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
+            room.ask(accepted, t0);
+            let outs = room.listener.accept(room.asker_id, t0).unwrap();
+            room.run(false, outs, t0);
+
+            let outs = room.listener.receive(
+                room.asker_id,
+                "Asker",
+                BufferMessage::Ask { terms: ask },
+                seconds(t0, 5),
+            );
+
+            assert!(
+                outs.iter()
+                    .any(|o| matches!(o, Out::Event(BufferEvent::Asked { .. }))),
+                "the user is asked about {ask:?} after {accepted:?}"
+            );
+            assert!(
+                !outs.iter().any(|o| matches!(o, Out::Apply { .. })),
+                "nothing is applied for {ask:?} before the user answers"
+            );
+        }
+    }
+
+    /// Verifies: REQ-CON-035
+    #[test]
+    fn when_a_participant_asks_and_withdraws_in_turn_it_is_answered_at_most_once_a_second() {
+        let (mut listener, t0) = (BufferRequests::default(), Instant::now());
+        let asker = Uuid::new_v4();
+        let mut answers = 0;
+
+        for round in 0..6 {
+            let at = t0 + Duration::from_millis(100 * round);
+            for message in [
+                BufferMessage::Ask { terms: terms() },
+                BufferMessage::Withdraw,
+            ] {
+                answers += listener
+                    .receive(asker, "Asker", message, at)
+                    .iter()
+                    .filter(|o| matches!(o, Out::Send { .. }))
+                    .count();
+            }
+        }
+
+        assert_eq!(answers, 1, "six asks and six withdrawals in 0.6 s");
     }
 
     /// Verifies: REQ-CON-036
