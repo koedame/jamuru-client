@@ -106,7 +106,7 @@ parking_lot = "0.13"
 local-ip-address = "0.6"
 
 # OS version and installed memory for the environment probe
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 
 [target.'cfg(unix)'.dependencies]
 # Real-time priority of the audio thread
