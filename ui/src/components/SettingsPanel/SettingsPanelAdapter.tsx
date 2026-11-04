@@ -11,6 +11,8 @@ import {
   configLoad,
   configSetUsageReporting,
   configSetAskNameOnEntry,
+  bufferRequestSetPolicy,
+  type BufferAskPolicy,
   configGetPeerName,
   configSetPeerName,
   configGetServerUrl,
@@ -115,6 +117,11 @@ export function SettingsPanelAdapter({
   // Whether the name is confirmed before entering a room (on until turned off)
   const [askNameOnEntry, setAskNameOnEntry] = useState(true);
 
+  // Whether asks to buffer someone's audio for longer are put to the person (ADR-097)
+  const [bufferAsks, setBufferAsks] = useState<BufferAskPolicy>("ask");
+  const bufferAsksRef = useRef(bufferAsks);
+  bufferAsksRef.current = bufferAsks;
+
   // Usage reporting (off unless the user turns it on)
   const [usageReporting, setUsageReporting] = useState(false);
   const [usagePreview, setUsagePreview] = useState<string | null>(null);
@@ -198,6 +205,7 @@ export function SettingsPanelAdapter({
       .then((config) => {
         setUsageReporting(config?.usage_reporting === true);
         setAskNameOnEntry(config?.ask_name_on_entry !== false);
+        setBufferAsks(config?.buffer_asks === "never" ? "never" : "ask");
       })
       .catch((err) => console.error("Failed to read the usage reporting setting:", err));
   }, []);
@@ -360,6 +368,17 @@ export function SettingsPanelAdapter({
     }
   }, []);
 
+  const handleBufferAsksChange = useCallback(async (policy: BufferAskPolicy) => {
+    const previous = bufferAsksRef.current;
+    setBufferAsks(policy);
+    try {
+      await bufferRequestSetPolicy(policy);
+    } catch (err) {
+      console.error("Failed to save whether buffer asks are taken:", err);
+      setBufferAsks(previous);
+    }
+  }, []);
+
   const handleAskNameOnEntryChange = useCallback(async (enabled: boolean) => {
     setAskNameOnEntry(enabled);
     try {
@@ -469,6 +488,8 @@ export function SettingsPanelAdapter({
       onDisplayNameChange={handleDisplayNameChange}
       askNameOnEntry={askNameOnEntry}
       onAskNameOnEntryChange={handleAskNameOnEntryChange}
+      bufferAsks={bufferAsks}
+      onBufferAsksChange={handleBufferAsksChange}
       diagnosticsState={diagnosticsState}
       diagnosticsProgress={diagnosticsProgress}
       diagnosticsProgressMessage={diagnosticsProgressMessage}

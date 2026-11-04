@@ -1,6 +1,19 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { PeerLinkDialog } from "./PeerLinkDialog";
 import type { PeerLinkStatus } from "../../lib/tauri";
+import type { BufferRequests } from "../BufferRequest";
+
+/** No ask made or received */
+const idle: BufferRequests = {
+  askedOf: () => null,
+  heldFor: () => null,
+  canAsk: true,
+  ask: async () => {},
+  withdraw: async () => {},
+  restore: async () => {},
+  toast: null,
+  overlays: null,
+};
 
 const meta = {
   title: "Components/Room/PeerLinkDialog",
@@ -9,7 +22,7 @@ const meta = {
     layout: "fullscreen",
   },
   tags: ["autodocs"],
-  args: { onClose: () => {} },
+  args: { onClose: () => {}, peerId: "b", askable: true, requests: idle },
 } satisfies Meta<typeof PeerLinkDialog>;
 
 export default meta;
@@ -59,6 +72,7 @@ const upLink: PeerLinkStatus = {
     jitter_buffer_ms: 5,
   },
   level: 0,
+  buffer: { own: { mode: "preset" }, delay_ms10: 0, granted: null },
 };
 
 export const Default: Story = {
@@ -72,4 +86,18 @@ export const Empty: Story = {
 
 export const LongName: Story = {
   args: { peerName: "とても長い名前の参加者のひとり", link: upLink, localSampleRate: 48000 },
+};
+
+/** The other app does not take asks: only the user's own buffer is offered */
+export const CannotAsk: Story = {
+  args: { peerName: "Aki", link: upLink, localSampleRate: 48000, askable: false },
+};
+
+/** The user holds the buffer at a length of their own */
+export const Held: Story = {
+  args: {
+    peerName: "Aki",
+    link: { ...upLink, buffer: { own: { mode: "fixed", ms10: 150 }, delay_ms10: 150, granted: null } },
+    localSampleRate: 48000,
+  },
 };
