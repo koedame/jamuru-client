@@ -52,7 +52,7 @@ export function GeneralTab({
   onDisplayNameChange,
   askNameOnEntry = true,
   onAskNameOnEntryChange,
-  voicePriority = true,
+  voicePriority = false,
   onVoicePriorityChange,
   bufferAsks = "ask",
   onBufferAsksChange,
@@ -190,7 +190,7 @@ export function GeneralTab({
             <span className="tab-content__switch-hint">
               {t(
                 "settings.general.voicePriorityHint",
-                "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Turn it off if connecting gets worse. Applies from the next session"
+                "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Try it when audio breaks up while others use the same Wi-Fi; turn it off if it gets worse. Not available on macOS. Applies from the next session"
               )}
             </span>
           </span>

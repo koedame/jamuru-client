@@ -245,7 +245,7 @@
       "display": "Display",
       "connection": "Connection",
       "voicePriority": "Send audio with priority",
-      "voicePriorityHint": "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Turn it off if connecting gets worse. Applies from the next session",
+      "voicePriorityHint": "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Try it when audio breaks up while others use the same Wi-Fi; turn it off if it gets worse. Not available on macOS. Applies from the next session",
       "serverUrl": {
         "customHint": "Using a custom server: {{url}}",
         "defaultHint": "Using the default server ({{url}})"

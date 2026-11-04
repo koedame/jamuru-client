@@ -9,9 +9,9 @@
 //! The mark is set once, on the session's audio socket, and every packet then carries it:
 //!
 //! - Linux: `IP_TOS` / `IPV6_TCLASS` to EF, and `SO_PRIORITY` 6 for the local queue.
-//! - macOS: `IP_TOS` / `IPV6_TCLASS`. `SO_NET_SERVICE_TYPE` (voice), the system's own way, was
-//!   tried first: it leaves the IP header unmarked on a tunnel and, in a measured session,
-//!   made the sent audio drop out (ADR-110).
+//! - macOS: not marked. `IP_TOS` / `IPV6_TCLASS` leave the header unmarked on a dual-stack
+//!   socket, and `SO_NET_SERVICE_TYPE` (voice), the system's own way, made the sent audio drop
+//!   out in a measured session (ADR-110).
 //! - Windows: `IP_TOS` / `IPV6_TCLASS`. qWAVE, the system's QoS service, cannot do this job: it
 //!   marks a flow per destination, refuses an IPv6 socket that sends to an IPv4 address (the
 //!   audio socket is dual-stack, ADR-093), and gives voice 56 (CS7), not 46.
@@ -19,10 +19,12 @@
 //! The mark is a request: a network may clear it or, rarely, drop what is marked. That is
 //! why it is a setting (`voice_priority`).
 
+#[cfg(any(target_os = "linux", windows))]
 use socket2::SockRef;
 use tracing::{info, warn};
 
 /// EF (46) in the upper six bits of the byte
+#[cfg(any(target_os = "linux", windows))]
 const EF_TRAFFIC_CLASS: u32 = 46 << 2;
 
 /// Marks what `socket` sends as voice, and logs how. Returns what was used, or `None` where the
@@ -42,7 +44,7 @@ pub fn mark_voice(socket: &std::net::UdpSocket) -> Option<&'static str> {
 
 /// `IP_TOS` for what goes out with an IPv4 header (an IPv6 socket sends to an IPv4 peer with
 /// one, too) and `IPV6_TCLASS` for IPv6. Marked if either took.
-#[cfg(any(unix, windows))]
+#[cfg(any(target_os = "linux", windows))]
 fn mark_traffic_class(socket: &std::net::UdpSocket) -> Result<(), String> {
     let local = socket.local_addr().map_err(|e| e.to_string())?;
     let v4 = SockRef::from(socket).set_tos_v4(EF_TRAFFIC_CLASS);
@@ -63,7 +65,7 @@ fn mark_traffic_class(socket: &std::net::UdpSocket) -> Result<(), String> {
     Err(reason.unwrap_or_default())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn set_tclass_v6(socket: &std::net::UdpSocket) -> std::io::Result<()> {
     SockRef::from(socket).set_tclass_v6(EF_TRAFFIC_CLASS)
 }
@@ -102,9 +104,14 @@ fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
     })
 }
 
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(windows)]
 fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
     mark_traffic_class(socket).map(|()| "IP_TOS and IPV6_TCLASS")
+}
+
+#[cfg(target_os = "macos")]
+fn mark(_socket: &std::net::UdpSocket) -> Result<&'static str, String> {
+    Err("macOS does not carry the mark in the packets, and its voice service type made the sent audio drop out".to_string())
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]

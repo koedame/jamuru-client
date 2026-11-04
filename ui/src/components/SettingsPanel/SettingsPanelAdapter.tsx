@@ -119,7 +119,7 @@ export function SettingsPanelAdapter({
   const [askNameOnEntry, setAskNameOnEntry] = useState(true);
 
   // Whether the audio packets are marked as voice (on until turned off)
-  const [voicePriority, setVoicePriority] = useState(true);
+  const [voicePriority, setVoicePriority] = useState(false);
 
   // Whether asks to buffer someone's audio for longer are put to the person (ADR-097)
   const [bufferAsks, setBufferAsks] = useState<BufferAskPolicy>("ask");
@@ -209,7 +209,7 @@ export function SettingsPanelAdapter({
       .then((config) => {
         setUsageReporting(config?.usage_reporting === true);
         setAskNameOnEntry(config?.ask_name_on_entry !== false);
-        setVoicePriority(config?.voice_priority !== false);
+        setVoicePriority(config?.voice_priority === true);
         setBufferAsks(config?.buffer_asks === "never" ? "never" : "ask");
       })
       .catch((err) => console.error("Failed to read the usage reporting setting:", err));

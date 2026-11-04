@@ -1838,7 +1838,7 @@ mod tests {
             transmit_channels: 1,
             input_limiter: true,
             output_limiter: true,
-            voice_priority: true,
+            voice_priority: false,
             wasapi_mode: Default::default(),
             input_channels: (1, Some(2)),
             output_channels: (1, Some(2)),

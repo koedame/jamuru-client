@@ -40,17 +40,17 @@ describe('the voice priority switch in the settings panel', () => {
   });
 
   // Verifies: REQ-CON-160
-  it('the packets are marked, the switch is on', async () => {
+  it('the marking was turned on, the switch is on', async () => {
     fakeBackend({ voice_priority: true });
     render(<SettingsPanelAdapter />);
 
     const toggle = await screen.findByTestId('general-voice-priority-toggle');
 
-    expect(toggle).toBeChecked();
+    await waitFor(() => expect(toggle).toBeChecked());
   });
 
   // Verifies: REQ-CON-160
-  it('the marking was turned off, the switch is off', async () => {
+  it('the marking is off, the switch is off', async () => {
     fakeBackend({ voice_priority: false });
     render(<SettingsPanelAdapter />);
 
@@ -60,29 +60,29 @@ describe('the voice priority switch in the settings panel', () => {
   });
 
   // Verifies: REQ-CON-160
-  it('the switch is turned off, the setting is saved as off', async () => {
-    const saved = { voice_priority: true };
+  it('the switch is turned on, the setting is saved as on', async () => {
+    const saved = { voice_priority: false };
     fakeBackend(saved);
     render(<SettingsPanelAdapter />);
     const toggle = await screen.findByTestId('general-voice-priority-toggle');
-    await waitFor(() => expect(toggle).toBeChecked());
+    await waitFor(() => expect(toggle).not.toBeChecked());
 
     fireEvent.click(toggle);
 
-    await waitFor(() => expect(saved.voice_priority).toBe(false));
+    await waitFor(() => expect(saved.voice_priority).toBe(true));
     expect(invoke.mock.calls.filter(([command]) => command === 'config_set_voice_priority')).toEqual([
-      ['config_set_voice_priority', { enabled: false }, undefined],
+      ['config_set_voice_priority', { enabled: true }, undefined],
     ]);
   });
 
   // Verifies: REQ-CON-160
   it('saving fails, the switch goes back to what is saved', async () => {
-    fakeBackend({ voice_priority: true }, true);
+    fakeBackend({ voice_priority: false }, true);
     render(<SettingsPanelAdapter />);
     const toggle = await screen.findByTestId('general-voice-priority-toggle');
 
     fireEvent.click(toggle);
 
-    await waitFor(() => expect(toggle).toBeChecked());
+    await waitFor(() => expect(toggle).not.toBeChecked());
   });
 });
