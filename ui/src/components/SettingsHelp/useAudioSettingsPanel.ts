@@ -32,7 +32,11 @@ function refusalOf(error: unknown): HelpRefusal | null {
  * `describeRefusal` says in words why the app did not apply a change; without
  * it a refusal is only logged.
  */
-export function useAudioSettingsPanel(describeRefusal?: (reason: HelpRefusal) => string) {
+export function useAudioSettingsPanel(
+  describeRefusal?: (reason: HelpRefusal) => string,
+  /** The panel is the helper's: the sound of a measuring would come out of the helped person's speakers */
+  asHelper = false
+) {
   const [audio, setAudio] = useState<AudioSettings | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
@@ -63,5 +67,5 @@ export function useAudioSettingsPanel(describeRefusal?: (reason: HelpRefusal) =>
     [describeRefusal, showSettings]
   );
 
-  return { devicesTab: useAudioSettingsTab(audio, change), note, changing };
+  return { devicesTab: useAudioSettingsTab(audio, change, !asHelper), note, changing };
 }

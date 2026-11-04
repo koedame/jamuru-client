@@ -16,6 +16,7 @@ import type {
   SettingChange,
 } from "../../lib/tauri";
 import type { DevicesTabProps } from "./tabs/DevicesTab";
+import { useDeviceDelay } from "./useDeviceDelay";
 import type { SelectOption } from "./Select";
 
 /** The most channels any device is taken to have (the backend refuses higher numbers). */
@@ -53,9 +54,12 @@ export type AudioSettingsTabProps = Omit<DevicesTabProps, "isLoading">;
 
 export function useAudioSettingsTab(
   audio: AudioSettings | null,
-  change: (settingChange: SettingChange) => void
+  change: (settingChange: SettingChange) => void,
+  /** False where the sound of the delay measurement would come out of someone else's speakers */
+  canMeasureDelay = true
 ): AudioSettingsTabProps {
   const { t } = useTranslation();
+  const delay = useDeviceDelay(canMeasureDelay);
 
   const channelOptions = (maxChannels: number): SelectOption[] =>
     Array.from({ length: maxChannels }, (_, i) => ({
@@ -116,6 +120,7 @@ export function useAudioSettingsTab(
     ],
     selectedTransmitChannels: String(audio?.transmit_channels ?? 2),
     wasapi: audio?.wasapi ?? null,
+    delay,
     inputLimiter: audio?.input_limiter ?? true,
     outputLimiter: audio?.output_limiter ?? true,
     onInputLimiterChange: (enabled) => change({ setting: "input_limiter", enabled }),
