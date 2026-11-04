@@ -149,6 +149,15 @@ app_commands! {
     [Access::HELP] "手伝う人が、いま指している部品とフォーカスしている部品を、相手の画面に伝える" crate::help_presence::help_presence;
     [Access::NO_HELP] "手伝われる人の画面が、いま指している部品とフォーカスしている部品を、手伝う人の窓に伝える" crate::help_presence::help_presence_publish;
 
+    // Asking another participant to buffer one's audio for longer, and answering such an ask, is
+    // the person's own (ADR-097).
+    [Access::NO_HELP] "相手に、自分の音を受けるバッファを増やすよう頼む" crate::signaling::buffer_asks::buffer_request_ask;
+    [Access::NO_HELP] "相手へのバッファの頼みを取り下げる" crate::signaling::buffer_asks::buffer_request_withdraw;
+    [Access::NO_HELP] "相手からのバッファの頼みを受ける・断る" crate::signaling::buffer_asks::buffer_request_answer;
+    [Access::NO_HELP] "受けたバッファの頼みを元に戻す" crate::signaling::buffer_asks::buffer_request_restore;
+    [Access::NO_HELP] "バッファの頼みの状況を読む" crate::signaling::buffer_asks::buffer_request_snapshot;
+    [Access::NO_HELP] "バッファの頼みを受けるかを変える" crate::signaling::buffer_asks::buffer_request_set_policy;
+
     [Access::ALL] "音声の設定を読む" crate::settings::settings_get;
     [Access::ALL] "音声の設定を変える" crate::settings::settings_change;
 
@@ -172,6 +181,8 @@ app_commands! {
     [Access::ALL] "相手ごとの音量を変える" crate::mixer::mixer_set_peer_volume;
     [Access::ALL] "相手ごとの左右の位置を変える" crate::mixer::mixer_set_peer_pan;
     [Access::ALL] "相手ごとの音を消す・戻す" crate::mixer::mixer_set_peer_muted;
+    // How long to buffer a participant is a trade of latency for stability; a helper has no say in it.
+    [Access::NO_HELP] "相手ごとの受信バッファを決める・プリセットに戻す" crate::streaming::streaming_set_peer_buffer;
     [Access::ALL] "全体の音量を変える" crate::streaming::streaming_set_master_volume;
     [Access::ALL] "全体の音量を読む" crate::streaming::streaming_get_master_volume;
 

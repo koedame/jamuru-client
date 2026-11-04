@@ -252,6 +252,11 @@ impl BufferRequests {
         }
     }
 
+    /// Whether asks are taken.
+    pub fn policy(&self) -> Policy {
+        self.policy
+    }
+
     /// Changes whether asks are taken. An ask waiting for an answer is declined
     /// when asks are no longer taken; one already held stays until the user
     /// puts it back.
@@ -323,6 +328,14 @@ impl BufferRequests {
         }
         out.push(standing_event(peer, None));
         Ok(out)
+    }
+
+    /// The asks this app made, with what was asked and how each stands.
+    pub fn asked(&self) -> Vec<(Uuid, BufferTerms, Standing)> {
+        self.asking
+            .iter()
+            .map(|(peer, asking)| (*peer, asking.terms, asking.standing))
+            .collect()
     }
 
     /// How this app's ask of `peer` stands.

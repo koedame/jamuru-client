@@ -2,7 +2,7 @@
 //!
 //! Provides commands to connect to signaling servers, list rooms, and join/leave rooms.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
@@ -23,6 +23,9 @@ use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
+pub mod buffer_asks;
+
+use jamjam::network::buffer_request::{BufferEvent, BufferRequests, Policy};
 use jamjam::network::recording_notice::RecordingNotice;
 use jamjam::network::settings_help::{
     notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
@@ -126,6 +129,13 @@ pub struct SignalingState {
     /// The connection the help talks over, for a message not prompted by
     /// the UI (the relay connection ending, a setting being changed).
     help_conn: std::sync::Mutex<Option<u32>>,
+    /// Asking participants to buffer this app's audio for longer, and their asks of this app
+    /// (ADR-097). Never held across an await.
+    buffer_asks: std::sync::Mutex<BufferRequests>,
+    /// The connection the asks last talked over, for a message not prompted by a poll
+    buffer_asks_conn: std::sync::Mutex<Option<u32>>,
+    /// When the asks last put a peer message on the connection
+    buffer_sent: std::sync::Mutex<VecDeque<Instant>>,
     /// Events from the UI's own help actions, handed over on its next poll
     /// with those that arrived from the room.
     queued_events: std::sync::Mutex<Vec<SignalingEvent>>,
@@ -148,6 +158,9 @@ impl SignalingState {
             lost_logged: std::sync::Mutex::new(HashSet::new()),
             help: std::sync::Mutex::new(Help::new()),
             help_conn: std::sync::Mutex::new(None),
+            buffer_asks: std::sync::Mutex::new(BufferRequests::new(Policy::default())),
+            buffer_asks_conn: std::sync::Mutex::new(None),
+            buffer_sent: std::sync::Mutex::new(VecDeque::new()),
             queued_events: std::sync::Mutex::new(Vec::new()),
             link_identity: std::sync::Mutex::new(None),
             recording_told: std::sync::Mutex::new(None),
@@ -574,6 +587,7 @@ pub async fn signaling_leave_room(
     // The others hear that this app left; any help with them is over.
     let ended = help_events(lock_help(&state).reset());
     queue_events(&state, ended);
+    queue_events(&state, buffer_asks::end_all(&state, &streaming));
 
     Ok(())
 }
@@ -813,6 +827,9 @@ pub enum SignalingEvent {
     /// The help this app asked for was accepted: open the helper's end of the
     /// relay and the window the help is done in.
     HelpLink { link: Link },
+    /// Something about asking a participant to buffer audio for longer, or being asked, that the
+    /// UI shows (ADR-097)
+    BufferRequest { event: BufferEvent },
 }
 
 /// Poll for signaling events (peer join/leave, chat messages)
@@ -844,6 +861,11 @@ pub async fn signaling_poll_events(
         streaming.recorder().report().recording,
     )
     .await;
+    *state
+        .buffer_asks_conn
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(conn_id);
+    events.extend(buffer_asks::tick(conn, &state, &streaming).await);
 
     // Poll with 50ms timeout to avoid blocking too long
     loop {
@@ -910,6 +932,11 @@ pub async fn signaling_poll_events(
                         });
                         let outs = lock_help(&state).peer_left(peer_id);
                         events.extend(carry_out(conn, &state, outs).await);
+                        let outs = buffer_asks::peer_left_outs(&state, peer_id);
+                        events.extend(
+                            buffer_asks::carry_out(conn, &state, &streaming, outs, Instant::now())
+                                .await,
+                        );
                     }
                     SignalingMessage::PeerUpdated { peer } => {
                         crate::logging::register_participant_name(&peer.name);
@@ -978,6 +1005,19 @@ pub async fn signaling_poll_events(
                                 );
                                 events.extend(carry_out(conn, &state, outs).await);
                             }
+                            PeerBody::BufferRequest(message) => {
+                                events.extend(
+                                    buffer_asks::received(
+                                        conn,
+                                        &state,
+                                        &streaming,
+                                        from,
+                                        from_name.as_deref().unwrap_or_default(),
+                                        message,
+                                    )
+                                    .await,
+                                );
+                            }
                             PeerBody::Recording(RecordingNotice { on }) => {
                                 events.extend(
                                     recording_notice_received(
@@ -1019,6 +1059,7 @@ pub async fn signaling_poll_events(
                     state.forget_recording_peers();
                     // Before the loss: the window stops reading the batch there.
                     events.extend(help_events(lock_help(&state).reset()));
+                    events.extend(buffer_asks::end_all(&state, &streaming));
                     events.push(SignalingEvent::ConnectionLost {
                         reason: e.to_string(),
                     });
