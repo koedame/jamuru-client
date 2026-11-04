@@ -1,8 +1,8 @@
 /**
  * StereoMeter - Stereo level meter with peak hold
  *
- * Displays L/R audio levels with a fixed green->yellow->red gradient (ui.pen
- * Molecules/Meter/Stereo) revealed from the bottom, plus a decaying peak marker.
+ * Displays L/R audio levels with a fixed green->yellow->red gradient
+ * revealed from the bottom, plus a decaying peak marker.
  */
 
 import { usePeakHold } from "./usePeakHold";

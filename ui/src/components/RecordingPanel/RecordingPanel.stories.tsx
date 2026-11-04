@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { RecordingMark, RecordingPanel } from "./RecordingPanel";
 
 const meta = {
-  title: "Components/RecordingPanel",
+  title: "Components/Room/RecordingPanel",
   component: RecordingPanel,
   parameters: { layout: "centered" },
   decorators: [

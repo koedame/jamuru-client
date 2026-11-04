@@ -1,7 +1,7 @@
 /**
  * DiagnosticsTab - System diagnostics with results view, plus the log file and "Report a problem"
  *
- * Design: jamuru brand (ui.pen Screens/Settings/Diagnostics + Running + Result).
+ * Design: jamuru brand.
  * Idle: description + primary run button. Running: loader, progress bar, steps,
  * optional cancel. Complete: score, result cards with grade badges, problems.
  */

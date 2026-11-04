@@ -44,11 +44,6 @@ const ALLOWED_JAPANESE: { file: string; text: string; reason: string }[] = [
     reason: 'language selector shows each language by its own name',
   },
   {
-    file: '../Catalog.tsx',
-    text: '日本語',
-    reason: 'language toggle shows each language by its own name',
-  },
-  {
     file: '../components/ChatPanel/ChatMessage.tsx',
     text: '参加|入室|join',
     reason: 'keywords that classify text, not text shown to the user',
@@ -65,10 +60,6 @@ const ALLOWED_JAPANESE: { file: string; text: string; reason: string }[] = [
  * allows the whole file.
  */
 const ALLOWED_ENGLISH: { file: string; text?: string; reason: string }[] = [
-  {
-    file: '../Catalog.tsx',
-    reason: 'development catalog, only rendered with VITE_CATALOG_MODE',
-  },
   {
     file: '../screens/MainScreen.tsx',
     text: 'jamuru',

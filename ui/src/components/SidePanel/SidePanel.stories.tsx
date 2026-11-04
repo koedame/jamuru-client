@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SidePanel } from "./SidePanel";
 
 const meta = {
-  title: "Components/SidePanel",
+  title: "Components/Common/SidePanel",
   component: SidePanel,
   parameters: {
     layout: "fullscreen",

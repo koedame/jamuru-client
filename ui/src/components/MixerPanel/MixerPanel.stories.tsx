@@ -141,9 +141,14 @@ export const Default: Story = {
   },
 };
 
+/** No channel yet: only the title (a session with no audio link) */
+export const Empty: Story = {
+  args: { channels: [] },
+};
+
 /**
  * Single user (no remote participants). Named for that, not the removed
- * per-channel solo/isolate button (ui.pen has no solo control).
+ * per-channel solo/isolate button.
  */
 export const SingleParticipant: Story = {
   args: {

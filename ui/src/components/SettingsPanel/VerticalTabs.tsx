@@ -1,7 +1,7 @@
 /**
  * VerticalTabs - Vertical tab navigation for settings panel
  *
- * Design: jamuru brand (ui.pen Screens/Settings sidebar). Flat near-black
+ * Design: jamuru brand. Flat near-black
  * surfaces, yellow accent icon on the selected tab.
  */
 

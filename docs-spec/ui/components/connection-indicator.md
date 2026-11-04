@@ -9,13 +9,13 @@
 **目的**: ユーザーに現在の接続状態を一目で伝える
 
 **使用場面**:
-- コンポーネントカタログ（`Catalog.tsx`）
+- Storybook（`Components/Room/ConnectionIndicator`）
 - 接続状態の汎用インジケータが必要な箇所
 
-### 現在の実装での配置（ui.pen Screens/Main）
+### 現在の実装での配置（Storybook `Screens/Main`）
 
 接続済み画面（`MainScreen.tsx`）では、大きな `ConnectionIndicator` は使用しない。
-ui.pen の Screens/Main に合わせ、接続状態は 32px フッターのステータスドット
+接続状態は 32px フッターのステータスドット
 （`--color-success` の 8px 円）+ テキスト（「接続中」/`status.connected`）で表示し、
 参加者ごとの ↑/↓ レイテンシはサイドバーの参加者行に表示する。
 フッターには遅延の値を出さない（参加者が複数いると、どの人の値か分からないため）。自分のデバイスの入出力遅延、

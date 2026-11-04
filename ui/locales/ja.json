@@ -90,6 +90,7 @@
       "joined": "{{name}}さんが参加しました",
       "left": "{{name}}さんが退出しました",
       "highestLatency": "遅延がいちばん大きい参加者",
+      "departed": "退室済み・音声は継続中",
       "detail": {
         "you": "自分",
         "network": "ネットワーク",

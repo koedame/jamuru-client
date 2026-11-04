@@ -6,8 +6,7 @@ import "./LeaveDialog.css";
 export interface LeaveDialogProps {
   /** Whether the dialog is visible. Renders nothing when false. */
   open: boolean;
-  /** True while the leave operation is in flight (ui.pen Dialog/LeaveConfirm
-   * "Loading" state) - both buttons disable and the confirm button shows a
+  /** True while the leave operation is in flight ("Loading" state) - both buttons disable and the confirm button shows a
    * spinner instead of its label. */
   pending?: boolean;
   onConfirm: () => void;
@@ -19,7 +18,7 @@ export interface LeaveDialogProps {
 }
 
 /**
- * Room-leave confirmation dialog (ui.pen Dialog/LeaveConfirm States).
+ * Room-leave confirmation dialog.
  * Centered, shadowed card. Escape cancels; Tab wraps focus between the two
  * buttons since focus would otherwise escape to the hidden-behind-overlay
  * content.

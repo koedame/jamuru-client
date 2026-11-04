@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { DeviceSelector } from "./DeviceSelector";
 
 const meta = {
-  title: "Components/DeviceSelector",
+  title: "Components/Settings/DeviceSelector",
   component: DeviceSelector,
   parameters: {
     layout: "padded",
