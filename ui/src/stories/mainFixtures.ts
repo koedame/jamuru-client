@@ -88,7 +88,7 @@ export function answers(session: SessionSnapshot, extra: Answers = {}): Answers 
     config_load: { peer_name: "Yuki", ask_name_on_entry: false },
     config_get_sample_rate: 48000,
     config_get_transmit_channels: 2,
-    config_get_effective_server_url: "wss://signal.example.org",
+    config_get_effective_server_url: "signal.example.org",
     update_notice_get: null,
     signaling_get_chat_messages: [],
     recording_status: idleRecording,
