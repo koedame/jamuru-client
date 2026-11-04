@@ -2372,7 +2372,7 @@ mod tests {
     #[tokio::test]
     async fn when_the_participant_who_asked_leaves_the_room_the_buffer_goes_back_without_a_word() {
         let asker = Uuid::new_v4();
-        let (url, sent, later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let (url, _sent, later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
         let app = connect(&url).await;
         let streaming = app.state::<StreamingState>();
         poll_until_events(&app).await;
