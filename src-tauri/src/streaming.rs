@@ -12,9 +12,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use jamjam::audio::{
-    opened_ways, DeviceProblem, GrantView, OpenedWays, OwnBuffer, PeerBufferView,
-};
+use jamjam::audio::{opened_ways, DeviceProblem, GrantView, OpenedWays, OwnBuffer, PeerBufferView};
 pub use jamjam::audio_session::LinkTarget;
 use jamjam::audio_session::{self, BandwidthSnapshot, LinkReport, Params, Shared};
 use jamjam::network::{
