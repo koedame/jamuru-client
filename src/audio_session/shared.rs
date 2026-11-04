@@ -13,7 +13,7 @@ use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 use crate::audio::{
-    DeviceProblem, FlightRecorder, PeerGain, PeerMeter, PlayoutStats, RoomRecorder,
+    DeviceProblem, FlightRecorder, PeerBufferControl, PeerGain, PeerMeter, PlayoutStats, RoomRecorder,
 };
 use crate::network::{
     BandwidthStatus, ConnectionStats, LinkFacts, LinkHealth, PeerLatencyInfo, MAX_PEERS_PER_ROOM,
@@ -126,6 +126,9 @@ pub struct Shared {
     /// Where the fader and pan of each participant stand, whether or not there is a link to
     /// them yet. The output callback reads them as it mixes.
     pub peer_gains: Arc<RwLock<HashMap<Uuid, Arc<PeerGain>>>>,
+    /// The receive buffer of each participant: the owner's choice and what a participant
+    /// asked of it, whether or not there is a link to them yet (ADR-097)
+    pub peer_buffers: Arc<RwLock<HashMap<Uuid, Arc<PeerBufferControl>>>>,
     /// Devices the audio thread could not open, one per direction at most
     pub device_problems: Arc<RwLock<Vec<DeviceProblem>>>,
     /// Buffer underrun count (audio glitches due to CPU/scheduling)
@@ -179,6 +182,7 @@ impl Shared {
             links: Arc::new(RwLock::new(Vec::new())),
             ended: Arc::new(RwLock::new(Vec::new())),
             peer_gains: Arc::new(RwLock::new(HashMap::new())),
+            peer_buffers: Arc::new(RwLock::new(HashMap::new())),
             device_problems: Arc::new(RwLock::new(Vec::new())),
             underrun_count: Arc::new(AtomicU64::new(0)),
             delay_adjustments: Arc::new(AtomicU64::new(0)),
@@ -239,6 +243,12 @@ impl Shared {
         gains.entry(peer).or_default().clone()
     }
 
+    /// The receive buffer of `peer`, made as the preset has it the first time it is asked for.
+    pub fn buffer_of(&self, peer: Uuid) -> Arc<PeerBufferControl> {
+        let mut buffers = self.peer_buffers.write().unwrap_or_else(|e| e.into_inner());
+        buffers.entry(peer).or_default().clone()
+    }
+
     /// The participant `from` is now known as `to`: what is kept under their id (the link's
     /// report, the record of what went wrong with their audio, the fader) is kept under the
     /// new one, `gain` being the fader the link plays them through.
@@ -256,6 +266,10 @@ impl Shared {
         let mut gains = self.peer_gains.write().unwrap_or_else(|e| e.into_inner());
         gains.remove(&from);
         gains.insert(to, gain);
+        let mut buffers = self.peer_buffers.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(buffer) = buffers.remove(&from) {
+            buffers.insert(to, buffer);
+        }
     }
 
     /// The links of the running session, in the order they were opened
@@ -309,6 +323,8 @@ mod tests {
         fader.set_volume(150);
         fader.set_pan(-30);
         shared.gain_of(other);
+        let buffer = shared.buffer_of(from);
+        buffer.set_own(crate::audio::OwnBuffer::Fixed { ms10: 200 });
 
         shared.rename_peer(from, to, fader.clone());
 
@@ -323,5 +339,8 @@ mod tests {
         let moved = &gains[&to];
         assert_eq!((moved.volume(), moved.pan()), (150, -30));
         assert!(gains.contains_key(&other));
+        let buffers = shared.peer_buffers.read().unwrap();
+        assert!(!buffers.contains_key(&from), "the old id has no buffer left");
+        assert!(Arc::ptr_eq(&buffers[&to], &buffer), "the buffer is the one they had");
     }
 }

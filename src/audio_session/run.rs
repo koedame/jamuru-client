@@ -461,7 +461,8 @@ pub(super) async fn run(
 
     // Main loop: process received audio and check for stop command
     let mut next_stats_at = std::time::Instant::now();
-    let mut next_adapt_at = std::time::Instant::now() + ADAPT_INTERVAL;
+    let mut last_adapt_at = std::time::Instant::now();
+    let mut next_adapt_at = last_adapt_at + ADAPT_INTERVAL;
 
     // Pre-allocate buffers to avoid allocation in hot path
     // Receive buffer is stereo (frame_size * 2) since sender transmits stereo with local_pan applied
@@ -933,11 +934,18 @@ pub(super) async fn run(
         // iterations would tie the cadence to how fast this loop happens to
         // spin, which is a property of the audio clock, not of anything the UI
         // cares about.
+        // What the owner set for a receive buffer, or a participant asked of it, takes hold at
+        // once rather than at the next tick (ADR-097)
+        for link in &mut links {
+            link.follow_buffer_control(packet_duration_ms, false);
+        }
         if std::time::Instant::now() >= next_adapt_at {
-            next_adapt_at = std::time::Instant::now() + ADAPT_INTERVAL;
-            for link in &links {
+            let adapted_for = last_adapt_at.elapsed();
+            last_adapt_at = std::time::Instant::now();
+            next_adapt_at = last_adapt_at + ADAPT_INTERVAL;
+            for link in &mut links {
                 let before = link.receive.delay_frames();
-                if let Some(frames) = link.receive.adapt() {
+                if let Some(frames) = link.receive.adapt_over(adapted_for) {
                     tracing::info!(
                         "Play-out delay of {} adjusted to {} frame(s)",
                         link.peer,
@@ -952,6 +960,7 @@ pub(super) async fn run(
                         delay_adjustments.fetch_add(1, Ordering::Relaxed);
                     }
                 }
+                link.follow_buffer_control(packet_duration_ms, true);
             }
         }
 
