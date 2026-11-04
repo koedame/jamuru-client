@@ -155,7 +155,7 @@ hound = "3.5"  # WAV file handling for audio quality tests
 tempfile = "3"
 
 # Checks the usage log lines against schema.json in tests
-jsonschema = { version = "0.59", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
 
 
 # The key exchange of every link signs and checks with curve25519, which in an unoptimised
