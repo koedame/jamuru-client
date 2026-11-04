@@ -239,6 +239,25 @@ impl Shared {
         gains.entry(peer).or_default().clone()
     }
 
+    /// The participant `from` is now known as `to`: what is kept under their id (the link's
+    /// report, the record of what went wrong with their audio, the fader) is kept under the
+    /// new one, `gain` being the fader the link plays them through.
+    pub fn rename_peer(&self, from: Uuid, to: Uuid, gain: Arc<PeerGain>) {
+        if let Ok(mut links) = self.links.write() {
+            for (peer, _) in links.iter_mut().filter(|(peer, _)| *peer == from) {
+                *peer = to;
+            }
+        }
+        if let Ok(mut flights) = self.flights.write() {
+            for (peer, _) in flights.iter_mut().filter(|(peer, _)| *peer == from) {
+                *peer = to;
+            }
+        }
+        let mut gains = self.peer_gains.write().unwrap_or_else(|e| e.into_inner());
+        gains.remove(&from);
+        gains.insert(to, gain);
+    }
+
     /// The links of the running session, in the order they were opened
     pub fn link_reports(&self) -> Vec<(Uuid, Arc<LinkReport>)> {
         self.links
@@ -261,5 +280,48 @@ impl Shared {
             .into_iter()
             .map(|(peer, report)| (peer, report.health()))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::FlightRecorder;
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_participant_is_known_by_a_new_id_the_report_the_flights_and_the_fader_follow_the_id() {
+        let shared = Shared::new();
+        let (from, to, other) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let report = Arc::new(LinkReport::default());
+        let other_report = Arc::new(LinkReport::default());
+        shared
+            .links
+            .write()
+            .unwrap()
+            .extend([(from, report.clone()), (other, other_report.clone())]);
+        shared
+            .flights
+            .write()
+            .unwrap()
+            .push((from, FlightRecorder::new()));
+        let fader = shared.gain_of(from);
+        fader.set_volume(150);
+        fader.set_pan(-30);
+        shared.gain_of(other);
+
+        shared.rename_peer(from, to, fader.clone());
+
+        let links = shared.link_reports();
+        assert_eq!(links.len(), 2, "no link is added or lost");
+        assert_eq!(links[0].0, to, "the link keeps its place in the order");
+        assert!(Arc::ptr_eq(&links[0].1, &report), "and its report");
+        assert_eq!(links[1].0, other, "another link is left as it was");
+        assert_eq!(shared.flights.read().unwrap()[0].0, to);
+        let gains = shared.peer_gains.read().unwrap();
+        assert!(!gains.contains_key(&from), "the old id has no fader left");
+        let moved = &gains[&to];
+        assert_eq!((moved.volume(), moved.pan()), (150, -30));
+        assert!(gains.contains_key(&other));
     }
 }

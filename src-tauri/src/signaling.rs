@@ -462,7 +462,16 @@ pub async fn signaling_publish_local_candidates(
     streaming: tauri::State<'_, StreamingState>,
     usage: tauri::State<'_, UsageState>,
 ) -> Result<usize, String> {
-    let candidates = local_candidates(&streaming, local_port).await;
+    // A session that runs has its socket, so its address is told again as it was told, not
+    // asked of STUN through a socket it cannot be asked through
+    let candidates = match streaming.told_candidates_of_running(local_port) {
+        Some(candidates) => candidates,
+        None => {
+            let candidates = local_candidates(&streaming, local_port).await;
+            streaming.remember_told_candidates(local_port, &candidates);
+            candidates
+        }
+    };
     usage
         .reporter()
         .with_session(|tally| tally.set_local_candidates(&candidates));

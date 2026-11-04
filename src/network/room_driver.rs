@@ -122,6 +122,9 @@ pub trait Backend: Send + Sync + 'static {
         link_key: Option<String>,
     ) -> impl Future<Output = Result<(), String>> + Send;
     fn unlink(&self, peer: Uuid) -> impl Future<Output = Result<(), String>> + Send;
+    /// The audio link to `from` goes on as the link to `to`, with whatever is kept of the
+    /// participant (their fader, the record of their audio)
+    fn relink(&self, from: Uuid, to: Uuid) -> impl Future<Output = Result<(), String>> + Send;
 
     /// The session changed to `snapshot`, which differs from what was last announced
     fn announce(&self, snapshot: &Snapshot);
@@ -321,7 +324,7 @@ impl<B: Backend> Driver<B> {
             return Err("Not in a room".to_string());
         }
         let epoch = self.next_epoch();
-        self.reconnect(epoch).await
+        self.reconnect(epoch, true).await
     }
 
     /// Leaves the room, if in one, lets go of the connection and ends whatever step is running:
@@ -370,7 +373,12 @@ impl<B: Backend> Driver<B> {
     /// Ends the connection there is: the audio, then the server connection. The state is left
     /// for the caller to change in the same breath.
     async fn drop_connection(&self) {
-        let (conn, in_room) = self.lock().dropping_the_connection();
+        self.drop_connection_keeping(false).await;
+    }
+
+    /// [`Driver::drop_connection`], with the audio left going if `keep_audio`.
+    async fn drop_connection_keeping(&self, keep_audio: bool) {
+        let (conn, in_room) = self.lock().dropping_the_connection(keep_audio);
         if in_room {
             self.backend().stop_audio().await;
         }
@@ -487,7 +495,11 @@ impl<B: Backend> Driver<B> {
     /// Retries with a backoff. While a room is open its screen stays up and the reconnect
     /// reports progress; otherwise the phase is `connecting_server` and, on giving up, `error` -
     /// what a failed first connect looks like.
-    async fn reconnect(&self, epoch: u64) -> Result<Snapshot, String> {
+    ///
+    /// The audio goes on meanwhile if `keep_audio`: it does not go through the server, so the
+    /// server being gone is no reason to silence the room. It is not when the audio is what is
+    /// being started over (see `Audio::Rejoin`).
+    async fn reconnect(&self, epoch: u64, keep_audio: bool) -> Result<Snapshot, String> {
         let _flow = self.session.flow.lock().await;
         if self.epoch() != epoch {
             return Ok(self.snapshot());
@@ -496,7 +508,7 @@ impl<B: Backend> Driver<B> {
         // rejoin, not the one it was in when the connection was lost.
         let rejoin = self.lock().rejoin_code();
 
-        self.drop_connection().await;
+        self.drop_connection_keeping(keep_audio).await;
         let was_in_room = rejoin.is_some();
         self.change(|session| session.reconnecting(was_in_room));
 
@@ -545,8 +557,11 @@ impl<B: Backend> Driver<B> {
                     Some(code) => {
                         let name = self.backend().peer_name();
                         let entered = self.backend().join_room(conn, code, &name).await?;
-                        let audio =
-                            self.change(|session| session.entered(conn, entered, name, code));
+                        let (running, healths) = self.backend().audio_state();
+                        let healths = if running { healths } else { Vec::new() };
+                        let audio = self.change(|session| {
+                            session.entered_again(conn, entered, name, code, &healths)
+                        });
                         self.spawn_pump(conn);
                         self.run_audio(conn, audio).await;
                     }
@@ -618,14 +633,15 @@ impl<B: Backend> Driver<B> {
     }
 
     /// Ends the connection `conn` and gets it back, rejoining the room the participant is in,
-    /// unless `conn` is no longer the session's.
-    fn get_connection_back(&self, conn: u32) {
+    /// unless `conn` is no longer the session's. The audio goes on meanwhile if `keep_audio`
+    /// (see [`Driver::reconnect`]).
+    fn get_connection_back(&self, conn: u32, keep_audio: bool) {
         let Some(epoch) = self.lock().next_epoch_of(conn) else {
             return;
         };
         let this = self.clone();
         tokio::spawn(async move {
-            let _ = this.reconnect(epoch).await;
+            let _ = this.reconnect(epoch, keep_audio).await;
         });
     }
 
@@ -656,7 +672,7 @@ impl<B: Backend> Driver<B> {
                     // A network blip, a proxy reset or a server restart: the connection is dead
                     // either way.
                     tracing::warn!("Signaling connection lost: {}", reason);
-                    self.get_connection_back(conn);
+                    self.get_connection_back(conn, true);
                     return false;
                 }
             }
@@ -682,13 +698,20 @@ impl<B: Backend> Driver<B> {
                     tracing::warn!(
                         "An audio link gave up and nobody is heard: entering the room again"
                     );
-                    self.get_connection_back(conn);
+                    // Entering again is for telling the room a new audio address: the audio
+                    // starts over with it
+                    self.get_connection_back(conn, false);
                     // The rest is for a room this participant is on its way out of
                     return;
                 }
                 Audio::End { peer } => {
                     if let Err(e) = self.backend().unlink(peer).await {
                         tracing::error!("Failed to close an audio link: {}", e);
+                    }
+                }
+                Audio::Relink { from, to } => {
+                    if let Err(e) = self.backend().relink(from, to).await {
+                        tracing::error!("Failed to carry an audio link over: {}", e);
                     }
                 }
                 Audio::Start {
@@ -742,6 +765,10 @@ mod tests {
         /// How many connects fail before one is made
         refusing: Mutex<u32>,
         connections: Mutex<u32>,
+        /// Who is in the room when it is entered
+        peers: Mutex<Vec<PeerInfo>>,
+        /// Whether audio runs, and how each link is doing
+        audio: Mutex<(bool, Vec<(Uuid, LinkHealth)>)>,
     }
 
     impl FakeBackend {
@@ -763,7 +790,7 @@ mod tests {
                 room_id: "room".to_string(),
                 peer_id: Uuid::from_u128(1),
                 invite_code: Some("ABC234XYZ".parse::<InviteCode>().unwrap()),
-                peers: Vec::new(),
+                peers: self.peers.lock().unwrap().clone(),
                 created: false,
             }
         }
@@ -833,7 +860,7 @@ mod tests {
         }
 
         fn audio_state(&self) -> (bool, Vec<(Uuid, LinkHealth)>) {
-            (false, Vec::new())
+            self.audio.lock().unwrap().clone()
         }
 
         async fn advertise(&self, _conn: u32) -> Result<(), String> {
@@ -859,6 +886,11 @@ mod tests {
 
         async fn unlink(&self, _peer: Uuid) -> Result<(), String> {
             self.ask("unlink");
+            Ok(())
+        }
+
+        async fn relink(&self, from: Uuid, to: Uuid) -> Result<(), String> {
+            self.ask(format!("relink {from} {to}"));
             Ok(())
         }
 
@@ -992,5 +1024,127 @@ mod tests {
         assert_eq!(driver.backend().asked("leave_room"), 1);
         assert_eq!(driver.backend().asked("disconnect"), 1);
         assert_eq!(driver.backend().asked("connect"), 1);
+    }
+
+    fn at(id: u128, name: &str, address: &str) -> PeerInfo {
+        PeerInfo {
+            id: Uuid::from_u128(id),
+            name: name.to_string(),
+            candidates: vec![crate::network::AddressCandidate::host(
+                address.parse().unwrap(),
+            )],
+            public_addr: None,
+            local_addr: None,
+            joined_at: 0,
+            features: vec![],
+            link_key: None,
+        }
+    }
+
+    /// A room Aki created with Ben in it, heard on the audio link there is to him
+    async fn room_with_ben_heard(ben: PeerInfo) -> Driver<FakeBackend> {
+        let backend = FakeBackend::default();
+        *backend.peers.lock().unwrap() = vec![ben.clone()];
+        *backend.audio.lock().unwrap() = (true, vec![(ben.id, LinkHealth::Heard)]);
+        let driver = driver_over(backend);
+        driver.connect_afresh().await.unwrap();
+        driver.create().await.unwrap();
+        assert_eq!(driver.backend().asked("link"), 1);
+        driver
+    }
+
+    async fn lose_the_connection_and_get_it_back(driver: &Driver<FakeBackend>) {
+        driver
+            .backend()
+            .polls
+            .lock()
+            .unwrap()
+            .push_back(vec![Polled::Room(RoomEvent::ConnectionLost(
+                "reset".to_string(),
+            ))]);
+        until(driver, |_| {
+            driver.backend().asked("join_room ABC234XYZ") == 1
+        })
+        .await;
+        until(driver, |s| {
+            s.phase == Phase::Connected && s.connection_id == Some(2)
+        })
+        .await;
+    }
+
+    /// Verifies: REQ-CON-150
+    #[tokio::test]
+    async fn the_connection_is_lost_while_the_audio_is_heard_enters_the_room_again_without_stopping_the_audio(
+    ) {
+        let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
+
+        lose_the_connection_and_get_it_back(&driver).await;
+
+        assert_eq!(driver.backend().asked("stop_audio"), 0);
+        assert_eq!(driver.backend().asked("unlink"), 0);
+        assert_eq!(driver.backend().asked("link"), 1);
+        assert_eq!(driver.snapshot().streaming_peer_ids, [id_text(2)]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[tokio::test]
+    async fn the_connection_is_lost_and_ben_is_listed_under_a_new_id_goes_on_with_the_audio_link_as_his_new_id(
+    ) {
+        let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
+        *driver.backend().peers.lock().unwrap() = vec![at(3, "Ben", "192.0.2.2:5000")];
+
+        lose_the_connection_and_get_it_back(&driver).await;
+
+        assert_eq!(driver.backend().asked("stop_audio"), 0);
+        assert_eq!(driver.backend().asked("unlink"), 0);
+        assert_eq!(driver.backend().asked("link"), 1);
+        assert_eq!(
+            driver.backend().asked(&format!(
+                "relink {} {}",
+                Uuid::from_u128(2),
+                Uuid::from_u128(3)
+            )),
+            1
+        );
+        assert_eq!(driver.snapshot().streaming_peer_ids, [id_text(3)]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[tokio::test]
+    async fn the_connection_is_lost_and_ben_is_listed_at_another_address_opens_a_link_to_him_again()
+    {
+        let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
+        *driver.backend().peers.lock().unwrap() = vec![at(3, "Ben", "192.0.2.9:7000")];
+
+        lose_the_connection_and_get_it_back(&driver).await;
+
+        assert_eq!(driver.backend().asked("stop_audio"), 0);
+        assert_eq!(driver.backend().asked("link"), 2);
+        assert_eq!(driver.snapshot().streaming_peer_ids, [id_text(3)]);
+    }
+
+    /// Entering the room again is how a link that gave up and nobody is heard tells the room a
+    /// new audio address: the audio starts over with it.
+    ///
+    /// Verifies: REQ-CON-134
+    #[tokio::test]
+    async fn a_link_gives_up_and_nobody_is_heard_enters_the_room_again_with_the_audio_stopped() {
+        let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
+        *driver.backend().audio.lock().unwrap() = (true, vec![(id(2), LinkHealth::Failed)]);
+
+        until(&driver, |_| {
+            driver.backend().asked("join_room ABC234XYZ") == 1
+        })
+        .await;
+
+        assert_eq!(driver.backend().asked("stop_audio"), 1);
+    }
+
+    fn id(n: u128) -> Uuid {
+        Uuid::from_u128(n)
+    }
+
+    fn id_text(n: u128) -> String {
+        id(n).to_string()
     }
 }

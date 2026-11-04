@@ -301,13 +301,20 @@ impl<R: Runtime> Backend for AppBackend<R> {
 
     async fn advertise(&self, conn: u32) -> Result<(), String> {
         let app = &self.app;
-        let local = streaming::streaming_prepare(app.state()).await?;
-        let port = local
-            .rsplit(':')
-            .next()
-            .and_then(|port| port.parse::<u16>().ok())
-            .filter(|port| *port != 0)
-            .ok_or_else(|| format!("unexpected local audio address: {}", local))?;
+        // A session that runs is on its socket: preparing one would bind another, whose
+        // address nobody sending to this app would be told of
+        let port = match app.state::<streaming::StreamingState>().running_port() {
+            Some(port) => port,
+            None => {
+                let local = streaming::streaming_prepare(app.state()).await?;
+                local
+                    .rsplit(':')
+                    .next()
+                    .and_then(|port| port.parse::<u16>().ok())
+                    .filter(|port| *port != 0)
+                    .ok_or_else(|| format!("unexpected local audio address: {}", local))?
+            }
+        };
         signaling::signaling_publish_local_candidates(
             conn,
             port,
@@ -365,6 +372,14 @@ impl<R: Runtime> Backend for AppBackend<R> {
 
     async fn unlink(&self, peer: Uuid) -> Result<(), String> {
         streaming::streaming_unlink(peer, self.app.state()).await
+    }
+
+    async fn relink(&self, from: Uuid, to: Uuid) -> Result<(), String> {
+        let app = &self.app;
+        streaming::streaming_relink(from, to, app.state()).await?;
+        // Heard with the faders where they stand for the participant, as the room knows them now
+        mixer::set_on_audio(app, &to.to_string()).await;
+        Ok(())
     }
 
     fn announce(&self, snapshot: &Snapshot) {
@@ -1250,6 +1265,48 @@ mod tests {
             s.phase == Phase::Connected && s.signaling_reconnect == Reconnect::Idle
         })
         .await;
+    }
+
+    /// The audio goes between the apps, not through the server: a server that is gone, or a path
+    /// to it that is, is no reason for the room to fall silent.
+    ///
+    /// Verifies: REQ-CON-150
+    #[tokio::test]
+    async fn the_connection_to_the_server_drops_while_the_audio_is_heard_enters_the_room_again_without_ending_the_audio_or_a_link(
+    ) {
+        use crate::streaming::StreamingCommand;
+        let server = FakeServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (app, commands) = in_a_room_of_three(&server, &dir).await;
+        let audio = app.state::<StreamingState>();
+        audio.set_link_for_test(Uuid::from_u128(OTHER), "connected", Some((100, 8.0)));
+        audio.set_link_for_test(Uuid::from_u128(3), "connected", Some((100, 8.0)));
+        // The loop that reads the links has seen them heard
+        tokio::time::sleep(POLL_INTERVAL * 4).await;
+        let first = app.state::<SessionState>().snapshot().connection_id;
+
+        server.reset(0);
+        until(&app, |s| {
+            s.phase == Phase::Connected
+                && s.connection_id.is_some()
+                && s.connection_id != first
+                && s.signaling_reconnect == Reconnect::Idle
+        })
+        .await;
+
+        assert_eq!(server.count("JoinRoom"), 2);
+        assert!(
+            audio.is_active(),
+            "the audio session goes on while the room is entered again"
+        );
+        let told: Vec<StreamingCommand> = commands.try_iter().collect();
+        assert!(
+            !told.iter().any(|command| matches!(
+                command,
+                StreamingCommand::Stop | StreamingCommand::Unlink(_) | StreamingCommand::Link(_)
+            )),
+            "the audio session was told to end something: {told:?}"
+        );
     }
 
     /// Verifies: REQ-RMT-028

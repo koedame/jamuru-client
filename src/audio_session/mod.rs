@@ -86,6 +86,12 @@ pub enum Command {
     Link(Box<LinkTarget>),
     /// Close the audio link to a participant. The others go on.
     Unlink(Uuid),
+    /// The participant `from` is the one now known as `to` (the room gave them a new id when
+    /// they entered again): the link, and where their fader stands, go on under the new id.
+    Relink {
+        from: Uuid,
+        to: Uuid,
+    },
 }
 
 /// What is captured in place of an input device

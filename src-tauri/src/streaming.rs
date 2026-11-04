@@ -42,6 +42,12 @@ pub struct StreamingState {
     /// Address `prepared_socket` is bound to, kept so repeated prepares report
     /// the same one.
     prepared_addr: Mutex<Option<SocketAddr>>,
+    /// The port of the socket the running session took, and the address candidates the room
+    /// was last told for a port (the candidates carry the public address STUN gave through the
+    /// socket, which cannot be asked again once the session has the socket). Together they say
+    /// what to tell the room of a session that goes on when the room is entered again.
+    running_port: std::sync::Mutex<Option<u16>>,
+    told_candidates: std::sync::Mutex<Option<(u16, Vec<jamjam::network::AddressCandidate>)>>,
     /// The IP families of the audio socket last prepared. Kept after the socket is handed to
     /// the session, so the addresses offered to the room stay those the socket can use.
     audio_families: std::sync::Mutex<jamjam::network::IpFamilies>,
@@ -88,6 +94,8 @@ impl StreamingState {
             sample_rate: Arc::new(AtomicU32::new(jamjam::config::DEFAULT_SAMPLE_RATE)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
+            running_port: std::sync::Mutex::new(None),
+            told_candidates: std::sync::Mutex::new(None),
             audio_families: std::sync::Mutex::new(jamjam::network::IpFamilies::V4_ONLY),
             mute_hold: std::sync::Mutex::new(None),
             #[cfg(test)]
@@ -264,8 +272,51 @@ impl StreamingState {
     async fn take_prepared_socket(&self) -> Option<std::net::UdpSocket> {
         let mut addr_lock = self.prepared_addr.lock().await;
         let socket = self.prepared_socket.lock().await.take();
+        if socket.is_some() {
+            *self.running_port.lock().unwrap_or_else(|e| e.into_inner()) =
+                addr_lock.map(|addr| addr.port());
+        }
         *addr_lock = None;
         socket
+    }
+
+    /// The port the running audio session's socket is on, while one runs
+    pub fn running_port(&self) -> Option<u16> {
+        if !self.is_active() {
+            return None;
+        }
+        *self.running_port.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Keeps what the room was told of `port`
+    pub(crate) fn remember_told_candidates(
+        &self,
+        port: u16,
+        candidates: &[jamjam::network::AddressCandidate],
+    ) {
+        *self
+            .told_candidates
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some((port, candidates.to_vec()));
+    }
+
+    /// What the room was told of `port`, when the running session is on it
+    pub(crate) fn told_candidates_of_running(
+        &self,
+        port: u16,
+    ) -> Option<Vec<jamjam::network::AddressCandidate>> {
+        if self.running_port() != Some(port) {
+            return None;
+        }
+        match self
+            .told_candidates
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            Some((told_port, candidates)) if *told_port == port => Some(candidates.clone()),
+            _ => None,
+        }
     }
 
     /// Whether an audio session is running
@@ -792,6 +843,22 @@ pub async fn streaming_unlink(
     tracing::info!("Audio link to {} to be closed", peer);
     if let Some(sender) = state.cmd_tx.lock().await.as_ref() {
         let _ = sender.send(StreamingCommand::Unlink(peer));
+    }
+    Ok(())
+}
+
+/// The participant `from` is now known as `to`: their link goes on under the new id.
+pub async fn streaming_relink(
+    from: Uuid,
+    to: Uuid,
+    state: tauri::State<'_, StreamingState>,
+) -> Result<(), String> {
+    if !state.is_active() {
+        return Ok(());
+    }
+    tracing::info!("Audio link to {} goes on as {}", from, to);
+    if let Some(sender) = state.cmd_tx.lock().await.as_ref() {
+        let _ = sender.send(StreamingCommand::Relink { from, to });
     }
     Ok(())
 }

@@ -642,6 +642,15 @@ pub(super) async fn run(
                     tracing::info!("Audio link to {} closed", peer);
                 }
             }
+            Ok(Command::Relink { from, to }) => {
+                if links.iter().any(|link| link.peer == to) {
+                    tracing::debug!("There is a link to {} already", to);
+                } else if let Some(link) = links.iter_mut().find(|link| link.peer == from) {
+                    link.peer = to;
+                    shared.rename_peer(from, to, link.gain.clone());
+                    tracing::info!("Audio link to {} goes on as {}", from, to);
+                }
+            }
             Err(std_mpsc::TryRecvError::Disconnected) => {
                 tracing::info!("Command channel disconnected");
                 break;

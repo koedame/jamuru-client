@@ -270,9 +270,18 @@ impl State {
 
     /// The connection there is, and the room, are let go of. Returns the connection to close
     /// and whether the audio of a room is to be stopped.
-    pub fn dropping_the_connection(&mut self) -> (Option<u32>, bool) {
-        self.roster.audio_ended();
-        (self.connection_id.take(), self.room.is_some())
+    ///
+    /// With `keep_audio` the audio is not: the participant is on their way back into the room
+    /// (the connection was lost), and the audio goes between the apps, not through the server.
+    /// The links are kept for [`State::entered_again`] to carry on with.
+    pub fn dropping_the_connection(&mut self, keep_audio: bool) -> (Option<u32>, bool) {
+        if !keep_audio {
+            self.roster.audio_ended();
+        }
+        (
+            self.connection_id.take(),
+            self.room.is_some() && !keep_audio,
+        )
     }
 
     /// Starting from nothing: reaching the server, in no room.
@@ -320,6 +329,19 @@ impl State {
         peer_name: String,
         fallback_code: &str,
     ) -> Vec<Audio> {
+        self.entered_again(conn, entered, peer_name, fallback_code, &[])
+    }
+
+    /// [`State::entered`], for entering the room again with the audio going on: `healths` is how
+    /// each audio link is doing now.
+    pub fn entered_again(
+        &mut self,
+        conn: u32,
+        entered: Entered,
+        peer_name: String,
+        fallback_code: &str,
+        healths: &[(Uuid, LinkHealth)],
+    ) -> Vec<Audio> {
         self.connection_id = Some(conn);
         self.room = Some(Room {
             room_id: entered.room_id,
@@ -336,7 +358,8 @@ impl State {
         self.joining_code = None;
         self.reconnect = Reconnect::Idle;
         self.reconnect_error = None;
-        self.roster.entered(entered.peer_id, entered.peers)
+        self.roster
+            .entered_again(entered.peer_id, entered.peers, healths)
     }
 
     /// The app left its room, and the rooms the server then listed are `listed` (or why they
@@ -644,11 +667,24 @@ mod tests {
         let mut state = in_a_room(vec![peer(2, Some("10.0.0.2:5000"))]);
         assert_eq!(state.view().streaming_peer_ids.len(), 1);
 
-        let (conn, in_room) = state.dropping_the_connection();
+        let (conn, in_room) = state.dropping_the_connection(false);
 
         assert_eq!((conn, in_room), (Some(7), true));
         assert_eq!(state.connection_id(), None);
         assert!(state.view().streaming_peer_ids.is_empty());
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn when_the_connection_is_dropped_to_get_it_back_the_audio_is_not_to_be_stopped_and_the_links_stay(
+    ) {
+        let mut state = in_a_room(vec![peer(2, Some("10.0.0.2:5000"))]);
+
+        let (conn, stop_audio) = state.dropping_the_connection(true);
+
+        assert_eq!((conn, stop_audio), (Some(7), false));
+        assert_eq!(state.connection_id(), None);
+        assert_eq!(state.view().streaming_peer_ids.len(), 1);
     }
 
     /// Verifies: REQ-RMT-028

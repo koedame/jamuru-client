@@ -395,6 +395,38 @@ describe('MainScreen のルームの表示', () => {
     expect(callsTo('session_reconnect')).toHaveLength(1);
     expect(screen.getByText(/no route to host/)).toBeInTheDocument();
   });
+
+  /** Verifies: REQ-CON-150 */
+  it('繋ぎ直しに失敗しても相手との音声がつながっているとき、音声は止まっていないと添えること', async () => {
+    current = inRoom({
+      connection_id: null,
+      signaling_reconnect: 'failed',
+      signaling_reconnect_error: 'room not found',
+    });
+    statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
+
+    render(<MainScreen />);
+
+    expect(
+      await screen.findByText(
+        i18n.t('session.signalingReconnect.failedAudioGoesOn', { reason: 'room not found' })
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('繋ぎ直しに失敗して音声のつながりも無いとき、音声は止まっていないとは言わないこと', async () => {
+    current = inRoom({
+      connection_id: null,
+      signaling_reconnect: 'failed',
+      signaling_reconnect_error: 'no route to host',
+    });
+    statusLinks = [];
+
+    render(<MainScreen />);
+
+    expect(await screen.findByText(/no route to host/)).toBeInTheDocument();
+    expect(screen.queryByText(/has not stopped/)).not.toBeInTheDocument();
+  });
 });
 
 describe('MainScreen の受信バッファ調整の知らせ', () => {
