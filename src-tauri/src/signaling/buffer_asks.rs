@@ -17,29 +17,34 @@ use super::*;
 /// What the UI hears of asks, as a window event
 pub const BUFFER_REQUEST_EVENT: &str = "buffer-request";
 
-/// The most peer messages these asks put on the connection in [`BUDGET_WINDOW`]. The server
-/// closes a connection that sends more than thirty in ten seconds, and the chat, a help and the
-/// recording notice share it.
+/// The most peer messages these asks put on the connection in [`BUDGET_WINDOW`]: [`BUDGET`]
+/// that this app sends of itself (answers to what others sent, sending again, checking), and
+/// [`USER_BUDGET`] more for what its user does (asking, taking back, answering, putting back), so
+/// that a participant who keeps sending cannot use up the room for the user's own actions. The
+/// server closes a connection that sends more than thirty in ten seconds, and the chat, a help and
+/// the recording notice share it.
 const BUDGET: usize = 15;
+const USER_BUDGET: usize = 5;
 const BUDGET_WINDOW: Duration = Duration::from_secs(10);
 
 fn lock(state: &SignalingState) -> MutexGuard<'_, BufferRequests> {
     state.buffer_asks.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Whether one more message may go out now.
-fn within_budget(state: &SignalingState, now: Instant) -> bool {
+/// Whether one more message may go out now, of the user's own doing or not.
+fn within_budget(state: &SignalingState, now: Instant, user: bool) -> bool {
     let mut sent = state.buffer_sent.lock().unwrap_or_else(|e| e.into_inner());
     while sent
         .front()
-        .is_some_and(|at| now.duration_since(*at) >= BUDGET_WINDOW)
+        .is_some_and(|(at, _)| now.duration_since(*at) >= BUDGET_WINDOW)
     {
         sent.pop_front();
     }
-    if sent.len() >= BUDGET {
+    let used = sent.iter().filter(|(_, by_user)| *by_user == user).count();
+    if used >= if user { USER_BUDGET } else { BUDGET } {
         return false;
     }
-    sent.push_back(now);
+    sent.push_back((now, user));
     true
 }
 
@@ -50,8 +55,9 @@ async fn send(
     state: &SignalingState,
     to: Uuid,
     message: BufferMessage,
+    user: bool,
 ) {
-    if !within_budget(state, Instant::now()) {
+    if !within_budget(state, Instant::now(), user) {
         tracing::warn!("Held back a buffer message: too many went out just now");
         return;
     }
@@ -83,12 +89,13 @@ pub(super) async fn carry_out(
     streaming: &StreamingState,
     outs: Vec<Out>,
     now: Instant,
+    user: bool,
 ) -> Vec<SignalingEvent> {
     let mut events = Vec::new();
     let mut queue: VecDeque<Out> = outs.into();
     while let Some(out) = queue.pop_front() {
         match out {
-            Out::Send { to, message } => send(conn, state, to, message).await,
+            Out::Send { to, message } => send(conn, state, to, message, user).await,
             Out::Event(event) => events.push(SignalingEvent::BufferRequest { event }),
             Out::Apply { peer, terms } => {
                 tracing::info!("The receive buffer of {} is set to {:?}", peer, terms);
@@ -114,7 +121,7 @@ pub(super) async fn received(
 ) -> Vec<SignalingEvent> {
     let now = Instant::now();
     let outs = lock(state).receive(from, from_name, message, now);
-    carry_out(conn, state, streaming, outs, now).await
+    carry_out(conn, state, streaming, outs, now, false).await
 }
 
 /// Time passes: asks go out again, how they stand is asked, and the buffers' state is kept for
@@ -132,7 +139,7 @@ pub(super) async fn tick(
         }
     }
     let outs = lock(state).tick(now);
-    carry_out(conn, state, streaming, outs, now).await
+    carry_out(conn, state, streaming, outs, now, false).await
 }
 
 /// A participant left the room, or this app did: what was asked is over.
@@ -171,7 +178,7 @@ async fn act<T>(
     let conn = connections
         .get_mut(&conn_id)
         .ok_or("Connection not found")?;
-    let events = carry_out(conn, state, streaming, outs, now).await;
+    let events = carry_out(conn, state, streaming, outs, now, true).await;
     drop(connections);
     queue_events(state, events);
     Ok(value)
@@ -345,7 +352,7 @@ pub async fn buffer_request_set_policy(
     };
     let mut connections = state.connections.lock().await;
     if let Some(conn) = connections.get_mut(&conn_id) {
-        let events = carry_out(conn, &state, &streaming, outs, now).await;
+        let events = carry_out(conn, &state, &streaming, outs, now, false).await;
         drop(connections);
         queue_events(&state, events);
     } else {
@@ -369,5 +376,42 @@ impl SignalingState {
     /// Sets whether asks are taken at the start, from the settings file.
     pub fn init_buffer_policy(&self, policy: Policy) {
         lock(self).set_policy(policy);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies: REQ-CON-036
+    #[test]
+    fn when_others_use_up_what_the_app_sends_of_itself_the_users_own_actions_still_go_out() {
+        let state = SignalingState::new();
+        let now = Instant::now();
+
+        let of_itself = (0..BUDGET + 5)
+            .filter(|_| within_budget(&state, now, false))
+            .count();
+        let by_user = (0..USER_BUDGET + 5)
+            .filter(|_| within_budget(&state, now, true))
+            .count();
+
+        assert_eq!(of_itself, BUDGET, "what the app sends of itself is capped");
+        assert_eq!(
+            by_user, USER_BUDGET,
+            "the user's actions have their own room"
+        );
+        assert!(
+            !within_budget(
+                &state,
+                now + BUDGET_WINDOW - Duration::from_millis(1),
+                false
+            ),
+            "the cap holds through the window"
+        );
+        assert!(
+            within_budget(&state, now + BUDGET_WINDOW, false),
+            "and lifts when it has passed"
+        );
     }
 }

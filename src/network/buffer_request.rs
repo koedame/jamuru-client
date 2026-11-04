@@ -245,6 +245,8 @@ pub struct BufferRequests {
     accepted_before: HashMap<Uuid, BufferTerms>,
     /// When each participant was last answered unasked
     answered_at: HashMap<Uuid, Instant>,
+    /// When the last ask that was not a repeat arrived from each participant
+    ask_heard_at: HashMap<Uuid, Instant>,
     /// Participants the buffer was put back for, the messages saying so still to go and when
     /// the next is due
     repeat_restored: HashMap<Uuid, (u32, Instant)>,
@@ -605,6 +607,14 @@ impl BufferRequests {
             }
             _ => {}
         }
+        // A participant who changes the ask over and over would swap the prompt under the user's
+        // hand, or set the buffer again each time; their sending it again, if it is meant, comes
+        self.ask_heard_at
+            .retain(|_, at| now.duration_since(*at) < REPLY_INTERVAL);
+        if self.ask_heard_at.contains_key(&from) {
+            return Vec::new();
+        }
+        self.ask_heard_at.insert(from, now);
         if self
             .accepted_before
             .get(&from)
@@ -735,6 +745,7 @@ impl BufferRequests {
     /// over. The room already hears that they left, so nothing is sent.
     pub fn peer_left(&mut self, peer: Uuid) -> Vec<Out> {
         self.answered_at.remove(&peer);
+        self.ask_heard_at.remove(&peer);
         self.accepted_before.remove(&peer);
         self.repeat_restored.remove(&peer);
         let mut out = Vec::new();
@@ -770,6 +781,7 @@ impl BufferRequests {
         }
         self.accepted_before.clear();
         self.answered_at.clear();
+        self.ask_heard_at.clear();
         self.repeat_restored.clear();
         out
     }
@@ -1246,6 +1258,45 @@ mod tests {
             room.listener.decline(room.asker_id).unwrap();
             assert!(room.listener.held().is_empty());
         }
+    }
+
+    /// Verifies: REQ-CON-036
+    #[test]
+    fn when_a_participant_keeps_changing_the_ask_the_prompt_changes_at_most_once_a_second() {
+        let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
+        let at_ms = |ms: u16| BufferTerms {
+            max_ms10: 300 + ms,
+            ..terms()
+        };
+        room.ask(at_ms(0), t0);
+
+        for step in 1..10u16 {
+            let outs = room.listener.receive(
+                room.asker_id,
+                "Asker",
+                BufferMessage::Ask { terms: at_ms(step) },
+                t0 + Duration::from_millis(100 * u64::from(step)),
+            );
+            assert!(outs.is_empty(), "the change at step {step} is let go by");
+        }
+        assert_eq!(
+            room.listener.prompts(),
+            [(room.asker_id, "Asker".to_string(), at_ms(0))],
+            "the user's prompt stayed put"
+        );
+
+        let outs = room.listener.receive(
+            room.asker_id,
+            "Asker",
+            BufferMessage::Ask { terms: at_ms(10) },
+            seconds(t0, 1),
+        );
+
+        assert!(
+            outs.iter()
+                .any(|o| matches!(o, Out::Event(BufferEvent::Asked { .. }))),
+            "a second on, the new ask is shown"
+        );
     }
 
     /// Verifies: REQ-CON-037

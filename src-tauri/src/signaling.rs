@@ -136,7 +136,7 @@ pub struct SignalingState {
     /// The connection the asks last talked over, for a message not prompted by a poll
     buffer_asks_conn: std::sync::Mutex<Option<u32>>,
     /// When the asks last put a peer message on the connection
-    buffer_sent: std::sync::Mutex<VecDeque<Instant>>,
+    buffer_sent: std::sync::Mutex<VecDeque<(Instant, bool)>>,
     /// Events from the UI's own help actions, handed over on its next poll
     /// with those that arrived from the room.
     queued_events: std::sync::Mutex<Vec<SignalingEvent>>,
@@ -984,8 +984,15 @@ pub async fn signaling_poll_events(
                         events.extend(carry_out(conn, &state, outs).await);
                         let outs = buffer_asks::peer_left_outs(&state, peer_id);
                         events.extend(
-                            buffer_asks::carry_out(conn, &state, &streaming, outs, Instant::now())
-                                .await,
+                            buffer_asks::carry_out(
+                                conn,
+                                &state,
+                                &streaming,
+                                outs,
+                                Instant::now(),
+                                false,
+                            )
+                            .await,
                         );
                     }
                     SignalingMessage::PeerUpdated { peer } => {
