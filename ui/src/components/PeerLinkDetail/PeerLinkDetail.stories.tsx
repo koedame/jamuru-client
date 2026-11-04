@@ -65,6 +65,7 @@ const upLink: PeerLinkStatus = {
     jitter_buffer_ms: 5,
   },
   level: 0,
+  buffer: { own: { mode: "preset" }, delay_ms10: 0, granted: null },
 };
 
 export const Default: Story = {

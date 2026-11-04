@@ -253,6 +253,11 @@ pub struct AppConfig {
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
 
+    /// Whether another participant's ask to buffer their audio for longer is taken, and
+    /// whether the user is asked about each (ADR-097).
+    #[serde(default)]
+    pub buffer_asks: crate::network::buffer_request::Policy,
+
     /// The version of the terms of use the user agreed to on this device
     /// (`None` = not yet). Kept only here, never sent to the server. The app
     /// asks again when [`TERMS_VERSION`] is newer than this.
@@ -307,6 +312,7 @@ impl Default for AppConfig {
             language: None,
             usage_reporting: false,
             auto_update: true,
+            buffer_asks: crate::network::buffer_request::Policy::default(),
             terms_version: None,
             terms_accepted_at: None,
             device_delay: None,

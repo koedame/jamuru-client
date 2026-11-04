@@ -1023,5 +1023,79 @@
     "note": "jamuru opens when this is done.",
     "skip": "Open without waiting",
     "progressLabel": "Update progress"
+  },
+  "bufferRequest": {
+    "title": "Receive buffer",
+    "ms": "{{ms}}ms",
+    "unit": "ms",
+    "now": "In use now",
+    "setBy": "Set by",
+    "raisedBy": "Raised by",
+    "raisedByValue": "{{name}}'s ask",
+    "source": {
+      "preset": "Preset (adjusts itself)",
+      "held": "You: held at {{ms}}ms"
+    },
+    "holdAt": "Hold the buffer for this person at",
+    "holdHint": "Up to {{max}}ms. A held buffer stays as it is, whatever the connection does. It ends when they leave.",
+    "presetPlaceholder": "preset",
+    "set": "Set",
+    "usePreset": "Back to preset",
+    "hint": "You can set the buffer for {{name}}'s audio yourself, or ask {{name}} to buffer your audio for longer. Only the audio between the two of you changes.",
+    "hintDismiss": "Got it",
+    "held": {
+      "fixed": "{{name}} asked for your buffer to be {{ms}}ms. You accepted.",
+      "auto": "{{name}} asked for your buffer to follow the connection, up to {{max}}ms. It is at {{ms}}ms now. You accepted.",
+      "restore": "Put it back"
+    },
+    "ask": {
+      "title": "Ask {{name}} for a longer buffer",
+      "what": "{{name}} decides whether to take it. It lasts until you or {{name}} leave the room.",
+      "longest": "Longest buffer",
+      "auto": "Let it follow the connection",
+      "tolerance": "Dropouts allowed before it grows",
+      "perSecond": "per second",
+      "toleranceHint": "0 to {{max}}. At 0, any dropout makes it grow.",
+      "send": "Ask",
+      "askAgain": "Ask again",
+      "withdraw": "Take the ask back"
+    },
+    "standing": {
+      "sending": "Asking {{name}}...",
+      "pending": "{{name}} has your ask and has not answered yet",
+      "granted": "{{name}} accepted: your audio is buffered at {{ms}}ms",
+      "declined": "{{name}} said no",
+      "declinedBySetting": "{{name}}'s settings do not take asks",
+      "restored": "{{name}} put the buffer back",
+      "unreachable": "No answer from {{name}}"
+    },
+    "note": {
+      "rounded": "rounded to their packet length",
+      "atLowest": "at its lowest",
+      "auto": "following their connection",
+      "separator": ", "
+    },
+    "question": {
+      "message": "{{name}} asks you to buffer their audio at {{ms}}ms",
+      "detailAuto": "The buffer for {{name}}'s audio grows when it drops out, up to {{ms}}ms. This adds delay for {{name}}'s audio only, and you can put it back whenever you like.",
+      "detailFixed": "The buffer for {{name}}'s audio is held at {{ms}}ms. This adds delay for {{name}}'s audio only, and you can put it back whenever you like.",
+      "accept": "Accept",
+      "decline": "No"
+    },
+    "notice": {
+      "granted": "{{name}} is buffering your audio at {{ms}}ms",
+      "declined": "{{name}} said no to your buffer ask",
+      "declinedBySetting": "{{name}}'s settings do not take buffer asks",
+      "restored": "{{name}} put the buffer for your audio back",
+      "unreachable": "No answer from {{name}} to your buffer ask",
+      "withdrawn": "{{name}} took the buffer ask back"
+    },
+    "policy": {
+      "title": "Buffer asks from others",
+      "label": "When someone asks me to buffer their audio for longer",
+      "ask": "Ask me each time",
+      "never": "Do not take asks",
+      "hint": "Someone you accepted once in this session is taken without asking again. Asks are never kept: they end when they or you leave the room."
+    }
   }
 }

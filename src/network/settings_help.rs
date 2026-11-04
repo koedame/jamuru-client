@@ -86,13 +86,14 @@ pub enum NoticeEvent {
 }
 
 /// The body of a peer message, by topic: settings help, whether the sender
-/// records the room, and the delay of the sender's audio devices. A body on another topic (from a newer app) does not parse
+/// records the room, asks about the receive buffer, and the delay of the sender's audio devices. A body on another topic (from a newer app) does not parse
 /// and is ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PeerBody {
     SettingsHelp(HelpMessage),
     Recording(super::recording_notice::RecordingNotice),
+    BufferRequest(super::buffer_request::BufferMessage),
     DeviceDelay(super::device_delay_notice::DeviceDelayNotice),
 }
 

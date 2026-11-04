@@ -366,6 +366,55 @@ pub(crate) fn child_process_turn() -> std::sync::MutexGuard<'static, ()> {
 mod tests {
     use super::*;
 
+    /// What the sampler read has to be what the process used, which a loaded
+    /// machine can make less than a core, so a fixed share of a core cannot be
+    /// the bar. `ran` is the processor time the system counted for it over its whole
+    /// life; `outside` is the time it could have run before the sampler started or
+    /// after it finished. The reading cannot fall short of the difference.
+    fn assert_reads_what_ran(
+        usage: &ProcessUsage,
+        read_percent: f32,
+        window: Duration,
+        ran: Duration,
+        outside: Duration,
+    ) {
+        // The clock ticks the system counts in are 10 ms
+        let tick = Duration::from_millis(20);
+        let read_ms = read_percent as f64 / 100.0 * window.as_secs_f64() * 1000.0;
+        let at_least_ms = (ran.as_secs_f64() - outside.as_secs_f64() - tick.as_secs_f64()) * 1000.0;
+        assert!(
+            read_ms >= at_least_ms,
+            "read {read_ms:.0} ms, it used {:.0} ms with {:.0} ms outside the stretch: {usage:?}",
+            ran.as_secs_f64() * 1000.0,
+            outside.as_secs_f64() * 1000.0,
+        );
+    }
+
+    /// Ends the child and returns the processor time the system counted for it, from
+    /// the kernel's own count when it is reaped, not from the process list the sampler reads.
+    #[cfg(unix)]
+    fn kill_and_reap(mut child: std::process::Child) -> Duration {
+        child.kill().unwrap();
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let mut status = 0;
+        let reaped = unsafe { libc::wait4(child.id() as libc::pid_t, &mut status, 0, &mut usage) };
+        assert_eq!(reaped, child.id() as libc::pid_t);
+        let time = |t: libc::timeval| Duration::new(t.tv_sec as u64, t.tv_usec as u32 * 1000);
+        time(usage.ru_utime) + time(usage.ru_stime)
+    }
+
+    /// The processor time the calling thread has used; `None` where this does not say.
+    fn thread_cpu_time() -> Option<Duration> {
+        #[cfg(unix)]
+        {
+            let mut time: libc::timespec = unsafe { std::mem::zeroed() };
+            let read = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
+            (read == 0).then(|| Duration::new(time.tv_sec as u64, time.tv_nsec as u32))
+        }
+        #[cfg(not(unix))]
+        None
+    }
+
     #[test]
     fn a_pass_stopped_while_timing_is_off_records_nothing() {
         let timer = Timer::new();
@@ -473,40 +522,76 @@ mod tests {
     fn a_thread_that_runs_the_whole_time_reads_as_about_one_core() {
         let _turn = child_process_turn();
         let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let spawned = Instant::now();
         let spinner = {
             let stop = stop.clone();
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
                     std::hint::spin_loop();
                 }
+                thread_cpu_time()
             })
         };
         let sampler = ProcessSampler::start().unwrap();
+        let started = Instant::now();
         std::thread::sleep(Duration::from_secs(1));
 
+        let finishing = Instant::now();
         let usage = sampler.finish().unwrap();
+        let finished = Instant::now();
         stop.store(true, Ordering::Relaxed);
-        spinner.join().unwrap();
+        let ran = spinner.join().unwrap();
+        let ended = Instant::now();
 
-        assert!(usage.cpu_percent > 40.0, "{:?}", usage);
+        match ran {
+            // A machine with no core to spare gives the spinner less than a
+            // core; what the sampler has to read is what the spinner got
+            Some(ran) => assert_reads_what_ran(
+                &usage,
+                usage.cpu_percent,
+                finished - started,
+                ran,
+                (started - spawned) + (ended - finishing),
+            ),
+            None => assert!(usage.cpu_percent > 40.0, "{:?}", usage),
+        }
     }
 
     #[cfg(unix)]
     #[test]
     fn a_child_process_that_runs_the_whole_time_reads_as_about_one_core() {
         let _turn = child_process_turn();
-        let mut child = std::process::Command::new("sh")
+        let spawned = Instant::now();
+        let child = std::process::Command::new("sh")
             .args(["-c", "while :; do :; done"])
             .spawn()
             .unwrap();
         let sampler = ProcessSampler::start().unwrap();
+        let started = Instant::now();
         std::thread::sleep(Duration::from_secs(1));
 
+        let finishing = Instant::now();
         let usage = sampler.finish().unwrap();
-        child.kill().unwrap();
-        child.wait().unwrap();
+        let finished = Instant::now();
+        let ran = kill_and_reap(child);
+        let ended = Instant::now();
 
-        assert!(usage.children_cpu_percent > 40.0, "{:?}", usage);
+        let read = usage.children_cpu_percent;
+        assert_reads_what_ran(
+            &usage,
+            read,
+            finished - started,
+            ran,
+            (started - spawned) + (ended - finishing),
+        );
+        // The child cannot have used more in the stretch than the system counted
+        // for its whole life
+        let read_ms = read as f64 / 100.0 * (finished - started).as_secs_f64() * 1000.0;
+        let ran_ms = ran.as_secs_f64() * 1000.0;
+        assert!(
+            read_ms <= ran_ms * 1.25 + 30.0,
+            "read {read_ms:.0} ms, the child used {ran_ms:.0} ms: {usage:?}"
+        );
     }
 
     #[test]
