@@ -184,6 +184,7 @@ impl MixerState {
                 .filter_map(|id| Uuid::parse_str(id).ok())
                 .collect();
             audio.keep_peer_gains(&peers);
+            audio.keep_peer_buffers(&peers);
         }
     }
 }

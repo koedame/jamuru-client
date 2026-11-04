@@ -7,7 +7,10 @@ use uuid::Uuid;
 
 use super::shared::{BandwidthSnapshot, LinkReport, Shared};
 use super::LinkTarget;
-use crate::audio::{AudioPreset, PeerGain, PeerMix, ReceivePath, VoiceHandle, WIRE_CHANNELS};
+use crate::audio::{
+    AudioPreset, PeerBufferControl, PeerBufferDriver, PeerGain, PeerMix, ReceivePath, VoiceHandle,
+    WIRE_CHANNELS,
+};
 use crate::link::{LinkSpec, Opened};
 use crate::network::{
     audio_packet_duration_ms, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
@@ -30,6 +33,9 @@ pub(super) struct Link {
     pub(super) report: Arc<LinkReport>,
     /// Where their fader and pan stand, the one the mix reads
     pub(super) gain: Arc<PeerGain>,
+    /// What the owner chose for their receive buffer and what they asked of it (ADR-097)
+    pub(super) buffer: Arc<PeerBufferControl>,
+    buffer_driver: PeerBufferDriver,
     /// Their audio, from payload to the mix
     pub(super) receive: ReceivePath,
     /// Their place in the mix: they are heard for as long as the link is held
@@ -91,6 +97,7 @@ impl LinkSetup<'_> {
 
         let gain = self.shared.gain_of(peer);
         let link_gain = gain.clone();
+        let link_buffer = self.shared.buffer_of(peer);
 
         let report_for_state = report.clone();
         let reconnect_count = self.shared.reconnect_count.clone();
@@ -154,6 +161,8 @@ impl LinkSetup<'_> {
             peer,
             report,
             gain: link_gain,
+            buffer: link_buffer,
+            buffer_driver: PeerBufferDriver::default(),
             receive,
             _voice: voice,
             stage: LinkStage::Checking(checking),
@@ -183,6 +192,19 @@ fn peer_packet_ms(told: Option<&PeerLatencyInfo>, ours: f32) -> f32 {
 }
 
 impl Link {
+    /// How long one of their packets lasts, in ms, where one of ours lasts `our_packet_ms`.
+    fn packet_ms(&self, our_packet_ms: f32) -> f32 {
+        let told = self.report.latency_info.read().ok();
+        peer_packet_ms(told.as_ref().and_then(|info| info.as_ref()), our_packet_ms)
+    }
+
+    /// Carries what was set for their receive buffer to it; `publish` also says what it came to.
+    pub(super) fn follow_buffer_control(&mut self, our_packet_ms: f32, publish: bool) {
+        let packet_ms = self.packet_ms(our_packet_ms);
+        self.buffer_driver
+            .drive(&self.buffer, &self.receive, packet_ms, publish);
+    }
+
     pub(super) fn connection(&self) -> Option<&Arc<tokio::sync::Mutex<Connection>>> {
         match &self.stage {
             LinkStage::Up(connection) => Some(connection),

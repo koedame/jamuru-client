@@ -12,7 +12,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use jamjam::audio::{opened_ways, DeviceProblem, OpenedWays};
+use jamjam::audio::{opened_ways, DeviceProblem, GrantView, OpenedWays, OwnBuffer, PeerBufferView};
 pub use jamjam::audio_session::LinkTarget;
 use jamjam::audio_session::{self, BandwidthSnapshot, LinkReport, Params, Shared};
 use jamjam::network::{
@@ -188,6 +188,28 @@ impl StreamingState {
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|peer, _| peers.contains(peer));
+    }
+
+    /// Forgets what was chosen for the receive buffer of everyone but `peers`, and what
+    /// anyone asked of it, so one who left leaves nothing behind (ADR-097).
+    pub fn keep_peer_buffers(&self, peers: &[Uuid]) {
+        self.shared
+            .peer_buffers
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|peer, _| peers.contains(peer));
+    }
+
+    /// Sets the receive buffer of `peer` to `choice`: the preset's own, or a length held.
+    /// Heard on the next frame when there is a link to them, and kept for when there is.
+    pub fn set_peer_buffer(&self, peer: Uuid, choice: OwnBuffer) {
+        self.shared.buffer_of(peer).set_own(choice);
+    }
+
+    /// How the receive buffer of `peer` stands.
+    pub fn peer_buffer(&self, peer: Uuid) -> (OwnBuffer, PeerBufferView) {
+        let control = self.shared.buffer_of(peer);
+        (control.own(), control.view())
     }
 
     /// Sets the volume of the microphone, in percent of unity gain (0-200).
@@ -722,6 +744,20 @@ pub struct PeerLinkStatus {
     pub peer_audio: Option<PeerAudioInfo>,
     /// Level of what is played of them, after their fader (0-100)
     pub level: u32,
+    /// The buffer their audio is played from: what the user chose for it, what
+    /// another participant asked of it, and what it stands at (ADR-097)
+    pub buffer: PeerBufferStatus,
+}
+
+/// The receive buffer of one participant, for IPC
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerBufferStatus {
+    /// What the user chose: the preset's own buffer, or a length held
+    pub own: OwnBuffer,
+    /// The buffer in force, in tenths of a millisecond; 0 before the audio thread has said
+    pub delay_ms10: u32,
+    /// What the buffer stands at under an ask the user accepted, if there is one
+    pub granted: Option<GrantView>,
 }
 
 /// Streaming status for IPC
@@ -1046,6 +1082,23 @@ fn state_rank(state: Option<&str>) -> u8 {
     }
 }
 
+/// Chooses the receive buffer of `peer_id`: `ms10` tenths of a millisecond, held whatever the link
+/// does, or `None` for the preset's own, which follows the link (ADR-097).
+#[tauri::command]
+pub fn streaming_set_peer_buffer(
+    peer_id: String,
+    ms10: Option<u32>,
+    state: tauri::State<'_, StreamingState>,
+) -> Result<(), String> {
+    let peer = Uuid::parse_str(&peer_id).map_err(|e| format!("Invalid peer id: {}", e))?;
+    let choice = match ms10 {
+        Some(ms10) => OwnBuffer::fixed(ms10)?,
+        None => OwnBuffer::Preset,
+    };
+    state.set_peer_buffer(peer, choice);
+    Ok(())
+}
+
 /// Get streaming status
 #[tauri::command]
 pub async fn streaming_status(
@@ -1103,6 +1156,14 @@ pub async fn streaming_status(
                 latency,
                 peer_audio,
                 level: report.meter.level(),
+                buffer: {
+                    let (own, view) = state.peer_buffer(*peer);
+                    PeerBufferStatus {
+                        own,
+                        delay_ms10: view.delay_ms10,
+                        granted: view.granted,
+                    }
+                },
             }
         })
         .collect();
@@ -1757,6 +1818,7 @@ mod tests {
         assert_eq!(
             keys(&status["peers"][0]),
             [
+                "buffer",
                 "connection_error",
                 "connection_state",
                 "latency",
