@@ -172,6 +172,8 @@ app_commands! {
     [Access::ALL] "相手ごとの音量を変える" crate::mixer::mixer_set_peer_volume;
     [Access::ALL] "相手ごとの左右の位置を変える" crate::mixer::mixer_set_peer_pan;
     [Access::ALL] "相手ごとの音を消す・戻す" crate::mixer::mixer_set_peer_muted;
+    // How long to buffer a participant is a trade of latency for stability; a helper has no say in it.
+    [Access::NO_HELP] "相手ごとの受信バッファを決める・プリセットに戻す" crate::streaming::streaming_set_peer_buffer;
     [Access::ALL] "全体の音量を変える" crate::streaming::streaming_set_master_volume;
     [Access::ALL] "全体の音量を読む" crate::streaming::streaming_get_master_volume;
 
