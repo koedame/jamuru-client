@@ -13,6 +13,7 @@ mod fec;
 mod latency;
 mod link_facts;
 mod quality;
+pub mod device_delay_notice;
 pub mod recording_notice;
 mod remote;
 pub mod room_driver;

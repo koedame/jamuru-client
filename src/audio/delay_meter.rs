@@ -309,10 +309,11 @@ fn input_at(data: &[f32], channels: usize, rate: u32, now: Instant) {
     let mut at = shared.written.load(Ordering::Relaxed);
     for frame in data.chunks_exact(channels) {
         // The channel that carries the sound is the loudest one
-        let sample = frame
-            .iter()
-            .copied()
-            .fold(0.0f32, |kept, s| if s.abs() > kept.abs() { s } else { kept });
+        let sample =
+            frame.iter().copied().fold(
+                0.0f32,
+                |kept, s| if s.abs() > kept.abs() { s } else { kept },
+            );
         shared.ring[(at as usize) & (RING_FRAMES - 1)].store(sample.to_bits(), Ordering::Relaxed);
         at += 1;
     }
@@ -432,7 +433,10 @@ fn seek_arrival(
     let span = frames_of(PERSISTENCE, rate);
     let backtrack = frames_of(BACKTRACK, rate);
     let mut at = from;
-    while let Some(offset) = signal.get(at..).and_then(|rest| rest.iter().position(|s| s.abs() > threshold)) {
+    while let Some(offset) = signal
+        .get(at..)
+        .and_then(|rest| rest.iter().position(|s| s.abs() > threshold))
+    {
         let crossing = at + offset;
         if crossing + span > signal.len() {
             return Seek::Pending(crossing);
@@ -633,12 +637,17 @@ pub fn cancel() {
     CANCEL.store(true, Ordering::Release);
 }
 
-/// Starts a run on a thread of its own. Fails when one is under way.
-pub fn start() -> Result<(), &'static str> {
-    begin(std::sync::Arc::new(RealClock), true)
+/// Starts a run on a thread of its own, which calls `on_done` with how it
+/// ended. Fails when one is under way.
+pub fn start(
+    on_done: impl FnOnce(&Result<Measurement, Failure>) + Send + 'static,
+) -> Result<(), &'static str> {
+    begin(std::sync::Arc::new(RealClock), true, Box::new(on_done))
 }
 
-fn begin(clock: std::sync::Arc<dyn Clock>, spawn: bool) -> Result<(), &'static str> {
+type Done = Box<dyn FnOnce(&Result<Measurement, Failure>) + Send>;
+
+fn begin(clock: std::sync::Arc<dyn Clock>, spawn: bool, on_done: Done) -> Result<(), &'static str> {
     {
         let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
         if matches!(*state, State::Running(_)) {
@@ -658,7 +667,8 @@ fn begin(clock: std::sync::Arc<dyn Clock>, spawn: bool) -> Result<(), &'static s
     let work = move || {
         let result = run(&*clock, shared);
         ARMED.store(false, Ordering::Release);
-        set_state(State::Done(result));
+        set_state(State::Done(result.clone()));
+        on_done(&result);
     };
     if spawn {
         std::thread::Builder::new()
@@ -698,8 +708,9 @@ fn time_of_frame(anchors: &[(u64, u64)], rate: u32, frame: u64) -> Option<i64> {
 }
 
 fn read_ring(shared: &Shared, from: u64, to: u64) -> impl Iterator<Item = f32> + '_ {
-    (from..to)
-        .map(|n| f32::from_bits(shared.ring[(n as usize) & (RING_FRAMES - 1)].load(Ordering::Relaxed)))
+    (from..to).map(|n| {
+        f32::from_bits(shared.ring[(n as usize) & (RING_FRAMES - 1)].load(Ordering::Relaxed))
+    })
 }
 
 enum Trial {
@@ -729,13 +740,19 @@ impl Context<'_> {
         let until = self.clock.now() + duration;
         while self.clock.now() < until {
             self.check()?;
-            self.clock.sleep(POLL.min(until.saturating_duration_since(self.clock.now())));
+            self.clock
+                .sleep(POLL.min(until.saturating_duration_since(self.clock.now())));
         }
         Ok(())
     }
 
     /// Plays the sound once and says when it came back.
-    fn trial(&self, stimulus: Stimulus, level_db: f32, margin_db: f32) -> Result<(Trial, Duration), Failure> {
+    fn trial(
+        &self,
+        stimulus: Stimulus,
+        level_db: f32,
+        margin_db: f32,
+    ) -> Result<(Trial, Duration), Failure> {
         let shared = self.shared;
         // Both streams must be calling back before anything can be measured
         let waiting_since = self.clock.now();
@@ -848,7 +865,11 @@ impl Context<'_> {
             _ => WAIT,
         };
         // Let the sound and its echo die out before the next quiet is taken
-        self.pause(sound_len + NOISE_WINDOW + waited.saturating_sub(self.clock.now().saturating_duration_since(started)))?;
+        self.pause(
+            sound_len
+                + NOISE_WINDOW
+                + waited.saturating_sub(self.clock.now().saturating_duration_since(started)),
+        )?;
         Ok((verdict, waited))
     }
 }

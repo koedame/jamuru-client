@@ -48,7 +48,11 @@ impl Virtual {
     /// time to `frame`. False when the run is over.
     fn advance_to(&self, frame: u64) -> bool {
         let mut moment = self.inner.lock().unwrap();
-        while !moment.over && !moment.sleeping_until.is_some_and(|until| until > moment.elapsed) {
+        while !moment.over
+            && !moment
+                .sleeping_until
+                .is_some_and(|until| until > moment.elapsed)
+        {
             moment = self.changed.wait(moment).unwrap();
         }
         if moment.over {
@@ -186,7 +190,7 @@ fn measure(device: &Device) -> Result<Measurement, Failure> {
     let meter = std::thread::spawn({
         let clock = clock.clone();
         move || {
-            begin(meter_clock, false).unwrap();
+            begin(meter_clock, false, Box::new(|_| {})).unwrap();
             clock.finish();
         }
     });
@@ -332,7 +336,7 @@ fn while_a_run_is_under_way_the_session_gets_silence_and_after_it_the_input_agai
     let meter = std::thread::spawn({
         let clock = clock.clone();
         move || {
-            begin(meter_clock, false).unwrap();
+            begin(meter_clock, false, Box::new(|_| {})).unwrap();
             clock.finish();
         }
     });
@@ -361,7 +365,7 @@ fn when_no_stream_is_calling_back_the_run_says_so() {
     let meter = std::thread::spawn({
         let clock = clock.clone();
         move || {
-            begin(meter_clock, false).unwrap();
+            begin(meter_clock, false, Box::new(|_| {})).unwrap();
             clock.finish();
         }
     });
@@ -416,7 +420,11 @@ fn the_noise_is_the_amplitude_ninety_percent_of_the_samples_stay_under() {
     let noise = noise_of(&window);
 
     assert!((noise - 0.9).abs() < 0.01, "{noise}");
-    assert_eq!(noise_of(&[0.0; 10]), NOISE_MIN, "digital silence has a floor");
+    assert_eq!(
+        noise_of(&[0.0; 10]),
+        NOISE_MIN,
+        "digital silence has a floor"
+    );
 }
 
 /// Verifies: REQ-AUD-050
@@ -435,7 +443,11 @@ fn the_arrival_is_traced_back_to_where_the_rise_began() {
 
     // A louder floor means the same rise is first seen later
     let arrival = seek_arrival(&signal, 100, 1e-3, 20.0, RATE, Stimulus::Clicks);
-    assert_eq!(arrival, Seek::Found(201), "0.01 is the first over 10 x 1e-3");
+    assert_eq!(
+        arrival,
+        Seek::Found(201),
+        "0.01 is the first over 10 x 1e-3"
+    );
 }
 
 /// Verifies: REQ-AUD-050

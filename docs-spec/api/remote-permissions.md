@@ -32,6 +32,7 @@
 | `settings_get` | 音声の設定を読む |
 | `settings_change` | 音声の設定を変える |
 | `streaming_status` | 音声の状態（レベル・遅延・統計）を読む |
+| `delay_measure_status` | 機器の遅延の測定の進み具合と、いまの機器で測った値を読む |
 | `streaming_set_mute` | 自分のマイクをミュートする・戻す |
 | `streaming_get_mute` | 自分のマイクのミュートの状態を読む |
 | `streaming_set_monitoring` | 自分の音のモニターを切り替える |
@@ -84,6 +85,8 @@
 | `settings_help_answer` | 設定の手伝いの依頼に答える |
 | `settings_help_begin` | 設定の手伝いを始める |
 | `settings_help_stop` | 設定の手伝いを止める |
+| `delay_measure_start` | 機器の遅延の測定を始める |
+| `delay_measure_cancel` | 機器の遅延の測定を止める |
 | `streaming_reconnect` | 音声の接続を張り直す |
 | `streaming_hold_mute` | 確認を出している間、マイクをミュートし相手の音を止めておく・やめて元に戻す |
 | `recording_start` | ルームの音の録音を始める |
