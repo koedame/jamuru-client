@@ -121,6 +121,8 @@ pub enum Release {
     Restored,
     /// The asker withdrew
     Withdrawn,
+    /// The asker asked for something else; the earlier ask ends until the user answers
+    Replaced,
     /// The asker left the room
     PeerLeft,
     /// This app left the room or lost the connection
@@ -190,6 +192,8 @@ pub enum BufferRequestError {
     InvalidTerms,
     /// There is no ask from that participant waiting, or held
     NotActive,
+    /// The ask changed after the user was shown it
+    Changed,
 }
 
 impl std::fmt::Display for BufferRequestError {
@@ -197,6 +201,7 @@ impl std::fmt::Display for BufferRequestError {
         match self {
             BufferRequestError::InvalidTerms => f.write_str("The ask is outside what may be asked"),
             BufferRequestError::NotActive => f.write_str("No ask from that participant"),
+            BufferRequestError::Changed => f.write_str("The ask changed after it was shown"),
         }
     }
 }
@@ -373,11 +378,20 @@ impl BufferRequests {
             .collect()
     }
 
-    /// The user accepts the ask of `peer`.
-    pub fn accept(&mut self, peer: Uuid, now: Instant) -> Result<Vec<Out>, BufferRequestError> {
+    /// The user accepts the ask of `peer`, which they saw as `shown`. An ask that
+    /// changed after it was shown is not taken; the new one is up for an answer.
+    pub fn accept(
+        &mut self,
+        peer: Uuid,
+        shown: BufferTerms,
+        now: Instant,
+    ) -> Result<Vec<Out>, BufferRequestError> {
         let Some(Heard::Prompting { terms, .. }) = self.heard.get(&peer).cloned() else {
             return Err(BufferRequestError::NotActive);
         };
+        if terms != shown {
+            return Err(BufferRequestError::Changed);
+        }
         self.accepted_before.insert(peer, terms);
         Ok(self.take(peer, terms, now))
     }
@@ -598,6 +612,8 @@ impl BufferRequests {
         {
             return self.take(from, terms, now);
         }
+        // An ask accepted earlier ends here: the buffer goes back until this one is answered
+        let mut out = self.let_go(from, Release::Replaced);
         self.heard.insert(
             from,
             Heard::Prompting {
@@ -605,11 +621,11 @@ impl BufferRequests {
                 terms,
             },
         );
-        let mut out = vec![Out::Event(BufferEvent::Asked {
+        out.push(Out::Event(BufferEvent::Asked {
             peer: from,
             peer_name: name.to_string(),
             terms,
-        })];
+        }));
         if self.may_answer(from, now) {
             out.push(Out::Send {
                 to: from,
@@ -972,7 +988,7 @@ mod tests {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
 
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
 
         assert_eq!(room.applies, [Some(terms())]);
@@ -988,7 +1004,7 @@ mod tests {
     fn when_the_user_accepts_the_answer_is_sent_three_times_a_second_apart() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         let accepted = |room: &Room| {
             room.sent_by_listener
@@ -1021,7 +1037,7 @@ mod tests {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
         room.up = false;
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         for s in 1..=4 {
             room.tick(seconds(t0, s));
@@ -1048,7 +1064,7 @@ mod tests {
     fn when_the_ask_is_granted_the_asker_checks_how_it_stands_every_ten_seconds() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
 
         for s in 1..=25 {
@@ -1072,7 +1088,7 @@ mod tests {
     fn when_the_listener_goes_quiet_for_twenty_seconds_after_granting_the_ask_is_unreachable() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         room.up = false;
 
@@ -1119,7 +1135,7 @@ mod tests {
             .listener
             .receive(other, "Other", BufferMessage::Ask { terms: terms() }, t0);
         assert!(!outs.is_empty());
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
 
         let outs = room.listener.set_policy(Policy::Never);
@@ -1144,7 +1160,7 @@ mod tests {
     ) {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         let shorter = BufferTerms {
             max_ms10: terms().max_ms10 - 50,
@@ -1167,7 +1183,7 @@ mod tests {
 
     /// Verifies: REQ-CON-036
     #[test]
-    fn when_a_participant_accepted_once_asks_for_more_the_user_is_asked_again_and_nothing_changes_until_they_answer(
+    fn when_a_participant_accepted_once_asks_for_more_the_user_is_asked_again_and_the_earlier_buffer_ends_until_they_answer(
     ) {
         let following = BufferTerms {
             auto: true,
@@ -1185,7 +1201,7 @@ mod tests {
         for (accepted, ask) in [(terms(), longer), (following, held_fixed)] {
             let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
             room.ask(accepted, t0);
-            let outs = room.listener.accept(room.asker_id, t0).unwrap();
+            let outs = room.listener.accept(room.asker_id, accepted, t0).unwrap();
             room.run(false, outs, t0);
 
             let outs = room.listener.receive(
@@ -1201,10 +1217,44 @@ mod tests {
                 "the user is asked about {ask:?} after {accepted:?}"
             );
             assert!(
-                !outs.iter().any(|o| matches!(o, Out::Apply { .. })),
-                "nothing is applied for {ask:?} before the user answers"
+                !outs
+                    .iter()
+                    .any(|o| matches!(o, Out::Apply { terms: Some(_), .. })),
+                "nothing new is applied for {ask:?} before the user answers"
             );
+            assert!(
+                outs.iter()
+                    .any(|o| matches!(o, Out::Apply { terms: None, .. })),
+                "the buffer taken earlier is put back for {ask:?} while the user decides"
+            );
+
+            // Turning it down leaves nothing held that restore or leaving could not reach
+            room.listener.decline(room.asker_id).unwrap();
+            assert!(room.listener.held().is_empty());
         }
+    }
+
+    /// Verifies: REQ-CON-036
+    #[test]
+    fn when_the_ask_changed_after_the_user_was_shown_it_accepting_what_they_saw_is_refused() {
+        let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
+        room.ask(terms(), t0);
+        let longer = BufferTerms {
+            max_ms10: 500,
+            ..terms()
+        };
+        room.ask(longer, seconds(t0, 1));
+
+        let refused = room.listener.accept(room.asker_id, terms(), seconds(t0, 2));
+
+        assert_eq!(refused, Err(BufferRequestError::Changed));
+        assert_eq!(
+            room.listener.prompts(),
+            [(room.asker_id, "Asker".to_string(), longer)],
+            "the new ask is still up for an answer"
+        );
+        assert!(room.listener.held().is_empty());
+        assert!(!room.listener.accepted_before.contains_key(&room.asker_id));
     }
 
     /// Verifies: REQ-CON-035
@@ -1236,7 +1286,7 @@ mod tests {
     fn when_another_participant_asks_it_is_asked_about_even_if_someone_was_accepted_before() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         let other = Uuid::new_v4();
 
@@ -1255,7 +1305,7 @@ mod tests {
     fn when_the_user_puts_the_buffer_back_the_asker_is_told_and_the_next_ask_is_asked_about() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
 
         let outs = room
@@ -1281,7 +1331,7 @@ mod tests {
     fn when_the_buffer_is_put_back_the_asker_is_told_three_times_a_second_apart() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         let outs = room
             .listener
@@ -1316,7 +1366,7 @@ mod tests {
     fn when_the_asker_withdraws_the_buffer_goes_back_and_the_listener_is_told_why() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
 
         let outs = room.asker.withdraw(room.listener_id).unwrap();
@@ -1351,7 +1401,7 @@ mod tests {
     fn when_the_asker_leaves_the_room_the_buffer_goes_back_and_nothing_is_sent() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         let sent = room.sent_by_listener.len();
 
@@ -1395,7 +1445,7 @@ mod tests {
     fn when_this_app_leaves_the_room_every_buffer_goes_back_and_nothing_is_remembered() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
 
         let outs = room.listener.reset();
@@ -1416,7 +1466,7 @@ mod tests {
     ) {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
 
         let outs = room.listener.receive(
@@ -1452,7 +1502,10 @@ mod tests {
             room.listener.prompts(),
             [(room.asker_id, "Asker".to_string(), longer)]
         );
-        let outs = room.listener.accept(room.asker_id, seconds(t0, 2)).unwrap();
+        let outs = room
+            .listener
+            .accept(room.asker_id, longer, seconds(t0, 2))
+            .unwrap();
         room.run(false, outs, seconds(t0, 2));
         assert_eq!(room.applies, [Some(longer)]);
     }
@@ -1529,7 +1582,7 @@ mod tests {
     fn when_a_check_comes_for_an_ask_this_app_does_not_hold_it_says_the_buffer_is_not_held() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         // The listener's app was started again: it knows nothing of the ask
         room.listener = BufferRequests::new(Policy::Ask);
@@ -1581,7 +1634,7 @@ mod tests {
     fn when_the_buffer_changes_after_it_was_granted_the_next_check_tells_the_asker() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
         room.ask(terms(), t0);
-        let outs = room.listener.accept(room.asker_id, t0).unwrap();
+        let outs = room.listener.accept(room.asker_id, terms(), t0).unwrap();
         room.run(false, outs, t0);
         let auto = GrantView {
             applied_ms10: 400,

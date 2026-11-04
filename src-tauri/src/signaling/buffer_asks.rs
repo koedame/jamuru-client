@@ -212,19 +212,22 @@ pub async fn buffer_request_withdraw(
     .await
 }
 
-/// Answers the ask of `peer_id` the user was shown: take it up, or turn it down.
+/// Answers the ask of `peer_id` the user was shown: take it up (saying which `terms`
+/// were shown), or turn it down.
 #[tauri::command]
 pub async fn buffer_request_answer(
     conn_id: u32,
     peer_id: String,
     accept: bool,
+    terms: Option<BufferTerms>,
     state: tauri::State<'_, SignalingState>,
     streaming: tauri::State<'_, StreamingState>,
 ) -> Result<(), String> {
     let peer = parse_peer(&peer_id)?;
     act(&state, &streaming, conn_id, |asks, now| {
         let outs = if accept {
-            asks.accept(peer, now)?
+            let shown = terms.ok_or(BufferRequestError::InvalidTerms)?;
+            asks.accept(peer, shown, now)?
         } else {
             asks.decline(peer)?
         };

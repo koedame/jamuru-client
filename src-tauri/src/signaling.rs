@@ -2259,6 +2259,15 @@ mod tests {
         .to_string()
     }
 
+    /// The terms `ask_from` sends, as the user was shown them
+    fn shown_terms(max_ms10: u16, auto: bool) -> jamjam::audio::BufferTerms {
+        jamjam::audio::BufferTerms {
+            max_ms10,
+            tolerance_tenths: 10,
+            auto,
+        }
+    }
+
     /// What the app answered, by the `answer` each reply of a participant carried
     fn answers_sent(sent: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
         sent.lock()
@@ -2309,9 +2318,16 @@ mod tests {
             None,
             "nothing is held before they say yes"
         );
-        buffer_asks::buffer_request_answer(1, asker.to_string(), true, app.state(), app.state())
-            .await
-            .unwrap();
+        buffer_asks::buffer_request_answer(
+            1,
+            asker.to_string(),
+            true,
+            Some(shown_terms(300, false)),
+            app.state(),
+            app.state(),
+        )
+        .await
+        .unwrap();
         let held = streaming
             .peer_buffer(asker)
             .1
@@ -2348,9 +2364,16 @@ mod tests {
         let app = connect(&url).await;
         let streaming = app.state::<StreamingState>();
         poll_until_events(&app).await;
-        buffer_asks::buffer_request_answer(1, asker.to_string(), true, app.state(), app.state())
-            .await
-            .unwrap();
+        buffer_asks::buffer_request_answer(
+            1,
+            asker.to_string(),
+            true,
+            Some(shown_terms(300, false)),
+            app.state(),
+            app.state(),
+        )
+        .await
+        .unwrap();
 
         buffer_asks::buffer_request_restore(1, asker.to_string(), app.state(), app.state())
             .await
@@ -2376,9 +2399,16 @@ mod tests {
         let app = connect(&url).await;
         let streaming = app.state::<StreamingState>();
         poll_until_events(&app).await;
-        buffer_asks::buffer_request_answer(1, asker.to_string(), true, app.state(), app.state())
-            .await
-            .unwrap();
+        buffer_asks::buffer_request_answer(
+            1,
+            asker.to_string(),
+            true,
+            Some(shown_terms(300, false)),
+            app.state(),
+            app.state(),
+        )
+        .await
+        .unwrap();
         assert!(streaming.peer_buffer(asker).1.granted.is_some());
         later
             .send(format!(
@@ -2436,9 +2466,16 @@ mod tests {
         let app = connect(&url).await;
         let streaming = app.state::<StreamingState>();
         poll_until_events(&app).await;
-        buffer_asks::buffer_request_answer(1, asker.to_string(), true, app.state(), app.state())
-            .await
-            .unwrap();
+        buffer_asks::buffer_request_answer(
+            1,
+            asker.to_string(),
+            true,
+            Some(shown_terms(300, false)),
+            app.state(),
+            app.state(),
+        )
+        .await
+        .unwrap();
         assert!(streaming.peer_buffer(asker).1.granted.is_some());
 
         // The server hangs up
