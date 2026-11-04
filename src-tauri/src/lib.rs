@@ -8,9 +8,9 @@ mod app_info;
 mod audio_tap;
 mod chat_link;
 mod config;
-mod delay;
 #[cfg(feature = "debug-remote")]
 mod debug_remote;
+mod delay;
 mod device_identity;
 mod diagnostics;
 #[cfg(feature = "e2e-control")]

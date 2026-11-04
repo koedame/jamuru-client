@@ -169,10 +169,9 @@ impl SignalingState {
     /// Sets the delay of this app's devices that the room is told, in ms. It
     /// goes out on the next poll of each connection.
     pub fn set_own_delay(&self, delay_ms: Option<f64>) {
-        *self.own_delay.lock().unwrap_or_else(|e| e.into_inner()) =
-            DeviceDelayNotice::of(delay_ms)
-                .delay_ms
-                .map(|ms| (ms * 10.0).round() as u32);
+        *self.own_delay.lock().unwrap_or_else(|e| e.into_inner()) = DeviceDelayNotice::of(delay_ms)
+            .delay_ms
+            .map(|ms| (ms * 10.0).round() as u32);
     }
 
     /// The delays the participants told of their devices, in ms, by id
@@ -1266,7 +1265,10 @@ async fn sync_delay_notice(conn: &mut SignalingConnection, state: &SignalingStat
         *told = Some((conn_id, wanted));
         before
     };
-    tracing::info!("Telling the room the device delay: {:?} (tenths of ms)", wanted);
+    tracing::info!(
+        "Telling the room the device delay: {:?} (tenths of ms)",
+        wanted
+    );
     if !send_delay_notice(conn, None, wanted).await {
         *state.delay_told.lock().unwrap_or_else(|e| e.into_inner()) = before;
     }
@@ -1285,7 +1287,10 @@ async fn send_delay_notice(
     let body = match serde_json::to_value(PeerBody::DeviceDelay(notice)) {
         Ok(serde_json::Value::Object(body)) => body,
         other => {
-            tracing::error!("A device delay notice did not encode as an object: {:?}", other);
+            tracing::error!(
+                "A device delay notice did not encode as an object: {:?}",
+                other
+            );
             return false;
         }
     };
@@ -2279,5 +2284,144 @@ mod tests {
         sync_recording_notice(&mut conn, &state, 1, true).await;
 
         assert!(!recording_told(&state, 1), "told, though nothing was sent");
+    }
+
+    async fn next_delay_notice(
+        received: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+    ) -> Option<Option<f64>> {
+        loop {
+            let text = tokio::time::timeout(Duration::from_millis(800), received.recv())
+                .await
+                .ok()??;
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let notice = &value["data"]["body"]["device_delay"];
+            if !notice.is_null() {
+                return Some(notice["delay_ms"].as_f64());
+            }
+        }
+    }
+
+    /// Verifies: REQ-CON-035
+    #[tokio::test]
+    async fn when_the_delay_of_this_apps_devices_is_known_the_room_is_told_once_and_told_again_when_it_goes(
+    ) {
+        let (tx, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let url = spawn_server_listening(vec![], tx).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[]);
+        let poll = || async {
+            signaling_poll_events(
+                1,
+                app.state::<SignalingState>(),
+                app.state::<UsageState>(),
+                app.state::<StreamingState>(),
+            )
+            .await
+            .unwrap()
+        };
+        let state = app.state::<SignalingState>();
+
+        poll().await;
+        assert_eq!(
+            next_delay_notice(&mut received).await,
+            None,
+            "nothing is said while there is no figure"
+        );
+
+        state.set_own_delay(Some(23.04));
+        poll().await;
+        poll().await;
+        assert_eq!(next_delay_notice(&mut received).await, Some(Some(23.0)));
+        assert_eq!(
+            next_delay_notice(&mut received).await,
+            None,
+            "it is said once, not on every poll"
+        );
+
+        // The devices were changed: the figure no longer holds
+        state.set_own_delay(None);
+        poll().await;
+        assert_eq!(next_delay_notice(&mut received).await, Some(None));
+    }
+
+    /// Verifies: REQ-CON-035
+    #[tokio::test]
+    async fn when_someone_comes_in_after_the_delay_was_told_they_are_told_on_arrival() {
+        let newcomer = Uuid::new_v4();
+        let (tx, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let joined = format!(
+            r#"{{"type":"PeerJoined","data":{{"peer":{{"id":"{newcomer}","name":"Bo","candidates":[],"public_addr":null,"local_addr":null,"joined_at":0,"features":["peer_message"]}}}}}}"#
+        );
+        let url = spawn_server_listening(vec![joined], tx).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[]);
+        let state = app.state::<SignalingState>();
+        state.set_own_delay(Some(31.5));
+        // The room has been told over this connection already
+        *state.delay_told.lock().unwrap() = Some((1, Some(315)));
+
+        poll_until_events(&app).await;
+
+        let text = tokio::time::timeout(Duration::from_secs(2), received.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let sent: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(sent["data"]["to"], newcomer.to_string());
+        assert_eq!(sent["data"]["body"]["device_delay"]["delay_ms"], 31.5);
+    }
+
+    /// Verifies: REQ-CON-035
+    #[tokio::test]
+    async fn when_a_participant_tells_their_delay_it_is_kept_and_a_figure_that_cannot_be_a_delay_is_not(
+    ) {
+        let sender = Uuid::new_v4();
+        let said = |ms: &str| {
+            format!(
+                r#"{{"type":"PeerMessage","data":{{"from":"{sender}","from_name":"Bo","body":{{"device_delay":{{"delay_ms":{ms}}}}}}}}}"#
+            )
+        };
+        let url = spawn_server_sending(vec![said("23.5")]).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[(sender, "Bo")]);
+
+        for _ in 0..20 {
+            poll_until_events(&app).await;
+            if !app.state::<SignalingState>().peer_delays().is_empty() {
+                break;
+            }
+        }
+
+        let state = app.state::<SignalingState>();
+        assert_eq!(state.peer_delays().get(&sender.to_string()), Some(&23.5));
+        // They take it back, or tell a number no device has
+        state.set_peer_delay(
+            &sender.to_string(),
+            DeviceDelayNotice { delay_ms: None }.stated(),
+        );
+        assert!(state.peer_delays().is_empty());
+        state.set_peer_delay(
+            &sender.to_string(),
+            DeviceDelayNotice {
+                delay_ms: Some(900.0),
+            }
+            .stated(),
+        );
+        assert!(state.peer_delays().is_empty());
     }
 }

@@ -127,7 +127,9 @@ pub fn delay_measure_start(
 ) -> Result<(), String> {
     crate::terms::require_accepted(&app)?;
     if !streaming.is_active() {
-        return Err("The delay is measured on the devices the room uses: enter a room first".into());
+        return Err(
+            "The delay is measured on the devices the room uses: enter a room first".into(),
+        );
     }
     let measured_on = config.get()?;
     let handle = app.clone();
@@ -212,8 +214,18 @@ mod tests {
     /// Verifies: REQ-AUD-050
     #[test]
     fn when_a_run_found_nothing_the_status_says_why_and_a_cancel_says_nothing() {
-        let failed = status(true, &State::Done(Err(Failure::NoSound)), None, Default::default());
-        let cancelled = status(true, &State::Done(Err(Failure::Cancelled)), None, Default::default());
+        let failed = status(
+            true,
+            &State::Done(Err(Failure::NoSound)),
+            None,
+            Default::default(),
+        );
+        let cancelled = status(
+            true,
+            &State::Done(Err(Failure::Cancelled)),
+            None,
+            Default::default(),
+        );
 
         assert_eq!(failed.failure, Some("no_sound"));
         assert!(!failed.running);
@@ -223,8 +235,18 @@ mod tests {
     /// Verifies: REQ-AUD-050
     #[test]
     fn the_figure_carries_how_steady_it_is_and_whether_the_settings_want_a_look() {
-        let steady = status(true, &State::Idle, Some(&delay(23.0, 0.5)), Default::default());
-        let long = status(true, &State::Idle, Some(&delay(140.0, 4.0)), Default::default());
+        let steady = status(
+            true,
+            &State::Idle,
+            Some(&delay(23.0, 0.5)),
+            Default::default(),
+        );
+        let long = status(
+            true,
+            &State::Idle,
+            Some(&delay(140.0, 4.0)),
+            Default::default(),
+        );
 
         let steady = steady.figure.unwrap();
         assert_eq!(steady.stability, "steady");

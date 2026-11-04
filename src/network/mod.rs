@@ -5,6 +5,7 @@
 mod bandwidth;
 mod clock;
 mod connection;
+pub mod device_delay_notice;
 mod device_identity;
 mod discovery;
 mod encryption;
@@ -13,7 +14,6 @@ mod fec;
 mod latency;
 mod link_facts;
 mod quality;
-pub mod device_delay_notice;
 pub mod recording_notice;
 mod remote;
 pub mod room_driver;

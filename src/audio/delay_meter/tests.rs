@@ -358,6 +358,20 @@ fn while_a_run_is_under_way_the_session_gets_silence_and_after_it_the_input_agai
 
 /// Verifies: REQ-AUD-050
 #[test]
+fn when_no_run_is_under_way_the_callbacks_leave_the_sound_as_it_is() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let played: Vec<f32> = (0..128).map(|i| (i as f32 * 0.01).sin()).collect();
+    let mut stereo = played.clone();
+
+    on_output(&mut stereo, RATE);
+    let muted = on_input(&played, 2, RATE);
+
+    assert_eq!(stereo, played);
+    assert!(!muted);
+}
+
+/// Verifies: REQ-AUD-050
+#[test]
 fn when_no_stream_is_calling_back_the_run_says_so() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
     let clock = Virtual::new();

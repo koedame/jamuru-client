@@ -7,6 +7,7 @@
 import { useTranslation } from "react-i18next";
 import type { WasapiMode, WasapiModeAdvice, WasapiSettings } from "../../../lib/tauri";
 import { FormField } from "../FormField";
+import { DeviceDelayField, type DeviceDelayProps } from "./DeviceDelayField";
 import { Select, SelectOption } from "../Select";
 import "./TabContent.css";
 
@@ -85,6 +86,8 @@ export interface DevicesTabProps {
   /** Called when the person switches a limiter; the switches are left out when absent */
   onInputLimiterChange?: (enabled: boolean) => void;
   onOutputLimiterChange?: (enabled: boolean) => void;
+  /** The delay measurement of the devices in use; the section is left out when absent */
+  delay?: DeviceDelayProps;
 }
 
 /** One-way latency tone class based on app-induced buffer latency (ms). */
@@ -264,6 +267,7 @@ export function DevicesTab({
   outputLimiter = true,
   onInputLimiterChange,
   onOutputLimiterChange,
+  delay,
 }: DevicesTabProps) {
   const { t } = useTranslation();
 
@@ -476,6 +480,13 @@ export function DevicesTab({
           <span className="latency-card__value latency-card__value--total">{totalDisp.toFixed(1)}ms</span>
         </div>
       </div>
+
+      {delay && (
+        <>
+          <div className="tab-content__divider" />
+          <DeviceDelayField {...delay} />
+        </>
+      )}
 
       {onInputLimiterChange && onOutputLimiterChange && (
         <>

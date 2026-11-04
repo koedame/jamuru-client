@@ -283,6 +283,40 @@
       "latencyTotal": "Total Latency",
       "bufferOption": "{{samples}} samples ({{ms}}ms)",
       "channelOption": "Ch {{channel}}",
+      "delay": {
+        "title": "Measure the device delay",
+        "description": "Plays a measuring sound from the output and times how long it takes to reach the input. It shows the delay of the combination of devices selected now: microphone, speaker or headphones, audio interface.",
+        "setupCable": "Connecting the output to the input with a cable (loopback) measures most accurately",
+        "setupSpeaker": "Without a cable, put the speaker where the microphone hears it. Put earphones or headphones close to the microphone",
+        "setupRoom": "While it measures (up to 90 seconds) the room does not hear you. The sound starts quiet and gets louder step by step",
+        "measure": "Measure the delay",
+        "measureAgain": "Measure again",
+        "cancel": "Stop measuring",
+        "progress": "Playing {{sound}} (volume {{step}} / {{steps}})",
+        "sound": {
+          "clicks": "clicks",
+          "tone": "a 1 kHz tone"
+        },
+        "needsRoom": "It can only be measured while you are in a room (so that it measures the devices the room uses)",
+        "helperCannotStart": "The person being helped measures this on their own screen (the sound comes out of their speakers)",
+        "startFailed": "Could not start measuring. Check that you are in a room",
+        "none": "The devices selected now have not been measured yet",
+        "result": "Device delay: {{ms}} ms",
+        "stability": {
+          "steady": "Steady (spread {{spread}} ms)",
+          "slightly_shaky": "Slightly unsteady (spread {{spread}} ms)",
+          "shaky": "Unsteady (spread {{spread}} ms)"
+        },
+        "review": "The delay is over 100 ms. Look at the buffer size and the device settings again (the driver, exclusive mode, whether Bluetooth is in use)",
+        "told": "The others in the room are told this number (the number only, no sound). Changing the devices or the buffer size means measuring again",
+        "failure": {
+          "no_sound": "The sound did not come back. Check the cable, or the position and volume of the speaker and microphone",
+          "unsteady": "The values varied widely between plays. Reduce the noise around you and measure again",
+          "too_long": "The delay is too long to measure (over 0.5 seconds). Look at the device settings again",
+          "no_stream": "The audio has not started yet. Wait a moment and try again",
+          "timed_out": "It could not finish in time. Try again"
+        }
+      },
       "limiter": {
         "title": "Limiter",
         "input": "Input limiter",

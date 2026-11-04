@@ -49,7 +49,10 @@ mod tests {
         let body = serde_json::to_value(PeerBody::DeviceDelay(DeviceDelayNotice::of(Some(23.44))))
             .unwrap();
 
-        assert_eq!(body, serde_json::json!({"device_delay": {"delay_ms": 23.4}}));
+        assert_eq!(
+            body,
+            serde_json::json!({"device_delay": {"delay_ms": 23.4}})
+        );
         let parsed: PeerBody = serde_json::from_value(body).unwrap();
         assert_eq!(
             parsed,
@@ -62,9 +65,13 @@ mod tests {
     /// Verifies: REQ-CON-035
     #[test]
     fn when_the_sender_has_no_figure_the_notice_says_so() {
-        let body = serde_json::to_value(PeerBody::DeviceDelay(DeviceDelayNotice::of(None))).unwrap();
+        let body =
+            serde_json::to_value(PeerBody::DeviceDelay(DeviceDelayNotice::of(None))).unwrap();
 
-        assert_eq!(body, serde_json::json!({"device_delay": {"delay_ms": null}}));
+        assert_eq!(
+            body,
+            serde_json::json!({"device_delay": {"delay_ms": null}})
+        );
     }
 
     /// Verifies: REQ-CON-035

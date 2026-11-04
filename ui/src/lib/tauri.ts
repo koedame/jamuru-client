@@ -583,6 +583,51 @@ export type SettingChange =
 /** Event every window hears after an audio setting changed */
 export const AUDIO_SETTINGS_CHANGED = "audio:config-changed";
 
+/** Event every window hears when a device delay measurement ended with a figure */
+export const DEVICE_DELAY_MEASURED = "audio:delay-measured";
+
+/** The delay kept for the devices selected now (`src-tauri/src/delay.rs`) */
+export interface DeviceDelayFigure {
+  delay_ms: number;
+  spread_ms: number;
+  stability: "steady" | "slightly_shaky" | "shaky";
+  /** Long enough to look at the device settings again */
+  needs_review: boolean;
+  /** Unix seconds */
+  measured_at: number;
+}
+
+export type DeviceDelayFailure = "no_sound" | "unsteady" | "too_long" | "no_stream" | "timed_out";
+
+/** Where the device delay measurement is */
+export interface DeviceDelayStatus {
+  /** Whether an audio session is running (the sound is played through its streams) */
+  session_running: boolean;
+  running: boolean;
+  stimulus: "clicks" | "tone" | null;
+  step: number | null;
+  steps: number;
+  failure: DeviceDelayFailure | null;
+  figure: DeviceDelayFigure | null;
+  /** The delays the others in the room told, in ms, by id */
+  peers: Record<string, number>;
+}
+
+/** Start measuring the delay of the devices the session runs on */
+export async function delayMeasureStart(): Promise<void> {
+  return invoke("delay_measure_start");
+}
+
+/** Stop the measuring under way */
+export async function delayMeasureCancel(): Promise<void> {
+  return invoke("delay_measure_cancel");
+}
+
+/** Where the measuring is, and the figure for the devices selected now */
+export async function delayMeasureStatus(): Promise<DeviceDelayStatus> {
+  return invoke("delay_measure_status");
+}
+
 /** The menu bar asks the main window's screen to do something; the payload names it (`src-tauri/src/menu.rs`). */
 export const MENU_ACTION = "menu:action";
 
