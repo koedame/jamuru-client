@@ -197,7 +197,7 @@ pub struct AppConfig {
     #[serde(default = "default_ask_name_on_entry")]
     pub ask_name_on_entry: bool,
     /// Whether the audio packets are marked as voice, so that a Wi-Fi sends them ahead of other
-    /// traffic (ADR-098). Takes effect when the next session starts.
+    /// traffic (ADR-110). Takes effect when the next session starts.
     #[serde(default = "default_voice_priority")]
     pub voice_priority: bool,
 
