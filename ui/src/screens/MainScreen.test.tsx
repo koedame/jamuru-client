@@ -359,6 +359,20 @@ describe('MainScreen のルームの表示', () => {
     await waitFor(() => expect(screen.getByTestId('participant-list')).toHaveTextContent('Bo'));
   });
 
+  // Verifies: REQ-CON-150
+  it('退室した相手の音がまだ届いているとき、一覧に「退室済み・音声は継続中」と出し、参加者の数には数えないこと', async () => {
+    current = inRoom({ revision: 2 });
+    current.room!.participants.push({ id: 'c', name: 'Bo', features: [], departed: true });
+
+    render(<MainScreen />);
+
+    const list = await screen.findByTestId('participant-list');
+    const departed = within(list).getByTestId('participant-departed');
+    expect(departed).toHaveTextContent(i18n.t('session.participant.departed'));
+    expect(departed.closest('[data-testid="participant"]')).toHaveTextContent('Bo');
+    expect(screen.getByText(i18n.t('session.participant.title', { count: 2 }))).toBeInTheDocument();
+  });
+
   it('退室を確かめたとき、session_leave を呼ぶこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -990,6 +1004,19 @@ describe('MainScreen のミキサー', () => {
     render(<MainScreen />);
 
     expect(await peerFader()).toHaveValue('30');
+  });
+
+  // Verifies: REQ-CON-150
+  it('退室した相手の音がまだ届いているとき、その相手のフェーダーも使えること', async () => {
+    current = inRoom();
+    current.room!.participants.push({ id: 'c', name: 'Bo', features: [], departed: true });
+    mixerNow = faders({
+      peers: { b: { volume: 80, pan: 0, muted: false }, c: { volume: 55, pan: 0, muted: false } },
+    });
+
+    render(<MainScreen />);
+
+    expect(await screen.findByLabelText(i18n.t('mixer.channel.volumeLabel', { name: 'Bo' }))).toHaveValue('55');
   });
 
   // Verifies: REQ-RMT-031

@@ -329,6 +329,14 @@ button.participant__summary:focus-visible {
   white-space: nowrap;
 }
 
+/* Not in the room any more, but still heard */
+.participant__departed {
+  flex-shrink: 0;
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
 .participant__link--unstable {
   color: var(--color-warning);
 }

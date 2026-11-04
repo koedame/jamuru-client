@@ -18,6 +18,11 @@ export interface Participant {
    * (ADR-043).
    */
   features?: string[];
+  /**
+   * The room no longer lists them but their audio still arrives. They stay in the list, with
+   * a fader, for as long as they are heard. Absent from an app that predates it.
+   */
+  departed?: boolean;
 }
 
 /**

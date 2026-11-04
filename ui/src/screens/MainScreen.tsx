@@ -1013,7 +1013,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     // no room can be joined with them, so a participant who copied it could
     // not invite anyone (ADR-026).
     const roomCode = room?.invite_code ?? "";
-    const participantCount = participants.length + 1;
+    const participantCount = participants.filter((p) => !p.departed).length + 1;
     // Whose audio takes longest to go there and back is marked (REQ-LAT-102)
     const slowest = slowestPeerId(links);
 
@@ -1085,6 +1085,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                     data-testid="participant"
                     data-peer-id={participant.id}
                     data-link={trouble ?? "connected"}
+                    data-departed={participant.departed ? "true" : undefined}
                   >
                     <button
                       type="button"
@@ -1100,6 +1101,11 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                         <span className="participant__name">{participant.name}</span>
                       </span>
                       {recording.status.peers.includes(participant.id) && <RecordingMark />}
+                      {participant.departed && (
+                        <span className="participant__departed" data-testid="participant-departed">
+                          {t("session.participant.departed")}
+                        </span>
+                      )}
                       {trouble !== null && (
                         <span
                           className={`participant__link participant__link--${trouble}`}
