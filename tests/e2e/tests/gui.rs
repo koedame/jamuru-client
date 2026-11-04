@@ -925,11 +925,14 @@ fn a_room_entered_by_a_link_is_entered_muted_and_sends_no_audio_until_unmuted() 
 /// Verifies: REQ-LAT-030
 /// Verifies: REQ-LAT-031
 #[test]
-fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_deciding_it_back_restores_it() {
+fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_deciding_it_back_restores_it(
+) {
     let _guard = exclusive();
     let (chosen, other) = (common::Peer::bind(), common::Peer::bind());
-    let server =
-        FakeSignaling::start_with_residents_at(&[chosen.resident("chosen"), other.resident("other")]);
+    let server = FakeSignaling::start_with_residents_at(&[
+        chosen.resident("chosen"),
+        other.resident("other"),
+    ]);
     let _chosen = PlayingPeer::start(chosen, 750.0, 0.2);
     let _other = PlayingPeer::start(other, 1500.0, 0.2);
 
@@ -968,7 +971,9 @@ fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_dec
     let reading = |id: &str| -> (f64, u64) {
         let link = link_to(id);
         (
-            link["latency"]["roundtrip_total_ms"].as_f64().unwrap_or(f64::NAN),
+            link["latency"]["roundtrip_total_ms"]
+                .as_f64()
+                .unwrap_or(f64::NAN),
             link["buffer"]["delay_ms10"].as_u64().unwrap_or(u64::MAX),
         )
     };
@@ -993,7 +998,12 @@ fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_dec
         let sum = |kind: &str| -> u64 {
             timing["peers"]
                 .as_array()
-                .map(|peers| peers.iter().map(|p| p["counts"][kind].as_u64().unwrap_or(0)).sum())
+                .map(|peers| {
+                    peers
+                        .iter()
+                        .map(|p| p["counts"][kind].as_u64().unwrap_or(0))
+                        .sum()
+                })
                 .unwrap_or(0)
         };
         (sum("starved"), sum("concealed"))
@@ -1022,7 +1032,10 @@ fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_dec
     });
     std::thread::sleep(Duration::from_secs(3));
     let (chosen_during, other_during) = (reading(&chosen_id), reading(&other_id));
-    eprintln!("BUFFER during: chosen {chosen_during:?} other {other_during:?} starved/concealed {:?}", damage());
+    eprintln!(
+        "BUFFER during: chosen {chosen_during:?} other {other_during:?} starved/concealed {:?}",
+        damage()
+    );
     // The preset's own adaptation of the peer that was not chosen may move it a
     // few packets (1.33 ms each) on its own, but not by what was chosen (50 ms).
     assert!(
