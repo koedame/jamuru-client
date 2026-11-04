@@ -13,7 +13,8 @@ use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 use crate::audio::{
-    DeviceProblem, FlightRecorder, PeerBufferControl, PeerGain, PeerMeter, PlayoutStats, RoomRecorder,
+    DeviceProblem, FlightRecorder, PeerBufferControl, PeerGain, PeerMeter, PlayoutStats,
+    RoomRecorder,
 };
 use crate::network::{
     BandwidthStatus, ConnectionStats, LinkFacts, LinkHealth, PeerLatencyInfo, MAX_PEERS_PER_ROOM,
@@ -340,7 +341,13 @@ mod tests {
         assert_eq!((moved.volume(), moved.pan()), (150, -30));
         assert!(gains.contains_key(&other));
         let buffers = shared.peer_buffers.read().unwrap();
-        assert!(!buffers.contains_key(&from), "the old id has no buffer left");
-        assert!(Arc::ptr_eq(&buffers[&to], &buffer), "the buffer is the one they had");
+        assert!(
+            !buffers.contains_key(&from),
+            "the old id has no buffer left"
+        );
+        assert!(
+            Arc::ptr_eq(&buffers[&to], &buffer),
+            "the buffer is the one they had"
+        );
     }
 }

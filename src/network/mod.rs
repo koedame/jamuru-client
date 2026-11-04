@@ -3,6 +3,7 @@
 //! Handles UDP transport, NAT traversal, signaling, FEC, encryption, and connection management.
 
 mod bandwidth;
+pub mod buffer_request;
 mod clock;
 mod connection;
 mod device_identity;

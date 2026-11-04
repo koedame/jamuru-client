@@ -98,7 +98,7 @@ impl Terms {
 
 /// How an ask stands on the audio, for the reply to the participant who made it
 /// and for the screen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct GrantView {
     /// The buffer the ask holds, in tenths of a millisecond
     pub applied_ms10: u16,
@@ -111,7 +111,7 @@ pub struct GrantView {
 }
 
 /// What the audio thread publishes about a buffer.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct View {
     /// The buffer in force, in tenths of a millisecond
     pub delay_ms10: u32,
@@ -255,7 +255,11 @@ impl PeerBufferControl {
 /// The shortest an automatic ask comes down to, in packets of `packet_ms` at
 /// `sample_rate` (0: at 48 kHz).
 fn lowest_frames(packet_ms: f32, sample_rate: u32) -> u32 {
-    let rate = if sample_rate == 0 { 48_000 } else { sample_rate };
+    let rate = if sample_rate == 0 {
+        48_000
+    } else {
+        sample_rate
+    };
     let lowest_ms = AUTO_LOWEST_SAMPLES as f32 * 1000.0 / rate as f32;
     if packet_ms <= 0.0 {
         return 1;
@@ -357,7 +361,13 @@ mod tests {
     const PACKET_MS: f32 = 64.0 / 48.0;
 
     fn receive(delay_frames: u32) -> ReceivePath {
-        ReceivePath::new(AudioPreset::Balanced.codec_type(), RATE, FRAME, delay_frames).unwrap()
+        ReceivePath::new(
+            AudioPreset::Balanced.codec_type(),
+            RATE,
+            FRAME,
+            delay_frames,
+        )
+        .unwrap()
     }
 
     /// Verifies: REQ-LAT-031
@@ -396,11 +406,8 @@ mod tests {
     /// Verifies: REQ-LAT-031
     #[test]
     fn a_fixed_buffer_is_held_in_whole_packets_and_the_choice_goes_back_to_the_preset() {
-        let (control, receive, mut driver) = (
-            PeerBufferControl::default(),
-            receive(4),
-            Driver::default(),
-        );
+        let (control, receive, mut driver) =
+            (PeerBufferControl::default(), receive(4), Driver::default());
 
         control.set_own(Own::Fixed { ms10: 200 });
         driver.drive(&control, &receive, PACKET_MS, true);
@@ -416,11 +423,8 @@ mod tests {
     /// Verifies: REQ-LAT-032
     #[test]
     fn an_ask_that_is_accepted_holds_the_buffer_and_letting_go_gives_it_back() {
-        let (control, receive, mut driver) = (
-            PeerBufferControl::default(),
-            receive(4),
-            Driver::default(),
-        );
+        let (control, receive, mut driver) =
+            (PeerBufferControl::default(), receive(4), Driver::default());
         driver.drive(&control, &receive, PACKET_MS, true);
 
         let view = control
@@ -430,9 +434,16 @@ mod tests {
                 auto: false,
             }))
             .unwrap();
-        assert_eq!(view.applied_ms10, 293, "the answer needs no wait for the audio thread");
+        assert_eq!(
+            view.applied_ms10, 293,
+            "the answer needs no wait for the audio thread"
+        );
         driver.drive(&control, &receive, PACKET_MS, true);
-        assert_eq!(receive.delay_frames(), 22, "30 ms is 22.5 packets, taken as 22");
+        assert_eq!(
+            receive.delay_frames(),
+            22,
+            "30 ms is 22.5 packets, taken as 22"
+        );
         let granted = control.view().granted.unwrap();
         assert_eq!(granted.applied_ms10, 293, "22 packets");
         assert!(granted.rounded, "the packets do not divide the 30 ms");
@@ -446,11 +457,8 @@ mod tests {
     /// Verifies: REQ-LAT-032
     #[test]
     fn an_automatic_ask_starts_at_its_lowest_and_says_it_follows_the_link() {
-        let (control, receive, mut driver) = (
-            PeerBufferControl::default(),
-            receive(4),
-            Driver::default(),
-        );
+        let (control, receive, mut driver) =
+            (PeerBufferControl::default(), receive(4), Driver::default());
         driver.drive(&control, &receive, PACKET_MS, true);
 
         control.set_grant(Some(Terms {
@@ -464,7 +472,11 @@ mod tests {
         // 48 samples at 48 kHz are 1 ms: one packet of 1.33 ms
         assert_eq!(granted.applied_ms10, 13);
         assert!(granted.at_lowest && granted.auto_running);
-        assert_eq!(receive.delay_frames(), 4, "the preset's own delay is longer");
+        assert_eq!(
+            receive.delay_frames(),
+            4,
+            "the preset's own delay is longer"
+        );
     }
 
     /// Verifies: REQ-LAT-030
@@ -496,17 +508,18 @@ mod tests {
         for ((control, receive), driver) in controls.iter().zip(&receives).zip(&mut drivers) {
             driver.drive(control, receive, PACKET_MS, true);
         }
-        assert_eq!(delays(&receives), [4, 4, 8], "back, and only the other one set");
+        assert_eq!(
+            delays(&receives),
+            [4, 4, 8],
+            "back, and only the other one set"
+        );
     }
 
     /// Verifies: REQ-LAT-032
     #[test]
     fn an_ask_stays_when_the_packets_of_the_participant_turn_out_longer_than_assumed() {
-        let (control, receive, mut driver) = (
-            PeerBufferControl::default(),
-            receive(4),
-            Driver::default(),
-        );
+        let (control, receive, mut driver) =
+            (PeerBufferControl::default(), receive(4), Driver::default());
         control.set_grant(Some(Terms {
             max_ms10: 200,
             tolerance_tenths: 10,

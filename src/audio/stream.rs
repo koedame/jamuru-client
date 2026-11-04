@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use super::codec::{create_codec, AudioCodec, CodecConfig, CodecError, CodecType};
 use super::flight::{FlightRecorder, Kind};
 use super::playout::{
-    widest_frame_samples, Grant, PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult, PlayoutStats,
-    WriteOutcome, WIDEST_PACKET_SAMPLES,
+    widest_frame_samples, Grant, PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult,
+    PlayoutStats, WriteOutcome, WIDEST_PACKET_SAMPLES,
 };
 use super::preset::AudioPreset;
 use super::resampler::{create_resampler_with_channels, AudioResampler, ResamplerError};
@@ -377,7 +377,8 @@ impl ReceivePath {
         // ... and for the longest buffer a participant may be given, counted in
         // the shortest packet (ADR-097). A restarted stream is still told from a
         // late one by the distance the preset-sized ring has.
-        let widest_ring_frames = ring_delay_frames.max(super::peer_buffer::ring_frames(sample_rate));
+        let widest_ring_frames =
+            ring_delay_frames.max(super::peer_buffer::ring_frames(sample_rate));
 
         Ok(Self {
             delay: Arc::new(AtomicU32::new(target_delay_frames)),
@@ -627,7 +628,9 @@ impl ReceivePath {
     /// The delay an accepted ask holds the buffer to at least, in frames; 0
     /// without one.
     pub fn floor_frames(&self) -> u32 {
-        self.playout.lock().map_or(0, |buffer| buffer.floor_frames())
+        self.playout
+            .lock()
+            .map_or(0, |buffer| buffer.floor_frames())
     }
 
     /// The play-out delay in force, in frames.

@@ -85,14 +85,15 @@ pub enum NoticeEvent {
     Ended,
 }
 
-/// The body of a peer message, by topic: settings help, and whether the sender
-/// records the room. A body on another topic (from a newer app) does not parse
+/// The body of a peer message, by topic: settings help, whether the sender
+/// records the room, and asks about the receive buffer. A body on another topic (from a newer app) does not parse
 /// and is ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PeerBody {
     SettingsHelp(HelpMessage),
     Recording(super::recording_notice::RecordingNotice),
+    BufferRequest(super::buffer_request::BufferMessage),
 }
 
 /// Which side of a help this app is on.

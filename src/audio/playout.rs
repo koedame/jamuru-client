@@ -805,7 +805,9 @@ impl PlayoutBuffer {
         }
         self.play_sequence = None;
         self.playing = false;
-        self.own_target_frames = self.pinned_frames.unwrap_or(self.config.target_delay_frames);
+        self.own_target_frames = self
+            .pinned_frames
+            .unwrap_or(self.config.target_delay_frames);
         self.target_delay_frames = self
             .own_target_frames
             .max(self.floor_frames)
@@ -1173,11 +1175,19 @@ mod tests {
             assert_eq!(buffer.adapt(), None, "a clean stretch does not shrink it");
         }
         buffer.set_delay(4);
-        assert_eq!(buffer.target_delay_frames(), 12, "the preset does not move it");
+        assert_eq!(
+            buffer.target_delay_frames(),
+            12,
+            "the preset does not move it"
+        );
         assert!(buffer.is_pinned());
 
         buffer.unpin_delay();
-        assert_eq!(buffer.target_delay_frames(), 4, "the preset's delay is back");
+        assert_eq!(
+            buffer.target_delay_frames(),
+            4,
+            "the preset's delay is back"
+        );
         assert!(!buffer.is_pinned());
     }
 
@@ -1215,10 +1225,18 @@ mod tests {
             drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             buffer.adapt();
         }
-        assert_eq!(buffer.target_delay_frames(), 10, "its own choice shrinks, the grant stays");
+        assert_eq!(
+            buffer.target_delay_frames(),
+            10,
+            "its own choice shrinks, the grant stays"
+        );
 
         assert_eq!(buffer.set_grant(None), 0);
-        assert_eq!(buffer.target_delay_frames(), 1, "its own choice, which a clean link brought down");
+        assert_eq!(
+            buffer.target_delay_frames(),
+            1,
+            "its own choice, which a clean link brought down"
+        );
     }
 
     /// An automatic grant starts at its lowest delay and goes up a step at a
@@ -1280,7 +1298,11 @@ mod tests {
             buffer.adapt();
         }
 
-        assert_eq!(buffer.floor_frames(), held, "one a second is within three a second");
+        assert_eq!(
+            buffer.floor_frames(),
+            held,
+            "one a second is within three a second"
+        );
     }
 
     /// A tenth of the delay is given back after fifteen seconds in which no
@@ -1351,7 +1373,11 @@ mod tests {
         }
         assert_eq!(buffer.floor_frames(), 16);
 
-        assert_eq!(buffer.set_grant(Some(auto(30))), 16, "same terms: no start over");
+        assert_eq!(
+            buffer.set_grant(Some(auto(30))),
+            16,
+            "same terms: no start over"
+        );
         assert_eq!(buffer.set_grant(Some(auto(10))), 10, "a lower cap");
     }
 
