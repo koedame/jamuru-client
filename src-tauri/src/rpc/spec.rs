@@ -153,6 +153,12 @@ app_commands! {
     [Access::ALL] "音声の設定を変える" crate::settings::settings_change;
 
     [Access::ALL] "音声の状態（レベル・遅延・統計）を読む" crate::streaming::streaming_status;
+    // The measuring sound comes out of the person's speakers and the room hears
+    // silence from them meanwhile, and the cable or the microphone is placed by
+    // hand: starting it is the person's own. What it found is open to a helper.
+    [Access::NO_HELP] "機器の遅延の測定を始める" crate::delay::delay_measure_start;
+    [Access::NO_HELP] "機器の遅延の測定を止める" crate::delay::delay_measure_cancel;
+    [Access::ALL] "機器の遅延の測定の進み具合と、いまの機器で測った値を読む" crate::delay::delay_measure_status;
     [Access::NO_HELP] "音声の接続を張り直す" crate::streaming::streaming_reconnect;
     [Access::ALL] "自分のマイクをミュートする・戻す" crate::streaming::streaming_set_mute;
     [Access::SCREEN_ONLY] "確認を出している間、マイクをミュートし相手の音を止めておく・やめて元に戻す" crate::streaming::streaming_hold_mute;
@@ -538,6 +544,7 @@ mod tests {
             "config_list_presets",
             "config_set_language",
             "config_set_peer_name",
+            "delay_measure_status",
             "diagnostics_check_zero_latency",
             "diagnostics_get_recommended_preset",
             "diagnostics_run_audio",
