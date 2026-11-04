@@ -12,7 +12,9 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use jamjam::audio::{opened_ways, DeviceProblem, GrantView, OpenedWays, OwnBuffer, PeerBufferView};
+use jamjam::audio::{
+    opened_ways, BufferTerms, DeviceProblem, GrantView, OpenedWays, OwnBuffer, PeerBufferView,
+};
 pub use jamjam::audio_session::LinkTarget;
 use jamjam::audio_session::{self, BandwidthSnapshot, LinkReport, Params, Shared};
 use jamjam::network::{
@@ -204,6 +206,16 @@ impl StreamingState {
     /// Heard on the next frame when there is a link to them, and kept for when there is.
     pub fn set_peer_buffer(&self, peer: Uuid, choice: OwnBuffer) {
         self.shared.buffer_of(peer).set_own(choice);
+    }
+
+    /// Holds the receive buffer of `peer` to what they asked, or lets go of it. What it
+    /// stands at, as far as can be told before the audio thread has followed.
+    pub fn set_peer_buffer_grant(
+        &self,
+        peer: Uuid,
+        terms: Option<BufferTerms>,
+    ) -> Option<GrantView> {
+        self.shared.buffer_of(peer).set_grant(terms)
     }
 
     /// How the receive buffer of `peer` stands.

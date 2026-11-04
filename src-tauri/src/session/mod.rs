@@ -264,6 +264,11 @@ impl<R: Runtime> Backend for AppBackend<R> {
                 }
             }
             SignalingEvent::HelpLink { link } => crate::help_link::open_helper(app.clone(), link),
+            SignalingEvent::BufferRequest { event } => {
+                if let Err(e) = app.emit(signaling::buffer_asks::BUFFER_REQUEST_EVENT, &event) {
+                    tracing::warn!("Could not pass on a buffer request event: {}", e);
+                }
+            }
             // The chat panel reads the chat lines from the backend itself.
             _ => {}
         }

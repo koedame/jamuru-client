@@ -215,6 +215,8 @@ pub fn run() {
     // identity) would go nowhere.
     app.manage(SignalingState::new());
     let startup_config = load_startup_config();
+    app.state::<SignalingState>()
+        .init_buffer_policy(startup_config.buffer_asks);
     // Until the user agrees to the terms of use, nothing below that talks to
     // the network on its own starts (`terms::wait_accepted`).
     app.manage(terms::TermsState::new(startup_config.terms_accepted()));
