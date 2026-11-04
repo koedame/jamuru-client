@@ -91,6 +91,7 @@
       "joined": "{{name}} joined",
       "left": "{{name}} left",
       "highestLatency": "Highest latency",
+      "departed": "Left the room · audio continues",
       "detail": {
         "you": "You",
         "network": "Network",

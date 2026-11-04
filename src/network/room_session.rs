@@ -67,6 +67,10 @@ pub struct Participant {
     pub name: String,
     /// What their app can do beyond the base protocol (ADR-043).
     pub features: Vec<String>,
+    /// The room no longer lists them but their audio still arrives (REQ-CON-150). They are
+    /// shown, with a fader, for as long as they are heard; none of what needs the room
+    /// (messages, help) is for them.
+    pub departed: bool,
 }
 
 /// The room this app is in.
@@ -173,7 +177,19 @@ impl State {
                         id: peer.id.to_string(),
                         name: peer.name.clone(),
                         features: peer.features.clone(),
+                        departed: false,
                     })
+                    .chain(
+                        self.roster
+                            .departed()
+                            .into_iter()
+                            .map(|(id, name)| Participant {
+                                id: id.to_string(),
+                                name,
+                                features: Vec::new(),
+                                departed: true,
+                            }),
+                    )
                     .collect(),
             }),
             signaling_reconnect: self.reconnect,
@@ -685,6 +701,48 @@ mod tests {
         assert_eq!((conn, stop_audio), (Some(7), false));
         assert_eq!(state.connection_id(), None);
         assert_eq!(state.view().streaming_peer_ids.len(), 1);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn when_someone_left_the_room_while_their_audio_is_heard_they_are_listed_as_departed_until_it_stops(
+    ) {
+        let mut state = in_a_room(vec![
+            peer(2, Some("10.0.0.2:5000")),
+            peer(3, Some("10.0.0.3:5000")),
+        ]);
+        let heard = |ids: &[u128]| -> Vec<(Uuid, LinkHealth)> {
+            ids.iter()
+                .map(|id| (Uuid::from_u128(*id), LinkHealth::Heard))
+                .collect()
+        };
+        state.following_the_links(7, true, heard(&[2, 3]));
+
+        state.peer_left(7, Uuid::from_u128(2));
+
+        let room = state.view().room.unwrap();
+        let listed: Vec<_> = room
+            .participants
+            .iter()
+            .map(|p| (p.id.clone(), p.departed))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                (Uuid::from_u128(3).to_string(), false),
+                (Uuid::from_u128(2).to_string(), true)
+            ]
+        );
+        assert_eq!(
+            state.view().streaming_peer_ids,
+            vec![Uuid::from_u128(3).to_string()]
+        );
+
+        state.following_the_links(7, true, vec![(Uuid::from_u128(2), LinkHealth::Silent)]);
+
+        let room = state.view().room.unwrap();
+        assert_eq!(room.participants.len(), 1);
+        assert!(!room.participants[0].departed);
     }
 
     /// Verifies: REQ-RMT-028
