@@ -1466,6 +1466,8 @@ mod tests {
     /// Verifies: REQ-AUD-119
     #[test]
     fn test_a_device_wider_than_stereo_is_played_on_the_selected_channels() {
+        // A delay measurement under way would put its own sound in the output
+        let _quiet = super::super::delay_meter::one_at_a_time();
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mut puller = RoutedPuller {
             puller: FramePuller::new(4, counting_source(4, calls)),

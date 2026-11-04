@@ -46,7 +46,7 @@ pub struct Status {
     /// The figure for the devices selected now, if there is one.
     pub figure: Option<Figure>,
     /// The delays the others in the room told of their devices, in ms, by id.
-    pub peers: std::collections::BTreeMap<String, f32>,
+    pub peers: std::collections::BTreeMap<String, f64>,
 }
 
 fn figure_of(delay: &DeviceDelay) -> Figure {
@@ -63,7 +63,7 @@ fn status(
     session_running: bool,
     state: &State,
     current: Option<&DeviceDelay>,
-    peers: std::collections::HashMap<String, f32>,
+    peers: std::collections::HashMap<String, f64>,
 ) -> Status {
     let (running, stimulus, step) = match state {
         State::Running(step) => (true, Some(step.stimulus.name()), Some(step.step)),
@@ -259,7 +259,7 @@ mod tests {
     /// Verifies: REQ-CON-035
     #[test]
     fn the_status_lists_the_delays_the_others_told() {
-        let peers = [("p1".to_string(), 23.5_f32)].into_iter().collect();
+        let peers = [("p1".to_string(), 23.5_f64)].into_iter().collect();
 
         let status = status(true, &State::Idle, None, peers);
 

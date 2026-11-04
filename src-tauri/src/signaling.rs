@@ -145,7 +145,7 @@ pub struct SignalingState {
     /// What the room was last told of it, and over which connection.
     delay_told: std::sync::Mutex<Option<(u32, Option<u32>)>>,
     /// The delays the participants told, in ms, by id
-    peer_delays: std::sync::Mutex<HashMap<String, f32>>,
+    peer_delays: std::sync::Mutex<HashMap<String, f64>>,
 }
 
 impl SignalingState {
@@ -175,7 +175,7 @@ impl SignalingState {
     }
 
     /// The delays the participants told of their devices, in ms, by id
-    pub fn peer_delays(&self) -> HashMap<String, f32> {
+    pub fn peer_delays(&self) -> HashMap<String, f64> {
         self.peer_delays
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -184,7 +184,7 @@ impl SignalingState {
 
     /// Notes the delay a participant told (`None` takes it back). True when
     /// that is a change.
-    fn set_peer_delay(&self, peer: &str, delay_ms: Option<f32>) -> bool {
+    fn set_peer_delay(&self, peer: &str, delay_ms: Option<f64>) -> bool {
         let mut peers = self.peer_delays.lock().unwrap_or_else(|e| e.into_inner());
         match delay_ms {
             Some(ms) => peers.insert(peer.to_string(), ms) != Some(ms),
@@ -1282,7 +1282,7 @@ async fn send_delay_notice(
     tenths: Option<u32>,
 ) -> bool {
     let notice = DeviceDelayNotice {
-        delay_ms: tenths.map(|tenths| tenths as f32 / 10.0),
+        delay_ms: tenths.map(|tenths| f64::from(tenths) / 10.0),
     };
     let body = match serde_json::to_value(PeerBody::DeviceDelay(notice)) {
         Ok(serde_json::Value::Object(body)) => body,

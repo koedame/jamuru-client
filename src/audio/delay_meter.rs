@@ -119,6 +119,16 @@ const ANCHORS: usize = 1 << 13;
 // What the callbacks and the analysis thread share
 
 static ARMED: AtomicBool = AtomicBool::new(false);
+
+/// The meter is one per process: tests that run it, or that play sound
+/// through the callbacks it hooks, take turns.
+#[cfg(test)]
+static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    TURN.lock().unwrap_or_else(|e| e.into_inner())
+}
 static SHARED: OnceLock<Shared> = OnceLock::new();
 static BASE: OnceLock<Instant> = OnceLock::new();
 
@@ -287,7 +297,7 @@ fn output_at(stereo: &mut [f32], rate: u32, now: Instant) {
     }
     let stimulus = stimulus_of(shared.play_stimulus.load(Ordering::Relaxed));
     let level = f32::from_bits(shared.play_level.load(Ordering::Relaxed));
-    for frame in stereo.chunks_exact_mut(2) {
+    for frame in stereo.as_chunks_mut::<2>().0.iter_mut() {
         let value = if pos < len {
             let sample = stimulus_sample(stimulus, pos as usize, len as usize, rate) * level;
             pos += 1;

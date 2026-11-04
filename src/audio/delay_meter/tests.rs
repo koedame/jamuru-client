@@ -1,9 +1,6 @@
 use super::*;
 use std::sync::{Arc, Condvar, Mutex};
 
-/// The meter is one per process, so the tests that run it take turns.
-static TURN: Mutex<()> = Mutex::new(());
-
 const RATE: u32 = 48_000;
 
 // ---------------------------------------------------------------------
@@ -148,7 +145,7 @@ fn drive(clock: &Virtual, device: &Device) {
         if next_out <= next_in {
             let mut stereo = vec![0.9f32; device.output_frames * 2];
             output_at(&mut stereo, RATE, clock.at(next_out));
-            sent.extend(stereo.chunks_exact(2).map(|f| f[0]));
+            sent.extend(stereo.as_chunks::<2>().0.iter().map(|f| f[0]));
             let shared = SHARED.get().unwrap();
             let started = shared.started_gen.load(Ordering::Relaxed);
             if started != seen_started {
@@ -429,7 +426,7 @@ fn the_tone_is_a_one_kilohertz_sine_for_fifty_milliseconds() {
 /// Verifies: REQ-AUD-050
 #[test]
 fn the_noise_is_the_amplitude_ninety_percent_of_the_samples_stay_under() {
-    let window: Vec<f32> = (0..1000).map(|n| (n as f32 / 1000.0) * -1.0).collect();
+    let window: Vec<f32> = (0..1000).map(|n| -(n as f32 / 1000.0)).collect();
 
     let noise = noise_of(&window);
 
