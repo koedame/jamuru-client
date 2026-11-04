@@ -122,7 +122,7 @@ zbus = "6"
 # Real-time priority of the audio thread, and the WASAPI streams `cpal` does not
 # open (exclusive and low-latency shared, `audio::wasapi`). The same `windows`
 # the app is built on.
-windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_NetworkManagement_QoS", "Win32_Networking_WinSock", "Win32_Media_Audio", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
+windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Media_Audio", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
 # What `windows::core::implement` expands to names `windows_core` (the
 # notifications of the default device changing, `audio::wasapi`)
 windows-core = "0.62"

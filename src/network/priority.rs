@@ -1,4 +1,4 @@
-//! Marking the audio packets as time-critical (ADR-098)
+//! Marking the audio packets as time-critical (ADR-110)
 //!
 //! An IP header has a six-bit priority field (DSCP; the upper bits of IPv4's ToS byte and
 //! IPv6's Traffic Class). A home Wi-Fi access point, and the Wi-Fi adapter of the sending PC,
@@ -6,26 +6,22 @@
 //! Forwarding (46) it is sent ahead of a video stream or a download on the same Wi-Fi. Most
 //! of the internet clears the field, so what this buys is on the first hop, inside the home.
 //!
-//! How the mark is set differs by system, and is set for the whole session, on its one socket:
+//! The mark is set once, on the session's audio socket, and every packet then carries it:
 //!
 //! - Linux: `IP_TOS` / `IPV6_TCLASS` to EF, and `SO_PRIORITY` 6 for the local queue.
 //! - macOS: `SO_NET_SERVICE_TYPE` to voice, which sets both the DSCP and the Wi-Fi queue. If
 //!   the system refuses it, `IP_TOS` / `IPV6_TCLASS`.
-//! - Windows: `setsockopt(IP_TOS)` is ignored unless a policy allows it, so the packets go
-//!   through qWAVE, the system's QoS service, as a voice flow. A flow is made for one
-//!   destination, so one is added for each address the first time a packet goes to it. No
-//!   administrator is needed (setting the DSCP value by hand would).
+//! - Windows: `IP_TOS` / `IPV6_TCLASS`. qWAVE, the system's QoS service, cannot do this job: it
+//!   marks a flow per destination, refuses an IPv6 socket that sends to an IPv4 address (the
+//!   audio socket is dual-stack, ADR-093), and gives voice 56 (CS7), not 46.
 //!
 //! The mark is a request: a network may clear it or, rarely, drop what is marked. That is
 //! why it is a setting (`voice_priority`).
 
-use std::net::SocketAddr;
-
-use tokio::net::UdpSocket;
+use socket2::SockRef;
 use tracing::{info, warn};
 
 /// EF (46) in the upper six bits of the byte
-#[cfg(unix)]
 const EF_TRAFFIC_CLASS: u32 = 46 << 2;
 
 /// How `SO_NET_SERVICE_TYPE` is spelled in `<sys/socket.h>`, and the value of
@@ -35,79 +31,85 @@ const SO_NET_SERVICE_TYPE: libc::c_int = 0x1116;
 #[cfg(target_os = "macos")]
 const NET_SERVICE_TYPE_VO: libc::c_int = 4;
 
-/// The audio socket's packets are marked as voice, for as long as this lives
-pub struct VoicePriority {
-    how: &'static str,
-    #[cfg(windows)]
-    flows: windows_qos::Flows,
-}
-
-impl VoicePriority {
-    /// Marks what `socket` sends. `None` where the system does not take it (the reason is
-    /// logged): audio goes unmarked then.
-    pub fn on(socket: &UdpSocket) -> Option<Self> {
-        match mark(socket) {
-            Ok(priority) => {
-                info!("Audio packets are marked as voice ({})", priority.how);
-                Some(priority)
-            }
-            Err(reason) => {
-                warn!("Audio packets are not marked as voice: {reason}");
-                None
-            }
+/// Marks what `socket` sends as voice, and logs how. Returns what was used, or `None` where the
+/// system does not take it (the reason is logged): audio goes unmarked then.
+pub fn mark_voice(socket: &std::net::UdpSocket) -> Option<&'static str> {
+    match mark(socket) {
+        Ok(how) => {
+            info!("Audio packets are marked as voice ({how})");
+            Some(how)
+        }
+        Err(reason) => {
+            warn!("Audio packets are not marked as voice: {reason}");
+            None
         }
     }
-
-    /// What was used to mark the packets, for the log and the tests
-    pub fn how(&self) -> &'static str {
-        self.how
-    }
-
-    /// Called as a packet goes to `addr`. On Windows the first one to an address adds the flow
-    /// that marks the packets to it; elsewhere the mark is on the socket and there is
-    /// nothing to do.
-    #[inline]
-    pub(super) fn sending_to(&self, socket: &std::sync::Arc<UdpSocket>, addr: SocketAddr) {
-        #[cfg(windows)]
-        self.flows.add_for(socket, addr);
-        #[cfg(not(windows))]
-        let _ = (socket, addr);
-    }
 }
 
-#[cfg(target_os = "linux")]
-fn mark(socket: &UdpSocket) -> Result<VoicePriority, String> {
-    let sock = socket2::SockRef::from(socket);
+/// `IP_TOS` for what goes out with an IPv4 header (an IPv6 socket sends to an IPv4 peer with
+/// one, too) and `IPV6_TCLASS` for IPv6. Marked if either took.
+#[cfg(any(unix, windows))]
+fn mark_traffic_class(socket: &std::net::UdpSocket) -> Result<(), String> {
     let local = socket.local_addr().map_err(|e| e.to_string())?;
-    // An IPv6 socket sends an IPv4 peer's packets with the IPv4 header, so it needs both
-    let v4 = sock.set_tos_v4(EF_TRAFFIC_CLASS);
+    let v4 = SockRef::from(socket).set_tos_v4(EF_TRAFFIC_CLASS);
     let v6 = if local.is_ipv6() {
-        sock.set_tclass_v6(EF_TRAFFIC_CLASS)
+        set_tclass_v6(socket)
     } else {
         Ok(())
     };
-    // The queue of this machine's own network stack and Wi-Fi driver (0-6 need no privilege)
-    let queue = sock.set_priority(6);
     let marked = if local.is_ipv6() {
         v4.is_ok() || v6.is_ok()
     } else {
         v4.is_ok()
     };
-    if !marked {
-        let reason = v4.err().or(v6.err()).map(|e| e.to_string());
-        return Err(reason.unwrap_or_default());
+    if marked {
+        return Ok(());
     }
-    Ok(VoicePriority {
-        how: if queue.is_ok() {
-            "IP_TOS, IPV6_TCLASS and SO_PRIORITY"
-        } else {
-            "IP_TOS and IPV6_TCLASS"
-        },
+    let reason = v4.err().or(v6.err()).map(|e| e.to_string());
+    Err(reason.unwrap_or_default())
+}
+
+#[cfg(unix)]
+fn set_tclass_v6(socket: &std::net::UdpSocket) -> std::io::Result<()> {
+    SockRef::from(socket).set_tclass_v6(EF_TRAFFIC_CLASS)
+}
+
+#[cfg(windows)]
+fn set_tclass_v6(socket: &std::net::UdpSocket) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawSocket;
+    use windows::Win32::Networking::WinSock::{
+        setsockopt, IPPROTO_IPV6, IPV6_TCLASS, SOCKET, SOCKET_ERROR,
+    };
+
+    let value = EF_TRAFFIC_CLASS as i32;
+    // SAFETY: a valid socket, and the bytes of an int
+    let result = unsafe {
+        setsockopt(
+            SOCKET(socket.as_raw_socket() as usize),
+            IPPROTO_IPV6.0,
+            IPV6_TCLASS,
+            Some(&value.to_ne_bytes()),
+        )
+    };
+    if result == SOCKET_ERROR {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
+    mark_traffic_class(socket)?;
+    // The queue of this machine's own network stack and Wi-Fi driver (0-6 need no privilege)
+    Ok(if SockRef::from(socket).set_priority(6).is_ok() {
+        "IP_TOS, IPV6_TCLASS and SO_PRIORITY"
+    } else {
+        "IP_TOS and IPV6_TCLASS"
     })
 }
 
 #[cfg(target_os = "macos")]
-fn mark(socket: &UdpSocket) -> Result<VoicePriority, String> {
+fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
     use std::os::fd::AsRawFd;
 
     let value = NET_SERVICE_TYPE_VO;
@@ -122,140 +124,21 @@ fn mark(socket: &UdpSocket) -> Result<VoicePriority, String> {
         )
     };
     if result == 0 {
-        return Ok(VoicePriority {
-            how: "SO_NET_SERVICE_TYPE",
-        });
+        return Ok("SO_NET_SERVICE_TYPE");
     }
     let refused = std::io::Error::last_os_error();
     info!("SO_NET_SERVICE_TYPE was refused ({refused}); using IP_TOS");
-
-    let sock = socket2::SockRef::from(socket);
-    let local = socket.local_addr().map_err(|e| e.to_string())?;
-    let v4 = sock.set_tos_v4(EF_TRAFFIC_CLASS);
-    let v6 = if local.is_ipv6() {
-        sock.set_tclass_v6(EF_TRAFFIC_CLASS)
-    } else {
-        Ok(())
-    };
-    v4.and(v6).map_err(|e| format!("IP_TOS: {e}"))?;
-    Ok(VoicePriority {
-        how: "IP_TOS and IPV6_TCLASS",
-    })
+    mark_traffic_class(socket).map(|()| "IP_TOS and IPV6_TCLASS")
 }
 
 #[cfg(windows)]
-fn mark(_socket: &UdpSocket) -> Result<VoicePriority, String> {
-    Ok(VoicePriority {
-        how: "qWAVE voice flows",
-        flows: windows_qos::Flows::open()?,
-    })
+fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
+    mark_traffic_class(socket).map(|()| "IP_TOS and IPV6_TCLASS")
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn mark(_socket: &UdpSocket) -> Result<VoicePriority, String> {
+fn mark(_socket: &std::net::UdpSocket) -> Result<&'static str, String> {
     Err("this system has no way to mark them".to_string())
-}
-
-#[cfg(windows)]
-mod windows_qos {
-    use std::collections::HashSet;
-    use std::net::SocketAddr;
-    use std::os::windows::io::AsRawSocket;
-    use std::sync::Arc;
-
-    use parking_lot::Mutex;
-    use tokio::net::UdpSocket;
-    use tracing::{debug, info, warn};
-    use windows::Win32::Foundation::{GetLastError, HANDLE};
-    use windows::Win32::NetworkManagement::QoS::{
-        QOSAddSocketToFlow, QOSCloseHandle, QOSCreateHandle, QOSTrafficTypeVoice,
-        QOS_NON_ADAPTIVE_FLOW, QOS_VERSION,
-    };
-    use windows::Win32::Networking::WinSock::{SOCKADDR, SOCKET};
-
-    /// qWAVE's handle, and the addresses a flow has been asked for
-    pub(super) struct Flows {
-        handle: Arc<Handle>,
-        asked: Mutex<HashSet<SocketAddr>>,
-    }
-
-    struct Handle(HANDLE);
-
-    // SAFETY: a qWAVE handle may be used from any thread
-    unsafe impl Send for Handle {}
-    unsafe impl Sync for Handle {}
-
-    impl Drop for Handle {
-        fn drop(&mut self) {
-            // SAFETY: the handle QOSCreateHandle gave, closed once. Closing ends its flows.
-            unsafe {
-                let _ = QOSCloseHandle(self.0);
-            }
-        }
-    }
-
-    impl Flows {
-        pub(super) fn open() -> Result<Self, String> {
-            let version = QOS_VERSION {
-                MajorVersion: 1,
-                MinorVersion: 0,
-            };
-            let mut handle = HANDLE::default();
-            // SAFETY: valid pointers to a version and a handle
-            let created = unsafe { QOSCreateHandle(&version, &mut handle) };
-            if !created.as_bool() {
-                // SAFETY: reads the thread's last error
-                let code = unsafe { GetLastError() };
-                return Err(format!("QOSCreateHandle failed ({code:?})"));
-            }
-            Ok(Self {
-                handle: Arc::new(Handle(handle)),
-                asked: Mutex::new(HashSet::new()),
-            })
-        }
-
-        /// Asks qWAVE to mark what `socket` sends to `addr`, if it has not been asked
-        ///
-        /// Done on a thread of its own: qWAVE answers over RPC to a service, which can take
-        /// a few milliseconds, and the audio of the other peers is received on this thread.
-        /// The packets sent before it answers go unmarked.
-        pub(super) fn add_for(&self, socket: &Arc<UdpSocket>, addr: SocketAddr) {
-            let addr = SocketAddr::new(addr.ip().to_canonical(), addr.port());
-            if !self.asked.lock().insert(addr) {
-                return;
-            }
-            let handle = self.handle.clone();
-            let socket = socket.clone();
-            let spawned = std::thread::Builder::new()
-                .name("voice-flow".to_string())
-                .spawn(move || {
-                    let dest = socket2::SockAddr::from(addr);
-                    let mut flow_id = 0u32;
-                    // SAFETY: the handle and the socket are alive (this thread holds both),
-                    // `dest` is a sockaddr of the length it says, `flow_id` starts at 0
-                    let added = unsafe {
-                        QOSAddSocketToFlow(
-                            handle.0,
-                            SOCKET(socket.as_raw_socket() as usize),
-                            Some(dest.as_ptr().cast::<SOCKADDR>()),
-                            QOSTrafficTypeVoice,
-                            Some(QOS_NON_ADAPTIVE_FLOW),
-                            &mut flow_id,
-                        )
-                    };
-                    if added.as_bool() {
-                        info!("Packets to {addr} are marked as voice (qWAVE flow {flow_id})");
-                    } else {
-                        // SAFETY: reads the thread's last error
-                        let code = unsafe { GetLastError() };
-                        warn!("Packets to {addr} are not marked as voice: QOSAddSocketToFlow failed ({code:?})");
-                    }
-                });
-            if let Err(e) = spawned {
-                debug!("No thread for the voice flow to {addr}: {e}");
-            }
-        }
-    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -331,52 +214,45 @@ mod tests {
         socket
     }
 
-    async fn marked_audio_socket() -> (UdpSocket, VoicePriority) {
-        let socket = UdpSocket::from_std(crate::network::bind_audio_std(0).unwrap()).unwrap();
-        let priority = VoicePriority::on(&socket).expect("the socket takes the mark");
-        (socket, priority)
-    }
-
     /// Verifies: REQ-CON-160
-    #[tokio::test]
-    async fn when_the_audio_socket_is_marked_an_ipv4_peer_reads_expedited_forwarding() {
-        let (socket, _priority) = marked_audio_socket().await;
+    #[test]
+    fn when_the_audio_socket_is_marked_an_ipv4_peer_reads_expedited_forwarding() {
+        let socket = crate::network::bind_audio_std(0).unwrap();
+        assert!(mark_voice(&socket).is_some());
         let peer = receiver("127.0.0.1:0");
 
         socket
             .send_to(b"audio", peer.local_addr().unwrap())
-            .await
             .unwrap();
 
         assert_eq!(received_traffic_class(&peer, false), EF_TRAFFIC_CLASS as u8);
     }
 
     /// Verifies: REQ-CON-160
-    #[tokio::test]
-    async fn when_the_audio_socket_is_marked_an_ipv6_peer_reads_expedited_forwarding() {
+    #[test]
+    fn when_the_audio_socket_is_marked_an_ipv6_peer_reads_expedited_forwarding() {
         if std::net::UdpSocket::bind("[::1]:0").is_err() {
             return;
         }
-        let (socket, _priority) = marked_audio_socket().await;
+        let socket = crate::network::bind_audio_std(0).unwrap();
+        assert!(mark_voice(&socket).is_some());
         let peer = receiver("[::1]:0");
 
         socket
             .send_to(b"audio", peer.local_addr().unwrap())
-            .await
             .unwrap();
 
         assert_eq!(received_traffic_class(&peer, true), EF_TRAFFIC_CLASS as u8);
     }
 
     /// Verifies: REQ-CON-160
-    #[tokio::test]
-    async fn when_the_audio_socket_is_not_marked_a_peer_reads_no_priority() {
-        let socket = UdpSocket::from_std(crate::network::bind_audio_std(0).unwrap()).unwrap();
+    #[test]
+    fn when_the_audio_socket_is_not_marked_a_peer_reads_no_priority() {
+        let socket = crate::network::bind_audio_std(0).unwrap();
         let peer = receiver("127.0.0.1:0");
 
         socket
             .send_to(b"audio", peer.local_addr().unwrap())
-            .await
             .unwrap();
 
         assert_eq!(received_traffic_class(&peer, false), 0);

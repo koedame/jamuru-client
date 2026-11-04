@@ -15,7 +15,6 @@ use tokio::sync::Notify;
 use tracing::{debug, error, trace};
 
 use super::error::NetworkError;
-use super::priority::VoicePriority;
 use super::transport::{bind_std, canonical_addr, UdpTransport, RECV_BUFFER_SIZE};
 
 /// How many datagrams a lane holds for a reader that has fallen behind. Past that they are
@@ -143,7 +142,6 @@ pub struct UdpMux {
     local_addr: SocketAddr,
     lanes: Arc<Mutex<Vec<Arc<LaneShared>>>>,
     reader: tokio::task::JoinHandle<()>,
-    priority: Option<Arc<VoicePriority>>,
 }
 
 impl UdpMux {
@@ -182,19 +180,7 @@ impl UdpMux {
             local_addr,
             lanes,
             reader,
-            priority: None,
         })
-    }
-
-    /// Marks what is sent to every peer as voice, where the system takes it (see
-    /// [`VoicePriority`]). Applies to the transports made from now on.
-    pub fn mark_voice(&mut self) {
-        self.priority = VoicePriority::on(&self.socket).map(Arc::new);
-    }
-
-    /// How the packets are marked as voice, if they are
-    pub fn voice_mark(&self) -> Option<&'static str> {
-        self.priority.as_ref().map(|priority| priority.how())
     }
 
     /// The address every peer sends to
@@ -220,7 +206,6 @@ impl UdpMux {
                 shared,
                 lanes: self.lanes.clone(),
             },
-            self.priority.clone(),
         )
     }
 }

@@ -26,12 +26,17 @@ OS ごとの付け方:
 |----|--------|------|
 | Linux | `IP_TOS` と `IPV6_TCLASS` を 0xB8、`SO_PRIORITY` を 6 | IPv6 のソケットは IPv4 の相手へ IPv4 の見出しで送るので、両方に付ける。`SO_PRIORITY` は手元の Wi-Fi ドライバの待ち行列に載せる（0〜6 は特権が要らない） |
 | macOS | `SO_NET_SERVICE_TYPE` を `NET_SERVICE_TYPE_VO` | DSCP と Wi-Fi の待ち行列の両方が音声になる（Apple の推奨）。拒まれたときだけ `IP_TOS` / `IPV6_TCLASS` |
-| Windows | qWAVE（`QOSCreateHandle` → `QOSAddSocketToFlow` に `QOSTrafficTypeVoice`、`QOS_NON_ADAPTIVE_FLOW`） | `setsockopt(IP_TOS)` は既定で無視される。DSCP を手で指定する `QOSSetOutgoingDSCPValue` は管理者の権限が要るので使わない |
+| Windows | `IP_TOS` と `IPV6_TCLASS` を 0xB8 | Windows 11（ビルド 26200）で、レジストリの `DisableUserTOSSetting` が無い既定のまま、`IP_TOS` を付けた UDP のパケットが 0xB8 で届くことを測った（下の「測定」）。管理者の権限は要らない |
 
-Windows の qWAVE は、接続していない UDP ソケットでは送り先のアドレスごとにフローを作る。そこで、あるアドレスへ最初のパケットを送るときにフローを足す。
-足す作業は qWAVE のサービスへの問い合わせで数ミリ秒かかることがあり、音声の受信と同じスレッドでは待たないので、専用のスレッドで行う。足し終わるまでの最初のパケットは印なしで出る。
+Windows で qWAVE（`QOSCreateHandle` → `QOSAddSocketToFlow` に `QOSTrafficTypeVoice`）を使わない理由:
 
-付けられなかったとき（OS が対応しない・拒まれた・qWAVE が使えない）は、ログに理由を残し、印なしで音声を送り続ける。印は要望であって、音声の送受信の条件にしない。
+- 音声のソケットは IPv4 と IPv6 の両用の 1 本（ADR-093）。qWAVE は、IPv6 のソケットから IPv4 の宛先へのフローを作れない（`ERROR_INVALID_PARAMETER`）。IPv4-mapped の宛先も作れない（`ERROR_NOT_FOUND`）。IPv4 の相手には印を付けられない。
+- フローは宛先ごとに作るため、最初のパケットが印なしで出て、宛先が変わるたびに足す仕組みが要る。
+- 音声に付く値が 56（CS7）で、46 ではない。46 を指定する `QOSSetOutgoingDSCPValue` は管理者の権限が要る。
+
+古い Windows で `IP_TOS` が無視されるかは測っていない。無視される場合は印なしで動く（害は無い）。
+
+付けられなかったとき（OS が対応しない・拒まれた）は、ログに理由を残し、印なしで音声を送り続ける。印は要望であって、音声の送受信の条件にしない。
 
 ### 2. 設定で切れる。既定はオン
 
@@ -45,10 +50,27 @@ Windows の qWAVE は、接続していない UDP ソケットでは送り先の
 
 - 同じ Wi-Fi で他の通信が流れていても、音声が先に送られる。遅延（`roundtrip_total_ms`）と音質は、パケットの中身を変えないので変わらない。
 - 印を消す・落とすネットワークでは、付けても付けなくても同じ（付けて悪くなる回線は設定で切る）。
-- qWAVE は Windows の「Quality Windows Audio Video Experience」サービスに依存する。サービスが止まっているときは印なしになる。
-- 付けた依存: Windows の `windows` crate に `Win32_NetworkManagement_QoS` の機能を足した。同じ crate・同じ版なので、ライセンスの許可リストと第三者ライセンスの表示は変わらない。
+- 付けるのはソケットのオプション 1 つで、依存の追加は無い。パケットごとの処理も増えない。
 
 ## 検証
 
 Linux では、印を付けたソケットから送ったデータグラムを、受け取る側が `IP_RECVTOS` / `IPV6_RECVTCLASS` で読み、IPv4・IPv6 のどちらも 0xB8（EF）であること、付けないソケットでは 0 であることをテストにした（`src/network/priority.rs`）。
 Windows・macOS では、ベータ版を入れた端末から LAN の Linux へ音声を送り、受け取る側の見出しの値を測る。結果は下の「測定」に残す。
+
+## 測定
+
+### Windows でどの付け方が効くか（IPv4）
+
+Windows 11（ビルド 26200、`DisableUserTOSSetting` は未設定）の PC から、同じ LAN の Linux へ UDP を 30 個ずつ送り、受ける側が `IP_RECVTOS` で IPv4 の見出しの ToS を読んだ。
+
+| 送る側のソケットと付け方 | 受けた ToS（30 個中） |
+|---|---|
+| IPv4 ソケット、付けない | 0x00 |
+| IPv4 ソケット、`IP_TOS` = 0xB8 | 0xB8（30） |
+| 両用ソケット、`IP_TOS` = 0xB8、IPv4 の宛先 | 0xB8（30） |
+| IPv4 ソケット、qWAVE の音声フロー（IPv4 の宛先） | 0xE0 = 56（30） |
+| 両用ソケット、qWAVE（IPv4 の宛先） | フローを作れず（`ERROR_INVALID_PARAMETER`）、0x00 |
+| 両用ソケット、qWAVE（IPv4-mapped の宛先） | フローを作れず（`ERROR_NOT_FOUND`）、0x00 |
+| 両用ソケット、qWAVE（宛先なし） | フローを作れず（`ERROR_INVALID_PARAMETER`）、0x00 |
+
+`IPV6_TCLASS` を Windows で付けるところまでは通った（エラーなし）が、受ける側で読む IPv6 の経路が手元に無く、届いた値は測っていない。
