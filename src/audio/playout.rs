@@ -1135,7 +1135,7 @@ mod tests {
     fn drive_losing(buffer: &mut PlayoutBuffer, next: &mut u32, count: u32, lose_every: u32) {
         let mut out = frame(0.0);
         for _ in 0..count {
-            if lose_every == 0 || *next % lose_every != 0 {
+            if lose_every == 0 || !(*next).is_multiple_of(lose_every) {
                 buffer.write(*next, &frame(*next as f32));
             }
             *next += 1;
