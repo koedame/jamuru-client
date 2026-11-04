@@ -24,6 +24,7 @@ import { RecordingMark, RecordingPanel, useRoomRecording } from "../components/R
 import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
 import { PeerLinkDialog } from "../components/PeerLinkDialog";
+import { useBufferRequests } from "../components/BufferRequest";
 import { Toast, ToastStack } from "../components/Toast";
 import { LeaveDialog } from "../components/LeaveDialog";
 import { EntryNameDialog } from "../components/EntryNameDialog";
@@ -70,6 +71,7 @@ import {
   configGetEffectiveServerUrl,
   windowResizeMain,
   type HelpEvent,
+  PEER_MESSAGE_FEATURE,
   PEER_APP_TOO_OLD,
   type PeerLinkStatus,
   type DeviceProblem,
@@ -522,6 +524,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // Helping with settings (ADR-043). Its events come from the backend as the
   // room's events are read.
   const settingsHelp = useSettingsHelp(connectionId, participants);
+  // Asking participants to buffer longer, and their asks of this app (ADR-097)
+  // A helper's window shows the helped app's room and changes none of its buffers.
+  const bufferRequests = useBufferRequests(helping ? null : connectionId, participants);
   // A helper's window shows the helped app's room: it does not record it
   const recording = useRoomRecording(phase === "connected" && !helping);
   const settingsHelpEventRef = useRef(settingsHelp.onEvent);
@@ -1211,6 +1216,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
         <ToastStack>
           {settingsHelp.toast}
+          {bufferRequests.toast}
           {recording.toast}
           {delayNoticeVisible && <Toast type="success" message={t("notification.delayAdjusted", { ms: Number(adjustedDelayMs.toFixed(1)) })} />}
           {oldAppWarning && <Toast type="warning" message={oldAppWarning} />}
@@ -1277,12 +1283,16 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         </ToastStack>
 
         {settingsHelp.overlays}
+        {bufferRequests.overlays}
         {helpedBy !== null && <SettingsHelpMirror name={helpedBy} open={presence.remotePanelOpen} />}
         {presence.marks}
 
         {detailParticipant && (
           <PeerLinkDialog
+            peerId={detailParticipant.id}
             peerName={detailParticipant.name}
+            askable={(detailParticipant.features ?? []).includes(PEER_MESSAGE_FEATURE)}
+            requests={helping ? undefined : bufferRequests}
             link={links.find((l) => l.peer_id === detailParticipant.id)}
             localSampleRate={localSampleRate}
             onClose={() => setDetailPeerId(null)}
