@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { FormField } from "../FormField";
 import { Select } from "../Select";
 import { Input } from "../Input";
+import type { BufferAskPolicy } from "../../../lib/tauri";
 import "./TabContent.css";
 
 export type Language = "ja" | "en";
@@ -25,6 +26,10 @@ export interface GeneralTabProps {
   askNameOnEntry?: boolean;
   /** Called when the person turns the name confirmation on or off; the switch is left out when absent */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
+  /** Whether asks to buffer a participant's audio for longer are put to the person or turned down (ADR-097) */
+  bufferAsks?: BufferAskPolicy;
+  /** Called when the person chooses; the section is left out when absent */
+  onBufferAsksChange?: (policy: BufferAskPolicy) => void;
   /** Current language */
   language: Language;
   /** Language change handler */
@@ -43,6 +48,8 @@ export function GeneralTab({
   onDisplayNameChange,
   askNameOnEntry = true,
   onAskNameOnEntryChange,
+  bufferAsks = "ask",
+  onBufferAsksChange,
   language,
   onLanguageChange,
   serverUrl,
@@ -98,6 +105,30 @@ export function GeneralTab({
             </span>
           </span>
         </label>
+      )}
+
+      {onBufferAsksChange && (
+        <>
+          <div className="tab-content__divider" />
+
+          <h2 className="tab-content__title">{t("bufferRequest.policy.title")}</h2>
+
+          <FormField
+            label={t("bufferRequest.policy.label")}
+            htmlFor="buffer-asks-select"
+            hint={t("bufferRequest.policy.hint")}
+          >
+            <Select
+              id="buffer-asks-select"
+              options={[
+                { value: "ask", label: t("bufferRequest.policy.ask") },
+                { value: "never", label: t("bufferRequest.policy.never") },
+              ]}
+              value={bufferAsks}
+              onChange={(value) => onBufferAsksChange(value as BufferAskPolicy)}
+            />
+          </FormField>
+        </>
       )}
 
       <div className="tab-content__divider" />
