@@ -338,17 +338,30 @@ fn while_a_run_is_under_way_the_session_gets_silence_and_after_it_the_input_agai
         }
     });
     let mut out_at = 0;
+    let mut cancelled = false;
     while clock.advance_to(out_at) {
         output_at(&mut vec![0.9f32; 128], RATE, clock.at(out_at));
-        seen.lock().unwrap().push(on_input(&[0.0; 128], 2, RATE));
+        // Once cancelled, the meter thread ends the run as soon as it wakes, so
+        // whether this call still sees the run is a race; only count the ones before
+        if !cancelled {
+            seen.lock().unwrap().push(on_input(&[0.0; 128], 2, RATE));
+        }
         out_at += 64;
-        if out_at > 20 * u64::from(RATE) {
+        if out_at > 20 * u64::from(RATE) && !cancelled {
             cancel();
+            cancelled = true;
         }
     }
     meter.join().unwrap();
 
-    assert!(seen.lock().unwrap().iter().all(|muted| *muted));
+    assert!(!seen.lock().unwrap().is_empty());
+    let seen = seen.lock().unwrap();
+    assert!(
+        seen.iter().all(|muted| *muted),
+        "the session heard the input at call {:?} of {}",
+        seen.iter().position(|muted| !*muted),
+        seen.len()
+    );
     assert!(!on_input(&[0.0; 128], 2, RATE), "the run is over");
     assert_eq!(state(), State::Done(Err(Failure::Cancelled)));
 }
