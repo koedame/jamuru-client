@@ -13,7 +13,7 @@
 }
 
 .peer-link-dialog {
-  width: 320px;
+  width: 360px;
   max-width: calc(100vw - 2 * var(--space-md));
   max-height: calc(100vh - 2 * var(--space-md));
   overflow-y: auto;

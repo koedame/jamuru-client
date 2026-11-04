@@ -18,7 +18,7 @@ import type { UpdateSectionProps } from "./tabs/UpdateSection";
 import { SelectOption } from "./Select";
 import type { LegalSectionProps } from "../Terms/LegalSection";
 import { MicIcon, SlidersIcon, ShieldIcon, ActivityIcon, InfoIcon } from "./icons";
-import { CompleteDiagnosticsResult, Hang, RecommendedPreset, WasapiMode, WasapiSettings } from "../../lib/tauri";
+import { BufferAskPolicy, CompleteDiagnosticsResult, Hang, RecommendedPreset, WasapiMode, WasapiSettings } from "../../lib/tauri";
 import "./SettingsPanel.css";
 
 /** `devices` is the Audio tab: its id is kept because tests and the settings help address it. */
@@ -43,6 +43,8 @@ export interface SettingsPanelProps {
   displayNameError?: string;
   /** Whether the name is confirmed before creating or entering a room (General tab) */
   askNameOnEntry?: boolean;
+  /** Whether asks to buffer a participant's audio for longer are put to the person (General tab) */
+  bufferAsks?: BufferAskPolicy;
   /** Input devices */
   inputDevices: DeviceInfo[];
   /** Output devices */
@@ -99,6 +101,8 @@ export interface SettingsPanelProps {
   onDisplayNameChange: (name: string) => void;
   /** Turns the name confirmation before entering a room on or off (General tab, left out when absent) */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
+  /** Chooses whether such asks are put to the person or turned down (General tab, left out when absent) */
+  onBufferAsksChange?: (policy: BufferAskPolicy) => void;
   /** Input device change handler */
   onInputDeviceChange: (id: string) => void;
   /** Output device change handler */
@@ -195,6 +199,7 @@ export function SettingsPanel({
   displayName,
   displayNameError,
   askNameOnEntry,
+  bufferAsks,
   inputDevices,
   outputDevices,
   selectedInputId,
@@ -223,6 +228,7 @@ export function SettingsPanel({
   update,
   onDisplayNameChange,
   onAskNameOnEntryChange,
+  onBufferAsksChange,
   onInputDeviceChange,
   onOutputDeviceChange,
   onInputChannelLChange = () => {},
@@ -289,6 +295,8 @@ export function SettingsPanel({
             onDisplayNameChange={onDisplayNameChange}
             askNameOnEntry={askNameOnEntry}
             onAskNameOnEntryChange={onAskNameOnEntryChange}
+            bufferAsks={bufferAsks}
+            onBufferAsksChange={onBufferAsksChange}
             language={language}
             onLanguageChange={onLanguageChange}
             serverUrl={serverUrl}
