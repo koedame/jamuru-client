@@ -13,12 +13,14 @@ use cpal::SupportedBufferSize;
 /// OS version as `major.minor` (`14.6`), or just `major` where the OS has no
 /// minor (`11` on Windows). The build number is dropped.
 pub fn os_version() -> Option<String> {
-    sysinfo::System::os_version().and_then(|raw| major_minor(&raw))
+    sysinfo::System::os_version()
+        .ok()
+        .and_then(|raw| major_minor(&raw))
 }
 
 /// Installed memory in GB, rounded to a power of two (`16`, not `15.6`).
 pub fn ram_gb() -> Option<u32> {
-    let mut system = sysinfo::System::new();
+    let mut system = sysinfo::System::new().ok()?;
     system.refresh_memory();
     round_ram_gb(system.total_memory())
 }
