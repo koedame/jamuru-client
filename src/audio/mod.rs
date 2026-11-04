@@ -22,6 +22,7 @@ mod listing;
 pub mod mic_access;
 mod monitor;
 mod open;
+mod peer_buffer;
 mod peer_mix;
 mod playout;
 mod plc;
@@ -97,6 +98,10 @@ pub use room_recorder::{
 #[cfg(target_os = "windows")]
 pub use slot::AsioSwitch;
 pub use slot::DeviceSlot;
+pub use peer_buffer::{
+    ring_frames, Driver as PeerBufferDriver, GrantView, Own as OwnBuffer, PeerBufferControl, Terms as BufferTerms,
+    View as PeerBufferView, MAX_BUFFER_MS10, MAX_TOLERANCE_TENTHS,
+};
 pub use stream::{
     balance_gains, capture_to_wire, mono_to_wire, pan_received, rms_level, GainRamp,
     PeerRateChange, ReceivePath, ADAPT_INTERVAL, WIRE_CHANNELS,
