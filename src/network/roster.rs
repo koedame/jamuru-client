@@ -149,6 +149,17 @@ impl Roster {
             .collect()
     }
 
+    /// The participants the room no longer lists but whose audio still arrives, with the name
+    /// they had: the person can still hear them, so the screen keeps them where it can be
+    /// turned down (REQ-CON-150).
+    pub fn departed(&self) -> Vec<(Uuid, String)> {
+        self.links
+            .iter()
+            .filter(|link| link.departed)
+            .map(|link| (link.peer, link.name.clone()))
+            .collect()
+    }
+
     /// This app, as `own`, is in a room with `peers` (it just created, joined
     /// or rejoined it). Whichever side comes second finds the other's address
     /// already there; whichever comes first learns it from [`Roster::updated`].
@@ -1148,6 +1159,42 @@ mod tests {
             roster.peers().is_empty(),
             "they are not listed as in the room"
         );
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_is_still_reported_as_departed_with_their_name() {
+        let mut roster = hearing(&[2, 3]);
+
+        roster.left(id(2));
+
+        assert_eq!(roster.departed(), vec![(id(2), "peer-2".to_string())]);
+        assert_eq!(roster.linked(), vec![id(3)]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_and_their_audio_stops_is_no_longer_reported_as_departed() {
+        let mut roster = hearing(&[2]);
+        roster.left(id(2));
+
+        roster.link_is(id(2), LinkHealth::Silent);
+
+        assert_eq!(roster.departed(), vec![]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_and_the_same_name_publishes_the_same_addresses_is_no_longer_departed(
+    ) {
+        let mut roster = hearing(&[2]);
+        roster.left(id(2));
+        let again = named(12, "peer-2", Some("192.0.2.2:5000"));
+
+        roster.joined(again.clone());
+        roster.updated(again);
+
+        assert_eq!(roster.departed(), vec![]);
     }
 
     /// Verifies: REQ-CON-150
