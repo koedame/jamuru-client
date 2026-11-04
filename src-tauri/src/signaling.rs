@@ -1076,7 +1076,16 @@ pub async fn signaling_poll_events(
                                 );
                             }
                             PeerBody::DeviceDelay(notice) => {
-                                state.set_peer_delay(&from.to_string(), notice.stated());
+                                // The relay sends a broadcast back to its sender too
+                                let is_own_notice = state
+                                    .room_state
+                                    .lock()
+                                    .await
+                                    .as_ref()
+                                    .is_some_and(|rs| rs.peer_id == from.to_string());
+                                if !is_own_notice {
+                                    state.set_peer_delay(&from.to_string(), notice.stated());
+                                }
                             }
                             PeerBody::Recording(RecordingNotice { on }) => {
                                 events.extend(
@@ -2763,5 +2772,36 @@ mod tests {
             .stated(),
         );
         assert!(state.peer_delays().is_empty());
+    }
+
+    /// Verifies: REQ-CON-035
+    #[tokio::test]
+    async fn when_the_relay_sends_this_apps_own_delay_back_it_is_not_kept_as_a_participants() {
+        let own = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let said = |from: Uuid, ms: &str| {
+            format!(
+                r#"{{"type":"PeerMessage","data":{{"from":"{from}","from_name":"Bo","body":{{"device_delay":{{"delay_ms":{ms}}}}}}}}}"#
+            )
+        };
+        let url = spawn_server_sending(vec![said(own, "36.0"), said(other, "23.5")]).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, own, &[(other, "Bo")]);
+
+        for _ in 0..20 {
+            poll_until_events(&app).await;
+            if !app.state::<SignalingState>().peer_delays().is_empty() {
+                break;
+            }
+        }
+
+        let kept = app.state::<SignalingState>().peer_delays();
+        assert_eq!(kept.get(&other.to_string()), Some(&23.5));
+        assert_eq!(kept.get(&own.to_string()), None);
     }
 }
