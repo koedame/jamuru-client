@@ -42,6 +42,8 @@
 //! `try_lock` on the reader side; a contended frame is concealed rather than
 //! waited for, which costs one frame and cannot invert priorities.
 
+use std::time::Duration;
+
 use super::plc::PcmPlc;
 
 /// Share of reads over an adaptation window that found their frame missing
@@ -75,6 +77,27 @@ const TRIM_WHEN_EXCESS_AT_LEAST: u32 = 2;
 /// adaptation does not count them, and the first frame after them starts the
 /// buffer again at the delay it had.
 const SILENT_AFTER_STARVED_READS: u32 = 375;
+
+/// Seconds without a missing frame after which an automatic grant gives a tenth
+/// of its delay back (ADR-097).
+const GRANT_CLEAN_SECS: f32 = 15.0;
+
+/// What a participant asked this buffer to hold, in frames (ADR-097).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Grant {
+    /// The longest delay the grant asks for
+    pub cap_frames: u32,
+    /// How far an automatic grant raises its delay at a time
+    pub step_frames: u32,
+    /// The shortest delay an automatic grant comes down to
+    pub min_frames: u32,
+    /// Missing frames a second the grant lets pass before its delay is
+    /// raised, in tenths
+    pub tolerance_tenths: u32,
+    /// Whether the delay follows the link between `min_frames` and
+    /// `cap_frames`; otherwise it is `cap_frames`
+    pub auto: bool,
+}
 
 /// How the buffer is sized and how long it holds audio back.
 ///
@@ -230,11 +253,31 @@ struct Slot {
 pub struct PlayoutBuffer {
     slots: Vec<Slot>,
     config: PlayoutConfig,
-    /// Delay in force now; adaptation moves it between min and max.
+    /// Delay in force now: the longer of `own_target_frames` and `floor_frames`.
     target_delay_frames: u32,
+    /// The delay this buffer chooses for itself - adaptation moves it between
+    /// min and max - or the one the user pinned it to (ADR-097).
+    own_target_frames: u32,
+    /// The delay the user pinned this buffer to; adaptation leaves it alone
+    /// (ADR-097).
+    pinned_frames: Option<u32>,
+    /// What a participant asked this buffer to hold at least, and the delay
+    /// that asks for now (ADR-097).
+    grant: Option<Grant>,
+    floor_frames: u32,
+    /// Seconds without a missing frame while an automatic grant is in force
+    grant_clean_secs: f32,
+    /// Seconds since adaptation last judged a window
+    adapt_elapsed_secs: f32,
     /// Largest `max_delay_frames` the ring was sized for. `set_delay` may move
     /// to any delay up to it without allocating.
     ring_delay_frames: u32,
+    /// The ring is sized for more than the longest delay a preset adapts to,
+    /// so that a delay the user chose fits. A sequence this far from the one
+    /// being played is taken for a restarted stream, and that distance must not
+    /// grow with the room the ring was given (ADR-097): it is what the ring
+    /// would have been for this delay.
+    resync_basis_frames: u32,
     /// Frames still to add (positive) or remove (negative) so that what is
     /// held catches up with `target_delay_frames` (ADR-031). Only meaningful
     /// while playing.
@@ -280,7 +323,22 @@ impl PlayoutBuffer {
     /// `ring_delay_frames`, so [`Self::set_delay`] can move to any of them
     /// without allocating (ADR-031).
     pub fn with_ring_for(config: PlayoutConfig, ring_delay_frames: u32) -> Self {
+        Self::with_ring_and_basis(config, ring_delay_frames, ring_delay_frames)
+    }
+
+    /// Like [`Self::with_ring_for`], with a ring that can hold up to
+    /// `ring_delay_frames` of delay while a restarted stream is still told
+    /// from a late one by the distance a ring for `resync_basis_frames` would
+    /// have had (ADR-097).
+    pub fn with_ring_and_basis(
+        config: PlayoutConfig,
+        ring_delay_frames: u32,
+        resync_basis_frames: u32,
+    ) -> Self {
         let ring_delay_frames = ring_delay_frames.max(config.max_delay_frames);
+        let resync_basis_frames = resync_basis_frames
+            .max(config.max_delay_frames)
+            .min(ring_delay_frames);
         let capacity = PlayoutConfig::capacity_frames(ring_delay_frames);
         let frame_samples = config.frame_samples.max(1);
         let slot_samples = config.slot_samples();
@@ -300,7 +358,14 @@ impl PlayoutBuffer {
         Self {
             slots,
             target_delay_frames: config.target_delay_frames,
+            own_target_frames: config.target_delay_frames,
+            pinned_frames: None,
+            grant: None,
+            floor_frames: 0,
+            grant_clean_secs: 0.0,
+            adapt_elapsed_secs: 0.0,
             ring_delay_frames,
+            resync_basis_frames,
             pending_shift: 0,
             adapt_seen: 0,
             adapt_missed: 0,
@@ -346,7 +411,7 @@ impl PlayoutBuffer {
             Some(next) => {
                 let distance = sequence.wrapping_sub(next) as i32;
 
-                if distance.unsigned_abs() as usize >= self.slots.len() {
+                if distance.unsigned_abs() as usize >= self.resync_distance() {
                     // Too far from the current sequence to be a gap in the
                     // same stream - the peer restarted its numbering, or we
                     // ran past what it sent. Waiting for a sequence that will
@@ -491,7 +556,8 @@ impl PlayoutBuffer {
         self.target_delay_frames
     }
 
-    /// Moves the delay, clamped to the configured range. Used by adaptation.
+    /// Moves the delay this buffer chooses for itself, clamped to the
+    /// configured range. Used by adaptation.
     ///
     /// While playing, what is held follows: see the module docs.
     pub fn set_target_delay_frames(&mut self, frames: u32) {
@@ -501,6 +567,17 @@ impl PlayoutBuffer {
                 .max_delay_frames
                 .max(self.config.min_delay_frames),
         );
+        self.own_target_frames = frames;
+        self.apply_target();
+    }
+
+    /// Holds the delay at the longer of what the buffer chose and what a
+    /// participant asked it to keep, moving what is held to it.
+    fn apply_target(&mut self) {
+        let frames = self
+            .own_target_frames
+            .max(self.floor_frames)
+            .min(self.ring_delay_frames);
         if self.playing {
             self.pending_shift += frames as i32 - self.target_delay_frames as i32;
             self.restart_depth_window();
@@ -515,7 +592,8 @@ impl PlayoutBuffer {
     /// the buffer started with: leaving passthrough for a buffered preset, or
     /// the other way round, has to land on the delay that was asked for. The
     /// delay is also what [`Self::reset`] returns to. It is limited only by
-    /// the ring, which was sized up front.
+    /// the ring, which was sized up front. A delay the user pinned for this
+    /// participant stays (ADR-097).
     pub fn set_delay(&mut self, frames: u32) {
         let bounds = PlayoutConfig::for_delay(self.config.frame_samples, frames);
         self.config.min_delay_frames = bounds.min_delay_frames;
@@ -524,7 +602,72 @@ impl PlayoutBuffer {
         self.clean_windows = 0;
         self.shrink_after_windows = CLEAN_WINDOWS_BEFORE_SHRINK;
         self.windows_since_shrink = None;
+        if self.pinned_frames.is_none() {
+            self.set_target_delay_frames(self.config.target_delay_frames);
+        }
+    }
+
+    /// Holds the delay at `frames` and stops adapting it: the user chose
+    /// this participant's delay (ADR-097). Limited by the ring; returns the
+    /// delay in force.
+    pub fn pin_delay(&mut self, frames: u32) -> u32 {
+        let frames = frames.min(self.ring_delay_frames);
+        self.pinned_frames = Some(frames);
+        self.own_target_frames = frames;
+        self.apply_target();
+        self.target_delay_frames
+    }
+
+    /// Goes back to the delay the preset asks for and to adapting it.
+    pub fn unpin_delay(&mut self) {
+        if self.pinned_frames.take().is_none() {
+            return;
+        }
+        self.clean_windows = 0;
+        self.shrink_after_windows = CLEAN_WINDOWS_BEFORE_SHRINK;
+        self.windows_since_shrink = None;
         self.set_target_delay_frames(self.config.target_delay_frames);
+    }
+
+    /// Whether the user pinned the delay.
+    pub fn is_pinned(&self) -> bool {
+        self.pinned_frames.is_some()
+    }
+
+    /// Sets what a participant asked this buffer to keep, or takes it away
+    /// (ADR-097). Asking again with other terms keeps the delay an automatic
+    /// grant had come to, within the new cap. Returns the delay it asks for
+    /// now, in frames.
+    pub fn set_grant(&mut self, grant: Option<Grant>) -> u32 {
+        match grant {
+            None => {
+                self.floor_frames = 0;
+                self.grant_clean_secs = 0.0;
+            }
+            Some(grant) => {
+                let cap = grant.cap_frames.min(self.ring_delay_frames);
+                let least = grant.min_frames.min(cap);
+                self.floor_frames = if grant.auto {
+                    let kept = if self.grant.is_some() {
+                        self.floor_frames
+                    } else {
+                        least
+                    };
+                    kept.clamp(least, cap)
+                } else {
+                    cap
+                };
+            }
+        }
+        self.grant = grant;
+        self.apply_target();
+        self.floor_frames
+    }
+
+    /// The delay a participant's ask holds this buffer to at least, in frames;
+    /// 0 without one.
+    pub fn floor_frames(&self) -> u32 {
+        self.floor_frames
     }
 
     /// Follows the link over the time since the last call: grows the delay
@@ -554,7 +697,16 @@ impl PlayoutBuffer {
     /// move costs a gap or a skip (ADR-031), so the delay must not flip back
     /// and forth: a shrink that is followed by a grow within
     /// [`BOUNCE_WITHIN_WINDOWS`] was wrong, and the next one waits twice as long.
+    ///
+    /// A delay the user pinned is not moved (ADR-097); the same stretch still
+    /// judges an automatic grant.
     pub fn adapt(&mut self) -> Option<u32> {
+        self.adapt_over(Duration::from_secs(1))
+    }
+
+    /// [`Self::adapt`] for a call made `elapsed` after the previous one.
+    pub fn adapt_over(&mut self, elapsed: Duration) -> Option<u32> {
+        self.adapt_elapsed_secs += elapsed.as_secs_f32();
         // A run of starved reads still going on may turn out to be silence, so
         // it is not judged until it ends or proves to be one.
         let undecided = if self.starved_streak < SILENT_AFTER_STARVED_READS {
@@ -576,10 +728,14 @@ impl PlayoutBuffer {
         self.adapt_seen = seen;
         self.adapt_missed = missed_total;
         self.windows_since_shrink = self.windows_since_shrink.map(|n| n + 1);
+        let window_secs = std::mem::take(&mut self.adapt_elapsed_secs);
 
         let before = self.target_delay_frames;
+        let own_before = self.own_target_frames;
         let miss_rate = missed as f32 / window as f32;
-        if miss_rate > GROW_ABOVE_MISS_RATE {
+        if self.pinned_frames.is_some() {
+            // Not the buffer's to move
+        } else if miss_rate > GROW_ABOVE_MISS_RATE {
             self.clean_windows = 0;
             if self
                 .windows_since_shrink
@@ -589,13 +745,13 @@ impl PlayoutBuffer {
                     (self.shrink_after_windows * 2).min(MAX_CLEAN_WINDOWS_BEFORE_SHRINK);
             }
             self.windows_since_shrink = None;
-            self.set_target_delay_frames(before + 1);
+            self.set_target_delay_frames(own_before + 1);
         } else if miss_rate < SHRINK_BELOW_MISS_RATE {
             self.clean_windows += 1;
             if self.clean_windows >= self.shrink_after_windows {
                 self.clean_windows = 0;
-                self.set_target_delay_frames(before.saturating_sub(1));
-                if self.target_delay_frames != before {
+                self.set_target_delay_frames(own_before.saturating_sub(1));
+                if self.own_target_frames != own_before {
                     self.windows_since_shrink = Some(0);
                 }
             }
@@ -603,7 +759,38 @@ impl PlayoutBuffer {
             self.clean_windows = 0;
         }
 
+        self.follow_grant(missed, window_secs);
+
         (self.target_delay_frames != before).then_some(self.target_delay_frames)
+    }
+
+    /// Moves the delay an automatic grant asks for: up by a step when the
+    /// frames missing in `secs` seconds were more often than the grant allows,
+    /// down by a tenth after [`GRANT_CLEAN_SECS`] without one (ADR-097).
+    fn follow_grant(&mut self, missed: u64, secs: f32) {
+        let Some(grant) = self.grant.filter(|grant| grant.auto) else {
+            return;
+        };
+        let cap = grant.cap_frames.min(self.ring_delay_frames);
+        let least = grant.min_frames.min(cap);
+        let per_second_tenths = missed as f32 * 10.0 / secs.max(0.001);
+        let mut floor = self.floor_frames;
+        if per_second_tenths > grant.tolerance_tenths as f32 {
+            self.grant_clean_secs = 0.0;
+            floor = (floor + grant.step_frames.max(1)).min(cap);
+        } else if missed == 0 {
+            self.grant_clean_secs += secs;
+            if self.grant_clean_secs >= GRANT_CLEAN_SECS {
+                self.grant_clean_secs = 0.0;
+                floor = (floor * 9 / 10).min(floor.saturating_sub(1)).max(least);
+            }
+        } else {
+            self.grant_clean_secs = 0.0;
+        }
+        if floor != self.floor_frames {
+            self.floor_frames = floor;
+            self.apply_target();
+        }
     }
 
     pub fn stats(&self) -> PlayoutStats {
@@ -618,7 +805,13 @@ impl PlayoutBuffer {
         }
         self.play_sequence = None;
         self.playing = false;
-        self.target_delay_frames = self.config.target_delay_frames;
+        self.own_target_frames = self.pinned_frames.unwrap_or(self.config.target_delay_frames);
+        self.target_delay_frames = self
+            .own_target_frames
+            .max(self.floor_frames)
+            .min(self.ring_delay_frames);
+        self.grant_clean_secs = 0.0;
+        self.adapt_elapsed_secs = 0.0;
         self.last_len = self.config.frame_samples;
         self.plc.reset();
         self.stats = PlayoutStats::default();
@@ -631,6 +824,13 @@ impl PlayoutBuffer {
         self.shrink_after_windows = CLEAN_WINDOWS_BEFORE_SHRINK;
         self.windows_since_shrink = None;
         self.restart_depth_window();
+    }
+
+    /// How far a sequence may be from the one being played and still belong to
+    /// the same stream.
+    fn resync_distance(&self) -> usize {
+        PlayoutConfig::capacity_frames(self.resync_basis_frames.max(self.target_delay_frames))
+            .min(self.slots.len())
     }
 
     fn slot_for(&self, sequence: u32) -> usize {
@@ -926,6 +1126,257 @@ mod tests {
             min_delay_frames: min,
             max_delay_frames: max,
         })
+    }
+
+    /// Delivers `count` frames, one read each, losing the ones whose sequence is
+    /// a multiple of `lose_every` (0 loses none).
+    fn drive_losing(buffer: &mut PlayoutBuffer, next: &mut u32, count: u32, lose_every: u32) {
+        let mut out = frame(0.0);
+        for _ in 0..count {
+            if lose_every == 0 || *next % lose_every != 0 {
+                buffer.write(*next, &frame(*next as f32));
+            }
+            *next += 1;
+            let _ = buffer.read_into(&mut out);
+        }
+    }
+
+    fn roomy(target: u32, min: u32, max: u32, ring: u32) -> PlayoutBuffer {
+        PlayoutBuffer::with_ring_and_basis(
+            PlayoutConfig {
+                frame_samples: 4,
+                target_delay_frames: target,
+                min_delay_frames: min,
+                max_delay_frames: max,
+            },
+            ring,
+            max,
+        )
+    }
+
+    /// A delay the user chose is the delay held: a lossy stretch that would
+    /// have grown it, and a clean one that would have given it back, leave it
+    /// alone, and so does a switch of preset.
+    ///
+    /// Verifies: REQ-LAT-031
+    #[test]
+    fn a_pinned_delay_is_held_whatever_the_link_does_and_whatever_the_preset() {
+        let mut buffer = roomy(2, 1, 6, 40);
+        let mut next = 0;
+        assert_eq!(buffer.pin_delay(12), 12, "longer than any preset adapts to");
+        drive(&mut buffer, &mut next, 20, false);
+
+        drive(&mut buffer, &mut next, 40, true);
+        assert_eq!(buffer.adapt(), None, "a lossy stretch does not grow it");
+        for _ in 0..CLEAN_WINDOWS_BEFORE_SHRINK + 2 {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            assert_eq!(buffer.adapt(), None, "a clean stretch does not shrink it");
+        }
+        buffer.set_delay(4);
+        assert_eq!(buffer.target_delay_frames(), 12, "the preset does not move it");
+        assert!(buffer.is_pinned());
+
+        buffer.unpin_delay();
+        assert_eq!(buffer.target_delay_frames(), 4, "the preset's delay is back");
+        assert!(!buffer.is_pinned());
+    }
+
+    /// The ring bounds a pinned delay, and the delay it lands on is returned.
+    ///
+    /// Verifies: REQ-LAT-031
+    #[test]
+    fn a_pinned_delay_longer_than_the_ring_holds_is_the_longest_the_ring_holds() {
+        let mut buffer = roomy(2, 1, 6, 20);
+
+        assert_eq!(buffer.pin_delay(500), 20);
+        assert_eq!(buffer.target_delay_frames(), 20);
+    }
+
+    /// What a participant asks for is a floor under the delay this buffer
+    /// chooses: the longer of the two is held, and when the ask is taken away
+    /// the buffer is where its own choice put it.
+    ///
+    /// Verifies: REQ-LAT-032
+    #[test]
+    fn a_fixed_grant_holds_the_delay_at_its_cap_and_the_buffers_own_choice_is_back_without_it() {
+        let mut buffer = roomy(2, 1, 6, 40);
+        let grant = Grant {
+            cap_frames: 10,
+            step_frames: 2,
+            min_frames: 1,
+            tolerance_tenths: 10,
+            auto: false,
+        };
+
+        assert_eq!(buffer.set_grant(Some(grant)), 10);
+        assert_eq!(buffer.target_delay_frames(), 10);
+        let mut next = 0;
+        for _ in 0..CLEAN_WINDOWS_BEFORE_SHRINK + 1 {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            buffer.adapt();
+        }
+        assert_eq!(buffer.target_delay_frames(), 10, "its own choice shrinks, the grant stays");
+
+        assert_eq!(buffer.set_grant(None), 0);
+        assert_eq!(buffer.target_delay_frames(), 1, "its own choice, which a clean link brought down");
+    }
+
+    /// An automatic grant starts at its lowest delay and goes up a step at a
+    /// time while frames go missing more often than it allows, never past its cap.
+    ///
+    /// Verifies: REQ-LAT-032
+    #[test]
+    fn an_automatic_grant_goes_up_a_step_while_frames_go_missing_more_often_than_it_allows() {
+        let mut buffer = roomy(2, 1, 6, 60);
+        buffer.pin_delay(1);
+        let grant = Grant {
+            cap_frames: 7,
+            step_frames: 3,
+            min_frames: 1,
+            tolerance_tenths: 20,
+            auto: true,
+        };
+        assert_eq!(buffer.set_grant(Some(grant)), 1, "it starts at its lowest");
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 4, false);
+
+        // Every other frame lost: far more than two a second
+        drive(&mut buffer, &mut next, 40, true);
+        buffer.adapt();
+        assert_eq!(buffer.floor_frames(), 4);
+        assert_eq!(buffer.target_delay_frames(), 4);
+        drive(&mut buffer, &mut next, 40, true);
+        buffer.adapt();
+        assert_eq!(buffer.floor_frames(), 7);
+        drive(&mut buffer, &mut next, 40, true);
+        buffer.adapt();
+        assert_eq!(buffer.floor_frames(), 7, "the cap holds");
+    }
+
+    /// Missing frames the grant allows do not raise its delay, and neither do
+    /// they count towards the quiet that gives delay back.
+    ///
+    /// Verifies: REQ-LAT-032
+    #[test]
+    fn an_automatic_grant_stays_where_it_is_while_the_frames_missing_are_within_what_it_allows() {
+        let mut buffer = roomy(2, 1, 6, 60);
+        buffer.pin_delay(1);
+        let grant = Grant {
+            cap_frames: 20,
+            step_frames: 4,
+            min_frames: 1,
+            tolerance_tenths: 30,
+            auto: true,
+        };
+        buffer.set_grant(Some(grant));
+        let mut next = 0;
+        drive_losing(&mut buffer, &mut next, 4, 0);
+        // Hurt by the first loss, then three windows at one missing frame each
+        drive_losing(&mut buffer, &mut next, 41, 40);
+        buffer.adapt();
+        let held = buffer.floor_frames();
+        for _ in 0..20 {
+            drive_losing(&mut buffer, &mut next, 41, 40);
+            buffer.adapt();
+        }
+
+        assert_eq!(buffer.floor_frames(), held, "one a second is within three a second");
+    }
+
+    /// A tenth of the delay is given back after fifteen seconds in which no
+    /// frame went missing, and never below the lowest.
+    ///
+    /// Verifies: REQ-LAT-032
+    #[test]
+    fn an_automatic_grant_gives_a_tenth_back_after_fifteen_quiet_seconds_down_to_its_lowest() {
+        let mut buffer = roomy(2, 1, 6, 80);
+        buffer.pin_delay(1);
+        let grant = Grant {
+            cap_frames: 40,
+            step_frames: 10,
+            min_frames: 3,
+            tolerance_tenths: 10,
+            auto: true,
+        };
+        buffer.set_grant(Some(grant));
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 4, false);
+        for _ in 0..4 {
+            drive(&mut buffer, &mut next, 40, true);
+            buffer.adapt();
+        }
+        assert_eq!(buffer.floor_frames(), 40);
+        // The stretch the last growth was made in has frames missing in it
+        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+        buffer.adapt();
+        assert_eq!(buffer.floor_frames(), 40);
+
+        for second in 1..=14 {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            buffer.adapt();
+            assert_eq!(buffer.floor_frames(), 40, "second {second}: not yet");
+        }
+        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+        buffer.adapt();
+        assert_eq!(buffer.floor_frames(), 36, "a tenth of forty");
+
+        for _ in 0..2_000 {
+            drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
+            buffer.adapt();
+        }
+        assert_eq!(buffer.floor_frames(), 3, "the lowest holds");
+    }
+
+    /// Asking again with other terms keeps the delay an automatic grant had
+    /// come to, within the new cap.
+    ///
+    /// Verifies: REQ-LAT-032
+    #[test]
+    fn a_new_ask_while_one_is_held_keeps_the_delay_it_came_to_within_the_new_cap() {
+        let mut buffer = roomy(2, 1, 6, 60);
+        buffer.pin_delay(1);
+        let auto = |cap| Grant {
+            cap_frames: cap,
+            step_frames: 5,
+            min_frames: 1,
+            tolerance_tenths: 10,
+            auto: true,
+        };
+        buffer.set_grant(Some(auto(30)));
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 4, false);
+        for _ in 0..3 {
+            drive(&mut buffer, &mut next, 40, true);
+            buffer.adapt();
+        }
+        assert_eq!(buffer.floor_frames(), 16);
+
+        assert_eq!(buffer.set_grant(Some(auto(30))), 16, "same terms: no start over");
+        assert_eq!(buffer.set_grant(Some(auto(10))), 10, "a lower cap");
+    }
+
+    /// A ring made roomy for a long delay does not make a stream that restarted
+    /// its numbering take longer to be noticed.
+    ///
+    /// Verifies: REQ-LAT-031
+    #[test]
+    fn a_roomy_ring_notices_a_restarted_stream_as_soon_as_a_small_one_does() {
+        let mut small = PlayoutBuffer::with_ring_for(
+            PlayoutConfig {
+                frame_samples: 4,
+                target_delay_frames: 2,
+                min_delay_frames: 1,
+                max_delay_frames: 6,
+            },
+            6,
+        );
+        let mut roomy = roomy(2, 1, 6, 200);
+        for buffer in [&mut small, &mut roomy] {
+            let mut next = 0;
+            drive(buffer, &mut next, 10, false);
+            // The sender went on counting while nothing arrived
+            assert_eq!(buffer.write(next + 40, &frame(0.0)), WriteOutcome::Resynced);
+        }
     }
 
     /// A lossy stretch buys more delay, one frame per decision, and never past
