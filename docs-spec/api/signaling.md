@@ -332,7 +332,7 @@ sequenceDiagram
 以前にあった `propose` / `answered` / `settings`（変更を 1 件ずつ申請する形）は無くなり、届いても知らない種類として読み飛ばす。
 知らないトピックは読まずに捨てる（新しいアプリからのもの）。数値は整数の ID と設定値だけで、±(2^53−1) に収まる。
 
-`device_delay`（REQ-CON-035、[ADR-097](../adr/ADR-097-device-delay-is-measured-by-sound-and-timed-to-the-sample.md)）は `{"delay_ms": number | null}`。送り手の機器の遅延で、0.1 ms 単位。`null` は「いまの機器には測った値が無い」。範囲は 0〜500 で、外の値は受け手が捨てる。機器の名前・測った時刻・ばらつきは載せない。測ったとき・値が変わったとき・無効になったときにルームの全員へ、入室した人には入室時に個別に送る。
+`device_delay`（REQ-CON-035、[ADR-098](../adr/ADR-098-device-delay-is-measured-by-sound-and-timed-to-the-sample.md)）は `{"delay_ms": number | null}`。送り手の機器の遅延で、0.1 ms 単位。`null` は「いまの機器には測った値が無い」。範囲は 0〜500 で、外の値は受け手が捨てる。機器の名前・測った時刻・ばらつきは載せない。測ったとき・値が変わったとき・無効になったときにルームの全員へ、入室した人には入室時に個別に送る。
 
 **知らない種類は読み飛ばす（REQ-CON-030）。** `SignalingConnection::recv()` は、`type` がこの列挙に無いメッセージを
 捨てて次のメッセージを待つ。サーバーにメッセージの種類を足しても、配布済みのアプリはルームから落ちない。

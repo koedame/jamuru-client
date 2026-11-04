@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use super::codec::{create_codec, AudioCodec, CodecConfig, CodecError, CodecType};
 use super::flight::{FlightRecorder, Kind};
 use super::playout::{
-    widest_frame_samples, PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult, PlayoutStats,
-    WriteOutcome, WIDEST_PACKET_SAMPLES,
+    widest_frame_samples, Grant, PlayoutBuffer, PlayoutConfig, PlayoutRead, PlayoutResult,
+    PlayoutStats, WriteOutcome, WIDEST_PACKET_SAMPLES,
 };
 use super::preset::AudioPreset;
 use super::resampler::{create_resampler_with_channels, AudioResampler, ResamplerError};
@@ -374,11 +374,17 @@ impl ReceivePath {
             .unwrap_or(0);
         let ring_delay_frames =
             PlayoutConfig::for_delay(frame_samples, largest_preset_delay).max_delay_frames;
+        // ... and for the longest buffer a participant may be given, counted in
+        // the shortest packet (ADR-097). A restarted stream is still told from a
+        // late one by the distance the preset-sized ring has.
+        let widest_ring_frames =
+            ring_delay_frames.max(super::peer_buffer::ring_frames(sample_rate));
 
         Ok(Self {
             delay: Arc::new(AtomicU32::new(target_delay_frames)),
-            playout: Arc::new(Mutex::new(PlayoutBuffer::with_ring_for(
+            playout: Arc::new(Mutex::new(PlayoutBuffer::with_ring_and_basis(
                 PlayoutConfig::for_delay(frame_samples, target_delay_frames),
+                widest_ring_frames,
                 ring_delay_frames,
             ))),
             decoder: Arc::new(Mutex::new(Decoder {
@@ -586,6 +592,47 @@ impl ReceivePath {
         }
     }
 
+    /// Holds the delay at `frames` whatever the link does: the user chose it
+    /// (ADR-097). Returns the delay in force.
+    pub fn pin_delay_frames(&self, frames: u32) -> u32 {
+        let Ok(mut buffer) = self.playout.lock() else {
+            return self.delay_frames();
+        };
+        let held = buffer.pin_delay(frames);
+        self.delay
+            .store(buffer.target_delay_frames(), Ordering::Relaxed);
+        held
+    }
+
+    /// Goes back to the delay the preset asks for, adapting to the link.
+    pub fn unpin_delay(&self) {
+        if let Ok(mut buffer) = self.playout.lock() {
+            buffer.unpin_delay();
+            self.delay
+                .store(buffer.target_delay_frames(), Ordering::Relaxed);
+        }
+    }
+
+    /// Holds the delay to what a participant asked for, or lets go of it
+    /// (ADR-097). Returns the delay the ask holds it to, in frames.
+    pub fn set_grant(&self, grant: Option<Grant>) -> u32 {
+        let Ok(mut buffer) = self.playout.lock() else {
+            return 0;
+        };
+        let floor = buffer.set_grant(grant);
+        self.delay
+            .store(buffer.target_delay_frames(), Ordering::Relaxed);
+        floor
+    }
+
+    /// The delay an accepted ask holds the buffer to at least, in frames; 0
+    /// without one.
+    pub fn floor_frames(&self) -> u32 {
+        self.playout
+            .lock()
+            .map_or(0, |buffer| buffer.floor_frames())
+    }
+
     /// The play-out delay in force, in frames.
     ///
     /// Read from the buffer rather than remembered by the caller, because
@@ -597,8 +644,13 @@ impl ReceivePath {
     /// Lets the delay follow the link over the time since the last call.
     /// Returns the new delay when it moved. Call it every [`ADAPT_INTERVAL`].
     pub fn adapt(&self) -> Option<u32> {
+        self.adapt_over(std::time::Duration::from_secs(1))
+    }
+
+    /// [`Self::adapt`] for a call made `elapsed` after the previous one.
+    pub fn adapt_over(&self, elapsed: std::time::Duration) -> Option<u32> {
         let mut buffer = self.playout.lock().ok()?;
-        let moved = buffer.adapt();
+        let moved = buffer.adapt_over(elapsed);
         self.delay
             .store(buffer.target_delay_frames(), Ordering::Relaxed);
         moved
