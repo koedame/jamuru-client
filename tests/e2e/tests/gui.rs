@@ -922,6 +922,127 @@ fn a_room_entered_by_a_link_is_entered_muted_and_sends_no_audio_until_unmuted() 
     });
 }
 
+/// Verifies: REQ-LAT-030
+/// Verifies: REQ-LAT-031
+#[test]
+fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_deciding_it_back_restores_it() {
+    let _guard = exclusive();
+    let (chosen, other) = (common::Peer::bind(), common::Peer::bind());
+    let server =
+        FakeSignaling::start_with_residents_at(&[chosen.resident("chosen"), other.resident("other")]);
+    let _chosen = PlayingPeer::start(chosen, 750.0, 0.2);
+    let _other = PlayingPeer::start(other, 1500.0, 0.2);
+
+    let app = App::launch_with_server_url(server.url()).expect("the app should launch");
+    app.connection_screen()
+        .wait_until_interactive(UI_TIMEOUT)
+        .unwrap_or_else(|e| panic!("{}\nThe log holds:\n{}", e, app.log_text()));
+    let session = app
+        .invoke("session_join", serde_json::json!({ "code": "echo" }))
+        .expect("the control channel should answer")
+        .expect("joining the room should succeed");
+    let id_of = |name: &str| -> String {
+        session["room"]["participants"]
+            .as_array()
+            .expect("the participants")
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is not in the room: {session}"))["id"]
+            .as_str()
+            .expect("an id")
+            .to_string()
+    };
+    let (chosen_id, other_id) = (id_of("chosen"), id_of("other"));
+    let status = || {
+        app.invoke("streaming_status", serde_json::json!({}))
+            .expect("the control channel should answer")
+            .expect("the status should be read")
+    };
+    let link_to = |id: &str| -> serde_json::Value {
+        status()["peers"]
+            .as_array()
+            .and_then(|peers| peers.iter().find(|p| p["peer_id"] == id).cloned())
+            .unwrap_or(serde_json::Value::Null)
+    };
+    // (round trip ms, delay of the receive buffer in tenths of a ms)
+    let reading = |id: &str| -> (f64, u64) {
+        let link = link_to(id);
+        (
+            link["latency"]["roundtrip_total_ms"].as_f64().unwrap_or(f64::NAN),
+            link["buffer"]["delay_ms10"].as_u64().unwrap_or(u64::MAX),
+        )
+    };
+    let up = |id: &str| {
+        let link = link_to(id);
+        link["connection_state"] == "connected"
+            && link["network"]["packets_received"].as_u64() > Some(0)
+            && link["latency"]["roundtrip_total_ms"].is_number()
+    };
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || up(&chosen_id) && up(&other_id))
+        .unwrap_or_else(|_| panic!("the links do not come up. The status is:\n{:#}", status()));
+    std::thread::sleep(Duration::from_secs(3));
+
+    let (chosen_before, other_before) = (reading(&chosen_id), reading(&other_id));
+    eprintln!("BUFFER before: chosen {chosen_before:?} other {other_before:?}");
+
+    // 60 ms is far above what either preset holds, so the change cannot be
+    // mistaken for the round trip wobbling.
+    app.invoke(
+        "streaming_set_peer_buffer",
+        serde_json::json!({ "peerId": chosen_id, "ms10": 600 }),
+    )
+    .expect("the control channel should answer")
+    .expect("the buffer should be set");
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        let (rtt, delay) = reading(&chosen_id);
+        delay.abs_diff(600) <= 30 && rtt > chosen_before.0 + 40.0
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "the chosen buffer does not show in the delay to that peer. The status is:\n{:#}",
+            status()
+        )
+    });
+    std::thread::sleep(Duration::from_secs(3));
+    let (chosen_during, other_during) = (reading(&chosen_id), reading(&other_id));
+    eprintln!("BUFFER during: chosen {chosen_during:?} other {other_during:?}");
+    assert_eq!(
+        other_during.1, other_before.1,
+        "the buffer of the peer that was not chosen must not move"
+    );
+    assert!(
+        (other_during.0 - other_before.0).abs() <= 8.0,
+        "the round trip to the peer that was not chosen moved from {} to {}",
+        other_before.0,
+        other_during.0
+    );
+    assert_eq!(
+        link_to(&chosen_id)["buffer"]["own"]["mode"],
+        "fixed",
+        "the chosen buffer shows as chosen"
+    );
+
+    app.invoke(
+        "streaming_set_peer_buffer",
+        serde_json::json!({ "peerId": chosen_id, "ms10": null }),
+    )
+    .expect("the control channel should answer")
+    .expect("the buffer should be given back to the preset");
+    jamjam_e2e_tests::pom::wait_until(UI_TIMEOUT, || {
+        let (rtt, delay) = reading(&chosen_id);
+        delay.abs_diff(chosen_before.1) <= 30 && rtt < chosen_before.0 + 12.0
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "the delay does not come back after the buffer is given back to the preset. The status is:\n{:#}",
+            status()
+        )
+    });
+    let (chosen_after, other_after) = (reading(&chosen_id), reading(&other_id));
+    eprintln!("BUFFER after: chosen {chosen_after:?} other {other_after:?}");
+    assert_eq!(other_after.1, other_before.1, "the other peer's buffer is as it was");
+}
+
 /// Reads how many peers the app takes in a room before it falls behind, on
 /// the build and the machine the test runs on. It measures; it asserts
 /// nothing, so it is ignored by default and run by hand:
