@@ -884,7 +884,7 @@ mod tests {
         base + Duration::from_secs(s)
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_an_ask_is_made_it_goes_out_once_and_shows_as_sending() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -896,7 +896,7 @@ mod tests {
         assert_eq!(room.standing(), Some(Standing::Sending));
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_no_answer_comes_the_ask_goes_out_every_two_seconds_and_after_twenty_it_is_unreachable()
     {
@@ -927,7 +927,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_listener_has_the_ask_it_says_so_and_the_asker_stops_sending_it_again() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -954,7 +954,7 @@ mod tests {
         assert_eq!(asks, 1);
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_user_accepts_the_buffer_is_set_and_the_asker_is_told_what_it_came_to() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -971,7 +971,7 @@ mod tests {
         assert_eq!(room.listener.held(), [(room.asker_id, terms())]);
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_user_accepts_the_answer_is_sent_three_times_a_second_apart() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1003,7 +1003,7 @@ mod tests {
         assert_eq!(accepted(&room), 3, "and no more");
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_accepted_answer_is_lost_the_asker_finds_out_from_its_check_within_ten_seconds() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1031,7 +1031,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_ask_is_granted_the_asker_checks_how_it_stands_every_ten_seconds() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1055,7 +1055,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_listener_goes_quiet_for_twenty_seconds_after_granting_the_ask_is_unreachable() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1071,7 +1071,7 @@ mod tests {
         assert_eq!(room.standing(), Some(Standing::Unreachable));
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_user_declines_the_asker_is_told_and_nothing_is_changed() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1085,7 +1085,7 @@ mod tests {
         assert!(room.listener.prompts().is_empty());
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_the_settings_take_no_asks_the_asker_is_told_and_the_user_is_not_asked() {
         let (mut room, t0) = (Room::new(Policy::Never), Instant::now());
@@ -1097,7 +1097,7 @@ mod tests {
         assert!(room.applies.is_empty());
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_the_settings_change_to_take_no_asks_the_ask_waiting_is_declined_and_one_held_stays() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1126,7 +1126,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_a_participant_was_accepted_once_their_next_ask_is_taken_without_asking_the_user() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1152,7 +1152,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_another_participant_asks_it_is_asked_about_even_if_someone_was_accepted_before() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1171,7 +1171,7 @@ mod tests {
         assert!(!outs.iter().any(|o| matches!(o, Out::Apply { .. })));
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_the_user_puts_the_buffer_back_the_asker_is_told_and_the_next_ask_is_asked_about() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1197,7 +1197,7 @@ mod tests {
         assert_eq!(room.applies.len(), 2);
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_the_buffer_is_put_back_the_asker_is_told_three_times_a_second_apart() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1232,7 +1232,7 @@ mod tests {
         assert_eq!(restored(&room), 3);
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_the_asker_withdraws_the_buffer_goes_back_and_the_listener_is_told_why() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1251,7 +1251,7 @@ mod tests {
         }));
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_the_asker_withdraws_before_the_user_decides_the_prompt_goes_away() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1267,7 +1267,7 @@ mod tests {
         assert!(room.applies.is_empty());
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_the_asker_leaves_the_room_the_buffer_goes_back_and_nothing_is_sent() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1293,7 +1293,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_the_listener_leaves_the_room_the_asker_drops_its_ask() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1311,7 +1311,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-037
+    /// Verifies: REQ-CON-036
     #[test]
     fn when_this_app_leaves_the_room_every_buffer_goes_back_and_nothing_is_remembered() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1331,7 +1331,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_ask_is_sent_again_after_it_was_accepted_the_answer_is_sent_again_and_nothing_is_set_twice(
     ) {
@@ -1357,7 +1357,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_ask_changes_while_the_user_has_not_decided_the_prompt_shows_the_new_one() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1378,7 +1378,7 @@ mod tests {
         assert_eq!(room.applies, [Some(longer)]);
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_an_ask_is_outside_what_may_be_asked_it_is_not_made_and_one_that_arrives_is_dropped() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1415,7 +1415,7 @@ mod tests {
         assert!(room.listener.prompts().is_empty());
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_a_peer_sends_asks_without_stopping_it_is_answered_once_a_second() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1445,7 +1445,7 @@ mod tests {
         assert_eq!(answers, 1, "in one second");
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_a_check_comes_for_an_ask_this_app_does_not_hold_it_says_the_buffer_is_not_held() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1462,7 +1462,7 @@ mod tests {
         assert_eq!(room.standing(), Some(Standing::Restored));
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_an_answer_comes_for_an_ask_never_made_it_is_dropped() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1478,7 +1478,7 @@ mod tests {
         assert_eq!(room.standing(), None);
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_a_late_pending_answer_arrives_after_the_ask_was_declined_the_standing_stays() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1497,7 +1497,7 @@ mod tests {
         assert_eq!(room.standing(), Some(Standing::Declined));
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_buffer_changes_after_it_was_granted_the_next_check_tells_the_asker() {
         let (mut room, t0) = (Room::new(Policy::Ask), Instant::now());
@@ -1518,7 +1518,7 @@ mod tests {
         assert_eq!(room.standing(), Some(Standing::Granted { applied: auto }));
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_ask_travels_it_is_a_peer_message_under_its_own_topic() {
         let body = serde_json::to_value(PeerBody::BufferRequest(BufferMessage::Ask {
@@ -1537,7 +1537,7 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_answer_travels_it_says_what_the_buffer_came_to() {
         let body = serde_json::to_value(PeerBody::BufferRequest(reply(

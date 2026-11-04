@@ -1568,6 +1568,56 @@ mod tests {
         format!("{TEST_HTTP_SCHEME}{addr}")
     }
 
+    /// Like [`spawn_server_sending`], and the server writes down every text frame it is sent
+    /// afterwards and sends whatever is put in the returned channel. Returns the server URL, what
+    /// was written down and the channel.
+    async fn spawn_server_exchanging(
+        messages: Vec<String>,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        tokio::sync::mpsc::UnboundedSender<String>,
+    ) {
+        use futures_util::{SinkExt, StreamExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written = received.clone();
+        let (later, mut to_send) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            let mut ws = answer_question_then_accept(listener).await;
+            for message in messages {
+                ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                    message.into(),
+                ))
+                .await
+                .unwrap();
+            }
+            loop {
+                tokio::select! {
+                    later = to_send.recv() => {
+                        // The test is done with the server, or drops the channel to hang up
+                        let Some(message) = later else { break };
+                        ws.send(tokio_tungstenite::tungstenite::Message::Text(message.into()))
+                            .await
+                            .unwrap();
+                    }
+                    frame = tokio::time::timeout(Duration::from_secs(20), ws.next()) => {
+                        match frame {
+                            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                                written.lock().unwrap().push(text.to_string());
+                            }
+                            Ok(Some(Ok(_))) => {}
+                            _ => break,
+                        }
+                    }
+                }
+            }
+        });
+        (format!("{TEST_HTTP_SCHEME}{addr}"), received, later)
+    }
+
     /// A mock app holding `conn` as connection 1, with the state
     /// `signaling_poll_events` needs.
     fn app_with_connection(conn: SignalingConnection) -> tauri::App<tauri::test::MockRuntime> {
@@ -2200,5 +2250,210 @@ mod tests {
         sync_recording_notice(&mut conn, &state, 1, true).await;
 
         assert!(!recording_told(&state, 1), "told, though nothing was sent");
+    }
+    fn ask_from(asker: Uuid, max_ms10: u32, auto: bool) -> String {
+        serde_json::json!({"type": "PeerMessage", "data": {
+            "from": asker, "from_name": "Bo",
+            "body": {"buffer_request": {"kind": "ask", "terms": {
+                "max_ms10": max_ms10, "tolerance_tenths": 10, "auto": auto}}}}})
+        .to_string()
+    }
+
+    /// What the app answered, by the `answer` each reply of a participant carried
+    fn answers_sent(sent: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
+        sent.lock()
+            .unwrap()
+            .iter()
+            .filter_map(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .filter_map(|frame| {
+                frame["data"]["body"]["buffer_request"]["answer"]
+                    .as_str()
+                    .map(str::to_string)
+            })
+            .collect()
+    }
+
+    async fn connect(url: &str) -> tauri::App<tauri::test::MockRuntime> {
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(url, identity).connect().await.unwrap();
+        app_with_connection(conn)
+    }
+
+    fn asked_events(events: &[SignalingEvent]) -> Vec<Uuid> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                SignalingEvent::BufferRequest {
+                    event: BufferEvent::Asked { peer, .. },
+                } => Some(*peer),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Verifies: REQ-CON-035
+    /// Verifies: REQ-CON-036
+    #[tokio::test]
+    async fn when_a_participant_asks_the_buffer_is_held_only_after_the_user_accepts_and_they_are_told(
+    ) {
+        let asker = Uuid::new_v4();
+        let (url, sent, _later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        let streaming = app.state::<StreamingState>();
+
+        let events = poll_until_events(&app).await;
+
+        assert_eq!(asked_events(&events), [asker], "the user is asked");
+        assert_eq!(
+            streaming.peer_buffer(asker).1.granted,
+            None,
+            "nothing is held before they say yes"
+        );
+        buffer_asks::buffer_request_answer(1, asker.to_string(), true, app.state(), app.state())
+            .await
+            .unwrap();
+        let held = streaming
+            .peer_buffer(asker)
+            .1
+            .granted
+            .expect("the buffer is held");
+        assert_eq!(held.applied_ms10, 300);
+        let mut answers = Vec::new();
+        for _ in 0..20 {
+            // The answer goes out with the poll that carries the ask, then on
+            // with the repeats
+            let _ = poll_until_events(&app).await;
+            answers = answers_sent(&sent);
+            if answers.iter().any(|a| a == "accepted") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            answers.contains(&"pending".to_string()),
+            "told that the ask was received: {answers:?}"
+        );
+        assert!(
+            answers.contains(&"accepted".to_string()),
+            "told it was accepted: {answers:?}"
+        );
+    }
+
+    /// Verifies: REQ-CON-036
+    #[tokio::test]
+    async fn when_the_user_puts_the_buffer_back_it_is_the_presets_again_and_the_participant_is_told(
+    ) {
+        let asker = Uuid::new_v4();
+        let (url, sent, _later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        let streaming = app.state::<StreamingState>();
+        poll_until_events(&app).await;
+        buffer_asks::buffer_request_answer(1, asker.to_string(), true, app.state(), app.state())
+            .await
+            .unwrap();
+
+        buffer_asks::buffer_request_restore(1, asker.to_string(), app.state(), app.state())
+            .await
+            .unwrap();
+
+        assert_eq!(streaming.peer_buffer(asker).1.granted, None);
+        let mut answers = Vec::new();
+        for _ in 0..20 {
+            answers = answers_sent(&sent);
+            if answers.iter().any(|a| a == "restored") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(answers.contains(&"restored".to_string()), "{answers:?}");
+    }
+
+    /// Verifies: REQ-CON-036
+    #[tokio::test]
+    async fn when_the_participant_who_asked_leaves_the_room_the_buffer_goes_back_without_a_word() {
+        let asker = Uuid::new_v4();
+        let (url, sent, later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        let streaming = app.state::<StreamingState>();
+        poll_until_events(&app).await;
+        buffer_asks::buffer_request_answer(1, asker.to_string(), true, app.state(), app.state())
+            .await
+            .unwrap();
+        assert!(streaming.peer_buffer(asker).1.granted.is_some());
+        later
+            .send(format!(
+                r#"{{"type":"PeerLeft","data":{{"peer_id":"{asker}"}}}}"#
+            ))
+            .unwrap();
+        let events = poll_until_events(&app).await;
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, SignalingEvent::PeerLeft { .. })),
+            "{events:?}"
+        );
+        assert_eq!(streaming.peer_buffer(asker).1.granted, None);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                SignalingEvent::BufferRequest { event: BufferEvent::Released { peer, .. } } if *peer == asker
+            )),
+            "the screen is told it was released: {events:?}"
+        );
+    }
+
+    /// Verifies: REQ-CON-036
+    #[tokio::test]
+    async fn when_the_settings_take_no_asks_the_user_is_not_asked_and_the_buffer_is_left_alone() {
+        let asker = Uuid::new_v4();
+        let (url, sent, _later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        app.state::<SignalingState>()
+            .init_buffer_policy(jamjam::network::buffer_request::Policy::Never);
+        let streaming = app.state::<StreamingState>();
+
+        let events = poll_until_events(&app).await;
+        let mut answers = Vec::new();
+        for _ in 0..20 {
+            answers = answers_sent(&sent);
+            if !answers.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert_eq!(asked_events(&events), Vec::<Uuid>::new());
+        assert_eq!(answers, ["declined_by_setting"]);
+        assert_eq!(streaming.peer_buffer(asker).1.granted, None);
+    }
+
+    /// Verifies: REQ-CON-036
+    #[tokio::test]
+    async fn when_the_connection_to_the_room_is_lost_every_buffer_that_was_held_goes_back() {
+        let asker = Uuid::new_v4();
+        let (url, _, later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        let streaming = app.state::<StreamingState>();
+        poll_until_events(&app).await;
+        buffer_asks::buffer_request_answer(1, asker.to_string(), true, app.state(), app.state())
+            .await
+            .unwrap();
+        assert!(streaming.peer_buffer(asker).1.granted.is_some());
+
+        // The server hangs up
+        drop(later);
+        let mut events = Vec::new();
+        for _ in 0..100 {
+            events.extend(poll_until_events(&app).await);
+            if events
+                .iter()
+                .any(|e| matches!(e, SignalingEvent::ConnectionLost { .. }))
+            {
+                break;
+            }
+        }
+
+        assert_eq!(streaming.peer_buffer(asker).1.granted, None, "{events:?}");
     }
 }
