@@ -90,6 +90,7 @@
 | `recording_stop` | ルームの音の録音を止める |
 | `recording_status` | 録音の状態（経過時間・保存したファイル名）を読む |
 | `recording_open_folder` | 録音を保存したフォルダを開く |
+| `streaming_set_peer_buffer` | 相手ごとの受信バッファを決める・プリセットに戻す |
 | `app_environment` | アプリの版・ビルドの種類・OS・メモリ・音声ホストを読む |
 | `config_load` | 設定ファイルの全体を読む |
 | `config_set_usage_reporting` | 利用状況の送信をオン・オフする |

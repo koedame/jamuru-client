@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 332 |
-| うち must | 311 |
+| 要求 総数 | 335 |
+| うち must | 314 |
 | うち should | 21 |
-| 検証済み | 306 |
+| 検証済み | 309 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 3 |
 
@@ -205,6 +205,9 @@
 | REQ-LAT-027 | must | ループバック実測のアプリ起因遅延が、ADR-019 の算出値と 0.1ms 以内で一致する | `docs-spec/requirements.md` | `tests/e2e/src/scenarios/loopback.rs`::test_all_presets_meet_their_latency_budget |
 | REQ-LAT-028 | must | zero-latency を推奨できるのは接続品質が「良好」のときのみである | `docs-spec/requirements.md` | `src/network/quality.rs`::only_good_links_suit_zero_latency |
 | REQ-LAT-029 | must | ジッタバッファは未到着のフレームを損失と扱わない。後続フレームの到着で初めて損失と判定する | `docs-spec/requirements.md` | `src/audio/playout.rs`::a_gap_is_concealed_once_a_later_frame_arrives<br/>`src/audio/playout.rs`::a_read_with_nothing_buffered_waits_instead_of_concealing |
+| REQ-LAT-030 | must | 受信バッファは参加者ごとに持つ。ある参加者のバッファを決めたり、その参加者から頼みを受けたりしても、ほかの参加者の段数・遅延は変わらない（往復遅延の表示が変わるのもその参加者の分だけ）。参加者が退室すれば、決めた値は残らない（[ADR-097](./adr/ADR-097-receive-buffer-per-participant-and-asking-for-it.md)） | `docs-spec/requirements.md` | `src/audio/peer_buffer.rs`::what_is_set_for_one_participant_leaves_the_buffer_of_every_other_as_it_was<br/>`tests/e2e/tests/gui.rs`::deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_deciding_it_back_restores_it |
+| REQ-LAT-031 | must | 参加者のバッファを手で決める（0.1 ms 単位、85 ms まで）と、その段数は回線の状態にもプリセットの切り替えにも動かさず、保持する。「プリセットに戻す」で、プリセットの段数と自動調整に戻る。リングより長く決めたときは、リングが持てる最長になる | `docs-spec/requirements.md` | `src/audio/peer_buffer.rs`::a_buffer_longer_than_eighty_five_milliseconds_is_not_a_choice<br/>`src/audio/peer_buffer.rs`::a_fixed_buffer_is_held_in_whole_packets_and_the_choice_goes_back_to_the_preset<br/>`src/audio/peer_buffer.rs`::the_ring_holds_the_longest_buffer_in_the_shortest_packets<br/>`src/audio/playout.rs`::a_pinned_delay_is_held_whatever_the_link_does_and_whatever_the_preset<br/>`src/audio/playout.rs`::a_pinned_delay_longer_than_the_ring_holds_is_the_longest_the_ring_holds<br/>`src/audio/playout.rs`::a_roomy_ring_notices_a_restarted_stream_as_soon_as_a_small_one_does<br/>`tests/e2e/tests/gui.rs`::deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_deciding_it_back_restores_it |
+| REQ-LAT-032 | must | 相手から受けた頼みは、受信バッファの下限として効き、自分の選び（プリセットか固定）より長い方が使われる。頼みを外すと自分の選びに戻る。自動調整を許した頼みは、許す欠け頻度を超える間は 5 ms ずつ増え（上限は頼まれた値）、15 秒欠けなければ 10 % 返す（48 サンプルまで） | `docs-spec/requirements.md` | `src/audio/peer_buffer.rs`::an_ask_is_within_what_it_may_say_or_it_is_not_one<br/>`src/audio/peer_buffer.rs`::an_ask_stays_when_the_packets_of_the_participant_turn_out_longer_than_assumed<br/>`src/audio/peer_buffer.rs`::an_ask_that_is_accepted_holds_the_buffer_and_letting_go_gives_it_back<br/>`src/audio/peer_buffer.rs`::an_automatic_ask_starts_at_its_lowest_and_says_it_follows_the_link<br/>`src/audio/playout.rs`::a_fixed_grant_holds_the_delay_at_its_cap_and_the_buffers_own_choice_is_back_without_it<br/>`src/audio/playout.rs`::a_new_ask_while_one_is_held_keeps_the_delay_it_came_to_within_the_new_cap<br/>`src/audio/playout.rs`::an_automatic_grant_gives_a_tenth_back_after_fifteen_quiet_seconds_down_to_its_lowest<br/>`src/audio/playout.rs`::an_automatic_grant_goes_up_a_step_while_frames_go_missing_more_often_than_it_allows<br/>`src/audio/playout.rs`::an_automatic_grant_stays_where_it_is_while_the_frames_missing_are_within_what_it_allows |
 | REQ-LAT-101 | must | 遅延情報を表示する | `docs-spec/behavior/latency.feature` | `ui/src/components/SessionStats.test.tsx`::shows the network RTT<br/>`ui/src/components/SessionStats.test.tsx`::shows the one-way and round-trip totals |
 | REQ-LAT-102 | should | 複数参加者の遅延を個別表示する | `docs-spec/behavior/latency.feature` | `src-tauri/src/streaming.rs`::the_status_has_the_buffers_each_participant_told_of_their_own_side<br/>`src-tauri/src/streaming.rs`::the_status_has_the_state_and_the_latency_of_the_link_to_each_participant<br/>`ui/src/lib/links.test.ts`::when every link is up, shows the worst quality among them<br/>`ui/src/lib/links.test.ts`::with several participants measured, names the one with the longest round trip<br/>`ui/src/screens/MainScreen.test.tsx`::3 人のルームで一方の行を押したとき、その人との内訳だけをダイアログに出し、もう一方の人の値は出さないこと<br/>`ui/src/screens/MainScreen.test.tsx`::3 人のルームで相手ごとに遅延が違うとき、それぞれの行にその人との遅延を出し、いちばん大きい人に印を付けること<br/>`ui/src/screens/MainScreen.test.tsx`::3 人のルームで遅延が違うとき、足もとの接続表示には誰のものか分からない遅延を出さないこと<br/>`ui/src/screens/MainScreen.test.tsx`::相手が 1 人のとき、遅延に印を付けないこと |
 | REQ-LAT-103 | must | ジッターをリアルタイムで表示する | `docs-spec/behavior/latency.feature` | `ui/src/components/SessionStats.test.tsx`::shows the current jitter value |
