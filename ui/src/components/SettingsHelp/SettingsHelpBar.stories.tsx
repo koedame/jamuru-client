@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SettingsHelpBar } from "./SettingsHelpBar";
 
 const meta = {
-  title: "Components/SettingsHelp/SettingsHelpBar",
+  title: "Components/Settings/Help/SettingsHelpBar",
   component: SettingsHelpBar,
   decorators: [
     (Story) => (

@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { AddReactionButton } from "./AddReactionButton";
 
 const meta = {
-  title: "Components/ChatPanel/AddReactionButton",
+  title: "Components/Chat/AddReactionButton",
   component: AddReactionButton,
   parameters: {
     layout: "centered",

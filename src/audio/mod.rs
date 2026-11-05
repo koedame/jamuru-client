@@ -23,6 +23,7 @@ mod listing;
 pub mod mic_access;
 mod monitor;
 mod open;
+mod packed;
 mod peer_buffer;
 mod peer_mix;
 mod playout;
@@ -80,6 +81,10 @@ pub use open::{
     capture_or_silence, clear_device_problem, discard_queued, microphone_allows_input,
     note_device_problem, note_trouble, on_captured_frame, playout_source, start_capture_ring,
     start_playout, CaptureRing, DeviceProblem, DeviceSide, DeviceTrouble, MIC_ANSWER_WAIT,
+};
+pub use packed::{
+    decode_packed, encode_packed, encode_packed_exact, verbatim_len, PACKED_HEADER_BYTES,
+    SIZE_STEPS,
 };
 pub use peer_buffer::{
     ring_frames, Driver as PeerBufferDriver, GrantView, Own as OwnBuffer, PeerBufferControl,

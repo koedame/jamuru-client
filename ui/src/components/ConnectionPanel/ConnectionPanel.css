@@ -1,6 +1,6 @@
 /**
  * ConnectionPanel Styles
- * jamuru brand guide (ui.pen Screens/JoinRoom, 2026-07-18): bg-page/bg-card/
+ * jamuru brand guide: bg-page/bg-card/
  * bg-row 3-tier surfaces, accent-blue primary, 1px borders, radius-control
  * (8px) on controls, radius-card (14px) on the test-room card, subtle
  * --shadow-button lift on primary/danger buttons.
@@ -81,7 +81,7 @@
 
 /* Form.
    margin:auto (not justify-content:center on the parent) so the form is
-   vertically centered like ui.pen's JoinRoom screen when it's shorter than
+   vertically centered like the join screen design when it's shorter than
    the available height, but gracefully top-aligns without clipping the
    welcome section when the content is taller than the window. */
 .connection-panel__form {
@@ -152,8 +152,8 @@
   height: 48px;
 }
 
-/* Input. Left-aligned, 16px, 4px letter-spacing — matches ui.pen's
-   JoinRoom Placeholder styling exactly (not the generic caption scale). */
+/* Input. Left-aligned, 16px, 4px letter-spacing — matches the
+   join screen's placeholder styling exactly (not the generic caption scale). */
 .connection-panel__input {
   flex: 1;
   min-width: 0;
@@ -277,8 +277,8 @@
   border-color: var(--color-accent-active);
 }
 
-/* Join button sits next to the code input, not full width. Per ui.pen's
-   Input/RoomCode states, it stays full-bright while the code is simply
+/* Join button sits next to the code input, not full width. Following the
+   room-code input's states, it stays full-bright while the code is simply
    incomplete (Default/Filled) and only dims on a submitted, rejected code
    (Error) — so it does not rely on the generic :disabled dimming. */
 .connection-panel__join-button {

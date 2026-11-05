@@ -5,7 +5,7 @@
 use jamjam::audio::{
     capture_to_wire, create_resampler, pan_received, AudioCodec, AudioConfig, AudioEngine,
     AudioPreset, BitDepth, CaptureConfig, CodecConfig, CodecType, LocalMonitor, PcmCodec,
-    PlaybackConfig, PCM_BYTES_PER_SAMPLE, WIRE_CHANNELS,
+    PlaybackConfig, PACKED_HEADER_BYTES, PCM_BYTES_PER_SAMPLE, WIRE_CHANNELS,
 };
 mod common;
 
@@ -134,10 +134,9 @@ async fn test_stereo_input() {
 
     let (decoded, payload_bytes) = send_captured_frame(&captured, 2, 1.0, 0).await;
 
-    assert_eq!(
-        payload_bytes,
-        captured.len() * PCM_BYTES_PER_SAMPLE,
-        "both channels are on the wire"
+    assert!(
+        payload_bytes <= captured.len() * PCM_BYTES_PER_SAMPLE + PACKED_HEADER_BYTES,
+        "both channels are on the wire, in no more than the samples as they are"
     );
     // Every value here is a multiple of 2^-23, so 24 bits hold it exactly
     assert_eq!(
@@ -434,13 +433,14 @@ fn test_capture_callback_accepts_non_sync_types() {
 // ---------------------------------------------------------------------------
 
 /// Given a link with at least 10 Mbps of bandwidth
-/// When the codec is set to uncompressed PCM
-/// Then audio is sent uncompressed at ~1.15 Mbps per channel (24 bits a sample) with 0ms of codec delay
+/// When the codec is set to PCM
+/// Then audio is sent as 24-bit samples (at most ~1.15 Mbps per channel), packed without loss, with 0ms of codec delay
 ///
 /// Verifies: REQ-CORE-002
 /// Verifies: REQ-AUD-101
+/// Verifies: REQ-AUD-131
 #[test]
-fn test_pcm_codec_is_uncompressed() {
+fn test_pcm_codec_packs_without_loss_and_never_beyond_the_samples() {
     let config = CodecConfig {
         codec_type: CodecType::Pcm,
         sample_rate: 48000,
@@ -454,16 +454,26 @@ fn test_pcm_codec_is_uncompressed() {
     let samples = vec![0.25f32; config.frame_size as usize];
     let encoded = codec.encode(&samples).expect("PCM encode should not fail");
 
-    // Uncompressed 24-bit: exactly 3 bytes per sample, no framing overhead.
+    // A steady level packs to a fraction of the 24-bit samples, and comes back as it was
+    assert!(
+        encoded.len() < samples.len() * PCM_BYTES_PER_SAMPLE / 2,
+        "{} samples took {} bytes",
+        samples.len(),
+        encoded.len()
+    );
+    assert_eq!(codec.decode(&encoded).expect("decode"), samples);
+
+    // Noise does not pack, and goes as the samples with the one byte that says so.
+    let noise: Vec<f32> = (0..config.frame_size)
+        .map(|i| (i.wrapping_mul(2_654_435_761u32) >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0)
+        .collect();
+    let encoded = codec.encode(&noise).expect("PCM encode should not fail");
     assert_eq!(
         encoded.len(),
-        samples.len() * PCM_BYTES_PER_SAMPLE,
-        "PCM must not compress: {} samples should produce {} bytes",
-        samples.len(),
-        samples.len() * PCM_BYTES_PER_SAMPLE
+        noise.len() * PCM_BYTES_PER_SAMPLE + PACKED_HEADER_BYTES
     );
 
-    // 48000 samples/s * 3 bytes * 8 bits = 1.152 Mbps per channel.
+    // Packed or not, 48000 samples/s * 3 bytes * 8 bits = 1.152 Mbps per channel at most.
     let bitrate_bps = config.sample_rate as f64 * PCM_BYTES_PER_SAMPLE as f64 * 8.0;
     assert!(
         (bitrate_bps - 1_152_000.0).abs() < 1.0,
@@ -516,7 +526,7 @@ fn test_pcm_codec_round_trip_is_exact_to_24_bits() {
     assert_eq!(codec.clipped_samples(), 0, "nothing here is past 0 dBFS");
 
     // A payload that is not whole samples must be rejected rather than silently mangled.
-    assert!(codec.decode(&[0u8; 4]).is_err());
+    assert!(codec.decode(&[0u8; 5]).is_err());
 }
 
 /// An audio packet must survive serialisation to the wire and back unchanged.

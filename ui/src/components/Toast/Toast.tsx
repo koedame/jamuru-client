@@ -15,7 +15,7 @@ const ICONS: Record<ToastType, typeof CheckIcon> = {
   warning: TriangleAlertIcon,
 };
 
-/** Single toast card (ui.pen Toast States). Stacking/auto-dismiss timing is
+/** Single toast card. Stacking/auto-dismiss timing is
  * the caller's responsibility (see components/README.md#toast). */
 export function Toast({ type, message }: ToastProps) {
   const Icon = ICONS[type];

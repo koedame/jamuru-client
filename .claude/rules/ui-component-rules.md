@@ -244,73 +244,33 @@ attributes nothing selects on, which then rot.
 **Rebuild `ui/` before running GUI E2E.** The app embeds `ui/dist` at compile time,
 so a test id that is only in the source is invisible to the running app.
 
-## Pencil デザインファイル連携
+## デザインの正本は Storybook
 
-UI のデザインは `ui.pen`（プロジェクトルート）で管理する。Pencil は MCP ベースのデザインキャンバスで、デザインファイルを Git 管理できる。
+UI のデザインは Storybook（`cd ui && npm run storybook`）が正本。デザインファイルは別に持たない。
 
-### 現在の構成
-
-| 項目 | 値 |
-|------|-----|
-| デザインファイル | `ui.pen`（Git 管理下、約1MB） |
-| 構成 | Atoms / Molecules / Organisms / Screens（アトミックデザイン） |
-| 収録数 | 再利用コンポーネント 47、トップレベルノード 91 |
-
-### MCP サーバーの設定
-
-**リポジトリには設定を置かない。** Pencil の MCP サーバーバイナリはプラットフォーム固有のパス（macOS arm64 なら `/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64`）にあり、リポジトリにコミットすると他プラットフォームで壊れる。
-
-各開発者がユーザーレベル（`~/.claude.json` の `mcpServers`）に設定する:
-
-```json
-{
-  "mcpServers": {
-    "pencil": {
-      "type": "stdio",
-      "command": "<Pencil.app 内の mcp-server-<platform> への絶対パス>",
-      "args": ["--app", "desktop", "--agent", "claudeCodeCLI"]
-    }
-  }
-}
-```
-
-### 絶対禁止
-
-1. **`.pen` ファイルを Read / Grep / Edit で扱わない**
-   - 暗号化されており、テキストとして読めない。破損させる
-   - 必ず `mcp__pencil__*` ツール経由で読み書きする
-
-2. **`.pen` を `.gitignore` に入れない**
-   - デザインファイルを Git 管理することが Pencil を選んだ理由である
+| 見たいもの | 場所（Storybook の階層） |
+|---|---|
+| 色・文字・余白・角丸・影・動き・重なり・幅 | `Foundation/Design Tokens`（値の正本は `ui/src/styles/tokens.css`。一覧はその CSS から自動で作る） |
+| 部品と状態 | `Components/<グループ>/<部品>`（グループは `Chat` `Mixer` `Room` `Settings` `Terms` `Common`） |
+| 画面（実物の画面を偽の backend で描く） | `Screens/<画面>`、ウィンドウに組んだ見た目は `Windows/<ウィンドウ>` |
+| 原則・状態の規則 | `Foundation/Introduction` から `docs-spec/ui/design-guide.md` へ |
 
 ### ワークフロー
 
-```mermaid
-flowchart LR
-    P["ui.pen<br/>（デザイン）"] --> S["Pure Component<br/>+ .stories.tsx"]
-    S --> V["Storybook で<br/>全状態を確認"]
-    V --> A["Adapter<br/>（Tauri 結線）"]
-    A --> G["Tauri GUI"]
-    P -.デザイントークン.-> T["docs-spec/ui/design-tokens.md"]
-    T --> S
-```
-
-1. `mcp__pencil__get_editor_state` で現在のドキュメント状態とスキーマを取得する
-2. `mcp__pencil__batch_get` で該当コンポーネントを読む（一件ずつではなく一括で）
-3. デザイン値（色・間隔・タイポグラフィ）は `docs-spec/ui/design-tokens.md` のトークンに落とし、CSS 変数として使う。`.pen` の生の値を CSS へ直接書き写さない
-4. Pure Component と `.stories.tsx` を作る（本ファイル冒頭の Pure + Adapter パターンに従う）
-5. Storybook で全状態を確認する
+1. 値（色・間隔・タイポグラフィ）は `tokens.css` のトークンを使う。足すときは `tokens.css` に書く（Storybook の一覧にも自動で出る。どのグループにも入らない名前は `designTokens.test.ts` が落とす）
+2. Pure Component と `.stories.tsx` を作る（本ファイル冒頭の Pure + Adapter パターンに従う）。`ui/src/components/` と `ui/src/screens/` の部品・画面は、自分の `.stories.tsx` が無いと `storybookCatalog.test.ts` が落ちる（backend に繋ぐだけの層は同テストの一覧に理由を書く）
+3. stories の `title` は `Components/<グループ>/<部品>`（3 階層）、画面は `Screens/<画面>`。`docs-spec/ui/design-guide.md`「状態のデザイン規則」の状態を並べる
+4. 画面は `ui/src/stories/fakeBackend.tsx` の `withBackend` で backend の答えを与えて、実物の画面を描く。返す値の形は `ui/src/stories/mainFixtures.ts`
+5. Storybook を実ブラウザで開き、見た目を目で確かめる
 6. Adapter を作り Tauri と結線する
 
-### デザインと実装が食い違ったとき
-
-`ui.pen` はデザインの意図、`docs-spec/ui/` は仕様である。食い違いを見つけた場合:
+### 食い違ったとき
 
 | 状況 | 対応 |
 |------|------|
-| 実装がデザインから逸脱 | 実装を直す |
-| デザインが仕様（docs-spec/ui/）と矛盾 | どちらが正しいかを確認してから、片方を直す。勝手にどちらかへ寄せない |
-| デザインに存在しない画面を実装する必要がある | `ui.pen` にも追加する。実装だけ先に進めない |
+| 実装が Storybook の見た目から逸脱 | 実装を直す |
+| Storybook が仕様（`docs-spec/ui/`）と矛盾 | どちらが正しいかを確認してから、片方を直す。勝手にどちらかへ寄せない |
+| 実装する画面・状態が Storybook に無い | 実装と同じ変更で Story を足す。実装だけ先に進めない |
 
 ## Related Documents
 

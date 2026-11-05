@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ConnectionIndicator } from "./ConnectionIndicator";
 
 const meta = {
-  title: "Components/Mixer/ConnectionIndicator",
+  title: "Components/Room/ConnectionIndicator",
   component: ConnectionIndicator,
   parameters: {
     layout: "centered",

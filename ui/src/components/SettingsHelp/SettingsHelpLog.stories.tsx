@@ -3,7 +3,7 @@ import { SettingsHelpBar } from "./SettingsHelpBar";
 import { SettingsHelpLog } from "./SettingsHelpLog";
 
 const meta = {
-  title: "Components/SettingsHelp/SettingsHelpLog",
+  title: "Components/Settings/Help/SettingsHelpLog",
   component: SettingsHelpLog,
   decorators: [
     (Story) => (

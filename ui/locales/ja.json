@@ -90,6 +90,7 @@
       "joined": "{{name}}さんが参加しました",
       "left": "{{name}}さんが退出しました",
       "highestLatency": "遅延がいちばん大きい参加者",
+      "departed": "退室済み・音声は継続中",
       "detail": {
         "you": "自分",
         "network": "ネットワーク",
@@ -113,7 +114,7 @@
     "peerAppTooOld": "この相手とは繋げません（相手のアプリが古い版です）",
     "peerAppTooOldWith": "{{names}}とは繋げません（相手のアプリが古い版です）",
     "bandwidth": {
-      "insufficient": "帯域が不足しています（必要: 約{{required}}Mbps）",
+      "insufficient": "帯域が不足しています（最大で約{{required}}Mbps 必要）",
       "marginal": "帯域の余裕が少なくなっています",
       "noSignal": "相手からパケットが届いていません",
       "noSignalFrom": "{{names}}からパケットが届いていません"
@@ -241,6 +242,8 @@
     "general": {
       "display": "表示",
       "connection": "接続",
+      "voicePriority": "音声を優先して送る",
+      "voicePriorityHint": "音声のパケットに印を付け、Wi-Fi のルーターが他の通信より先に送れるようにします。同じ Wi-Fi で他の人が通信していて音が途切れるときに試し、かえって悪くなるときはオフにしてください。macOS では使えません。次の接続から変わります",
       "serverUrl": {
         "customHint": "独自のサーバーを使用中: {{url}}",
         "defaultHint": "既定のサーバーを使用中（{{url}}）"

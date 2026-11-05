@@ -26,6 +26,10 @@ export interface GeneralTabProps {
   askNameOnEntry?: boolean;
   /** Called when the person turns the name confirmation on or off; the switch is left out when absent */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
+  /** Whether the audio packets are marked as voice, so a Wi-Fi sends them ahead of other traffic (ADR-110) */
+  voicePriority?: boolean;
+  /** Called when the person turns the marking on or off; the switch is left out when absent */
+  onVoicePriorityChange?: (enabled: boolean) => void;
   /** Whether asks to buffer a participant's audio for longer are put to the person or turned down (ADR-097) */
   bufferAsks?: BufferAskPolicy;
   /** Called when the person chooses; the section is left out when absent */
@@ -48,6 +52,8 @@ export function GeneralTab({
   onDisplayNameChange,
   askNameOnEntry = true,
   onAskNameOnEntryChange,
+  voicePriority = false,
+  onVoicePriorityChange,
   bufferAsks = "ask",
   onBufferAsksChange,
   language,
@@ -169,6 +175,27 @@ export function GeneralTab({
           autoComplete="off"
         />
       </FormField>
+
+      {onVoicePriorityChange && (
+        <label className="tab-content__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={voicePriority}
+            onChange={(e) => onVoicePriorityChange(e.target.checked)}
+            data-testid="general-voice-priority-toggle"
+          />
+          <span>
+            {t("settings.general.voicePriority", "Send audio with priority")}
+            <span className="tab-content__switch-hint">
+              {t(
+                "settings.general.voicePriorityHint",
+                "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Try it when audio breaks up while others use the same Wi-Fi; turn it off if it gets worse. Not available on macOS. Applies from the next session"
+              )}
+            </span>
+          </span>
+        </label>
+      )}
     </div>
   );
 }

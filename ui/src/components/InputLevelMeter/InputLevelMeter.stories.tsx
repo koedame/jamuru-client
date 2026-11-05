@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { InputLevelMeter } from "./InputLevelMeter";
 
 const meta = {
-  title: "Components/InputLevelMeter",
+  title: "Components/Mixer/InputLevelMeter",
   component: InputLevelMeter,
   parameters: {
     layout: "centered",

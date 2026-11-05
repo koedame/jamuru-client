@@ -1,7 +1,7 @@
 /**
  * SettingsPanel - Settings panel with header and vertical tabs
  *
- * Design: jamuru brand (ui.pen Screens/Settings). Header bar + left sidebar of
+ * Design: jamuru brand. Header bar + left sidebar of
  * icon tabs (General / Audio / Privacy / Diagnostics and support / About)
  * + content area.
  */
@@ -44,6 +44,8 @@ export interface SettingsPanelProps {
   displayNameError?: string;
   /** Whether the name is confirmed before creating or entering a room (General tab) */
   askNameOnEntry?: boolean;
+  /** Whether the audio packets are marked as voice (General tab) */
+  voicePriority?: boolean;
   /** Whether asks to buffer a participant's audio for longer are put to the person (General tab) */
   bufferAsks?: BufferAskPolicy;
   /** Input devices */
@@ -102,6 +104,8 @@ export interface SettingsPanelProps {
   onDisplayNameChange: (name: string) => void;
   /** Turns the name confirmation before entering a room on or off (General tab, left out when absent) */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
+  /** Turns the marking of the audio packets as voice on or off (General tab, left out when absent) */
+  onVoicePriorityChange?: (enabled: boolean) => void;
   /** Chooses whether such asks are put to the person or turned down (General tab, left out when absent) */
   onBufferAsksChange?: (policy: BufferAskPolicy) => void;
   /** Input device change handler */
@@ -202,6 +206,7 @@ export function SettingsPanel({
   displayName,
   displayNameError,
   askNameOnEntry,
+  voicePriority,
   bufferAsks,
   inputDevices,
   outputDevices,
@@ -231,6 +236,7 @@ export function SettingsPanel({
   update,
   onDisplayNameChange,
   onAskNameOnEntryChange,
+  onVoicePriorityChange,
   onBufferAsksChange,
   onInputDeviceChange,
   onOutputDeviceChange,
@@ -299,6 +305,8 @@ export function SettingsPanel({
             onDisplayNameChange={onDisplayNameChange}
             askNameOnEntry={askNameOnEntry}
             onAskNameOnEntryChange={onAskNameOnEntryChange}
+            voicePriority={voicePriority}
+            onVoicePriorityChange={onVoicePriorityChange}
             bufferAsks={bufferAsks}
             onBufferAsksChange={onBufferAsksChange}
             language={language}

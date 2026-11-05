@@ -196,6 +196,11 @@ pub struct AppConfig {
     /// it off in Settings.
     #[serde(default = "default_ask_name_on_entry")]
     pub ask_name_on_entry: bool,
+    /// Whether the audio packets are marked as voice, so that a Wi-Fi sends them ahead of other
+    /// traffic (ADR-110). Off unless turned on: how it behaves on a Wi-Fi is not measured.
+    /// Takes effect when the next session starts.
+    #[serde(default)]
+    pub voice_priority: bool,
 
     /// Audio sample rate in Hz (44100, 48000, or 96000)
     /// Default: 48000 (recommended per ADR-013)
@@ -300,6 +305,7 @@ impl Default for AppConfig {
             preset: AudioPreset::default(),
             peer_name: DEFAULT_PEER_NAME.to_string(),
             ask_name_on_entry: true,
+            voice_priority: false,
             sample_rate: DEFAULT_SAMPLE_RATE,
             input_channel_l: 1,
             input_channel_r: Some(2),
@@ -627,6 +633,21 @@ mod tests {
     fn when_the_setting_is_off_in_the_file_the_name_is_not_asked() {
         let config: AppConfig = toml::from_str("ask_name_on_entry = false").unwrap();
         assert!(!config.ask_name_on_entry);
+    }
+
+    /// Verifies: REQ-CON-160
+    #[test]
+    fn when_the_setting_is_absent_the_audio_packets_are_not_marked() {
+        assert!(!AppConfig::default().voice_priority);
+        let config: AppConfig = toml::from_str("peer_name = \"Aki\"").unwrap();
+        assert!(!config.voice_priority);
+    }
+
+    /// Verifies: REQ-CON-160
+    #[test]
+    fn when_the_setting_is_on_in_the_file_the_audio_packets_are_marked() {
+        let config: AppConfig = toml::from_str("voice_priority = true").unwrap();
+        assert!(config.voice_priority);
     }
 
     #[test]

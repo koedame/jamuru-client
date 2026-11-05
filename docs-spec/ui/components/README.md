@@ -90,8 +90,8 @@ jamuru UI
 | Input | P0 | 仕様未作成 | - |
 | Select | P0 | 仕様未作成 | - |
 | FormField | P1 | 仕様未作成 | - |
-| Toast | P1 | 仕様作成済み（本ファイル内） | 下記「Toast」参照。`ui.pen` Toast States（success/error/info/warning）準拠 |
-| Modal | P1 | 仕様作成済み（本ファイル内） | 下記「Modal」参照。退室確認は `ui.pen` Dialog/LeaveConfirm States 準拠 |
+| Toast | P1 | 仕様作成済み（本ファイル内） | 下記「Toast」参照。Storybook `Components/Common/Toast`（success/error/info/warning） |
+| Modal | P1 | 仕様作成済み（本ファイル内） | 下記「Modal」参照。退室確認は Storybook `Components/Room/LeaveDialog` |
 
 ### ドメイン固有コンポーネント（パネル内部）
 
@@ -210,7 +210,7 @@ interface ComponentProps {
 
 ### Toast
 
-**用途**: 一時的な通知メッセージ（`ui.pen` Toast States 準拠、幅280px、カード＋`--shadow-modal`）
+**用途**: 一時的な通知メッセージ（Storybook `Components/Common/Toast`、幅280px、カード＋`--shadow-modal`）
 
 **タイプ**:
 | タイプ | 用途 | lucideアイコン | 例文 |
@@ -273,7 +273,7 @@ interface ComponentProps {
 
 #### LeaveDialog（退室確認ダイアログ）
 
-`ui.pen` Dialog/LeaveConfirm States 準拠。中央寄せ、幅180px、`--radius-card` +
+Storybook `Components/Room/LeaveDialog` が正。中央寄せ、幅180px、`--radius-card` +
 `--shadow-modal`（blur 24px, y+4, `#00000080`）。`Screens/Main/LeaveDialogState` の
 インライン簡易版レイアウト（画面内左下配置）は現行 `Screens/Main` との内容不一致があり
 陳腐化しているため使用しない。States カタログを正とする。

@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:catalog": "VITE_CATALOG_MODE=true vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest",

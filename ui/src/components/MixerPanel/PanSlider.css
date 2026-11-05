@@ -1,6 +1,6 @@
 /**
  * PanSlider styles
- * jamuru brand (ui.pen Molecules/Slider/Pan): recessed near-black box, value
+ * jamuru brand: recessed near-black box, value
  * label on top, center detent mark, green fill, yellow thumb. No border-radius.
  */
 
@@ -39,7 +39,7 @@
   height: 15px;
 }
 
-/* Track line: intentionally near-invisible groove, matching ui.pen. */
+/* Track line: intentionally near-invisible groove. */
 .pan-slider__track::before {
   content: "";
   position: absolute;

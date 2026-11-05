@@ -1,8 +1,7 @@
 /**
  * Single source of truth for the main window's two logical-pixel sizes,
- * matching ui.pen exactly: Screens/JoinRoom (600x700) and Screens/Main
- * (1134 wide, height kept at 700 rather than ui.pen's 666 so only the width
- * changes on connect).
+ * the join screen (600x700) and the connected screen (1134 wide, height kept
+ * at 700 so only the width changes on connect).
  *
  * `src-tauri/tauri.conf.json`'s `windows[0].width/height` (the window's
  * initial size before any React code runs) cannot import this file — keep

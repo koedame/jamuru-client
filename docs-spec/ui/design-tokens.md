@@ -29,7 +29,7 @@ jamuru UI で使用する CSS Custom Properties（CSS変数）の定義。
 
 ### ダークテーマ（デフォルト）
 
-ui.pen（Pencil schema 2.14、2026-07-18更新）のブランド刷新に追従した配色。
+2026-07-18 のブランド刷新に追従した配色。正本は `ui/src/styles/tokens.css`、一覧は Storybook の `Foundation/Design Tokens`。
 `bg-page`（基調）< `bg-card`（カード、page より明るい）で階層を作り、`bg-row`（入力欄・行・
 メーター背景）を最も暗い recessed 面として使う3階調 + `accent-blue` を主要アクション色とする。
 `yellow-primary` はロゴ等ブランド要素専用に用途を限定する（前リビジョンまでのイエロー基調から
@@ -39,39 +39,39 @@ ui.pen（Pencil schema 2.14、2026-07-18更新）のブランド刷新に追従�
 :root,
 :root[data-theme="dark"] {
   /* === Background === */
-  --color-bg-primary: #1C1C1E;      /* 画面背景（ui.pen: --bg-page） */
-  --color-bg-secondary: #2C2C2E;    /* カード・ヘッダー背景（ui.pen: --bg-card。page より明るい） */
-  --color-bg-tertiary: #141414;     /* 入力欄・行・メーター背景（ui.pen: --bg-row。最も暗い recessed 面） */
-  --color-bg-elevated: #48484A;     /* ホバー時の浮き上がり（ui.pen: gray-600） */
+  --color-bg-primary: #1C1C1E;      /* 画面背景 */
+  --color-bg-secondary: #2C2C2E;    /* カード・ヘッダー背景（page より明るい） */
+  --color-bg-tertiary: #141414;     /* 入力欄・行・メーター背景（最も暗い recessed 面） */
+  --color-bg-elevated: #48484A;     /* ホバー時の浮き上がり */
   --color-bg-hover: #48484A;        /* ホバー背景（--color-bg-elevated と同値のエイリアス） */
   --color-bg-overlay: rgba(0, 0, 0, 0.6);  /* モーダル背景スクリム */
   --color-bg-error: rgba(255, 69, 58, 0.1); /* エラー状態の背景ハイライト（--color-danger のtint） */
 
   /* === Accent === */
-  --color-accent: #0A84FF;          /* 主要アクション・フォーカス状態（ui.pen: --accent-blue） */
+  --color-accent: #0A84FF;          /* 主要アクション・フォーカス状態 */
   --color-accent-hover: #3D9FFF;    /* ホバー時（明度を上げる） */
   --color-accent-active: #0A6ACC;   /* アクティブ時（明度を下げる） */
-  --color-accent-secondary: #FF9F0A; /* セカンダリブランドカラー（ui.pen: --orange-secondary）。チャンネルのソロ機能は未実装のため現状未使用（--color-solo-active と共に将来の再実装に備え保持） */
-  --color-brand: #FFD60A;           /* ブランドカラー（ui.pen: --yellow-primary）。ロゴ等ブランド要素専用、アクションには使わない */
+  --color-accent-secondary: #FF9F0A; /* セカンダリブランドカラー。チャンネルのソロ機能は未実装のため現状未使用（--color-solo-active と共に将来の再実装に備え保持） */
+  --color-brand: #FFD60A;           /* ブランドカラー。ロゴ等ブランド要素専用、アクションには使わない */
 
   /* === Semantic === */
-  --color-success: #30D158;         /* 接続成功、正常状態（ui.pen: --color-meter-low） */
+  --color-success: #30D158;         /* 接続成功、正常状態 */
   --color-success-bg: rgba(48, 209, 88, 0.1);
-  --color-warning: #FFD60A;         /* 警告、不安定（ui.pen: --color-meter-mid） */
+  --color-warning: #FFD60A;         /* 警告、不安定 */
   --color-warning-bg: rgba(255, 214, 10, 0.1);
-  --color-danger: #FF453A;          /* エラー、切断（ui.pen: --color-meter-high） */
+  --color-danger: #FF453A;          /* エラー、切断 */
   --color-danger-bg: rgba(255, 69, 58, 0.1);
 
   /* === Text === */
-  --color-text-primary: #F5F5F7;    /* 主要テキスト（ui.pen: --text-light） */
-  --color-text-secondary: #98989D;  /* 補助テキスト（ui.pen: gray-400） */
+  --color-text-primary: #F5F5F7;    /* 主要テキスト */
+  --color-text-secondary: #98989D;  /* 補助テキスト */
   --color-text-tertiary: #6E6E73;   /* 三次テキスト・アイコン（--color-text-disabled と同値） */
   --color-text-muted: #6E6E73;      /* 抑制テキスト（--color-text-disabled と同値のエイリアス） */
-  --color-text-disabled: #6E6E73;   /* 無効状態・プレースホルダー（ui.pen: gray-500） */
+  --color-text-disabled: #6E6E73;   /* 無効状態・プレースホルダー */
   --color-text-inverse: #F5F5F7;    /* 反転テキスト（accent-blue/dangerボタン上の文字など。白に近い text-light を流用） */
 
   /* === Border === */
-  --color-border: #38383A;          /* 通常ボーダー（ui.pen: --border-dark） */
+  --color-border: #38383A;          /* 通常ボーダー */
   --color-border-default: #38383A;  /* --color-border のエイリアス */
   --color-border-subtle: #141414;   /* 目立たせないボーダー（--color-bg-tertiary と同値） */
   --color-border-focus: #0A84FF;    /* フォーカス時（--color-accent と同値） */
@@ -97,13 +97,13 @@ ui.pen（Pencil schema 2.14、2026-07-18更新）のブランド刷新に追従�
 
 ### ライトテーマ
 
-ui.pen 側にライトモード仕様がまだ存在しないため、暫定的にダークテーマと同一の値を使う
+ライトモードのデザインがまだ無いため、暫定的にダークテーマと同一の値を使う
 （プロオーディオツールに多いダーク専用の方針）。
 `data-theme="light"` を設定する CSS の仕組み自体は残しているが、アプリ内にテーマ切り替え
-UI は存在しない（設定画面 General タブに元々あったテーマセレクターは、ui.pen の General
-タブにテーマ操作がなく、かつライト/ダークの値が同一で見た目に差がないため削除した。
+UI は存在しない（設定画面 General タブに元々あったテーマセレクターは、
+デザイン上 General タブにテーマ操作がなく、かつライト/ダークの値が同一で見た目に差がないため削除した。
 詳細はコンポーネント仕様 [settings-panel.md](./components/settings-panel.md) を参照）。
-ui.pen にライトモード仕様が追加され次第、専用の配色に更新し、必要であれば切り替えUIを再設計する。
+ライトモードのデザインが決まり次第、専用の配色に更新し、必要であれば切り替えUIを再設計する。
 
 ```css
 :root[data-theme="light"] {
@@ -119,7 +119,7 @@ ui.pen にライトモード仕様が追加され次第、専用の配色に更�
 「装飾的なグラデーション禁止」の原則に対し、レベルメーター（`StereoMeter`/`InputLevelMeter`）
 の塗りのみ例外とする。閾値ごとの色の塗り分けではなく、`--color-meter-low` →
 `--color-meter-mid` → `--color-meter-high` の縦方向グラデーションで音量レベルを連続的に表現する
-（意味を伝える機能的な装飾として許可。ui.pen 全体の原則でも明記されている）。
+（意味を伝える機能的な装飾として許可。デザインガイドの原則にも明記している）。
 
 ```css
 .meter-fill {
@@ -138,7 +138,7 @@ ui.pen にライトモード仕様が追加され次第、専用の配色に更�
 
 フォントは `@fontsource/inter`、`@fontsource/roboto-mono` としてバンドルし、Google Fonts 等の
 外部CDNには依存しない（オフライン起動時にも表示崩れが起きないようにするため）。
-ui.pen の `font-heading`（Inter）/`font-mono`（Roboto Mono）に合わせ、見出し専用フォント
+`font-heading`（Inter）/`font-mono`（Roboto Mono）に合わせ、見出し専用フォント
 （旧 Space Grotesk）は廃止し、見出しも本文と同じ Inter を使う。
 
 ```css
@@ -155,7 +155,7 @@ ui.pen の `font-heading`（Inter）/`font-mono`（Roboto Mono）に合わせ、
     'Noto Sans JP',
     sans-serif;
 
-  /* 見出し用（ui.pen: --font-heading）。本文と同じ Inter を使い、太さ/サイズで差をつける */
+  /* 見出し用。本文と同じ Inter を使い、太さ/サイズで差をつける */
   --font-family-heading:
     'Inter',
     var(--font-family-sans);
@@ -258,14 +258,14 @@ ui.pen の `font-heading`（Inter）/`font-mono`（Roboto Mono）に合わせ、
 
 ## 角丸トークン
 
-ui.pen（2026-07-18改訂）は「角丸なし」の原則から、`radius-control`/`radius-card` の2段階
+2026-07-18 の改訂で「角丸なし」の原則から、`radius-control`/`radius-card` の2段階
 スケールに転換した。装飾目的の角丸は依然として避けるが、ボタン/入力/バッジ類とカード/パネル類の
 2階層のみを許可する。
 
 ```css
 :root {
-  --radius-control: 8px;   /* ボタン・入力・バッジ・チップ（ui.pen: --radius-control） */
-  --radius-card: 14px;     /* カード・パネル・モーダル（ui.pen: --radius-card） */
+  --radius-control: 8px;   /* ボタン・入力・バッジ・チップ */
+  --radius-card: 14px;     /* カード・パネル・モーダル */
   --radius-full: 9999px;   /* 円形ボタン用（アイコンボタン等） */
 
   /* 旧スケールのエイリアス（既存コードとの互換のため保持。新規コードは上記2トークンを使う） */
@@ -287,7 +287,7 @@ ui.pen（2026-07-18改訂）は「角丸なし」の原則から、`radius-contr
 | カード | `--radius-card` |
 | モーダル・ダイアログ | `--radius-card` |
 | アイコンボタン（円形） | `--radius-full` |
-| フェーダーのつまみ（StereoFader thumb） | 例外的に `2px`（ui.pen上唯一2pxを使う箇所。トークン化せずハードコードで良い） |
+| フェーダーのつまみ（StereoFader thumb） | 例外的に `2px`（唯一2pxを使う箇所。トークン化せずハードコードで良い） |
 
 ---
 
@@ -435,7 +435,7 @@ ui/src/styles/
 現在、`data-theme` 属性を設定する呼び出し元はアプリ内に存在しない（設定画面のテーマ
 セレクター削除に伴い、それを操作していた `useTheme` フックも削除済み）。ライト/ダーク
 の値が同一なため、`data-theme` を設定しなくても `@media (prefers-color-scheme)` の
-フォールバックで見た目は変わらない。将来、ui.pen にライトモード仕様が追加され配色が
+フォールバックで見た目は変わらない。将来、ライトモードのデザインが追加され配色が
 分岐する時点で、以下のような実装を再導入することを想定する:
 
 ```typescript

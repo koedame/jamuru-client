@@ -43,12 +43,12 @@ DAWスタイルのミキシングコンソールコンポーネント。
 └────────┴────────┴────────┴────────┘                    └──────────────────┘
 ```
 
-> **注（ui.pen Screens/Main）**: 上図右側のマスターメーターと退室ボタンは、現在の実装では
+> **注（Storybook `Screens/Main`）**: 上図右側のマスターメーターと退室ボタンは、現在の実装では
 > MixerPanel ではなくルームサイドバー（`MainScreen.tsx`、幅 240px）に配置する。MixerPanel は
 > チャンネルストリップのみを保持し、`local`（自分）を入力セクション、`remote`（参加者）を
 > 出力セクションとして縦の区切り線（`--color-border`）で分割して横に並べる。マスターは
-> 水平メーター（`MasterSection` = `Molecules/Meter/MasterHorizontal`）としてサイドバーに表示する。
-> ソロ機能は ui.pen に存在しないため持たない。
+> 水平メーター（`MasterSection`）としてサイドバーに表示する。
+> ソロ機能はデザインに無いため持たない。
 
 ---
 
@@ -190,7 +190,7 @@ interface MasterSectionProps {
 }
 ```
 
-ui.pen の `Molecules/Meter/MasterHorizontal` に準拠した**水平表示専用**コンポーネント。
+Storybook `Components/Mixer/MasterSection` が正の**水平表示専用**コンポーネント。
 接続済み画面では MixerPanel 内ではなくルームサイドバーに配置する。退室ボタン・ミュート
 ボタンは持たない（退室はサイドバーの退出ボタン、ミュートは各チャンネル側）。
 

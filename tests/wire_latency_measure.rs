@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use jamjam::network::{AudioEncodingConfig, Connection, LinkIdentity};
 
-/// 128 frames of stereo 32-bit float: the Balanced preset's packet
+/// 128 frames of stereo: the Balanced preset's packet
 const FRAME: usize = 128;
 const PACKETS: usize = 3000;
 /// A packet every 2.67 ms, the pace of 128 frames at 48 kHz
@@ -98,10 +98,10 @@ async fn how_long_audio_takes_from_send_to_callback_over_loopback() {
     micros.sort_unstable();
     let lost = PACKETS - micros.len().min(PACKETS);
     println!(
-        "send -> callback over loopback, {} packets of {} bytes, \
+        "send -> callback over loopback, {} packets of {} stereo frames, \
          {} lost: p50 {} us, p95 {} us, p99 {} us, max {} us",
         micros.len(),
-        FRAME * 2 * 4,
+        FRAME,
         lost,
         percentile(&micros, 0.50),
         percentile(&micros, 0.95),
@@ -129,7 +129,7 @@ fn how_long_sealing_and_opening_one_packet_takes() {
     let _ = b.open(hello_from_a);
     let _ = a.open(hello_from_b);
 
-    for payload_bytes in [FRAME * 2 * 4, 2048] {
+    for payload_bytes in [FRAME * 2 * 3, 1400] {
         let packet = Packet::audio(1, 0, vec![0x5a; payload_bytes]);
         const ROUNDS: u32 = 200_000;
 

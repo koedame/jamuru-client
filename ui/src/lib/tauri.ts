@@ -18,6 +18,11 @@ export interface Participant {
    * (ADR-043).
    */
   features?: string[];
+  /**
+   * The room no longer lists them but their audio still arrives. They stay in the list, with
+   * a fader, for as long as they are heard. Absent from an app that predates it.
+   */
+  departed?: boolean;
 }
 
 /**
@@ -1148,6 +1153,8 @@ export interface AppConfig {
   peer_name: string;
   /** Whether the person is asked which name to use before creating or entering a room (on until they turn it off) */
   ask_name_on_entry: boolean;
+  /** Whether the audio packets are marked as voice so a Wi-Fi sends them first (on until the person turns it off; read when a session starts) */
+  voice_priority: boolean;
   /** Audio sample rate in Hz. Valid values: 44100, 48000, 96000 (ADR-013) */
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
@@ -1294,6 +1301,13 @@ export async function bufferRequestSnapshot(): Promise<BufferRequestSnapshot> {
 /** Choose whether asks are put to the user or turned down; kept in the settings */
 export async function bufferRequestSetPolicy(policy: BufferAskPolicy): Promise<void> {
   return invoke("buffer_request_set_policy", { policy });
+}
+
+/**
+ * Turn the marking of the audio packets as voice on or off (takes effect when the next session starts)
+ */
+export async function configSetVoicePriority(enabled: boolean): Promise<void> {
+  return invoke("config_set_voice_priority", { enabled });
 }
 
 /**
