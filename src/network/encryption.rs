@@ -1083,11 +1083,11 @@ mod tests {
 
         assert_eq!(
             hex(&from_a.to_bytes()),
-            "0201000030390000000700010000000000000001fe048d6a64edd154e96d6ea7e2f79484984b5ac3e924737194eb250105d0d82a1f86735856f89e"
+            "0301000030390000000700010000000000000001fe048d6a64edd154e96d6ea7e2f79484984b5ac3e924738666f137b274ea5c36d48f8bc49c9db3"
         );
         assert_eq!(
             hex(&from_b.to_bytes()),
-            "02010000303900000007000100000000000000019fd57190c6c29b9e0229087e1cde4b4ecab5d0180ef4d82af23aa9b2dee1288dbbc51d360a0009"
+            "03010000303900000007000100000000000000019fd57190c6c29b9e0229087e1cde4b4ecab5d0180ef4d84132c89629ec8056272fdbacbbcb09ac"
         );
         assert!(opened(&b, from_a).is_some());
         assert!(opened(&a, from_b).is_some());

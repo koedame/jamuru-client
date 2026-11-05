@@ -18,6 +18,11 @@ export interface Participant {
    * (ADR-043).
    */
   features?: string[];
+  /**
+   * The room no longer lists them but their audio still arrives. They stay in the list, with
+   * a fader, for as long as they are heard. Absent from an app that predates it.
+   */
+  departed?: boolean;
 }
 
 /**
@@ -583,6 +588,51 @@ export type SettingChange =
 /** Event every window hears after an audio setting changed */
 export const AUDIO_SETTINGS_CHANGED = "audio:config-changed";
 
+/** Event every window hears when a device delay measurement ended with a figure */
+export const DEVICE_DELAY_MEASURED = "audio:delay-measured";
+
+/** The delay kept for the devices selected now (`src-tauri/src/delay.rs`) */
+export interface DeviceDelayFigure {
+  delay_ms: number;
+  spread_ms: number;
+  stability: "steady" | "slightly_shaky" | "shaky";
+  /** Long enough to look at the device settings again */
+  needs_review: boolean;
+  /** Unix seconds */
+  measured_at: number;
+}
+
+export type DeviceDelayFailure = "no_sound" | "unsteady" | "too_long" | "no_stream" | "timed_out";
+
+/** Where the device delay measurement is */
+export interface DeviceDelayStatus {
+  /** Whether an audio session is running (the sound is played through its streams) */
+  session_running: boolean;
+  running: boolean;
+  stimulus: "clicks" | "tone" | null;
+  step: number | null;
+  steps: number;
+  failure: DeviceDelayFailure | null;
+  figure: DeviceDelayFigure | null;
+  /** The delays the others in the room told, in ms, by id */
+  peers: Record<string, number>;
+}
+
+/** Start measuring the delay of the devices the session runs on */
+export async function delayMeasureStart(): Promise<void> {
+  return invoke("delay_measure_start");
+}
+
+/** Stop the measuring under way */
+export async function delayMeasureCancel(): Promise<void> {
+  return invoke("delay_measure_cancel");
+}
+
+/** Where the measuring is, and the figure for the devices selected now */
+export async function delayMeasureStatus(): Promise<DeviceDelayStatus> {
+  return invoke("delay_measure_status");
+}
+
 /** The menu bar asks the main window's screen to do something; the payload names it (`src-tauri/src/menu.rs`). */
 export const MENU_ACTION = "menu:action";
 
@@ -767,6 +817,39 @@ export interface PeerLinkStatus {
   peer_audio: PeerAudioInfo | null;
   /** Level of what is played of them, after their fader (0-100) */
   level: number;
+  /** The buffer their audio is played from (ADR-097) */
+  buffer: PeerBuffer;
+}
+
+/** The longest a receive buffer may be, in tenths of a millisecond (ADR-097) */
+export const MAX_BUFFER_MS10 = 850;
+
+/** The most frames a second an ask may allow to go missing, in tenths (ADR-097) */
+export const MAX_TOLERANCE_TENTHS = 100;
+
+/** What the user chose for a participant's receive buffer */
+export type OwnBuffer = { mode: "preset" } | { mode: "fixed"; ms10: number };
+
+/** How an ask the user accepted stands on the buffer */
+export interface GrantView {
+  /** The buffer the ask holds, in tenths of a millisecond */
+  applied_ms10: number;
+  /** The buffer is not the one asked for: it counts in packets */
+  rounded: boolean;
+  /** An automatic ask has come down to its lowest */
+  at_lowest: boolean;
+  /** An automatic ask is following the link */
+  auto_running: boolean;
+}
+
+/** The receive buffer of one participant (ADR-097) */
+export interface PeerBuffer {
+  /** What the user chose: the preset's own buffer, or a length held */
+  own: OwnBuffer;
+  /** The buffer in force, in tenths of a millisecond; 0 before the audio thread has said */
+  delay_ms10: number;
+  /** How an ask the user accepted stands; null while there is none */
+  granted: GrantView | null;
 }
 
 /**
@@ -1070,6 +1153,8 @@ export interface AppConfig {
   peer_name: string;
   /** Whether the person is asked which name to use before creating or entering a room (on until they turn it off) */
   ask_name_on_entry: boolean;
+  /** Whether the audio packets are marked as voice so a Wi-Fi sends them first (on until the person turns it off; read when a session starts) */
+  voice_priority: boolean;
   /** Audio sample rate in Hz. Valid values: 44100, 48000, 96000 (ADR-013) */
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
@@ -1078,6 +1163,8 @@ export interface AppConfig {
   usage_reporting: boolean;
   /** Whether the app installs a new release by itself (on unless the user turns it off in config.toml) */
   auto_update: boolean;
+  /** Whether other participants' asks to lengthen the buffer are put to the user ("ask") or turned down ("never") (ADR-097) */
+  buffer_asks: BufferAskPolicy;
   /** The terms version the user agreed to on this device (null = not yet) */
   terms_version: number | null;
   /** When they agreed, in seconds since the Unix epoch (null = not yet) */
@@ -1118,6 +1205,109 @@ export async function configLoad(): Promise<AppConfig> {
  */
 export async function configSetUsageReporting(enabled: boolean): Promise<void> {
   return invoke("config_set_usage_reporting", { enabled });
+}
+
+/**
+ * Set the buffer the audio of `peerId` is played from, in tenths of a
+ * millisecond (at most MAX_BUFFER_MS10), or null for the preset's own (ADR-097)
+ */
+export async function streamingSetPeerBuffer(peerId: string, ms10: number | null): Promise<void> {
+  return invoke("streaming_set_peer_buffer", { peerId, ms10 });
+}
+
+// Asking a participant to buffer your audio for longer (ADR-097)
+
+/** Event carrying something about those asks that the screen shows */
+export const BUFFER_REQUEST_EVENT = "buffer-request";
+
+/** What an ask says */
+export interface BufferTerms {
+  /** The longest the buffer may be made, in tenths of a millisecond */
+  max_ms10: number;
+  /** How many frames a second may go missing before an automatic ask raises the buffer, in tenths */
+  tolerance_tenths: number;
+  /** Whether the buffer follows the link up to `max_ms10`; otherwise it is `max_ms10` */
+  auto: boolean;
+}
+
+/** Whether asks are put to the user, or turned down without asking */
+export type BufferAskPolicy = "ask" | "never";
+
+/** How an ask this app made stands, as the asker sees it */
+export type AskStanding =
+  | { state: "sending" }
+  | { state: "pending" }
+  | { state: "granted"; applied: GrantView }
+  | { state: "declined" }
+  | { state: "declined_by_setting" }
+  | { state: "restored" }
+  | { state: "unreachable" };
+
+/** Why the buffer held for an asker was given up */
+export type BufferRelease = "restored" | "withdrawn" | "replaced" | "peer_left" | "stopped";
+
+/** Something about the asks that the screen shows; peers are participant ids */
+export type BufferRequestEvent =
+  | { type: "asked"; peer: string; peer_name: string; terms: BufferTerms }
+  | { type: "ask_gone"; peer: string }
+  | { type: "held"; peer: string; terms: BufferTerms; applied: GrantView }
+  | { type: "released"; peer: string; reason: BufferRelease }
+  | { type: "standing"; peer: string; standing: AskStanding | null };
+
+/** Where the asks stand, for a window that opens after they began */
+export interface BufferRequestSnapshot {
+  policy: BufferAskPolicy;
+  /** The asks this app made */
+  asked: { peer_id: string; terms: BufferTerms; standing: AskStanding }[];
+  /** The asks waiting for this app's user */
+  prompts: { peer_id: string; peer_name: string; terms: BufferTerms }[];
+  /** The buffers this app holds for participants who asked */
+  held: { peer_id: string; terms: BufferTerms; applied: GrantView | null }[];
+}
+
+/** Ask `peerId` to hold the buffer their side plays this app's audio from to `terms` */
+export async function bufferRequestAsk(connId: number, peerId: string, terms: BufferTerms): Promise<void> {
+  return invoke("buffer_request_ask", { connId, peerId, terms });
+}
+
+/** Take the ask of `peerId` back, or clear what is shown of one that ended */
+export async function bufferRequestWithdraw(connId: number, peerId: string): Promise<void> {
+  return invoke("buffer_request_withdraw", { connId, peerId });
+}
+
+/**
+ * Answer the ask of `peerId` that the user was shown: take it up (saying which `terms` were shown,
+ * so an ask that changed since is not taken), or turn it down
+ */
+export async function bufferRequestAnswer(
+  connId: number,
+  peerId: string,
+  accept: boolean,
+  terms?: BufferTerms
+): Promise<void> {
+  return invoke("buffer_request_answer", { connId, peerId, accept, terms: accept ? terms : undefined });
+}
+
+/** Put the buffer for `peerId` back to what it was before they asked */
+export async function bufferRequestRestore(connId: number, peerId: string): Promise<void> {
+  return invoke("buffer_request_restore", { connId, peerId });
+}
+
+/** Where the asks stand now */
+export async function bufferRequestSnapshot(): Promise<BufferRequestSnapshot> {
+  return invoke("buffer_request_snapshot");
+}
+
+/** Choose whether asks are put to the user or turned down; kept in the settings */
+export async function bufferRequestSetPolicy(policy: BufferAskPolicy): Promise<void> {
+  return invoke("buffer_request_set_policy", { policy });
+}
+
+/**
+ * Turn the marking of the audio packets as voice on or off (takes effect when the next session starts)
+ */
+export async function configSetVoicePriority(enabled: boolean): Promise<void> {
+  return invoke("config_set_voice_priority", { enabled });
 }
 
 /**

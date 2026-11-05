@@ -1,5 +1,5 @@
 /* MainScreen styles
-   jamuru brand (ui.pen Screens/Main, 2026-07-18): bg-page/bg-card/bg-row
+   jamuru brand: bg-page/bg-card/bg-row
    3-tier surfaces, accent-blue for interactive elements, brand yellow
    reserved for the logo only, 1px borders, radius-control (8px) on
    controls, radius-card (14px) on dialogs, subtle shadows on buttons/dialogs. */
@@ -323,6 +323,14 @@ button.participant__summary:focus-visible {
 
 /* How the link to a participant is doing, where their latency would be */
 .participant__link {
+  flex-shrink: 0;
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* Not in the room any more, but still heard */
+.participant__departed {
   flex-shrink: 0;
   font-size: var(--font-size-tiny);
   color: var(--color-text-secondary);

@@ -135,6 +135,33 @@ fn default_limiter() -> bool {
     true
 }
 
+/// The delay of the audio device pair, as last measured in the settings
+/// (REQ-AUD-050), with what it was measured on: the figure holds only for
+/// those devices, that buffer size and that sample rate.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeviceDelay {
+    /// From the output being handed a sound to the input taking it in, in ms.
+    pub delay_ms: f64,
+    /// How far the results it comes from were apart, in ms.
+    pub spread_ms: f64,
+    pub input_device_id: Option<String>,
+    pub output_device_id: Option<String>,
+    pub buffer_size: u32,
+    pub sample_rate: u32,
+    /// When it was measured, in seconds since the Unix epoch.
+    pub measured_at: u64,
+}
+
+impl DeviceDelay {
+    /// Whether the figure was measured on what `config` selects now.
+    pub fn applies_to(&self, config: &AppConfig) -> bool {
+        self.input_device_id == config.input_device_id
+            && self.output_device_id == config.output_device_id
+            && self.buffer_size == config.buffer_size
+            && self.sample_rate == config.sample_rate
+    }
+}
+
 /// Application configuration
 ///
 /// Contains all persistent settings for the jamuru application.
@@ -169,6 +196,11 @@ pub struct AppConfig {
     /// it off in Settings.
     #[serde(default = "default_ask_name_on_entry")]
     pub ask_name_on_entry: bool,
+    /// Whether the audio packets are marked as voice, so that a Wi-Fi sends them ahead of other
+    /// traffic (ADR-110). Off unless turned on: how it behaves on a Wi-Fi is not measured.
+    /// Takes effect when the next session starts.
+    #[serde(default)]
+    pub voice_priority: bool,
 
     /// Audio sample rate in Hz (44100, 48000, or 96000)
     /// Default: 48000 (recommended per ADR-013)
@@ -226,6 +258,11 @@ pub struct AppConfig {
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
 
+    /// Whether another participant's ask to buffer their audio for longer is taken, and
+    /// whether the user is asked about each (ADR-097).
+    #[serde(default)]
+    pub buffer_asks: crate::network::buffer_request::Policy,
+
     /// The version of the terms of use the user agreed to on this device
     /// (`None` = not yet). Kept only here, never sent to the server. The app
     /// asks again when [`TERMS_VERSION`] is newer than this.
@@ -235,6 +272,11 @@ pub struct AppConfig {
     /// When the user agreed to those terms, in seconds since the Unix epoch.
     #[serde(default)]
     pub terms_accepted_at: Option<u64>,
+
+    /// The last measured delay of the device pair. Only the number is ever
+    /// told to the others in a room (REQ-CON-035).
+    #[serde(default)]
+    pub device_delay: Option<DeviceDelay>,
 }
 
 fn default_peer_name() -> String {
@@ -263,6 +305,7 @@ impl Default for AppConfig {
             preset: AudioPreset::default(),
             peer_name: DEFAULT_PEER_NAME.to_string(),
             ask_name_on_entry: true,
+            voice_priority: false,
             sample_rate: DEFAULT_SAMPLE_RATE,
             input_channel_l: 1,
             input_channel_r: Some(2),
@@ -275,8 +318,10 @@ impl Default for AppConfig {
             language: None,
             usage_reporting: false,
             auto_update: true,
+            buffer_asks: crate::network::buffer_request::Policy::default(),
             terms_version: None,
             terms_accepted_at: None,
+            device_delay: None,
         }
     }
 }
@@ -286,6 +331,13 @@ impl AppConfig {
     /// ([`TERMS_VERSION`]).
     pub fn terms_accepted(&self) -> bool {
         self.terms_version == Some(TERMS_VERSION)
+    }
+
+    /// The measured delay, when it was measured on what is selected now.
+    pub fn current_device_delay(&self) -> Option<&DeviceDelay> {
+        self.device_delay
+            .as_ref()
+            .filter(|measured| measured.applies_to(self))
     }
 
     /// The jamuru server to use: the configured one, or
@@ -433,6 +485,82 @@ pub fn save_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn measured_on(config: &AppConfig) -> DeviceDelay {
+        DeviceDelay {
+            delay_ms: 23.4,
+            spread_ms: 0.8,
+            input_device_id: config.input_device_id.clone(),
+            output_device_id: config.output_device_id.clone(),
+            buffer_size: config.buffer_size,
+            sample_rate: config.sample_rate,
+            measured_at: 1_762_300_000,
+        }
+    }
+
+    /// Verifies: REQ-AUD-050
+    #[test]
+    fn when_the_devices_are_still_the_ones_measured_the_delay_is_current() {
+        let mut config = AppConfig {
+            input_device_id: Some("in-a".into()),
+            output_device_id: Some("out-a".into()),
+            ..AppConfig::default()
+        };
+        config.device_delay = Some(measured_on(&config));
+
+        assert_eq!(
+            config.current_device_delay().map(|d| d.delay_ms),
+            Some(23.4)
+        );
+    }
+
+    /// Verifies: REQ-AUD-050
+    #[test]
+    fn when_a_device_the_buffer_or_the_rate_changes_the_old_delay_is_not_current() {
+        let base = AppConfig {
+            input_device_id: Some("in-a".into()),
+            ..AppConfig::default()
+        };
+        let measured = measured_on(&base);
+        for changed in [
+            AppConfig {
+                input_device_id: Some("in-b".into()),
+                ..base.clone()
+            },
+            AppConfig {
+                output_device_id: Some("out-b".into()),
+                ..base.clone()
+            },
+            AppConfig {
+                buffer_size: 128,
+                ..base.clone()
+            },
+            AppConfig {
+                sample_rate: 96000,
+                ..base.clone()
+            },
+        ] {
+            let config = AppConfig {
+                device_delay: Some(measured.clone()),
+                ..changed
+            };
+            assert_eq!(config.current_device_delay(), None);
+        }
+    }
+
+    /// Verifies: REQ-AUD-050
+    #[test]
+    fn a_measured_delay_survives_saving_and_loading_and_a_file_without_one_has_none() {
+        let mut config = AppConfig::default();
+        config.device_delay = Some(measured_on(&config));
+        let text = toml::to_string_pretty(&config).expect("saves");
+
+        let loaded: AppConfig = toml::from_str(&text).expect("loads");
+
+        assert_eq!(loaded, config);
+        let old: AppConfig = toml::from_str("buffer_size = 64").expect("loads");
+        assert_eq!(old.device_delay, None);
+    }
+
     #[test]
     fn test_default_config() {
         let config = AppConfig::default();
@@ -505,6 +633,21 @@ mod tests {
     fn when_the_setting_is_off_in_the_file_the_name_is_not_asked() {
         let config: AppConfig = toml::from_str("ask_name_on_entry = false").unwrap();
         assert!(!config.ask_name_on_entry);
+    }
+
+    /// Verifies: REQ-CON-160
+    #[test]
+    fn when_the_setting_is_absent_the_audio_packets_are_not_marked() {
+        assert!(!AppConfig::default().voice_priority);
+        let config: AppConfig = toml::from_str("peer_name = \"Aki\"").unwrap();
+        assert!(!config.voice_priority);
+    }
+
+    /// Verifies: REQ-CON-160
+    #[test]
+    fn when_the_setting_is_on_in_the_file_the_audio_packets_are_marked() {
+        let config: AppConfig = toml::from_str("voice_priority = true").unwrap();
+        assert!(config.voice_priority);
     }
 
     #[test]

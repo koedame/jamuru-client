@@ -63,6 +63,7 @@ function upLink(changes: Partial<PeerLinkStatus> = {}): PeerLinkStatus {
     },
     peer_audio: PEER_AUDIO,
     level: 0,
+    buffer: { own: { mode: 'preset' }, delay_ms10: 0, granted: null },
     ...changes,
   };
 }

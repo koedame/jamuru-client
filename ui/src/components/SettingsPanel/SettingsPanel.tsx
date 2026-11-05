@@ -1,7 +1,7 @@
 /**
  * SettingsPanel - Settings panel with header and vertical tabs
  *
- * Design: jamuru brand (ui.pen Screens/Settings). Header bar + left sidebar of
+ * Design: jamuru brand. Header bar + left sidebar of
  * icon tabs (General / Audio / Privacy / Diagnostics and support / About)
  * + content area.
  */
@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { VerticalTabs, Tab } from "./VerticalTabs";
 import { GeneralTab, Language } from "./tabs/GeneralTab";
 import { DevicesTab, DeviceInfo } from "./tabs/DevicesTab";
+import type { DeviceDelayProps } from "./tabs/DeviceDelayField";
 import { PrivacyTab } from "./tabs/PrivacyTab";
 import { DiagnosticsTab, DiagnosticsState, ReportProblemState } from "./tabs/DiagnosticsTab";
 import { AboutTab } from "./tabs/AboutTab";
@@ -18,7 +19,7 @@ import type { UpdateSectionProps } from "./tabs/UpdateSection";
 import { SelectOption } from "./Select";
 import type { LegalSectionProps } from "../Terms/LegalSection";
 import { MicIcon, SlidersIcon, ShieldIcon, ActivityIcon, InfoIcon } from "./icons";
-import { CompleteDiagnosticsResult, Hang, RecommendedPreset, WasapiMode, WasapiSettings } from "../../lib/tauri";
+import { BufferAskPolicy, CompleteDiagnosticsResult, Hang, RecommendedPreset, WasapiMode, WasapiSettings } from "../../lib/tauri";
 import "./SettingsPanel.css";
 
 /** `devices` is the Audio tab: its id is kept because tests and the settings help address it. */
@@ -43,6 +44,10 @@ export interface SettingsPanelProps {
   displayNameError?: string;
   /** Whether the name is confirmed before creating or entering a room (General tab) */
   askNameOnEntry?: boolean;
+  /** Whether the audio packets are marked as voice (General tab) */
+  voicePriority?: boolean;
+  /** Whether asks to buffer a participant's audio for longer are put to the person (General tab) */
+  bufferAsks?: BufferAskPolicy;
   /** Input devices */
   inputDevices: DeviceInfo[];
   /** Output devices */
@@ -99,6 +104,10 @@ export interface SettingsPanelProps {
   onDisplayNameChange: (name: string) => void;
   /** Turns the name confirmation before entering a room on or off (General tab, left out when absent) */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
+  /** Turns the marking of the audio packets as voice on or off (General tab, left out when absent) */
+  onVoicePriorityChange?: (enabled: boolean) => void;
+  /** Chooses whether such asks are put to the person or turned down (General tab, left out when absent) */
+  onBufferAsksChange?: (policy: BufferAskPolicy) => void;
   /** Input device change handler */
   onInputDeviceChange: (id: string) => void;
   /** Output device change handler */
@@ -125,6 +134,8 @@ export interface SettingsPanelProps {
   /** Limiter switch handlers; the switches are left out when absent */
   onInputLimiterChange?: (enabled: boolean) => void;
   onOutputLimiterChange?: (enabled: boolean) => void;
+  /** The delay measurement of the devices in use; the section is left out when absent */
+  delay?: DeviceDelayProps;
   /** Run diagnostics handler */
   onRunDiagnostics?: () => void;
   /** Cancel diagnostics handler (shows a cancel button while running) */
@@ -195,6 +206,8 @@ export function SettingsPanel({
   displayName,
   displayNameError,
   askNameOnEntry,
+  voicePriority,
+  bufferAsks,
   inputDevices,
   outputDevices,
   selectedInputId,
@@ -223,6 +236,8 @@ export function SettingsPanel({
   update,
   onDisplayNameChange,
   onAskNameOnEntryChange,
+  onVoicePriorityChange,
+  onBufferAsksChange,
   onInputDeviceChange,
   onOutputDeviceChange,
   onInputChannelLChange = () => {},
@@ -237,6 +252,7 @@ export function SettingsPanel({
   outputLimiter,
   onInputLimiterChange,
   onOutputLimiterChange,
+  delay,
   onRunDiagnostics,
   onCancelDiagnostics,
   onApplyPreset,
@@ -289,6 +305,10 @@ export function SettingsPanel({
             onDisplayNameChange={onDisplayNameChange}
             askNameOnEntry={askNameOnEntry}
             onAskNameOnEntryChange={onAskNameOnEntryChange}
+            voicePriority={voicePriority}
+            onVoicePriorityChange={onVoicePriorityChange}
+            bufferAsks={bufferAsks}
+            onBufferAsksChange={onBufferAsksChange}
             language={language}
             onLanguageChange={onLanguageChange}
             serverUrl={serverUrl}
@@ -331,6 +351,7 @@ export function SettingsPanel({
             outputLimiter={outputLimiter}
             onInputLimiterChange={onInputLimiterChange}
             onOutputLimiterChange={onOutputLimiterChange}
+            delay={delay}
           />
         );
       case "privacy":

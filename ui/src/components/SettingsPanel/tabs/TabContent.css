@@ -1,5 +1,5 @@
 /**
- * TabContent shared styles - jamuru brand (ui.pen Screens/Settings).
+ * TabContent shared styles - jamuru brand.
  */
 
 .tab-content {
@@ -9,7 +9,7 @@
   padding: var(--space-lg);
 }
 
-/* Section heading (Space Grotesk, ui.pen DeviceTitle / GeneralTitle). */
+/* Section heading (DeviceTitle / GeneralTitle). */
 .tab-content__title {
   margin: 0;
   font-family: var(--font-family-heading);
@@ -356,4 +356,87 @@
 
 .latency-card__value--total {
   color: var(--color-accent);
+}
+
+/* Device delay measurement (REQ-GUI-034). */
+.delay-meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.delay-meter__setup {
+  margin: 0;
+  padding-left: var(--space-lg);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-secondary);
+}
+
+.delay-meter__action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.delay-meter__button {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.delay-meter__button--primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-text-on-accent, #fff);
+}
+
+.delay-meter__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.delay-meter__progress {
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}
+
+.delay-meter__result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+}
+
+.delay-meter__result > p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.delay-meter__value {
+  font-family: var(--font-family-mono);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+}
+
+.delay-meter__stability {
+  font-size: var(--font-size-small);
+}
+
+.delay-meter__stability--steady {
+  color: var(--color-success);
+}
+
+.delay-meter__stability--slightly_shaky {
+  color: var(--color-warning);
+}
+
+.delay-meter__stability--shaky {
+  color: var(--color-danger);
 }

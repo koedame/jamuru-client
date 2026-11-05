@@ -4,7 +4,6 @@ import "./lib/installLogging";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import Catalog from "./Catalog";
 import { setBackend } from "./lib/backend";
 import { HELP_HASH, helperBackend } from "./lib/helperBackend";
 
@@ -33,11 +32,8 @@ if (import.meta.env.DEV || import.meta.env.VITE_ELEMENT_GRAB === "true") {
   void import("./lib/elementGrab").then((m) => m.installElementGrab());
 }
 
-// Check if catalog mode is enabled via environment variable
-const isCatalogMode = import.meta.env.VITE_CATALOG_MODE === "true";
-
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    {isCatalogMode ? <Catalog /> : <App />}
+    <App />
   </React.StrictMode>
 );

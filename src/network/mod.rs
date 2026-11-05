@@ -3,8 +3,10 @@
 //! Handles UDP transport, NAT traversal, signaling, FEC, encryption, and connection management.
 
 mod bandwidth;
+pub mod buffer_request;
 mod clock;
 mod connection;
+pub mod device_delay_notice;
 mod device_identity;
 mod discovery;
 mod encryption;
@@ -12,6 +14,7 @@ mod error;
 mod fec;
 mod latency;
 mod link_facts;
+mod priority;
 mod quality;
 pub mod recording_notice;
 mod remote;
@@ -51,6 +54,7 @@ pub use latency::{
     NetworkLatencyInfo, UpstreamLatency,
 };
 pub use link_facts::{LinkFacts, LinkRoute, LinkSnapshot};
+pub use priority::mark_voice;
 pub use quality::{ConnectionQuality, QualityChange, QualityMonitor};
 pub use remote::{
     connect_remote, discover_remote_enrollment, help_relay_url, is_help_session, new_help_session,

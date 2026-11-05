@@ -11,6 +11,9 @@ import {
   configLoad,
   configSetUsageReporting,
   configSetAskNameOnEntry,
+  configSetVoicePriority,
+  bufferRequestSetPolicy,
+  type BufferAskPolicy,
   configGetPeerName,
   configSetPeerName,
   configGetServerUrl,
@@ -115,6 +118,14 @@ export function SettingsPanelAdapter({
   // Whether the name is confirmed before entering a room (on until turned off)
   const [askNameOnEntry, setAskNameOnEntry] = useState(true);
 
+  // Whether the audio packets are marked as voice (on until turned off)
+  const [voicePriority, setVoicePriority] = useState(false);
+
+  // Whether asks to buffer someone's audio for longer are put to the person (ADR-097)
+  const [bufferAsks, setBufferAsks] = useState<BufferAskPolicy>("ask");
+  const bufferAsksRef = useRef(bufferAsks);
+  bufferAsksRef.current = bufferAsks;
+
   // Usage reporting (off unless the user turns it on)
   const [usageReporting, setUsageReporting] = useState(false);
   const [usagePreview, setUsagePreview] = useState<string | null>(null);
@@ -198,6 +209,8 @@ export function SettingsPanelAdapter({
       .then((config) => {
         setUsageReporting(config?.usage_reporting === true);
         setAskNameOnEntry(config?.ask_name_on_entry !== false);
+        setVoicePriority(config?.voice_priority === true);
+        setBufferAsks(config?.buffer_asks === "never" ? "never" : "ask");
       })
       .catch((err) => console.error("Failed to read the usage reporting setting:", err));
   }, []);
@@ -360,6 +373,17 @@ export function SettingsPanelAdapter({
     }
   }, []);
 
+  const handleBufferAsksChange = useCallback(async (policy: BufferAskPolicy) => {
+    const previous = bufferAsksRef.current;
+    setBufferAsks(policy);
+    try {
+      await bufferRequestSetPolicy(policy);
+    } catch (err) {
+      console.error("Failed to save whether buffer asks are taken:", err);
+      setBufferAsks(previous);
+    }
+  }, []);
+
   const handleAskNameOnEntryChange = useCallback(async (enabled: boolean) => {
     setAskNameOnEntry(enabled);
     try {
@@ -367,6 +391,16 @@ export function SettingsPanelAdapter({
     } catch (err) {
       console.error("Failed to save whether to ask the name:", err);
       setAskNameOnEntry(!enabled);
+    }
+  }, []);
+
+  const handleVoicePriorityChange = useCallback(async (enabled: boolean) => {
+    setVoicePriority(enabled);
+    try {
+      await configSetVoicePriority(enabled);
+    } catch (err) {
+      console.error("Failed to save whether to mark the audio as voice:", err);
+      setVoicePriority(!enabled);
     }
   }, []);
 
@@ -469,6 +503,10 @@ export function SettingsPanelAdapter({
       onDisplayNameChange={handleDisplayNameChange}
       askNameOnEntry={askNameOnEntry}
       onAskNameOnEntryChange={handleAskNameOnEntryChange}
+      voicePriority={voicePriority}
+      onVoicePriorityChange={handleVoicePriorityChange}
+      bufferAsks={bufferAsks}
+      onBufferAsksChange={handleBufferAsksChange}
       diagnosticsState={diagnosticsState}
       diagnosticsProgress={diagnosticsProgress}
       diagnosticsProgressMessage={diagnosticsProgressMessage}

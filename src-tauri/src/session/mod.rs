@@ -264,6 +264,11 @@ impl<R: Runtime> Backend for AppBackend<R> {
                 }
             }
             SignalingEvent::HelpLink { link } => crate::help_link::open_helper(app.clone(), link),
+            SignalingEvent::BufferRequest { event } => {
+                if let Err(e) = app.emit(signaling::buffer_asks::BUFFER_REQUEST_EVENT, &event) {
+                    tracing::warn!("Could not pass on a buffer request event: {}", e);
+                }
+            }
             // The chat panel reads the chat lines from the backend itself.
             _ => {}
         }
@@ -387,7 +392,8 @@ impl<R: Runtime> Backend for AppBackend<R> {
         if let Err(e) = app.emit(CHANGED_EVENT, snapshot) {
             tracing::warn!("Could not announce the session change: {}", e);
         }
-        // The mixer has a strip for each of the room, and for no one else.
+        // The mixer has a strip for each of the room and for each who left it but is still heard
+        // (they are listed as departed), and for no one else.
         if let Some(mixer) = app.try_state::<MixerState>() {
             let ids: Vec<String> = snapshot
                 .room

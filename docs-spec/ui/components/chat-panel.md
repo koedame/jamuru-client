@@ -304,7 +304,7 @@ type EmojiCategory = "recent" | "smileys" | "gestures" | "hearts" | "music" | "o
 
 ## サイズ仕様
 
-現在の実装では、チャットは接続済み画面（ui.pen Screens/Main）の**右端に固定された
+現在の実装では、チャットは接続済み画面（Storybook `Screens/Main`）の**右端に固定された
 ドッキング列**として常時表示する（スライドアウト/別ウィンドウではない）。`ChatPanelAdapter`
 は `SidePanel` を使わず `ChatPanel` を直接描画し、`connId !== null` の間メッセージを
 ポーリングする（500ms 間隔。前回と同じ内容なら一覧の状態を更新しない）。

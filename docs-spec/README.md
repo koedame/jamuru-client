@@ -96,6 +96,7 @@
 | [ADR-094](./adr/ADR-094-limiters-on-what-is-sent-and-what-is-played.md) | 送る音と聞こえる音に、遅延を足さない（先読みしない）リミッターを付ける。天井は 0 dBFS で、それ以下の音はビット単位で変えない。既定は両方 ON（ADR-005 の「既定は常に OFF」をこれにだけ当てはめない） |
 | [ADR-096](./adr/ADR-096-send-pcm-as-24-bit-integers.md) | PCM は 24-bit 符号付き整数で送る（32-bit float をやめ、帯域を約 22 % 減らす）。±1.0 を超えるサンプルは切り詰めて数える。取り違えを防ぐためプロトコル版を 2 に上げる |
 | [ADR-105](./adr/ADR-105-fill-lost-audio-from-the-sound-around-it.md) | FEC で直せなかった損失を、前後の波形（過去のコピーと両側からの線形予測）で埋める。供給が止まったときの予測は選択肢として持つ（既定は無音のまま）。遅延は足さない |
+| [ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md) | 音声パケットを損失なく詰めて送る（FLAC の固定予測 + Rice 符号。声で約 25 %、大きな雑音で約 91 %）。大きさは 8 段階に丸めて漏れを減らす。プロトコル版を 3 に上げる |
 
 ---
 

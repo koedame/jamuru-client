@@ -1,0 +1,163 @@
+/**
+ * PeerBufferSection Component Styles
+ */
+
+.peer-buffer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.peer-buffer__title,
+.peer-buffer__subtitle {
+  margin: 0;
+  font-size: var(--font-size-tiny);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.peer-buffer__rows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.peer-buffer__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  font-size: var(--font-size-tiny);
+}
+
+.peer-buffer__row dt {
+  color: var(--color-text-tertiary);
+}
+
+.peer-buffer__row dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  text-align: right;
+}
+
+.peer-buffer__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-secondary);
+}
+
+.peer-buffer__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.peer-buffer__input {
+  width: 64px;
+  padding: 4px 6px;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.peer-buffer__input:focus-visible,
+.peer-buffer__button:focus-visible {
+  outline: 2px solid var(--color-accent, currentColor);
+  outline-offset: 1px;
+}
+
+.peer-buffer__unit {
+  color: var(--color-text-tertiary);
+}
+
+.peer-buffer__button {
+  padding: 4px 10px;
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.peer-buffer__button:hover:not(:disabled) {
+  background: var(--color-bg-tertiary, var(--color-bg-primary));
+}
+
+.peer-buffer__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.peer-buffer__button--primary {
+  align-self: flex-start;
+}
+
+.peer-buffer__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-secondary);
+}
+
+.peer-buffer__hint-line {
+  margin: 0;
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-tertiary);
+}
+
+.peer-buffer__held,
+.peer-buffer__ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  align-items: flex-start;
+}
+
+.peer-buffer__held p,
+.peer-buffer__standing {
+  margin: 0;
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-primary);
+}
+
+/* The first-use explanation: a bubble whose tip points at the section title */
+.peer-buffer__hint {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary, var(--color-bg-primary));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.peer-buffer__hint p {
+  margin: 0;
+}
+
+.peer-buffer__hint::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 16px;
+  width: 10px;
+  height: 10px;
+  background: inherit;
+  border-top: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-border);
+  transform: rotate(45deg);
+}

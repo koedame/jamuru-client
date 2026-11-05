@@ -27,7 +27,7 @@ fn signal_of(sender: usize) -> Vec<f32> {
 
 fn bytes_of(signal: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::new();
-    jamjam::audio::encode_pcm24(signal, &mut bytes);
+    jamjam::audio::encode_packed(signal, 2, &mut bytes);
     bytes
 }
 

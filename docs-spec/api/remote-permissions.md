@@ -32,6 +32,7 @@
 | `settings_get` | 音声の設定を読む |
 | `settings_change` | 音声の設定を変える |
 | `streaming_status` | 音声の状態（レベル・遅延・統計）を読む |
+| `delay_measure_status` | 機器の遅延の測定の進み具合と、いまの機器で測った値を読む |
 | `streaming_set_mute` | 自分のマイクをミュートする・戻す |
 | `streaming_get_mute` | 自分のマイクのミュートの状態を読む |
 | `streaming_set_monitoring` | 自分の音のモニターを切り替える |
@@ -84,12 +85,21 @@
 | `settings_help_answer` | 設定の手伝いの依頼に答える |
 | `settings_help_begin` | 設定の手伝いを始める |
 | `settings_help_stop` | 設定の手伝いを止める |
+| `buffer_request_ask` | 相手に、自分の音を受けるバッファを増やすよう頼む |
+| `buffer_request_withdraw` | 相手へのバッファの頼みを取り下げる |
+| `buffer_request_answer` | 相手からのバッファの頼みを受ける・断る |
+| `buffer_request_restore` | 受けたバッファの頼みを元に戻す |
+| `buffer_request_snapshot` | バッファの頼みの状況を読む |
+| `buffer_request_set_policy` | バッファの頼みを受けるかを変える |
+| `delay_measure_start` | 機器の遅延の測定を始める |
+| `delay_measure_cancel` | 機器の遅延の測定を止める |
 | `streaming_reconnect` | 音声の接続を張り直す |
 | `streaming_hold_mute` | 確認を出している間、マイクをミュートし相手の音を止めておく・やめて元に戻す |
 | `recording_start` | ルームの音の録音を始める |
 | `recording_stop` | ルームの音の録音を止める |
 | `recording_status` | 録音の状態（経過時間・保存したファイル名）を読む |
 | `recording_open_folder` | 録音を保存したフォルダを開く |
+| `streaming_set_peer_buffer` | 相手ごとの受信バッファを決める・プリセットに戻す |
 | `app_environment` | アプリの版・ビルドの種類・OS・メモリ・音声ホストを読む |
 | `config_load` | 設定ファイルの全体を読む |
 | `config_set_usage_reporting` | 利用状況の送信をオン・オフする |
@@ -97,6 +107,7 @@
 | `config_set_server_url` | 接続先のサーバーを変える |
 | `config_get_effective_server_url` | 実際に使う接続先を読む |
 | `config_set_ask_name_on_entry` | 入室前に名前を確認するかを変える |
+| `config_set_voice_priority` | 音声のパケットに優先の印を付けるかを変える |
 | `terms_get` | 利用規約の本文と、同意済みかを読む |
 | `terms_get_license` | ライセンスの本文を読む |
 | `terms_accept` | 利用規約に同意する |

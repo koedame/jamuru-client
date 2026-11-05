@@ -3,7 +3,7 @@
 アプリケーション設定を管理するコンポーネント。
 一般（プロフィール・言語・サーバー）・オーディオ・プライバシー・診断とサポート・アプリについて、の 5 つのタブを提供する。タブの分け方は [ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)。
 
-デザインは `ui.pen`（Pencil schema 2.14）の `Screens/Settings` 系を正とする。
+デザインは Storybook の `Screens/Settings`（タブごと）と `Windows/Settings` を正とする。
 配色・タイポグラフィは `ui/src/styles/tokens.css` のトークンのみを使用する（ハードコード禁止）。
 
 ---
@@ -138,10 +138,10 @@ type ReportProblemState = "idle" | "loading" | "ready" | "sending" | "sent" | "e
 type Language = "ja" | "en";
 ```
 
-**テーマ選択は廃止した。** jamuru は現状ダーク専用ブランドであり（`tokens.css` の light は dark を複製）、`ui.pen` の一般タブも言語のみを持つ。このため `theme` / `onThemeChange` は SettingsPanel から削除した。
+**テーマ選択は廃止した。** jamuru は現状ダーク専用ブランドであり（`tokens.css` の light は dark を複製）、一般タブも言語のみを持つ。このため `theme` / `onThemeChange` は SettingsPanel から削除した。
 
 タブは次の 5 つで、並びは使う頻度の順（よく触る設定 → 送信の判断 → 困ったとき → 情報）。各タブにアイコンを表示する。
-`ui.pen` の設定画面（`Screens/Settings` の各フレーム）もこの 5 タブに合わせてある（[ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)）。
+Storybook の `Screens/Settings` もこの 5 タブに合わせてある（[ADR-080](../../adr/ADR-080-settings-tabs-by-what-the-user-is-doing.md)）。
 初期表示タブは一覧の並び順とは独立に `オーディオ`（`initialTab` のデフォルト値。設定ウィンドウは `一般` で開く）。
 `legal`（規約などを開く関数）を渡さないとき、アプリについてのタブは出さない。
 
@@ -268,7 +268,7 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 1. 見出し「プロフィール」: 表示名（`stacked` + Input、hint「他の参加者に表示される名前です（1〜32文字）」、最大32文字、空は error）と、その下のスイッチ「入室前に名前を確認する」（hint「ルームを作る・入るたびに、使う名前を確かめます」。既定はオン。オフにするのは入室前の名前の確認の「次からこの名前を使用する」と同じ設定で、オンに戻すとまた確認が出る。`config_set_ask_name_on_entry` でその 1 項目だけを変える。REQ-CON-142）
 2. 見出し「表示」: 言語（`stacked` + `block` Select: 日本語 / English）
-3. 見出し「接続」: サーバー（`stacked` + Input。空なら既定のサーバーを使い、hint に実際の接続先を出す）
+3. 見出し「接続」: サーバー（`stacked` + Input。空なら既定のサーバーを使い、hint に実際の接続先を出す）と、その下のスイッチ「音声を優先して送る」（hint「音声のパケットに印を付け、Wi-Fi のルーターが他の通信より先に送れるようにします。同じ Wi-Fi で他の人が通信していて音が途切れるときに試し、かえって悪くなるときはオフにしてください。macOS では使えません。次の接続から変わります」。既定はオフ。`config_set_voice_priority` でその 1 項目だけを変える。REQ-CON-160）
 
 ### プライバシータブ（PrivacyTab）
 

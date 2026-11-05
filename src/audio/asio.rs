@@ -432,6 +432,7 @@ fn open_duplex(
         picked,
         device_out: vec![0.0; buffer_size * output.len().max(1)],
         sample_count: 0,
+        sample_rate,
         input,
         output,
     };
@@ -514,6 +515,7 @@ struct CallbackState {
     /// before it is encoded into the output half.
     device_out: Vec<f32>,
     sample_count: u64,
+    sample_rate: u32,
 }
 
 impl CallbackState {
@@ -536,6 +538,10 @@ impl CallbackState {
         }
         if in_channels > 0 {
             super::device_loop::on_input(&self.decoded, in_channels);
+            if super::delay_meter::on_input(&self.decoded, in_channels, self.sample_rate) {
+                // A delay measurement is under way: the session hears silence
+                self.decoded.fill(0.0);
+            }
             pick_channels(
                 &self.decoded,
                 in_channels,

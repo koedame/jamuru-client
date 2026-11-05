@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { FormField } from "../FormField";
 import { Select } from "../Select";
 import { Input } from "../Input";
+import type { BufferAskPolicy } from "../../../lib/tauri";
 import "./TabContent.css";
 
 export type Language = "ja" | "en";
@@ -25,6 +26,14 @@ export interface GeneralTabProps {
   askNameOnEntry?: boolean;
   /** Called when the person turns the name confirmation on or off; the switch is left out when absent */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
+  /** Whether the audio packets are marked as voice, so a Wi-Fi sends them ahead of other traffic (ADR-110) */
+  voicePriority?: boolean;
+  /** Called when the person turns the marking on or off; the switch is left out when absent */
+  onVoicePriorityChange?: (enabled: boolean) => void;
+  /** Whether asks to buffer a participant's audio for longer are put to the person or turned down (ADR-097) */
+  bufferAsks?: BufferAskPolicy;
+  /** Called when the person chooses; the section is left out when absent */
+  onBufferAsksChange?: (policy: BufferAskPolicy) => void;
   /** Current language */
   language: Language;
   /** Language change handler */
@@ -43,6 +52,10 @@ export function GeneralTab({
   onDisplayNameChange,
   askNameOnEntry = true,
   onAskNameOnEntryChange,
+  voicePriority = false,
+  onVoicePriorityChange,
+  bufferAsks = "ask",
+  onBufferAsksChange,
   language,
   onLanguageChange,
   serverUrl,
@@ -100,6 +113,30 @@ export function GeneralTab({
         </label>
       )}
 
+      {onBufferAsksChange && (
+        <>
+          <div className="tab-content__divider" />
+
+          <h2 className="tab-content__title">{t("bufferRequest.policy.title")}</h2>
+
+          <FormField
+            label={t("bufferRequest.policy.label")}
+            htmlFor="buffer-asks-select"
+            hint={t("bufferRequest.policy.hint")}
+          >
+            <Select
+              id="buffer-asks-select"
+              options={[
+                { value: "ask", label: t("bufferRequest.policy.ask") },
+                { value: "never", label: t("bufferRequest.policy.never") },
+              ]}
+              value={bufferAsks}
+              onChange={(value) => onBufferAsksChange(value as BufferAskPolicy)}
+            />
+          </FormField>
+        </>
+      )}
+
       <div className="tab-content__divider" />
 
       <h2 className="tab-content__title">{t("settings.general.display", "Display")}</h2>
@@ -138,6 +175,27 @@ export function GeneralTab({
           autoComplete="off"
         />
       </FormField>
+
+      {onVoicePriorityChange && (
+        <label className="tab-content__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={voicePriority}
+            onChange={(e) => onVoicePriorityChange(e.target.checked)}
+            data-testid="general-voice-priority-toggle"
+          />
+          <span>
+            {t("settings.general.voicePriority", "Send audio with priority")}
+            <span className="tab-content__switch-hint">
+              {t(
+                "settings.general.voicePriorityHint",
+                "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Try it when audio breaks up while others use the same Wi-Fi; turn it off if it gets worse. Not available on macOS. Applies from the next session"
+              )}
+            </span>
+          </span>
+        </label>
+      )}
     </div>
   );
 }

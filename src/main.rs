@@ -276,6 +276,8 @@ struct AudioSettings {
     /// Whether what is sent and what is played are held at 0 dBFS, as the app saves it
     input_limiter: bool,
     output_limiter: bool,
+    /// Whether the audio packets are marked as voice, as the app saves it
+    voice_priority: bool,
     /// How a WASAPI device is opened (Windows), as the app saves it
     wasapi_mode: jamjam::audio::WasapiMode,
     /// Which channels of a multi-channel interface are read and played on (1-based), as
@@ -339,6 +341,7 @@ impl AudioArgs {
             transmit_channels: config.transmit_channels,
             input_limiter: config.input_limiter,
             output_limiter: config.output_limiter,
+            voice_priority: config.voice_priority,
             wasapi_mode: config.wasapi_mode,
             input_channels: (config.input_channel_l, config.input_channel_r),
             output_channels: (config.output_channel_l, config.output_channel_r),
@@ -1434,6 +1437,7 @@ impl AudioSession {
                 transmit_channels: settings.transmit_channels,
                 input_limiter: settings.input_limiter,
                 output_limiter: settings.output_limiter,
+                voice_priority: settings.voice_priority,
                 input_channels: settings.input_channels,
                 output_channels: settings.output_channels,
                 input_signal,
@@ -1834,6 +1838,7 @@ mod tests {
             transmit_channels: 1,
             input_limiter: true,
             output_limiter: true,
+            voice_priority: false,
             wasapi_mode: Default::default(),
             input_channels: (1, Some(2)),
             output_channels: (1, Some(2)),

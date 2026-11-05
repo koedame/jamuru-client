@@ -24,6 +24,7 @@ import { RecordingMark, RecordingPanel, useRoomRecording } from "../components/R
 import { ChatPanelAdapter } from "../components/ChatPanel";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
 import { PeerLinkDialog } from "../components/PeerLinkDialog";
+import { useBufferRequests } from "../components/BufferRequest";
 import { Toast, ToastStack } from "../components/Toast";
 import { LeaveDialog } from "../components/LeaveDialog";
 import { EntryNameDialog } from "../components/EntryNameDialog";
@@ -70,6 +71,7 @@ import {
   configGetEffectiveServerUrl,
   windowResizeMain,
   type HelpEvent,
+  PEER_MESSAGE_FEATURE,
   PEER_APP_TOO_OLD,
   type PeerLinkStatus,
   type DeviceProblem,
@@ -300,8 +302,8 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     document.documentElement.lang = i18n.language;
   }, [i18n.language]);
 
-  // Resize the main window to match ui.pen's JoinRoom frame (600x700) while
-  // disconnected, and to ui.pen's Screens/Main (1134 wide) once connected.
+  // Resize the main window to match the join screen (600x700) while
+  // disconnected, and the connected screen (1134 wide) once connected.
   // Gated on the derived boolean (not the phase directly) so the handful of
   // non-connected phases a single connect attempt passes through
   // (connecting_server -> server_connected -> creating/joining) don't each
@@ -522,6 +524,9 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   // Helping with settings (ADR-043). Its events come from the backend as the
   // room's events are read.
   const settingsHelp = useSettingsHelp(connectionId, participants);
+  // Asking participants to buffer longer, and their asks of this app (ADR-097)
+  // A helper's window shows the helped app's room and changes none of its buffers.
+  const bufferRequests = useBufferRequests(helping ? null : connectionId, participants);
   // A helper's window shows the helped app's room: it does not record it
   const recording = useRoomRecording(phase === "connected" && !helping);
   const settingsHelpEventRef = useRef(settingsHelp.onEvent);
@@ -769,7 +774,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
   useWindowEvent<string>(MENU_ACTION, handleMenuAction);
 
   // Confirm leaving from the leave dialog. Keeps the dialog open in its
-  // "pending" (ui.pen Dialog/LeaveConfirm Loading) state until the leave
+  // "pending" state until the leave
   // completes - the connected screen (and this dialog with it) then
   // unmounts naturally once the phase flips away from "connected".
   const handleConfirmLeave = async () => {
@@ -1004,7 +1009,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
   // Render the connected session screen: a 3-column layout
   // (room sidebar | mixer | chat) with a header and status footer,
-  // matching ui.pen Screens/Main.
+  // (Storybook: Screens/Main).
   const renderConnectedState = () => {
     if (phase !== "connected") return null;
 
@@ -1013,7 +1018,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
     // no room can be joined with them, so a participant who copied it could
     // not invite anyone (ADR-026).
     const roomCode = room?.invite_code ?? "";
-    const participantCount = participants.length + 1;
+    const participantCount = participants.filter((p) => !p.departed).length + 1;
     // Whose audio takes longest to go there and back is marked (REQ-LAT-102)
     const slowest = slowestPeerId(links);
 
@@ -1085,6 +1090,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                     data-testid="participant"
                     data-peer-id={participant.id}
                     data-link={trouble ?? "connected"}
+                    data-departed={participant.departed ? "true" : undefined}
                   >
                     <button
                       type="button"
@@ -1100,6 +1106,11 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
                         <span className="participant__name">{participant.name}</span>
                       </span>
                       {recording.status.peers.includes(participant.id) && <RecordingMark />}
+                      {participant.departed && (
+                        <span className="participant__departed" data-testid="participant-departed">
+                          {t("session.participant.departed")}
+                        </span>
+                      )}
                       {trouble !== null && (
                         <span
                           className={`participant__link participant__link--${trouble}`}
@@ -1211,6 +1222,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
 
         <ToastStack>
           {settingsHelp.toast}
+          {bufferRequests.toast}
           {recording.toast}
           {delayNoticeVisible && <Toast type="success" message={t("notification.delayAdjusted", { ms: Number(adjustedDelayMs.toFixed(1)) })} />}
           {oldAppWarning && <Toast type="warning" message={oldAppWarning} />}
@@ -1277,12 +1289,16 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
         </ToastStack>
 
         {settingsHelp.overlays}
+        {bufferRequests.overlays}
         {helpedBy !== null && <SettingsHelpMirror name={helpedBy} open={presence.remotePanelOpen} />}
         {presence.marks}
 
         {detailParticipant && (
           <PeerLinkDialog
+            peerId={detailParticipant.id}
             peerName={detailParticipant.name}
+            askable={(detailParticipant.features ?? []).includes(PEER_MESSAGE_FEATURE)}
+            requests={helping ? undefined : bufferRequests}
             link={links.find((l) => l.peer_id === detailParticipant.id)}
             localSampleRate={localSampleRate}
             onClose={() => setDetailPeerId(null)}

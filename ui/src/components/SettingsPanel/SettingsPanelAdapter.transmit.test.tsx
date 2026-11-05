@@ -20,12 +20,17 @@ import { audioSettings } from './audioSettingsFixture';
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-/** Handlers the panel registered, by event name, so a test can raise one. */
-const listeners = vi.hoisted(() => new Map<string, (event: { payload: unknown }) => void>());
+/** Handlers the panel registered, by event name, so a test can raise one (several can hear the same event). */
+const handlers = vi.hoisted(() => new Map<string, Array<(event: { payload: unknown }) => void>>());
+const listeners = vi.hoisted(() => ({
+  has: (name: string) => handlers.has(name),
+  get: (name: string) => (event: { payload: unknown }) => handlers.get(name)?.forEach((handler) => handler(event)),
+  clear: () => handlers.clear(),
+}));
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn((name: string, handler: (event: { payload: unknown }) => void) => {
-    listeners.set(name, handler);
-    return Promise.resolve(() => listeners.delete(name));
+    handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+    return Promise.resolve(() => handlers.set(name, (handlers.get(name) ?? []).filter((held) => held !== handler)));
   }),
 }));
 

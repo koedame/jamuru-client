@@ -149,10 +149,25 @@ app_commands! {
     [Access::HELP] "手伝う人が、いま指している部品とフォーカスしている部品を、相手の画面に伝える" crate::help_presence::help_presence;
     [Access::NO_HELP] "手伝われる人の画面が、いま指している部品とフォーカスしている部品を、手伝う人の窓に伝える" crate::help_presence::help_presence_publish;
 
+    // Asking another participant to buffer one's audio for longer, and answering such an ask, is
+    // the person's own (ADR-097).
+    [Access::NO_HELP] "相手に、自分の音を受けるバッファを増やすよう頼む" crate::signaling::buffer_asks::buffer_request_ask;
+    [Access::NO_HELP] "相手へのバッファの頼みを取り下げる" crate::signaling::buffer_asks::buffer_request_withdraw;
+    [Access::NO_HELP] "相手からのバッファの頼みを受ける・断る" crate::signaling::buffer_asks::buffer_request_answer;
+    [Access::NO_HELP] "受けたバッファの頼みを元に戻す" crate::signaling::buffer_asks::buffer_request_restore;
+    [Access::NO_HELP] "バッファの頼みの状況を読む" crate::signaling::buffer_asks::buffer_request_snapshot;
+    [Access::NO_HELP] "バッファの頼みを受けるかを変える" crate::signaling::buffer_asks::buffer_request_set_policy;
+
     [Access::ALL] "音声の設定を読む" crate::settings::settings_get;
     [Access::ALL] "音声の設定を変える" crate::settings::settings_change;
 
     [Access::ALL] "音声の状態（レベル・遅延・統計）を読む" crate::streaming::streaming_status;
+    // The measuring sound comes out of the person's speakers and the room hears
+    // silence from them meanwhile, and the cable or the microphone is placed by
+    // hand: starting it is the person's own. What it found is open to a helper.
+    [Access::NO_HELP] "機器の遅延の測定を始める" crate::delay::delay_measure_start;
+    [Access::NO_HELP] "機器の遅延の測定を止める" crate::delay::delay_measure_cancel;
+    [Access::ALL] "機器の遅延の測定の進み具合と、いまの機器で測った値を読む" crate::delay::delay_measure_status;
     [Access::NO_HELP] "音声の接続を張り直す" crate::streaming::streaming_reconnect;
     [Access::ALL] "自分のマイクをミュートする・戻す" crate::streaming::streaming_set_mute;
     [Access::SCREEN_ONLY] "確認を出している間、マイクをミュートし相手の音を止めておく・やめて元に戻す" crate::streaming::streaming_hold_mute;
@@ -172,6 +187,8 @@ app_commands! {
     [Access::ALL] "相手ごとの音量を変える" crate::mixer::mixer_set_peer_volume;
     [Access::ALL] "相手ごとの左右の位置を変える" crate::mixer::mixer_set_peer_pan;
     [Access::ALL] "相手ごとの音を消す・戻す" crate::mixer::mixer_set_peer_muted;
+    // How long to buffer a participant is a trade of latency for stability; a helper has no say in it.
+    [Access::NO_HELP] "相手ごとの受信バッファを決める・プリセットに戻す" crate::streaming::streaming_set_peer_buffer;
     [Access::ALL] "全体の音量を変える" crate::streaming::streaming_set_master_volume;
     [Access::ALL] "全体の音量を読む" crate::streaming::streaming_get_master_volume;
 
@@ -192,6 +209,8 @@ app_commands! {
     [Access::ALL] "自分の表示名を変える" crate::config::config_set_peer_name;
     // Whether the person is asked their name before entering a room is their own.
     [Access::NO_HELP] "入室前に名前を確認するかを変える" crate::config::config_set_ask_name_on_entry;
+    // Whether the audio is marked as voice changes how the network treats the person's packets.
+    [Access::NO_HELP] "音声のパケットに優先の印を付けるかを変える" crate::config::config_set_voice_priority;
     [Access::ALL] "サンプルレートの設定を読む" crate::config::config_get_sample_rate;
     [Access::ALL] "送信チャンネル数の設定を読む" crate::config::config_get_transmit_channels;
     [Access::ALL] "表示の言語を読む" crate::config::config_get_language;
@@ -438,6 +457,7 @@ mod tests {
             "session_create",
             "session_reconnect",
             "config_set_ask_name_on_entry",
+            "config_set_voice_priority",
             "config_set_server_url",
             "config_set_usage_reporting",
             "settings_help_ask",
@@ -536,6 +556,7 @@ mod tests {
             "config_list_presets",
             "config_set_language",
             "config_set_peer_name",
+            "delay_measure_status",
             "diagnostics_check_zero_latency",
             "diagnostics_get_recommended_preset",
             "diagnostics_run_audio",

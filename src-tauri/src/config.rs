@@ -267,6 +267,16 @@ pub fn config_set_ask_name_on_entry(
     Ok(())
 }
 
+/// Turn the marking of the audio packets as voice on or off; takes effect when the next session starts
+#[tauri::command]
+pub fn config_set_voice_priority(
+    enabled: bool,
+    state: tauri::State<'_, ConfigState>,
+) -> Result<(), String> {
+    state.modify(|config| config.voice_priority = enabled)?;
+    Ok(())
+}
+
 // =============================================================================
 // Language Commands
 // =============================================================================

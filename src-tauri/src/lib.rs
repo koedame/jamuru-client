@@ -10,6 +10,7 @@ mod chat_link;
 mod config;
 #[cfg(feature = "debug-remote")]
 mod debug_remote;
+mod delay;
 mod device_identity;
 mod diagnostics;
 #[cfg(feature = "e2e-control")]
@@ -215,6 +216,8 @@ pub fn run() {
     // identity) would go nowhere.
     app.manage(SignalingState::new());
     let startup_config = load_startup_config();
+    app.state::<SignalingState>()
+        .init_buffer_policy(startup_config.buffer_asks);
     // Until the user agrees to the terms of use, nothing below that talks to
     // the network on its own starts (`terms::wait_accepted`).
     app.manage(terms::TermsState::new(startup_config.terms_accepted()));
@@ -240,12 +243,21 @@ pub fn run() {
     usage.apply_previous_incident(previous_incident);
     let watchdog = watchdog::Watchdog::install(usage.reporter().clone());
     app.manage(watchdog.clone());
+    let saved_usage = usage.clone();
+    let signaling_handle = app.handle().clone();
+    // The room is told the delay measured for the devices selected now
+    let tell_delay = move |config: &config::AppConfig| {
+        signaling_handle
+            .state::<SignalingState>()
+            .set_own_delay(config.current_device_delay().map(|d| d.delay_ms));
+    };
+    tell_delay(&startup_config);
     if usage.reporter().is_enabled() {
         usage.report_launch(startup_config);
     }
-    let saved_usage = usage.clone();
     config_state.on_saved(move |config| {
-        saved_usage.settings_saved(&with_usage_reporting_only_after_the_terms(config.clone()))
+        saved_usage.settings_saved(&with_usage_reporting_only_after_the_terms(config.clone()));
+        tell_delay(config);
     });
     app.manage(config_state);
     app.manage(usage);

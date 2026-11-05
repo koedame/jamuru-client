@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SettingsHelpQuestion } from "./SettingsHelpQuestion";
 
 const meta = {
-  title: "Components/SettingsHelp/SettingsHelpQuestion",
+  title: "Components/Settings/Help/SettingsHelpQuestion",
   component: SettingsHelpQuestion,
   parameters: {
     layout: "fullscreen",

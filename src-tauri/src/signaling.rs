@@ -2,7 +2,7 @@
 //!
 //! Provides commands to connect to signaling servers, list rooms, and join/leave rooms.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
@@ -23,6 +23,10 @@ use crate::device_identity::DeviceIdentityState;
 use crate::logging::strip_userinfo;
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
+pub mod buffer_asks;
+
+use jamjam::network::buffer_request::{BufferEvent, BufferRequests, Policy};
+use jamjam::network::device_delay_notice::DeviceDelayNotice;
 use jamjam::network::recording_notice::RecordingNotice;
 use jamjam::network::settings_help::{
     notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
@@ -126,6 +130,13 @@ pub struct SignalingState {
     /// The connection the help talks over, for a message not prompted by
     /// the UI (the relay connection ending, a setting being changed).
     help_conn: std::sync::Mutex<Option<u32>>,
+    /// Asking participants to buffer this app's audio for longer, and their asks of this app
+    /// (ADR-097). Never held across an await.
+    buffer_asks: std::sync::Mutex<BufferRequests>,
+    /// The connection the asks last talked over, for a message not prompted by a poll
+    buffer_asks_conn: std::sync::Mutex<Option<u32>>,
+    /// When the asks last put a peer message on the connection
+    buffer_sent: std::sync::Mutex<VecDeque<(Instant, bool)>>,
     /// Events from the UI's own help actions, handed over on its next poll
     /// with those that arrived from the room.
     queued_events: std::sync::Mutex<Vec<SignalingEvent>>,
@@ -138,6 +149,13 @@ pub struct SignalingState {
     recording_told: std::sync::Mutex<Option<(u32, bool)>>,
     /// The participants who said they record the room (ADR-095), by id
     recording_peers: std::sync::Mutex<HashSet<String>>,
+    /// The delay of this app's devices that the others are to be told (REQ-CON-035),
+    /// in tenths of a millisecond; `None` when there is no figure for the devices in use.
+    own_delay: std::sync::Mutex<Option<u32>>,
+    /// What the room was last told of it, and over which connection.
+    delay_told: std::sync::Mutex<Option<(u32, Option<u32>)>>,
+    /// The delays the participants told, in ms, by id
+    peer_delays: std::sync::Mutex<HashMap<String, f64>>,
 }
 
 impl SignalingState {
@@ -148,11 +166,50 @@ impl SignalingState {
             lost_logged: std::sync::Mutex::new(HashSet::new()),
             help: std::sync::Mutex::new(Help::new()),
             help_conn: std::sync::Mutex::new(None),
+            buffer_asks: std::sync::Mutex::new(BufferRequests::new(Policy::default())),
+            buffer_asks_conn: std::sync::Mutex::new(None),
+            buffer_sent: std::sync::Mutex::new(VecDeque::new()),
             queued_events: std::sync::Mutex::new(Vec::new()),
             link_identity: std::sync::Mutex::new(None),
             recording_told: std::sync::Mutex::new(None),
             recording_peers: std::sync::Mutex::new(HashSet::new()),
+            own_delay: std::sync::Mutex::new(None),
+            delay_told: std::sync::Mutex::new(None),
+            peer_delays: std::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Sets the delay of this app's devices that the room is told, in ms. It
+    /// goes out on the next poll of each connection.
+    pub fn set_own_delay(&self, delay_ms: Option<f64>) {
+        *self.own_delay.lock().unwrap_or_else(|e| e.into_inner()) = DeviceDelayNotice::of(delay_ms)
+            .delay_ms
+            .map(|ms| (ms * 10.0).round() as u32);
+    }
+
+    /// The delays the participants told of their devices, in ms, by id
+    pub fn peer_delays(&self) -> HashMap<String, f64> {
+        self.peer_delays
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Notes the delay a participant told (`None` takes it back). True when
+    /// that is a change.
+    fn set_peer_delay(&self, peer: &str, delay_ms: Option<f64>) -> bool {
+        let mut peers = self.peer_delays.lock().unwrap_or_else(|e| e.into_inner());
+        match delay_ms {
+            Some(ms) => peers.insert(peer.to_string(), ms) != Some(ms),
+            None => peers.remove(peer).is_some(),
+        }
+    }
+
+    fn forget_peer_delays(&self) {
+        self.peer_delays
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// The participants who have said they record the room, by id
@@ -571,9 +628,11 @@ pub async fn signaling_leave_room(
         .await
         .map_err(|e| e.to_string())?;
     state.forget_recording_peers();
+    state.forget_peer_delays();
     // The others hear that this app left; any help with them is over.
     let ended = help_events(lock_help(&state).reset());
     queue_events(&state, ended);
+    queue_events(&state, buffer_asks::end_all(&state, &streaming));
 
     Ok(())
 }
@@ -813,6 +872,9 @@ pub enum SignalingEvent {
     /// The help this app asked for was accepted: open the helper's end of the
     /// relay and the window the help is done in.
     HelpLink { link: Link },
+    /// Something about asking a participant to buffer audio for longer, or being asked, that the
+    /// UI shows (ADR-097)
+    BufferRequest { event: BufferEvent },
 }
 
 /// Poll for signaling events (peer join/leave, chat messages)
@@ -844,6 +906,12 @@ pub async fn signaling_poll_events(
         streaming.recorder().report().recording,
     )
     .await;
+    *state
+        .buffer_asks_conn
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(conn_id);
+    events.extend(buffer_asks::tick(conn, &state, &streaming).await);
+    sync_delay_notice(conn, &state, conn_id).await;
 
     // Poll with 50ms timeout to avoid blocking too long
     loop {
@@ -877,6 +945,9 @@ pub async fn signaling_poll_events(
                         if recording_told(&state, conn_id) {
                             send_recording_notice(conn, Some(peer.id), true).await;
                         }
+                        if let Some(tenths) = delay_told(&state, conn_id) {
+                            send_delay_notice(conn, Some(peer.id), Some(tenths)).await;
+                        }
                         events.push(SignalingEvent::PeerJoined { peer });
                     }
                     SignalingMessage::PeerLeft { peer_id } => {
@@ -905,11 +976,24 @@ pub async fn signaling_poll_events(
                         usage.participant_left();
                         tracing::info!("Peer {} left the room", peer_id);
                         state.set_peer_recording(&peer_id.to_string(), false);
+                        state.set_peer_delay(&peer_id.to_string(), None);
                         events.push(SignalingEvent::PeerLeft {
                             peer_id: peer_id.to_string(),
                         });
                         let outs = lock_help(&state).peer_left(peer_id);
                         events.extend(carry_out(conn, &state, outs).await);
+                        let outs = buffer_asks::peer_left_outs(&state, peer_id);
+                        events.extend(
+                            buffer_asks::carry_out(
+                                conn,
+                                &state,
+                                &streaming,
+                                outs,
+                                Instant::now(),
+                                false,
+                            )
+                            .await,
+                        );
                     }
                     SignalingMessage::PeerUpdated { peer } => {
                         crate::logging::register_participant_name(&peer.name);
@@ -978,6 +1062,31 @@ pub async fn signaling_poll_events(
                                 );
                                 events.extend(carry_out(conn, &state, outs).await);
                             }
+                            PeerBody::BufferRequest(message) => {
+                                events.extend(
+                                    buffer_asks::received(
+                                        conn,
+                                        &state,
+                                        &streaming,
+                                        from,
+                                        from_name.as_deref().unwrap_or_default(),
+                                        message,
+                                    )
+                                    .await,
+                                );
+                            }
+                            PeerBody::DeviceDelay(notice) => {
+                                // The relay sends a broadcast back to its sender too
+                                let is_own_notice = state
+                                    .room_state
+                                    .lock()
+                                    .await
+                                    .as_ref()
+                                    .is_some_and(|rs| rs.peer_id == from.to_string());
+                                if !is_own_notice {
+                                    state.set_peer_delay(&from.to_string(), notice.stated());
+                                }
+                            }
                             PeerBody::Recording(RecordingNotice { on }) => {
                                 events.extend(
                                     recording_notice_received(
@@ -1017,8 +1126,10 @@ pub async fn signaling_poll_events(
                     *room_state = None;
                     drop(room_state);
                     state.forget_recording_peers();
+                    state.forget_peer_delays();
                     // Before the loss: the window stops reading the batch there.
                     events.extend(help_events(lock_help(&state).reset()));
+                    events.extend(buffer_asks::end_all(&state, &streaming));
                     events.push(SignalingEvent::ConnectionLost {
                         reason: e.to_string(),
                     });
@@ -1181,6 +1292,77 @@ async fn sync_recording_notice(
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = before;
     }
+}
+
+/// What the room has been told of this app's device delay over this
+/// connection, in tenths of a millisecond; `None` when nothing, or that there is none.
+fn delay_told(state: &SignalingState, conn_id: u32) -> Option<u32> {
+    match *state.delay_told.lock().unwrap_or_else(|e| e.into_inner()) {
+        Some((conn, told)) if conn == conn_id => told,
+        _ => None,
+    }
+}
+
+/// Tells the room the delay of this app's devices if it is not what the room
+/// was told over this connection. A notice that could not be sent is tried
+/// again on the next poll.
+async fn sync_delay_notice(conn: &mut SignalingConnection, state: &SignalingState, conn_id: u32) {
+    let wanted = *state.own_delay.lock().unwrap_or_else(|e| e.into_inner());
+    let before = {
+        let mut told = state.delay_told.lock().unwrap_or_else(|e| e.into_inner());
+        let before = *told;
+        let already = match before {
+            Some((conn, ms)) if conn == conn_id => ms,
+            // Nothing was said over a connection that is new, and nothing needs saying of no figure
+            _ => None,
+        };
+        if already == wanted {
+            return;
+        }
+        *told = Some((conn_id, wanted));
+        before
+    };
+    tracing::info!(
+        "Telling the room the device delay: {:?} (tenths of ms)",
+        wanted
+    );
+    if !send_delay_notice(conn, None, wanted).await {
+        *state.delay_told.lock().unwrap_or_else(|e| e.into_inner()) = before;
+    }
+}
+
+/// Sends the device delay (in tenths of a millisecond) to `to`, or to everyone
+/// in the room. Whether it was sent.
+async fn send_delay_notice(
+    conn: &mut SignalingConnection,
+    to: Option<Uuid>,
+    tenths: Option<u32>,
+) -> bool {
+    let notice = DeviceDelayNotice {
+        delay_ms: tenths.map(|tenths| f64::from(tenths) / 10.0),
+    };
+    let body = match serde_json::to_value(PeerBody::DeviceDelay(notice)) {
+        Ok(serde_json::Value::Object(body)) => body,
+        other => {
+            tracing::error!(
+                "A device delay notice did not encode as an object: {:?}",
+                other
+            );
+            return false;
+        }
+    };
+    let sent = conn
+        .send(SignalingMessage::PeerMessage {
+            to,
+            from: None,
+            from_name: None,
+            body,
+        })
+        .await;
+    if let Err(e) = &sent {
+        tracing::warn!("Could not send a device delay notice: {}", e);
+    }
+    sent.is_ok()
 }
 
 /// Sends the recording notice to `to`, or to everyone in the room. Whether it
@@ -1525,6 +1707,56 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(5)).await;
         });
         format!("{TEST_HTTP_SCHEME}{addr}")
+    }
+
+    /// Like [`spawn_server_sending`], and the server writes down every text frame it is sent
+    /// afterwards and sends whatever is put in the returned channel. Returns the server URL, what
+    /// was written down and the channel.
+    async fn spawn_server_exchanging(
+        messages: Vec<String>,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        tokio::sync::mpsc::UnboundedSender<String>,
+    ) {
+        use futures_util::{SinkExt, StreamExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written = received.clone();
+        let (later, mut to_send) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            let mut ws = answer_question_then_accept(listener).await;
+            for message in messages {
+                ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                    message.into(),
+                ))
+                .await
+                .unwrap();
+            }
+            loop {
+                tokio::select! {
+                    later = to_send.recv() => {
+                        // The test is done with the server, or drops the channel to hang up
+                        let Some(message) = later else { break };
+                        ws.send(tokio_tungstenite::tungstenite::Message::Text(message.into()))
+                            .await
+                            .unwrap();
+                    }
+                    frame = tokio::time::timeout(Duration::from_secs(20), ws.next()) => {
+                        match frame {
+                            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                                written.lock().unwrap().push(text.to_string());
+                            }
+                            Ok(Some(Ok(_))) => {}
+                            _ => break,
+                        }
+                    }
+                }
+            }
+        });
+        (format!("{TEST_HTTP_SCHEME}{addr}"), received, later)
     }
 
     /// A mock app holding `conn` as connection 1, with the state
@@ -2159,5 +2391,417 @@ mod tests {
         sync_recording_notice(&mut conn, &state, 1, true).await;
 
         assert!(!recording_told(&state, 1), "told, though nothing was sent");
+    }
+    fn ask_from(asker: Uuid, max_ms10: u32, auto: bool) -> String {
+        serde_json::json!({"type": "PeerMessage", "data": {
+            "from": asker, "from_name": "Bo",
+            "body": {"buffer_request": {"kind": "ask", "terms": {
+                "max_ms10": max_ms10, "tolerance_tenths": 10, "auto": auto}}}}})
+        .to_string()
+    }
+
+    /// The terms `ask_from` sends, as the user was shown them
+    fn shown_terms(max_ms10: u16, auto: bool) -> jamjam::audio::BufferTerms {
+        jamjam::audio::BufferTerms {
+            max_ms10,
+            tolerance_tenths: 10,
+            auto,
+        }
+    }
+
+    /// What the app answered, by the `answer` each reply of a participant carried
+    fn answers_sent(sent: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
+        sent.lock()
+            .unwrap()
+            .iter()
+            .filter_map(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .filter_map(|frame| {
+                frame["data"]["body"]["buffer_request"]["answer"]
+                    .as_str()
+                    .map(str::to_string)
+            })
+            .collect()
+    }
+
+    async fn connect(url: &str) -> tauri::App<tauri::test::MockRuntime> {
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(url, identity).connect().await.unwrap();
+        app_with_connection(conn)
+    }
+
+    fn asked_events(events: &[SignalingEvent]) -> Vec<Uuid> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                SignalingEvent::BufferRequest {
+                    event: BufferEvent::Asked { peer, .. },
+                } => Some(*peer),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Verifies: REQ-CON-036
+    /// Verifies: REQ-CON-037
+    #[tokio::test]
+    async fn when_a_participant_asks_the_buffer_is_held_only_after_the_user_accepts_and_they_are_told(
+    ) {
+        let asker = Uuid::new_v4();
+        let (url, sent, _later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        let streaming = app.state::<StreamingState>();
+
+        let events = poll_until_events(&app).await;
+
+        assert_eq!(asked_events(&events), [asker], "the user is asked");
+        assert_eq!(
+            streaming.peer_buffer(asker).1.granted,
+            None,
+            "nothing is held before they say yes"
+        );
+        buffer_asks::buffer_request_answer(
+            1,
+            asker.to_string(),
+            true,
+            Some(shown_terms(300, false)),
+            app.state(),
+            app.state(),
+        )
+        .await
+        .unwrap();
+        let held = streaming
+            .peer_buffer(asker)
+            .1
+            .granted
+            .expect("the buffer is held");
+        assert_eq!(held.applied_ms10, 300);
+        let mut answers = Vec::new();
+        for _ in 0..20 {
+            // The answer goes out with the poll that carries the ask, then on
+            // with the repeats
+            let _ = poll_until_events(&app).await;
+            answers = answers_sent(&sent);
+            if answers.iter().any(|a| a == "accepted") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            answers.contains(&"pending".to_string()),
+            "told that the ask was received: {answers:?}"
+        );
+        assert!(
+            answers.contains(&"accepted".to_string()),
+            "told it was accepted: {answers:?}"
+        );
+    }
+
+    /// Verifies: REQ-CON-037
+    #[tokio::test]
+    async fn when_the_user_puts_the_buffer_back_it_is_the_presets_again_and_the_participant_is_told(
+    ) {
+        let asker = Uuid::new_v4();
+        let (url, sent, _later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        let streaming = app.state::<StreamingState>();
+        poll_until_events(&app).await;
+        buffer_asks::buffer_request_answer(
+            1,
+            asker.to_string(),
+            true,
+            Some(shown_terms(300, false)),
+            app.state(),
+            app.state(),
+        )
+        .await
+        .unwrap();
+
+        buffer_asks::buffer_request_restore(1, asker.to_string(), app.state(), app.state())
+            .await
+            .unwrap();
+
+        assert_eq!(streaming.peer_buffer(asker).1.granted, None);
+        let mut answers = Vec::new();
+        for _ in 0..20 {
+            answers = answers_sent(&sent);
+            if answers.iter().any(|a| a == "restored") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(answers.contains(&"restored".to_string()), "{answers:?}");
+    }
+
+    /// Verifies: REQ-CON-037
+    #[tokio::test]
+    async fn when_the_participant_who_asked_leaves_the_room_the_buffer_goes_back_without_a_word() {
+        let asker = Uuid::new_v4();
+        let (url, _sent, later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        let streaming = app.state::<StreamingState>();
+        poll_until_events(&app).await;
+        buffer_asks::buffer_request_answer(
+            1,
+            asker.to_string(),
+            true,
+            Some(shown_terms(300, false)),
+            app.state(),
+            app.state(),
+        )
+        .await
+        .unwrap();
+        assert!(streaming.peer_buffer(asker).1.granted.is_some());
+        later
+            .send(format!(
+                r#"{{"type":"PeerLeft","data":{{"peer_id":"{asker}"}}}}"#
+            ))
+            .unwrap();
+        let events = poll_until_events(&app).await;
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, SignalingEvent::PeerLeft { .. })),
+            "{events:?}"
+        );
+        assert_eq!(streaming.peer_buffer(asker).1.granted, None);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                SignalingEvent::BufferRequest { event: BufferEvent::Released { peer, .. } } if *peer == asker
+            )),
+            "the screen is told it was released: {events:?}"
+        );
+    }
+
+    /// Verifies: REQ-CON-037
+    #[tokio::test]
+    async fn when_the_settings_take_no_asks_the_user_is_not_asked_and_the_buffer_is_left_alone() {
+        let asker = Uuid::new_v4();
+        let (url, sent, _later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        app.state::<SignalingState>()
+            .init_buffer_policy(jamjam::network::buffer_request::Policy::Never);
+        let streaming = app.state::<StreamingState>();
+
+        let events = poll_until_events(&app).await;
+        let mut answers = Vec::new();
+        for _ in 0..20 {
+            answers = answers_sent(&sent);
+            if !answers.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert_eq!(asked_events(&events), Vec::<Uuid>::new());
+        assert_eq!(answers, ["declined_by_setting"]);
+        assert_eq!(streaming.peer_buffer(asker).1.granted, None);
+    }
+
+    /// Verifies: REQ-CON-037
+    #[tokio::test]
+    async fn when_the_connection_to_the_room_is_lost_every_buffer_that_was_held_goes_back() {
+        let asker = Uuid::new_v4();
+        let (url, _, later) = spawn_server_exchanging(vec![ask_from(asker, 300, false)]).await;
+        let app = connect(&url).await;
+        let streaming = app.state::<StreamingState>();
+        poll_until_events(&app).await;
+        buffer_asks::buffer_request_answer(
+            1,
+            asker.to_string(),
+            true,
+            Some(shown_terms(300, false)),
+            app.state(),
+            app.state(),
+        )
+        .await
+        .unwrap();
+        assert!(streaming.peer_buffer(asker).1.granted.is_some());
+
+        // The server hangs up
+        drop(later);
+        let mut events = Vec::new();
+        for _ in 0..100 {
+            events.extend(poll_until_events(&app).await);
+            if events
+                .iter()
+                .any(|e| matches!(e, SignalingEvent::ConnectionLost { .. }))
+            {
+                break;
+            }
+        }
+
+        assert_eq!(streaming.peer_buffer(asker).1.granted, None, "{events:?}");
+    }
+
+    async fn next_delay_notice(
+        received: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+    ) -> Option<Option<f64>> {
+        loop {
+            let text = tokio::time::timeout(Duration::from_millis(800), received.recv())
+                .await
+                .ok()??;
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let notice = &value["data"]["body"]["device_delay"];
+            if !notice.is_null() {
+                return Some(notice["delay_ms"].as_f64());
+            }
+        }
+    }
+
+    /// Verifies: REQ-CON-035
+    #[tokio::test]
+    async fn when_the_delay_of_this_apps_devices_is_known_the_room_is_told_once_and_told_again_when_it_goes(
+    ) {
+        let (tx, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let url = spawn_server_listening(vec![], tx).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[]);
+        let poll = || async {
+            signaling_poll_events(
+                1,
+                app.state::<SignalingState>(),
+                app.state::<UsageState>(),
+                app.state::<StreamingState>(),
+            )
+            .await
+            .unwrap()
+        };
+        let state = app.state::<SignalingState>();
+
+        poll().await;
+        assert_eq!(
+            next_delay_notice(&mut received).await,
+            None,
+            "nothing is said while there is no figure"
+        );
+
+        state.set_own_delay(Some(23.04));
+        poll().await;
+        poll().await;
+        assert_eq!(next_delay_notice(&mut received).await, Some(Some(23.0)));
+        assert_eq!(
+            next_delay_notice(&mut received).await,
+            None,
+            "it is said once, not on every poll"
+        );
+
+        // The devices were changed: the figure no longer holds
+        state.set_own_delay(None);
+        poll().await;
+        assert_eq!(next_delay_notice(&mut received).await, Some(None));
+    }
+
+    /// Verifies: REQ-CON-035
+    #[tokio::test]
+    async fn when_someone_comes_in_after_the_delay_was_told_they_are_told_on_arrival() {
+        let newcomer = Uuid::new_v4();
+        let (tx, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let joined = format!(
+            r#"{{"type":"PeerJoined","data":{{"peer":{{"id":"{newcomer}","name":"Bo","candidates":[],"public_addr":null,"local_addr":null,"joined_at":0,"features":["peer_message"]}}}}}}"#
+        );
+        let url = spawn_server_listening(vec![joined], tx).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[]);
+        let state = app.state::<SignalingState>();
+        state.set_own_delay(Some(31.5));
+        // The room has been told over this connection already
+        *state.delay_told.lock().unwrap() = Some((1, Some(315)));
+
+        poll_until_events(&app).await;
+
+        let text = tokio::time::timeout(Duration::from_secs(2), received.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let sent: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(sent["data"]["to"], newcomer.to_string());
+        assert_eq!(sent["data"]["body"]["device_delay"]["delay_ms"], 31.5);
+    }
+
+    /// Verifies: REQ-CON-035
+    #[tokio::test]
+    async fn when_a_participant_tells_their_delay_it_is_kept_and_a_figure_that_cannot_be_a_delay_is_not(
+    ) {
+        let sender = Uuid::new_v4();
+        let said = |ms: &str| {
+            format!(
+                r#"{{"type":"PeerMessage","data":{{"from":"{sender}","from_name":"Bo","body":{{"device_delay":{{"delay_ms":{ms}}}}}}}}}"#
+            )
+        };
+        let url = spawn_server_sending(vec![said("23.5")]).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, Uuid::new_v4(), &[(sender, "Bo")]);
+
+        for _ in 0..20 {
+            poll_until_events(&app).await;
+            if !app.state::<SignalingState>().peer_delays().is_empty() {
+                break;
+            }
+        }
+
+        let state = app.state::<SignalingState>();
+        assert_eq!(state.peer_delays().get(&sender.to_string()), Some(&23.5));
+        // They take it back, or tell a number no device has
+        state.set_peer_delay(
+            &sender.to_string(),
+            DeviceDelayNotice { delay_ms: None }.stated(),
+        );
+        assert!(state.peer_delays().is_empty());
+        state.set_peer_delay(
+            &sender.to_string(),
+            DeviceDelayNotice {
+                delay_ms: Some(900.0),
+            }
+            .stated(),
+        );
+        assert!(state.peer_delays().is_empty());
+    }
+
+    /// Verifies: REQ-CON-035
+    #[tokio::test]
+    async fn when_the_relay_sends_this_apps_own_delay_back_it_is_not_kept_as_a_participants() {
+        let own = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let said = |from: Uuid, ms: &str| {
+            format!(
+                r#"{{"type":"PeerMessage","data":{{"from":"{from}","from_name":"Bo","body":{{"device_delay":{{"delay_ms":{ms}}}}}}}}}"#
+            )
+        };
+        let url = spawn_server_sending(vec![said(own, "36.0"), said(other, "23.5")]).await;
+        let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
+        let conn = SignalingClient::new(&url, identity)
+            .connect()
+            .await
+            .unwrap();
+        let app = app_with_connection(conn);
+        in_room(&app, own, &[(other, "Bo")]);
+
+        for _ in 0..20 {
+            poll_until_events(&app).await;
+            if !app.state::<SignalingState>().peer_delays().is_empty() {
+                break;
+            }
+        }
+
+        let kept = app.state::<SignalingState>().peer_delays();
+        assert_eq!(kept.get(&other.to_string()), Some(&23.5));
+        assert_eq!(kept.get(&own.to_string()), None);
     }
 }

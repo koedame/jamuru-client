@@ -91,6 +91,7 @@
       "joined": "{{name}} joined",
       "left": "{{name}} left",
       "highestLatency": "Highest latency",
+      "departed": "Left the room · audio continues",
       "detail": {
         "you": "You",
         "network": "Network",
@@ -114,7 +115,7 @@
     "peerAppTooOld": "Cannot connect to this peer: their app is an older version",
     "peerAppTooOldWith": "Cannot connect to {{names}}: their app is an older version",
     "bandwidth": {
-      "insufficient": "Bandwidth is insufficient (about {{required}} Mbps needed)",
+      "insufficient": "Bandwidth is insufficient (up to about {{required}} Mbps needed)",
       "marginal": "Bandwidth headroom is running low",
       "noSignal": "No packets are arriving from the peer",
       "noSignalFrom": "No packets are arriving from {{names}}"
@@ -243,6 +244,8 @@
     "general": {
       "display": "Display",
       "connection": "Connection",
+      "voicePriority": "Send audio with priority",
+      "voicePriorityHint": "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Try it when audio breaks up while others use the same Wi-Fi; turn it off if it gets worse. Not available on macOS. Applies from the next session",
       "serverUrl": {
         "customHint": "Using a custom server: {{url}}",
         "defaultHint": "Using the default server ({{url}})"
@@ -283,6 +286,40 @@
       "latencyTotal": "Total Latency",
       "bufferOption": "{{samples}} samples ({{ms}}ms)",
       "channelOption": "Ch {{channel}}",
+      "delay": {
+        "title": "Measure the device delay",
+        "description": "Plays a measuring sound from the output and times how long it takes to reach the input. It shows the delay of the combination of devices selected now: microphone, speaker or headphones, audio interface.",
+        "setupCable": "Connecting the output to the input with a cable (loopback) measures most accurately",
+        "setupSpeaker": "Without a cable, put the speaker where the microphone hears it. Put earphones or headphones close to the microphone",
+        "setupRoom": "While it measures (up to 90 seconds) the room does not hear you. The sound starts quiet and gets louder step by step",
+        "measure": "Measure the delay",
+        "measureAgain": "Measure again",
+        "cancel": "Stop measuring",
+        "progress": "Playing {{sound}} (volume {{step}} / {{steps}})",
+        "sound": {
+          "clicks": "clicks",
+          "tone": "a 1 kHz tone"
+        },
+        "needsRoom": "It can only be measured while you are in a room (so that it measures the devices the room uses)",
+        "helperCannotStart": "The person being helped measures this on their own screen (the sound comes out of their speakers)",
+        "startFailed": "Could not start measuring. Check that you are in a room",
+        "none": "The devices selected now have not been measured yet",
+        "result": "Device delay: {{ms}} ms",
+        "stability": {
+          "steady": "Steady (spread {{spread}} ms)",
+          "slightly_shaky": "Slightly unsteady (spread {{spread}} ms)",
+          "shaky": "Unsteady (spread {{spread}} ms)"
+        },
+        "review": "The delay is over 100 ms. Look at the buffer size and the device settings again (the driver, exclusive mode, whether Bluetooth is in use)",
+        "told": "The others in the room are told this number (the number only, no sound). Changing the devices or the buffer size means measuring again",
+        "failure": {
+          "no_sound": "The sound did not come back. Check the cable, or the position and volume of the speaker and microphone",
+          "unsteady": "The values varied widely between plays. Reduce the noise around you and measure again",
+          "too_long": "The delay is too long to measure (over 0.5 seconds). Look at the device settings again",
+          "no_stream": "The audio has not started yet. Wait a moment and try again",
+          "timed_out": "It could not finish in time. Try again"
+        }
+      },
       "limiter": {
         "title": "Limiter",
         "input": "Input limiter",
@@ -989,5 +1026,79 @@
     "note": "jamuru opens when this is done.",
     "skip": "Open without waiting",
     "progressLabel": "Update progress"
+  },
+  "bufferRequest": {
+    "title": "Receive buffer",
+    "ms": "{{ms}}ms",
+    "unit": "ms",
+    "now": "In use now",
+    "setBy": "Set by",
+    "raisedBy": "Raised by",
+    "raisedByValue": "{{name}}'s ask",
+    "source": {
+      "preset": "Preset (adjusts itself)",
+      "held": "You: held at {{ms}}ms"
+    },
+    "holdAt": "Hold the buffer for this person at",
+    "holdHint": "Up to {{max}}ms. A held buffer stays as it is, whatever the connection does. It ends when they leave.",
+    "presetPlaceholder": "preset",
+    "set": "Set",
+    "usePreset": "Back to preset",
+    "hint": "You can set the buffer for {{name}}'s audio yourself, or ask {{name}} to buffer your audio for longer. Only the audio between the two of you changes.",
+    "hintDismiss": "Got it",
+    "held": {
+      "fixed": "{{name}} asked for your buffer to be {{ms}}ms. You accepted.",
+      "auto": "{{name}} asked for your buffer to follow the connection, up to {{max}}ms. It is at {{ms}}ms now. You accepted.",
+      "restore": "Put it back"
+    },
+    "ask": {
+      "title": "Ask {{name}} for a longer buffer",
+      "what": "{{name}} decides whether to take it. It lasts until you or {{name}} leave the room.",
+      "longest": "Longest buffer",
+      "auto": "Let it follow the connection",
+      "tolerance": "Dropouts allowed before it grows",
+      "perSecond": "per second",
+      "toleranceHint": "0 to {{max}}. At 0, any dropout makes it grow.",
+      "send": "Ask",
+      "askAgain": "Ask again",
+      "withdraw": "Take the ask back"
+    },
+    "standing": {
+      "sending": "Asking {{name}}...",
+      "pending": "{{name}} has your ask and has not answered yet",
+      "granted": "{{name}} accepted: your audio is buffered at {{ms}}ms",
+      "declined": "{{name}} said no",
+      "declinedBySetting": "{{name}}'s settings do not take asks",
+      "restored": "{{name}} put the buffer back",
+      "unreachable": "No answer from {{name}}"
+    },
+    "note": {
+      "rounded": "rounded to their packet length",
+      "atLowest": "at its lowest",
+      "auto": "following their connection",
+      "separator": ", "
+    },
+    "question": {
+      "message": "{{name}} asks you to buffer their audio at {{ms}}ms",
+      "detailAuto": "The buffer for {{name}}'s audio grows when it drops out, up to {{ms}}ms. This adds delay for {{name}}'s audio only, and you can put it back whenever you like.",
+      "detailFixed": "The buffer for {{name}}'s audio is held at {{ms}}ms. This adds delay for {{name}}'s audio only, and you can put it back whenever you like.",
+      "accept": "Accept",
+      "decline": "No"
+    },
+    "notice": {
+      "granted": "{{name}} is buffering your audio at {{ms}}ms",
+      "declined": "{{name}} said no to your buffer ask",
+      "declinedBySetting": "{{name}}'s settings do not take buffer asks",
+      "restored": "{{name}} put the buffer for your audio back",
+      "unreachable": "No answer from {{name}} to your buffer ask",
+      "withdrawn": "{{name}} took the buffer ask back"
+    },
+    "policy": {
+      "title": "Buffer asks from others",
+      "label": "When someone asks me to buffer their audio for longer",
+      "ask": "Ask me each time",
+      "never": "Do not take asks",
+      "hint": "Someone you accepted once in this session is taken without asking again. Asks are never kept: they end when they or you leave the room."
+    }
   }
 }
