@@ -736,7 +736,7 @@ mod tests {
     /// A PCM payload as `ReceivePath::receive` expects it (matches `PcmCodec::encode`)
     fn pcm(samples: &[f32]) -> Vec<u8> {
         let mut bytes = Vec::new();
-        crate::audio::encode_pcm24(samples, &mut bytes);
+        crate::audio::encode_packed_exact(samples, 2, &mut bytes);
         bytes
     }
 

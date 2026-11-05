@@ -2296,9 +2296,10 @@ mod tests {
         let conn2 = conn().await;
 
         // Create fake candidates, only the real one will respond
+        let (_silent, nowhere) = silent();
         let candidates = vec![
-            "127.0.0.1:59999".parse().unwrap(), // Fake - won't respond
-            conn2.local_addr(),                 // Real - will respond
+            nowhere,            // Fake - won't respond
+            conn2.local_addr(), // Real - will respond
         ];
 
         // This should succeed by finding the working candidate
@@ -2314,7 +2315,8 @@ mod tests {
         let mut conn2 = conn().await;
         // conn2 opens with a keep-alive, which conn1's probe wait takes as the answer.
         conn2.connect(conn1.local_addr()).await.unwrap();
-        let candidates = vec!["127.0.0.1:59999".parse().unwrap(), conn2.local_addr()];
+        let (_silent, nowhere) = silent();
+        let candidates = vec![nowhere, conn2.local_addr()];
 
         conn1.connect_with_candidates(&candidates).await.unwrap();
 
@@ -2368,10 +2370,8 @@ mod tests {
             .send_to(&Packet::latency_info(1, &info).to_bytes(), to)
             .await
             .unwrap();
-        let candidates = vec![
-            "127.0.0.1:59999".parse().unwrap(),
-            old_app.local_addr().unwrap(),
-        ];
+        let (_silent, nowhere) = silent();
+        let candidates = vec![nowhere, old_app.local_addr().unwrap()];
 
         conn1.connect_with_candidates(&candidates).await.unwrap();
         old_app
@@ -2390,7 +2390,8 @@ mod tests {
         let mut conn1 = conn().await;
         let mut conn2 = conn().await;
         conn2.connect(conn1.local_addr()).await.unwrap();
-        let candidates = vec!["127.0.0.1:59999".parse().unwrap(), conn2.local_addr()];
+        let (_silent, nowhere) = silent();
+        let candidates = vec![nowhere, conn2.local_addr()];
 
         conn1.connect_with_candidates(&candidates).await.unwrap();
 
@@ -2405,10 +2406,9 @@ mod tests {
     #[tokio::test]
     async fn when_no_candidate_answers_the_link_facts_say_the_route_was_not_confirmed() {
         let mut conn1 = conn().await;
-        let candidates = vec![
-            "127.0.0.1:59998".parse().unwrap(),
-            "127.0.0.1:59999".parse().unwrap(),
-        ];
+        let (_silent_a, nowhere_a) = silent();
+        let (_silent_b, nowhere_b) = silent();
+        let candidates = vec![nowhere_a, nowhere_b];
 
         conn1.connect_with_candidates(&candidates).await.unwrap();
 
@@ -2423,6 +2423,16 @@ mod tests {
 
     fn addr(text: &str) -> SocketAddr {
         text.parse().unwrap()
+    }
+
+    /// A loopback address nobody answers from. The socket is held (and never read) for as
+    /// long as the test runs, so no other test or process can be handed the port: the
+    /// ephemeral range includes any fixed port a test might pick, and whoever got it would
+    /// answer the probes.
+    fn silent() -> (std::net::UdpSocket, SocketAddr) {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let at = socket.local_addr().unwrap();
+        (socket, at)
     }
 
     /// Verifies: REQ-CON-114
@@ -2590,13 +2600,13 @@ mod tests {
         let mut conn = conn().await;
         // An IPv6 address cannot be sent to from the IPv4 audio socket.
         let unreachable = addr("[::1]:59997");
-        let silent = addr("127.0.0.1:59998");
+        let (_held, quiet) = silent();
 
-        conn.connect_with_candidates(&[unreachable, silent])
+        conn.connect_with_candidates(&[unreachable, quiet])
             .await
             .unwrap();
 
-        assert_eq!(conn.remote_addr(), silent);
+        assert_eq!(conn.remote_addr(), quiet);
     }
 
     /// The reply to the probe of `round` that went to candidate `index`, heard from the
@@ -3002,7 +3012,7 @@ mod tests {
         let mut a = conn().await;
         let mut b = conn().await;
         let (a_addr, b_addr) = (a.local_addr(), b.local_addr());
-        let nowhere = addr("127.0.0.1:59999");
+        let (_silent, nowhere) = silent();
 
         let (for_a, for_b) = ([nowhere, b_addr], [nowhere, a_addr]);
 
@@ -3072,8 +3082,10 @@ mod tests {
             let mut inside = conn().await;
             let (seen_from_outside, seen_from_inside) =
                 address_restricted_nat(inside.local_addr(), outside.local_addr()).await;
-            let outside_candidates = [addr("127.0.0.1:59999"), seen_from_outside];
-            let inside_candidates = [addr("127.0.0.1:59998"), seen_from_inside];
+            let (_silent_outside, nowhere_outside) = silent();
+            let (_silent_inside, nowhere_inside) = silent();
+            let outside_candidates = [nowhere_outside, seen_from_outside];
+            let inside_candidates = [nowhere_inside, seen_from_inside];
 
             let (from_outside, from_inside) = tokio::join!(
                 async {
@@ -3146,7 +3158,8 @@ mod tests {
         let peer = peer_answering_probes_after(&[0]).await;
         tokio::time::sleep(Duration::from_millis(600)).await;
 
-        conn.connect_with_candidates(&[addr("127.0.0.1:59999"), peer])
+        let (_silent, nowhere) = silent();
+        conn.connect_with_candidates(&[nowhere, peer])
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -3176,13 +3189,13 @@ mod tests {
         let mut conn2 = conn().await;
         conn2.set_reconnect_config(quick);
         trust_each_other(&mut conn1, &mut conn2);
-        let silent = addr("127.0.0.1:59999");
+        let (_held, quiet) = silent();
         // Nobody answers the probes yet, so the first candidate is taken.
         conn1
-            .connect_with_candidates(&[silent, conn2.local_addr()])
+            .connect_with_candidates(&[quiet, conn2.local_addr()])
             .await
             .unwrap();
-        assert_eq!(conn1.remote_addr(), silent);
+        assert_eq!(conn1.remote_addr(), quiet);
 
         // The peer comes up afterwards and is heard from its own address.
         conn2.connect(conn1.local_addr()).await.unwrap();
@@ -3276,13 +3289,15 @@ mod tests {
             .unwrap();
         let mut receiver = conn().await;
         trust_each_other(&mut sender, &mut receiver);
-        let heard = Arc::new(std::sync::Mutex::new(Vec::<(u32, usize, u32)>::new()));
+        let heard = Arc::new(std::sync::Mutex::new(Vec::<(u32, usize, u32, usize)>::new()));
         let record = heard.clone();
         receiver.set_audio_callback(move |sequence, payload, timestamp| {
+            let mut samples = [0.0f32; 1024];
+            let held = crate::audio::decode_packed(&payload, &mut samples).unwrap();
             record
                 .lock()
                 .unwrap()
-                .push((sequence, payload.len(), timestamp));
+                .push((sequence, payload.len(), timestamp, held));
         });
         sender.connect(receiver.local_addr()).await.unwrap();
         receiver.connect(sender.local_addr()).await.unwrap();
@@ -3313,13 +3328,13 @@ mod tests {
         assert_eq!(heard.len(), 2, "256 frames go as two packets: {:?}", heard);
         let (first, second) = (heard[0], heard[1]);
         assert_eq!(second.0, first.0 + 1, "numbered one after the other");
-        assert_eq!((first.1, second.1), (768, 768), "128 stereo frames each");
+        assert_eq!((first.3, second.3), (256, 256), "128 stereo frames each");
         assert_eq!(
             (first.2, second.2),
             (1000, 1128),
             "each timestamped where its audio starts"
         );
-        assert!(first.1 + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE);
+        assert!(first.1.max(second.1) + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE);
     }
 
     /// Verifies: REQ-TEL-015

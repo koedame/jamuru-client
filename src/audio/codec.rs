@@ -1,15 +1,17 @@
 //! Audio codec abstraction for encoding/decoding audio frames
 //!
 //! Provides a unified interface for different audio codecs (PCM, Opus).
-//! PCM goes on the wire as 24-bit signed integers (ADR-096).
+//! PCM goes on the wire as 24-bit signed integers (ADR-096), packed without loss (ADR-111).
 //! Opus support requires the `opus-codec` feature. It builds a bundled libopus, which needs cmake.
 
 use thiserror::Error;
 
+use super::packed::{decode_packed, encode_packed, packed_sample_count};
+
 /// Codec type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodecType {
-    /// Raw PCM, 24-bit integers (no compression)
+    /// PCM, 24-bit integers, packed without loss
     #[default]
     Pcm,
     /// Opus codec (for internet mode)
@@ -177,7 +179,7 @@ pub trait AudioCodec: Send {
 pub const PCM_BYTES_PER_SAMPLE: usize = 3;
 
 /// 2^23: what a sample of 1.0 is in 24-bit integers
-const PCM_FULL_SCALE: f32 = 8_388_608.0;
+pub(super) const PCM_FULL_SCALE: f32 = 8_388_608.0;
 
 /// Encode `samples` as 24-bit signed little-endian integers into `out`
 ///
@@ -192,17 +194,21 @@ pub fn encode_pcm24(samples: &[f32], out: &mut Vec<u8>) -> u64 {
     out.reserve(samples.len() * PCM_BYTES_PER_SAMPLE);
     let mut clipped = 0;
     for &sample in samples {
-        // Written so that NaN, for which every comparison is false, counts
-        #[allow(clippy::neg_cmp_op_on_partial_ord)]
-        if !(sample.abs() <= 1.0) {
-            clipped += 1;
-        }
-        // `as` saturates and turns NaN into 0, which is what is wanted here
-        let value = (sample * PCM_FULL_SCALE).round() as i32;
-        let value = value.clamp(-(1 << 23), (1 << 23) - 1);
+        let (value, was_clipped) = quantize(sample);
+        clipped += u64::from(was_clipped);
         out.extend_from_slice(&value.to_le_bytes()[..PCM_BYTES_PER_SAMPLE]);
     }
     clipped
+}
+
+/// `sample` as a 24-bit integer, and whether it had to be clipped to fit
+pub(super) fn quantize(sample: f32) -> (i32, bool) {
+    // Written so that NaN, for which every comparison is false, counts
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+    let clipped = !(sample.abs() <= 1.0);
+    // `as` saturates and turns NaN into 0, which is what is wanted here
+    let value = (sample * PCM_FULL_SCALE).round() as i32;
+    (value.clamp(-(1 << 23), (1 << 23) - 1), clipped)
 }
 
 /// The sample count of 24-bit PCM `data`, or an error if it is not whole samples
@@ -242,10 +248,11 @@ pub fn decode_pcm24(data: &[u8], output: &mut [f32]) -> Result<usize, CodecError
     Ok(sample_count)
 }
 
-/// PCM codec (no compression)
+/// PCM codec: 24-bit integers, packed without loss
 ///
-/// Converts f32 samples to and from 24-bit signed little-endian integers: what an
-/// audio interface resolves, at three quarters of the bytes of a 32-bit float.
+/// What an audio interface resolves, at three quarters of the bytes of a 32-bit
+/// float or fewer: each packet is packed the way FLAC does it (see [`super::packed`]),
+/// and what comes out is the bits that went in.
 pub struct PcmCodec {
     frame_size: u32,
     channels: u16,
@@ -266,18 +273,18 @@ impl PcmCodec {
 impl AudioCodec for PcmCodec {
     fn encode(&mut self, samples: &[f32]) -> Result<Vec<u8>, CodecError> {
         let mut bytes = Vec::new();
-        self.clipped += encode_pcm24(samples, &mut bytes);
+        self.clipped += encode_packed(samples, usize::from(self.channels), &mut bytes);
         Ok(bytes)
     }
 
     fn decode(&mut self, data: &[u8]) -> Result<Vec<f32>, CodecError> {
-        let mut samples = vec![0.0; pcm24_sample_count(data)?];
-        decode_pcm24(data, &mut samples)?;
+        let mut samples = vec![0.0; packed_sample_count(data)?];
+        decode_packed(data, &mut samples)?;
         Ok(samples)
     }
 
     fn decode_into(&mut self, data: &[u8], output: &mut [f32]) -> Result<usize, CodecError> {
-        decode_pcm24(data, output)
+        decode_packed(data, output)
     }
 
     fn decode_plc(&mut self, frame_size: usize) -> Result<Vec<f32>, CodecError> {
@@ -477,9 +484,9 @@ mod tests {
         // Create test samples
         let samples: Vec<f32> = (0..120).map(|i| (i as f32 / 120.0) * 2.0 - 1.0).collect();
 
-        // Encode
+        // Encode: a ramp is packed, and takes less than the samples as they are
         let encoded = codec.encode(&samples).unwrap();
-        assert_eq!(encoded.len(), samples.len() * PCM_BYTES_PER_SAMPLE);
+        assert!(encoded.len() < samples.len() * PCM_BYTES_PER_SAMPLE);
 
         // Decode
         let decoded = codec.decode(&encoded).unwrap();
@@ -505,13 +512,6 @@ mod tests {
         let samples: Vec<f32> = values.iter().map(|&v| v as f32 / PCM_FULL_SCALE).collect();
 
         let encoded = codec.encode(&samples).unwrap();
-        assert_eq!(encoded.len(), values.len() * PCM_BYTES_PER_SAMPLE);
-        for (value, bytes) in values
-            .iter()
-            .zip(encoded.as_chunks::<PCM_BYTES_PER_SAMPLE>().0)
-        {
-            assert_eq!(&value.to_le_bytes()[..3], bytes, "{value} as bytes");
-        }
         let decoded = codec.decode(&encoded).unwrap();
         assert_eq!(decoded, samples);
         assert_eq!(codec.clipped_samples(), 0, "nothing here is out of range");
@@ -520,12 +520,25 @@ mod tests {
     /// Verifies: REQ-AUD-044
     #[test]
     fn pcm_codec_sends_a_sample_as_three_little_endian_bytes_of_its_24_bit_integer() {
-        let mut codec = PcmCodec::new(&CodecConfig::default());
+        let mut bytes = Vec::new();
+        encode_pcm24(&[0.5, -0.5], &mut bytes);
         // 0.5 = 2^22 = 0x400000, -0.5 = -2^22 = 0xC00000
-        assert_eq!(
-            codec.encode(&[0.5, -0.5]).unwrap(),
-            vec![0x00, 0x00, 0x40, 0x00, 0x00, 0xC0]
-        );
+        assert_eq!(bytes, vec![0x00, 0x00, 0x40, 0x00, 0x00, 0xC0]);
+    }
+
+    /// Samples that do not pack are sent as those three bytes each, after one byte that says so.
+    ///
+    /// Verifies: REQ-AUD-044
+    #[test]
+    fn pcm_codec_sends_samples_that_do_not_pack_as_their_24_bit_integers_after_a_format_byte() {
+        let mut codec = PcmCodec::new(&CodecConfig::default());
+        // Two samples of different sign and size: there is nothing to predict one from
+        let samples = [0.5, -0.25];
+        let mut expected = vec![0];
+        encode_pcm24(&samples, &mut expected);
+        let encoded = codec.encode(&samples).unwrap();
+        assert_eq!(encoded[..expected.len()], expected[..]);
+        assert_eq!(codec.decode(&encoded).unwrap(), samples);
     }
 
     /// A sample past 0 dBFS is held at the largest value 24 bits take, with its sign,
@@ -574,12 +587,12 @@ mod tests {
     fn pcm_codec_refuses_data_that_is_not_whole_samples() {
         let mut codec = PcmCodec::new(&CodecConfig::default());
         assert!(matches!(
-            codec.decode(&[0u8; 7]),
+            codec.decode(&[0u8; 8]),
             Err(CodecError::InvalidData(_))
         ));
         let mut out = [0.0f32; 4];
         assert!(matches!(
-            codec.decode_into(&[0u8; 7], &mut out),
+            codec.decode_into(&[0u8; 8], &mut out),
             Err(CodecError::InvalidData(_))
         ));
     }
@@ -724,6 +737,6 @@ mod tests {
 
         // Malformed payloads are rejected the same way `decode` rejects them.
         let mut output = vec![0.0f32; 8];
-        assert!(codec.decode_into(&[0u8; 4], &mut output).is_err());
+        assert!(codec.decode_into(&[0u8; 5], &mut output).is_err());
     }
 }

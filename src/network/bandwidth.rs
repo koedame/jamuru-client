@@ -22,14 +22,15 @@
 
 use std::time::{Duration, Instant};
 
-use crate::audio::{AudioPreset, PCM_BYTES_PER_SAMPLE};
+use crate::audio::{AudioPreset, PACKED_HEADER_BYTES, PCM_BYTES_PER_SAMPLE};
 use crate::protocol::{HEADER_SIZE, MAX_PAYLOAD_SIZE};
 
 use super::encryption::SEAL_OVERHEAD;
 
 /// Bits in a byte, spelled out so the bitrate arithmetic reads clearly
 const BITS_PER_BYTE: f64 = 8.0;
-/// Bytes per sample on the wire: 24-bit PCM (ADR-096)
+/// Bytes per sample on the wire at most: 24-bit PCM (ADR-096). Packing it takes some
+/// of them back (ADR-111), by as much as the sound allows
 const BYTES_PER_SAMPLE: f64 = PCM_BYTES_PER_SAMPLE as f64;
 /// UDP + IP header bytes per packet on IPv4: 20 + 8. What the socket counts
 /// is the jamuru packet; the link carries these on top.
@@ -50,7 +51,8 @@ const PACKET_OVERHEAD_BYTES: f64 =
 /// 256 stereo frames (2048 bytes) go as two packets of 128.
 pub fn samples_per_audio_packet(total_samples: usize, channels: usize) -> usize {
     let channels = channels.max(1);
-    let max_samples = (MAX_PAYLOAD_SIZE - SEAL_OVERHEAD) / PCM_BYTES_PER_SAMPLE;
+    let max_samples =
+        (MAX_PAYLOAD_SIZE - SEAL_OVERHEAD - PACKED_HEADER_BYTES) / PCM_BYTES_PER_SAMPLE;
     let packets = total_samples.div_ceil(max_samples).max(1);
     total_samples.div_ceil(packets).next_multiple_of(channels)
 }
@@ -129,7 +131,13 @@ pub fn status_label(status: Option<BandwidthStatus>) -> &'static str {
     }
 }
 
-/// Bits per second a preset needs in one direction
+/// Bits per second a preset needs in one direction, at most
+///
+/// A packet is as large as the sound makes it (ADR-111), and the most it comes to is
+/// the samples as they are, one byte more per packet. This counts that: what a link
+/// has to carry when the sound packs no better, and so the figure to tell someone whose
+/// link drops packets. Quiet and tonal sound takes a half to two thirds of it, and the
+/// rate that is measured on the link (`BandwidthEstimator`) is what the stream took.
 ///
 /// Counts the audio payload, the per-packet header overhead, and the FEC
 /// redundancy the preset adds. Both sides send, so a session needs this much
@@ -147,8 +155,9 @@ pub fn required_bps(preset: &AudioPreset, sample_rate: u32, channels: u16) -> f6
     let packets_per_frame =
         frame_samples.div_ceil(samples_per_audio_packet(frame_samples, channels as usize)) as f64;
     let packets_per_second = sample_rate as f64 / frame_size * packets_per_frame;
-    let payload_bytes_per_packet =
-        frame_size * channels as f64 * BYTES_PER_SAMPLE / packets_per_frame;
+    let payload_bytes_per_packet = frame_size * channels as f64 * BYTES_PER_SAMPLE
+        / packets_per_frame
+        + PACKED_HEADER_BYTES as f64;
 
     let bytes_per_second = packets_per_second * (payload_bytes_per_packet + PACKET_OVERHEAD_BYTES);
 
@@ -466,7 +475,7 @@ mod tests {
         let preset = AudioPreset::HighQuality;
         let frame_size = preset.frame_size() as f64;
         let packets_per_second = 48_000.0 / frame_size * 2.0;
-        let payload = frame_size * 2.0 * BYTES_PER_SAMPLE / 2.0;
+        let payload = frame_size * 2.0 * BYTES_PER_SAMPLE / 2.0 + PACKED_HEADER_BYTES as f64;
         let expected = packets_per_second
             * (payload + PACKET_OVERHEAD_BYTES)
             * (1.0 + preset.fec_redundancy() as f64)

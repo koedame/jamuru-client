@@ -14,7 +14,10 @@ use serde::{Deserialize, Serialize};
 /// 2: PCM audio is 24-bit integers, not 32-bit floats (ADR-096). The two have no
 /// marker on the wire, and a payload of one read as the other is loud noise, so a
 /// peer of the other version has to be refused rather than decoded.
-pub const PROTOCOL_VERSION: u8 = 2;
+///
+/// 3: the 24-bit integers of a packet are packed without loss (ADR-111). A payload
+/// of version 2 has no format byte in front, so it too has to be refused.
+pub const PROTOCOL_VERSION: u8 = 3;
 
 /// Header size in bytes
 pub const HEADER_SIZE: usize = 12;

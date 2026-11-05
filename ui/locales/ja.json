@@ -114,7 +114,7 @@
     "peerAppTooOld": "この相手とは繋げません（相手のアプリが古い版です）",
     "peerAppTooOldWith": "{{names}}とは繋げません（相手のアプリが古い版です）",
     "bandwidth": {
-      "insufficient": "帯域が不足しています（必要: 約{{required}}Mbps）",
+      "insufficient": "帯域が不足しています（最大で約{{required}}Mbps 必要）",
       "marginal": "帯域の余裕が少なくなっています",
       "noSignal": "相手からパケットが届いていません",
       "noSignalFrom": "{{names}}からパケットが届いていません"
