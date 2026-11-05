@@ -44,6 +44,7 @@
 
 use std::time::Duration;
 
+use super::conceal::Concealer;
 use super::plc::PcmPlc;
 
 /// Share of reads over an adaptation window that found their frame missing
@@ -234,6 +235,9 @@ pub struct PlayoutStats {
     /// Frames discarded because the buffer held more than the target for a
     /// whole depth window, or because the target was lowered.
     pub frames_trimmed: u64,
+    /// Concealed frames, and starved reads, that were filled with sound continuing what was
+    /// heard (ADR-105) instead of a repeat of the last frame or silence.
+    pub frames_filled: u64,
     /// How far, in frames, the stream jumped at the last resynchronisation.
     pub last_resync_distance: u32,
 }
@@ -307,6 +311,12 @@ pub struct PlayoutBuffer {
     /// Whether enough has been buffered to start.
     playing: bool,
     plc: PcmPlc,
+    /// Fills gaps with sound that continues what was heard, once switched on
+    /// ([`Self::enable_waveform_concealment`]); the plain repeat-and-fade of `plc` otherwise.
+    concealer: Option<Concealer>,
+    /// Whether a starved read is answered with a prediction of the sound from what was heard,
+    /// rather than with silence ([`Self::set_starved_prediction`]).
+    predict_starved: bool,
     /// Length of the last frame played, so concealment lasts as long as the
     /// audio it stands in for.
     last_len: usize,
@@ -380,9 +390,31 @@ impl PlayoutBuffer {
             play_sequence: None,
             playing: false,
             plc,
+            concealer: None,
+            predict_starved: false,
             last_len: frame_samples,
             stats: PlayoutStats::default(),
         }
+    }
+
+    /// Switches on filling gaps with sound that continues what was heard (ADR-105), for
+    /// interleaved frames of `channels` channels at `sample_rate`. Allocates, so it is done
+    /// when the buffer is made, not from the audio callback.
+    pub fn enable_waveform_concealment(&mut self, channels: usize, sample_rate: u32) {
+        self.concealer = Some(Concealer::new(channels, sample_rate));
+    }
+
+    /// Chooses whether a read that finds nothing in the buffer at all is answered with a
+    /// prediction of the sound from what was heard (on) or with silence (off, as before). Only
+    /// has an effect once waveform concealment is on.
+    pub fn set_starved_prediction(&mut self, on: bool) {
+        self.predict_starved = on;
+    }
+
+    /// Goes back to the plain repeat-and-fade for concealment and silence for starved reads,
+    /// to compare the two.
+    pub fn disable_waveform_concealment(&mut self) {
+        self.concealer = None;
     }
 
     /// Hands a decoded frame to the buffer. Called from the network side.
@@ -481,6 +513,9 @@ impl PlayoutBuffer {
         }
         if self.pending_shift > 0 {
             self.pending_shift -= 1;
+            if let Some(concealer) = self.concealer.as_mut() {
+                concealer.interrupt();
+            }
             let mut read = silence(out, self.last_len);
             read.result = PlayoutResult::Padded;
             return read;
@@ -508,6 +543,18 @@ impl PlayoutBuffer {
             let mut read = silence(out, self.last_len);
             read.result = PlayoutResult::Starved;
             self.stats.frames_starved += 1;
+            if let Some(concealer) = self.concealer.as_mut() {
+                // Only a stretch that is not yet taken for silence is predicted: a sender that
+                // has muted must not leave an echo of its last words.
+                concealer.note_read(true, self.last_len);
+                if self.predict_starved && self.starved_streak < SILENT_AFTER_STARVED_READS {
+                    let len = self.last_len.min(out.len());
+                    if concealer.extrapolate(&mut out[..len]) {
+                        self.stats.frames_filled += 1;
+                        read.samples = len;
+                    }
+                }
+            }
             self.starved_streak = self.starved_streak.saturating_add(1);
             if self.starved_streak == SILENT_AFTER_STARVED_READS {
                 self.silent_reads += u64::from(SILENT_AFTER_STARVED_READS);
@@ -523,6 +570,10 @@ impl PlayoutBuffer {
             let len = self.slots[slot].len.min(out.len());
             out[..len].copy_from_slice(&self.slots[slot].samples[..len]);
             self.slots[slot].sequence = None;
+            if let Some(concealer) = self.concealer.as_mut() {
+                concealer.note_read(false, len);
+                concealer.on_played(&mut out[..len]);
+            }
             self.plc.store_frame(&out[..len]);
             self.last_len = len;
             self.stats.frames_played += 1;
@@ -534,7 +585,21 @@ impl PlayoutBuffer {
             // Conceal for as long as the last frame lasted, so a loss does not
             // shift the timing of everything after it.
             let len = self.last_len.min(out.len());
-            self.plc.conceal_into(&mut out[..len]);
+            let mut filled = false;
+            if let Some(concealer) = self.concealer.as_mut() {
+                concealer.note_read(true, len);
+                // The frame after the gap, if it is already here, shows what the fill has to
+                // run into
+                let following = sequence.wrapping_add(1);
+                let next = &self.slots[following as usize % self.slots.len()];
+                let next = (next.sequence == Some(following)).then(|| &next.samples[..next.len]);
+                filled = concealer.fill_gap(&mut out[..len], next);
+            }
+            if filled {
+                self.stats.frames_filled += 1;
+            } else {
+                self.plc.conceal_into(&mut out[..len]);
+            }
             self.stats.frames_concealed += 1;
             PlayoutRead {
                 result: PlayoutResult::Concealed { sequence },
@@ -816,6 +881,9 @@ impl PlayoutBuffer {
         self.adapt_elapsed_secs = 0.0;
         self.last_len = self.config.frame_samples;
         self.plc.reset();
+        if let Some(concealer) = self.concealer.as_mut() {
+            concealer.reset();
+        }
         self.stats = PlayoutStats::default();
         self.pending_shift = 0;
         self.adapt_seen = 0;
@@ -856,6 +924,9 @@ impl PlayoutBuffer {
         self.starved_streak = 0;
         self.restart_depth_window();
         self.plc.reset();
+        if let Some(concealer) = self.concealer.as_mut() {
+            concealer.reset();
+        }
     }
 
     fn restart_depth_window(&mut self) {

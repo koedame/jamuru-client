@@ -380,13 +380,16 @@ impl ReceivePath {
         let widest_ring_frames =
             ring_delay_frames.max(super::peer_buffer::ring_frames(sample_rate));
 
+        let mut playout = PlayoutBuffer::with_ring_and_basis(
+            PlayoutConfig::for_delay(frame_samples, target_delay_frames),
+            widest_ring_frames,
+            ring_delay_frames,
+        );
+        playout.enable_waveform_concealment(WIRE_CHANNELS, sample_rate);
+
         Ok(Self {
             delay: Arc::new(AtomicU32::new(target_delay_frames)),
-            playout: Arc::new(Mutex::new(PlayoutBuffer::with_ring_and_basis(
-                PlayoutConfig::for_delay(frame_samples, target_delay_frames),
-                widest_ring_frames,
-                ring_delay_frames,
-            ))),
+            playout: Arc::new(Mutex::new(playout)),
             decoder: Arc::new(Mutex::new(Decoder {
                 codec,
                 // The peer's frame is as long as its own buffer size makes
@@ -495,15 +498,20 @@ impl ReceivePath {
     fn read_pausing(&self, out: &mut [f32], pause: impl FnMut()) -> PlayoutRead {
         self.flight.count_read();
         self.note_read_time();
-        let (read, trimmed) = match self.lock_playout(pause) {
+        let (read, trimmed, filled) = match self.lock_playout(pause) {
             Some(mut buffer) => {
-                let trimmed_before = buffer.stats().frames_trimmed;
+                let before = buffer.stats();
                 let read = buffer.read_into(out);
-                let trimmed = buffer.stats().frames_trimmed - trimmed_before;
+                let after = buffer.stats();
+                let trimmed = after.frames_trimmed - before.frames_trimmed;
                 if trimmed > 0 {
                     self.flight.note(Kind::Trimmed, trimmed);
                 }
-                (read, trimmed > 0)
+                (
+                    read,
+                    trimmed > 0,
+                    after.frames_filled > before.frames_filled,
+                )
             }
             None => {
                 self.flight.note(Kind::Busy, 0);
@@ -515,6 +523,7 @@ impl ReceivePath {
                         result: PlayoutResult::Priming,
                         samples,
                     },
+                    false,
                     false,
                 );
             }
@@ -529,7 +538,7 @@ impl ReceivePath {
             }
             PlayoutResult::Priming => {}
         }
-        self.joined(out, read, trimmed)
+        self.joined(out, read, trimmed, filled)
     }
 
     /// Takes the play-out lock without blocking, trying again while it is only
@@ -556,8 +565,17 @@ impl ReceivePath {
     /// frame that follows the last one - silence where a frame was due,
     /// concealment, a frame skipped to lower the delay - puts a step in the
     /// waveform, which is heard as a click.
-    fn joined(&self, out: &mut [f32], read: PlayoutRead, skipped: bool) -> PlayoutRead {
-        let broken = skipped || !matches!(read.result, PlayoutResult::Played { .. });
+    ///
+    /// A gap the buffer filled with sound that continues the signal (`filled`) is not a cut:
+    /// the fill starts from the last sample played and is cross-faded into the frame after it.
+    fn joined(
+        &self,
+        out: &mut [f32],
+        read: PlayoutRead,
+        skipped: bool,
+        filled: bool,
+    ) -> PlayoutRead {
+        let broken = skipped || !(filled || matches!(read.result, PlayoutResult::Played { .. }));
         let len = read.samples.min(out.len());
         // A reset holds the seam for an instant; that one read goes unjoined
         if let Ok(mut seam) = self.seam.try_lock() {
@@ -578,6 +596,26 @@ impl ReceivePath {
         self.started.store(false, Ordering::Relaxed);
         if let Ok(mut seam) = self.seam.lock() {
             *seam = Seam::restarted();
+        }
+    }
+
+    /// Switches filling gaps with sound that continues what was heard on or off (ADR-105).
+    /// It is on from the start; off is the plain repeat-and-fade, for comparing the two.
+    pub fn set_waveform_concealment(&self, on: bool) {
+        if let Ok(mut buffer) = self.playout.lock() {
+            if on {
+                buffer.enable_waveform_concealment(WIRE_CHANNELS, self.sample_rate);
+            } else {
+                buffer.disable_waveform_concealment();
+            }
+        }
+    }
+
+    /// Chooses whether a stall of the link, when nothing at all has arrived, is bridged with a
+    /// prediction of the sound (on) or with silence (off, the start).
+    pub fn set_starved_prediction(&self, on: bool) {
+        if let Ok(mut buffer) = self.playout.lock() {
+            buffer.set_starved_prediction(on);
         }
     }
 
