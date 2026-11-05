@@ -23,8 +23,8 @@ use crate::audio::{
 use crate::audio::{open_asio, shared_asio_driver, AsioDuplex, AsioSwitch};
 use crate::link::Senders;
 use crate::network::{
-    audio_packet_duration_ms, longer_of_buffer_and_period, required_bps, AudioEncodingConfig,
-    UdpMux,
+    audio_packet_duration_ms, longer_of_buffer_and_period, mark_voice, required_bps,
+    AudioEncodingConfig, UdpMux,
 };
 use crate::protocol::LatencyInfoMessage;
 
@@ -58,6 +58,7 @@ pub(super) async fn run(
         transmit_channels,
         input_limiter,
         output_limiter,
+        voice_priority,
         mut input_channels,
         mut output_channels,
         input_signal,
@@ -112,6 +113,9 @@ pub(super) async fn run(
 
     // Everyone in the room sends to the one address this app told it, so every
     // link goes through that socket (the one `streaming_prepare` bound).
+    if voice_priority {
+        mark_voice(&prepared_socket);
+    }
     let mux = UdpMux::from_std(prepared_socket)
         .map_err(|e| format!("Failed to adopt the prepared audio socket: {}", e))?;
 

@@ -961,6 +961,8 @@ async fn start_session(
     let transmit_channels = config.transmit_channels;
     // Whether what is sent and what is played are held at 0 dBFS (ADR-094)
     let (input_limiter, output_limiter) = (config.input_limiter, config.output_limiter);
+    // Whether the audio packets are marked as voice (ADR-110)
+    let voice_priority = config.voice_priority;
     // Which channels of a multi-channel interface are read and played on
     let input_channels = (config.input_channel_l, config.input_channel_r);
     let output_channels = (config.output_channel_l, config.output_channel_r);
@@ -1016,6 +1018,7 @@ async fn start_session(
             transmit_channels,
             input_limiter,
             output_limiter,
+            voice_priority,
             input_channels,
             output_channels,
             input_signal,

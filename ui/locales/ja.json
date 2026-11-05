@@ -242,6 +242,8 @@
     "general": {
       "display": "表示",
       "connection": "接続",
+      "voicePriority": "音声を優先して送る",
+      "voicePriorityHint": "音声のパケットに印を付け、Wi-Fi のルーターが他の通信より先に送れるようにします。同じ Wi-Fi で他の人が通信していて音が途切れるときに試し、かえって悪くなるときはオフにしてください。macOS では使えません。次の接続から変わります",
       "serverUrl": {
         "customHint": "独自のサーバーを使用中: {{url}}",
         "defaultHint": "既定のサーバーを使用中（{{url}}）"
