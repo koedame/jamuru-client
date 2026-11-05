@@ -711,7 +711,7 @@ impl PlayingPeer {
                         })
                         .collect();
                     let mut samples = Vec::new();
-                    jamjam::audio::encode_pcm24(&tone, &mut samples);
+                    jamjam::audio::encode_packed(&tone, 2, &mut samples);
                     let timestamp = sequence.wrapping_mul(Self::FRAMES as u32);
                     peer.send(Packet::audio(sequence, timestamp, samples), app);
                     sequence = sequence.wrapping_add(1);

@@ -3276,13 +3276,15 @@ mod tests {
             .unwrap();
         let mut receiver = conn().await;
         trust_each_other(&mut sender, &mut receiver);
-        let heard = Arc::new(std::sync::Mutex::new(Vec::<(u32, usize, u32)>::new()));
+        let heard = Arc::new(std::sync::Mutex::new(Vec::<(u32, usize, u32, usize)>::new()));
         let record = heard.clone();
         receiver.set_audio_callback(move |sequence, payload, timestamp| {
+            let mut samples = [0.0f32; 1024];
+            let held = crate::audio::decode_packed(&payload, &mut samples).unwrap();
             record
                 .lock()
                 .unwrap()
-                .push((sequence, payload.len(), timestamp));
+                .push((sequence, payload.len(), timestamp, held));
         });
         sender.connect(receiver.local_addr()).await.unwrap();
         receiver.connect(sender.local_addr()).await.unwrap();
@@ -3313,13 +3315,13 @@ mod tests {
         assert_eq!(heard.len(), 2, "256 frames go as two packets: {:?}", heard);
         let (first, second) = (heard[0], heard[1]);
         assert_eq!(second.0, first.0 + 1, "numbered one after the other");
-        assert_eq!((first.1, second.1), (768, 768), "128 stereo frames each");
+        assert_eq!((first.3, second.3), (256, 256), "128 stereo frames each");
         assert_eq!(
             (first.2, second.2),
             (1000, 1128),
             "each timestamped where its audio starts"
         );
-        assert!(first.1 + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE);
+        assert!(first.1.max(second.1) + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE);
     }
 
     /// Verifies: REQ-TEL-015
