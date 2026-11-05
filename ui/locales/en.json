@@ -115,7 +115,7 @@
     "peerAppTooOld": "Cannot connect to this peer: their app is an older version",
     "peerAppTooOldWith": "Cannot connect to {{names}}: their app is an older version",
     "bandwidth": {
-      "insufficient": "Bandwidth is insufficient (about {{required}} Mbps needed)",
+      "insufficient": "Bandwidth is insufficient (up to about {{required}} Mbps needed)",
       "marginal": "Bandwidth headroom is running low",
       "noSignal": "No packets are arriving from the peer",
       "noSignalFrom": "No packets are arriving from {{names}}"

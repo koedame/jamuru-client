@@ -4,6 +4,8 @@
 
 Accepted。[ADR-003](./ADR-003-audio-codec.md)・[ADR-008](./ADR-008-zero-latency-mode.md) が「PCM 32-bit float」としていたワイヤ上の形式を置き換える。
 
+[ADR-111](./ADR-111-pack-audio-packets-without-loss.md) が、この 24-bit の値をパケットごとに損失なく詰めて送る形に替えた（値は変わらない。プロトコル版は 3）。
+
 ## Context
 
 jamuru は PCM を 32-bit float のまま送っていた。ステレオで 1 本あたり 3.5〜4.1 Mbps（[ADR-077](./ADR-077-every-participant-is-linked.md)）で、16 人のルームでは 1 人の上りが 52〜61 Mbps になる。
