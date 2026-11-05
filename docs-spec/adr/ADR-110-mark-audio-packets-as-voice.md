@@ -107,3 +107,8 @@ Windows 11 の PC（有線）を相手役（Linux、有線）のルームに入�
 オンのときだけ、3 回とも Mac から送る音に無音区間が出た（逆向きは 0 か所）。このとき Mac から出るパケットの ToS は、Tailscale の中の見出しでも 0x00 だった。つまり `NET_SERVICE_TYPE_VO` は見出しの印としては効かず、オンのときだけ無音区間が出た。欠ける理由（Mac の無線の待ち行列の扱い）までは測っていない。
 
 beta.210（`IP_TOS` / `IPV6_TCLASS` を付ける版）では、Mac の両用ソケットから LAN の相手役へ送るパケットの見出しが 0x00 のままだった（相手役から Mac へは 0xB8）。macOS は見出しに印を載せられないので、付けないことにした。
+
+### 最終のベータ版（beta.212）
+
+- Windows（有線）: 既定のオフで、相手役に届いたパケット 400 個は `tos 0x0`。オンにして入り直すと 400 個すべてが `tos 0xb8`、ログに `Audio packets are marked as voice (IP_TOS and IPV6_TCLASS)`。
+- Mac: オンにしても印は付かず、ログに `Audio packets are not marked as voice: macOS does not carry the mark …` が出る。この版でオンのまま 3 回測り、Mac から相手役へ送る音の無音区間は 3 回とも 0 か所（beta.209 では 3 回中 3 回）。このとき Mac の入出力は仮想デバイスだったので、逆向きの無音区間と underrun は別の要因（仮想デバイスの時計）で揺れた。
