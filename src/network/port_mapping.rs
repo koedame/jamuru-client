@@ -160,6 +160,8 @@ impl Mapped {
 /// How the router is searched for and how long a mapping lasts
 pub struct Options {
     pub search: SearchOptions,
+    /// Search from the address of each network interface too, not only from `search.bind_addr`
+    pub search_from_each_interface: bool,
     pub lease_secs: u32,
 }
 
@@ -173,6 +175,7 @@ impl Default for Options {
         search.gateway_ip_version = GatewayIpVersion::V4;
         Self {
             search,
+            search_from_each_interface: true,
             lease_secs: LEASE_SECS,
         }
     }
@@ -213,9 +216,7 @@ async fn open_unbounded(
     local_port: u16,
 ) -> Result<PortMapping, PortMappingError> {
     let allowed = options.search.allowed_gateway_ips.clone();
-    let gateway = search_gateway(options.search)
-        .await
-        .map_err(|e| PortMappingError::NoRouter(e.to_string()))?;
+    let gateway = search_everywhere(&options).await?;
     debug!("Found a router that maps ports at {}", gateway.addr);
     if !on_local_network(gateway.addr.ip(), &allowed) {
         return Err(PortMappingError::NoRouter(format!(
@@ -258,6 +259,60 @@ async fn open_unbounded(
         mapped,
         renewal,
     })
+}
+
+/// Searches for the router from `options.search.bind_addr` and from each private IPv4 address of
+/// this machine at once, and takes the first to answer.
+///
+/// A multicast search sent from an unbound socket leaves by the interface with the lowest metric.
+/// On a machine with a VPN or virtual adapters that is often not the one the router is on (on
+/// Windows, a link-local virtual adapter): the router never hears the search. A socket bound to
+/// an interface's address sends out of that interface.
+async fn search_everywhere(options: &Options) -> Result<Gateway<Tokio>, PortMappingError> {
+    let mut binds = vec![options.search.bind_addr];
+    if options.search_from_each_interface {
+        let interfaces = local_ip_address::list_afinet_netifas().unwrap_or_default();
+        for ip in interface_search_addresses(interfaces.into_iter().map(|(_, ip)| ip)) {
+            let bind = SocketAddr::new(ip.into(), 0);
+            if !binds.contains(&bind) {
+                binds.push(bind);
+            }
+        }
+    }
+    let mut searches = tokio::task::JoinSet::new();
+    for bind in binds {
+        let mut search = SearchOptions::default();
+        search.bind_addr = bind;
+        search.broadcast_address = options.search.broadcast_address;
+        search.timeout = options.search.timeout;
+        search.single_search_timeout = options.search.single_search_timeout;
+        search.gateway_ip_version = options.search.gateway_ip_version;
+        search.allowed_gateway_ips = options.search.allowed_gateway_ips.clone();
+        searches.spawn(search_gateway(search));
+    }
+    let mut first_error = None;
+    while let Some(finished) = searches.join_next().await {
+        match finished {
+            Ok(Ok(gateway)) => return Ok(gateway),
+            Ok(Err(e)) => {
+                first_error.get_or_insert_with(|| e.to_string());
+            }
+            Err(e) => debug!("A router search ended abnormally: {}", e),
+        }
+    }
+    Err(PortMappingError::NoRouter(
+        first_error.unwrap_or_else(|| "no search could start".into()),
+    ))
+}
+
+/// The interface addresses a home router can be reached from: private IPv4 (not link-local,
+/// where a router is not found)
+fn interface_search_addresses(ips: impl Iterator<Item = IpAddr>) -> Vec<Ipv4Addr> {
+    ips.filter_map(|ip| match ip {
+        IpAddr::V4(v4) if v4.is_private() => Some(v4),
+        _ => None,
+    })
+    .collect()
 }
 
 /// Maps the audio port to the same outside port or, when the router already forwards that to
@@ -352,6 +407,27 @@ mod tests {
         assert!(!public("169.254.1.1"));
         assert!(!public("127.0.0.1"));
         assert!(!public("0.0.0.0"));
+    }
+
+    #[test]
+    fn when_interfaces_are_listed_then_only_private_ipv4_addresses_are_searched_from() {
+        let ips = [
+            "192.168.1.127",
+            "169.254.136.2",
+            "127.0.0.1",
+            "100.68.50.17",
+            "10.0.0.5",
+            "fe80::1",
+            "2001:db8::1",
+        ]
+        .map(|text| text.parse().unwrap());
+
+        let from = interface_search_addresses(ips.into_iter());
+
+        assert_eq!(
+            from,
+            vec![Ipv4Addr::new(192, 168, 1, 127), Ipv4Addr::new(10, 0, 0, 5)]
+        );
     }
 
     #[test]

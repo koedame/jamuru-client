@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use jamjam::network::{bind_audio_std, gather_candidates_on, CandidateType};
+use jamjam::network::{bind_audio_std, gather_candidates_on, port_mapping, CandidateType};
 
 #[tokio::main]
 async fn main() {
@@ -40,7 +40,16 @@ async fn main() {
     }
     match &gathered.port_mapping {
         Some(mapping) => println!("MAPPED {}", mapping.external_addr()),
-        None => println!("NOT_MAPPED"),
+        None => {
+            println!("NOT_MAPPED");
+            if ask_router {
+                if let Err(e) =
+                    port_mapping::open_with(port_mapping::Options::default(), port).await
+                {
+                    println!("NOT_MAPPED_BECAUSE {e}");
+                }
+            }
+        }
     }
     println!("READY");
 
