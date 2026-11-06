@@ -201,6 +201,11 @@ pub struct AppConfig {
     /// Takes effect when the next session starts.
     #[serde(default)]
     pub voice_priority: bool,
+    /// Whether the app asks the router to forward the audio port to it, so that a peer behind
+    /// a NAT that STUN cannot see through can still reach it (UPnP, ADR-113). On unless turned
+    /// off. Takes effect when the room is next entered.
+    #[serde(default = "default_open_router_port")]
+    pub open_router_port: bool,
 
     /// Audio sample rate in Hz (44100, 48000, or 96000)
     /// Default: 48000 (recommended per ADR-013)
@@ -291,6 +296,10 @@ fn default_ask_name_on_entry() -> bool {
     true
 }
 
+fn default_open_router_port() -> bool {
+    true
+}
+
 fn default_buffer_size() -> u32 {
     DEFAULT_BUFFER_SIZE
 }
@@ -306,6 +315,7 @@ impl Default for AppConfig {
             peer_name: DEFAULT_PEER_NAME.to_string(),
             ask_name_on_entry: true,
             voice_priority: false,
+            open_router_port: true,
             sample_rate: DEFAULT_SAMPLE_RATE,
             input_channel_l: 1,
             input_channel_r: Some(2),
@@ -648,6 +658,21 @@ mod tests {
     fn when_the_setting_is_on_in_the_file_the_audio_packets_are_marked() {
         let config: AppConfig = toml::from_str("voice_priority = true").unwrap();
         assert!(config.voice_priority);
+    }
+
+    /// Verifies: REQ-CON-165
+    #[test]
+    fn when_the_setting_is_absent_the_router_is_asked_to_open_the_audio_port() {
+        assert!(AppConfig::default().open_router_port);
+        let config: AppConfig = toml::from_str("peer_name = \"Aki\"").unwrap();
+        assert!(config.open_router_port);
+    }
+
+    /// Verifies: REQ-CON-165
+    #[test]
+    fn when_the_setting_is_off_in_the_file_the_router_is_not_asked() {
+        let config: AppConfig = toml::from_str("open_router_port = false").unwrap();
+        assert!(!config.open_router_port);
     }
 
     #[test]

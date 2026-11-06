@@ -66,6 +66,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Random number generation
 rand = "0.10"
 
+# Asking the router to open the audio port (UPnP IGD, ADR-113)
+igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }
+
 # WebSocket for signaling
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 
