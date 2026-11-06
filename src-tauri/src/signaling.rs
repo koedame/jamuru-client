@@ -518,13 +518,15 @@ pub async fn signaling_publish_local_candidates(
     state: tauri::State<'_, SignalingState>,
     streaming: tauri::State<'_, StreamingState>,
     usage: tauri::State<'_, UsageState>,
+    config: tauri::State<'_, crate::config::ConfigState>,
 ) -> Result<usize, String> {
     // A session that runs has its socket, so its address is told again as it was told, not
     // asked of STUN through a socket it cannot be asked through
     let candidates = match streaming.told_candidates_of_running(local_port) {
         Some(candidates) => candidates,
         None => {
-            let candidates = local_candidates(&streaming, local_port).await;
+            let ask_router = config.get()?.open_router_port;
+            let candidates = local_candidates(&streaming, local_port, ask_router).await;
             streaming.remember_told_candidates(local_port, &candidates);
             candidates
         }
@@ -572,8 +574,12 @@ pub async fn signaling_publish_local_candidates(
 /// longer available, only host candidates are offered - a public address
 /// guessed from another socket's mapping would be wrong on a NAT that
 /// renumbers ports.
-async fn local_candidates(streaming: &StreamingState, local_port: u16) -> Vec<AddressCandidate> {
-    let candidates = match streaming.gather_candidates().await {
+async fn local_candidates(
+    streaming: &StreamingState,
+    local_port: u16,
+    ask_router: bool,
+) -> Vec<AddressCandidate> {
+    let candidates = match streaming.gather_candidates(ask_router).await {
         Some(candidates) => candidates,
         None => {
             tracing::warn!(

@@ -53,6 +53,10 @@ pub struct StreamingState {
     /// The IP families of the audio socket last prepared. Kept after the socket is handed to
     /// the session, so the addresses offered to the room stay those the socket can use.
     audio_families: std::sync::Mutex<jamjam::network::IpFamilies>,
+    /// The port the router forwards to the audio socket, when it was asked to (ADR-113). Kept
+    /// until the audio session stops, so the address the room was told stays open for as long
+    /// as the socket is in use.
+    port_mapping: std::sync::Mutex<Option<jamjam::network::PortMapping>>,
     /// While the microphone is held muted behind a question put to the person
     /// (REQ-CON-138), what lifting the hold goes back to. `None` when nothing
     /// holds it.
@@ -99,6 +103,7 @@ impl StreamingState {
             running_port: std::sync::Mutex::new(None),
             told_candidates: std::sync::Mutex::new(None),
             audio_families: std::sync::Mutex::new(jamjam::network::IpFamilies::V4_ONLY),
+            port_mapping: std::sync::Mutex::new(None),
             mute_hold: std::sync::Mutex::new(None),
             #[cfg(test)]
             stand_ins: std::sync::Mutex::new(None),
@@ -385,15 +390,43 @@ impl StreamingState {
     /// Address candidates for the prepared audio socket, with the public
     /// address STUN reports for that socket itself.
     ///
+    /// With `ask_router`, the router is also asked to forward the socket's port (UPnP,
+    /// ADR-113), and the forward is kept until [`Self::close_port_mapping`].
+    ///
     /// Returns `None` if there is no prepared socket to ask through - none was
     /// prepared, or the audio session already took it.
     ///
     /// The socket stays locked while STUN runs, so starting the session waits
     /// for the answer instead of moving the socket into the receive loop,
     /// which would swallow the reply.
-    pub async fn gather_candidates(&self) -> Option<Vec<jamjam::network::AddressCandidate>> {
-        let prepared = self.prepared_socket.lock().await;
-        jamjam::network::gather_candidates_on(prepared.as_ref()?).await
+    pub async fn gather_candidates(
+        &self,
+        ask_router: bool,
+    ) -> Option<Vec<jamjam::network::AddressCandidate>> {
+        let gathered = {
+            let prepared = self.prepared_socket.lock().await;
+            jamjam::network::gather_candidates_on(prepared.as_ref()?, ask_router).await?
+        };
+        let previous = std::mem::replace(
+            &mut *self.port_mapping.lock().unwrap_or_else(|e| e.into_inner()),
+            gathered.port_mapping,
+        );
+        if let Some(previous) = previous {
+            previous.close().await;
+        }
+        Some(gathered.candidates)
+    }
+
+    /// Takes the router's forward of the audio port away, when there is one
+    pub async fn close_port_mapping(&self) {
+        let mapping = self
+            .port_mapping
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(mapping) = mapping {
+            mapping.close().await;
+        }
     }
 
     /// Local latency info based on the audio config, for the link whose
@@ -1045,6 +1078,8 @@ pub async fn streaming_stop(state: tauri::State<'_, StreamingState>) -> Result<(
     if let Ok(mut problems) = state.shared.device_problems.write() {
         problems.clear();
     }
+    // The address the room was told of is of the socket that is ending
+    state.close_port_mapping().await;
     if !state.shared.is_active.load(Ordering::SeqCst) {
         return Ok(()); // Already stopped
     }

@@ -211,6 +211,8 @@ app_commands! {
     [Access::NO_HELP] "入室前に名前を確認するかを変える" crate::config::config_set_ask_name_on_entry;
     // Whether the audio is marked as voice changes how the network treats the person's packets.
     [Access::NO_HELP] "音声のパケットに優先の印を付けるかを変える" crate::config::config_set_voice_priority;
+    // Whether the router is asked to open a port for the app changes the person's home network.
+    [Access::NO_HELP] "ルーターにポートを開けてもらうかを変える" crate::config::config_set_open_router_port;
     [Access::ALL] "サンプルレートの設定を読む" crate::config::config_get_sample_rate;
     [Access::ALL] "送信チャンネル数の設定を読む" crate::config::config_get_transmit_channels;
     [Access::ALL] "表示の言語を読む" crate::config::config_get_language;
@@ -458,6 +460,7 @@ mod tests {
             "session_reconnect",
             "config_set_ask_name_on_entry",
             "config_set_voice_priority",
+            "config_set_open_router_port",
             "config_set_server_url",
             "config_set_usage_reporting",
             "settings_help_ask",
