@@ -1797,6 +1797,9 @@ impl Connection {
                     && secure_link.security() == LinkSecurity::Encrypted
                 {
                     route.lock().learn_roamed(addr, follow_after);
+                    if !from_a_peer_address {
+                        transport.also_expect_peer_at(addr);
+                    }
                 }
                 let followed = route.lock().follow(addr, follow_after);
                 if let Some(left) = followed {

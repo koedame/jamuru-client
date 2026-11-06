@@ -192,6 +192,14 @@ impl UdpTransport {
         }
     }
 
+    /// Says that a packet that got through the link came from `addr`, so that a shared socket's
+    /// datagrams from there come to this transport as well
+    pub(super) fn also_expect_peer_at(&self, addr: SocketAddr) {
+        if let Some(lane) = &self.lane {
+            lane.learn(addr);
+        }
+    }
+
     /// Stops taking the peer's datagrams off a shared socket, which ends a
     /// receive that is waiting for one
     pub(super) fn release(&self) {
