@@ -27,6 +27,13 @@ use tracing::{info, warn};
 #[cfg(any(target_os = "linux", windows))]
 const EF_TRAFFIC_CLASS: u32 = 46 << 2;
 
+/// How `SO_NET_SERVICE_TYPE` is spelled in `<sys/socket.h>`, and the value of
+/// `NET_SERVICE_TYPE_VO` (libc has neither)
+#[cfg(target_os = "macos")]
+const SO_NET_SERVICE_TYPE: libc::c_int = 0x1116;
+#[cfg(target_os = "macos")]
+const NET_SERVICE_TYPE_VO: libc::c_int = 4;
+
 /// Marks what `socket` sends as voice, and logs how. Returns what was used, or `None` where the
 /// system does not take it (the reason is logged): audio goes unmarked then.
 pub fn mark_voice(socket: &std::net::UdpSocket) -> Option<&'static str> {
@@ -110,8 +117,24 @@ fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn mark(_socket: &std::net::UdpSocket) -> Result<&'static str, String> {
-    Err("macOS does not carry the mark in the packets, and its voice service type made the sent audio drop out".to_string())
+fn mark(socket: &std::net::UdpSocket) -> Result<&'static str, String> {
+    use std::os::fd::AsRawFd;
+
+    let value = NET_SERVICE_TYPE_VO;
+    // SAFETY: a valid descriptor, and a pointer to a c_int of the size given
+    let result = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            SO_NET_SERVICE_TYPE,
+            std::ptr::addr_of!(value).cast(),
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if result == 0 {
+        return Ok("SO_NET_SERVICE_TYPE");
+    }
+    Err(std::io::Error::last_os_error().to_string())
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
