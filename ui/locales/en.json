@@ -244,6 +244,8 @@
     "general": {
       "display": "Display",
       "connection": "Connection",
+      "openRouterPort": "Open a router port automatically",
+      "openRouterPortHint": "While you are in a room, asks the router through UPnP to open one UDP port so others can reach you directly. It is closed when you leave or quit. Nothing happens if the router does not support UPnP or has it off. Applies the next time you enter a room",
       "voicePriority": "Send audio with priority",
       "voicePriorityHint": "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Try it when audio breaks up while others use the same Wi-Fi; turn it off if it gets worse. Not available on macOS. Applies from the next session",
       "serverUrl": {

@@ -12,6 +12,7 @@ import {
   configSetUsageReporting,
   configSetAskNameOnEntry,
   configSetVoicePriority,
+  configSetOpenRouterPort,
   bufferRequestSetPolicy,
   type BufferAskPolicy,
   configGetPeerName,
@@ -118,6 +119,9 @@ export function SettingsPanelAdapter({
   // Whether the name is confirmed before entering a room (on until turned off)
   const [askNameOnEntry, setAskNameOnEntry] = useState(true);
 
+  // Whether the router is asked to open the audio port (on until turned off)
+  const [openRouterPort, setOpenRouterPort] = useState(true);
+
   // Whether the audio packets are marked as voice (on until turned off)
   const [voicePriority, setVoicePriority] = useState(false);
 
@@ -209,6 +213,7 @@ export function SettingsPanelAdapter({
       .then((config) => {
         setUsageReporting(config?.usage_reporting === true);
         setAskNameOnEntry(config?.ask_name_on_entry !== false);
+        setOpenRouterPort(config?.open_router_port !== false);
         setVoicePriority(config?.voice_priority === true);
         setBufferAsks(config?.buffer_asks === "never" ? "never" : "ask");
       })
@@ -394,6 +399,16 @@ export function SettingsPanelAdapter({
     }
   }, []);
 
+  const handleOpenRouterPortChange = useCallback(async (enabled: boolean) => {
+    setOpenRouterPort(enabled);
+    try {
+      await configSetOpenRouterPort(enabled);
+    } catch (err) {
+      console.error("Failed to save whether to ask the router to open the audio port:", err);
+      setOpenRouterPort(!enabled);
+    }
+  }, []);
+
   const handleVoicePriorityChange = useCallback(async (enabled: boolean) => {
     setVoicePriority(enabled);
     try {
@@ -503,6 +518,8 @@ export function SettingsPanelAdapter({
       onDisplayNameChange={handleDisplayNameChange}
       askNameOnEntry={askNameOnEntry}
       onAskNameOnEntryChange={handleAskNameOnEntryChange}
+      openRouterPort={openRouterPort}
+      onOpenRouterPortChange={handleOpenRouterPortChange}
       voicePriority={voicePriority}
       onVoicePriorityChange={handleVoicePriorityChange}
       bufferAsks={bufferAsks}

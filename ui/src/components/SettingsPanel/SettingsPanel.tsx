@@ -44,6 +44,8 @@ export interface SettingsPanelProps {
   displayNameError?: string;
   /** Whether the name is confirmed before creating or entering a room (General tab) */
   askNameOnEntry?: boolean;
+  /** Whether the router is asked to open the audio port (General tab) */
+  openRouterPort?: boolean;
   /** Whether the audio packets are marked as voice (General tab) */
   voicePriority?: boolean;
   /** Whether asks to buffer a participant's audio for longer are put to the person (General tab) */
@@ -104,6 +106,8 @@ export interface SettingsPanelProps {
   onDisplayNameChange: (name: string) => void;
   /** Turns the name confirmation before entering a room on or off (General tab, left out when absent) */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
+  /** Turns asking the router to open the audio port on or off (General tab, left out when absent) */
+  onOpenRouterPortChange?: (enabled: boolean) => void;
   /** Turns the marking of the audio packets as voice on or off (General tab, left out when absent) */
   onVoicePriorityChange?: (enabled: boolean) => void;
   /** Chooses whether such asks are put to the person or turned down (General tab, left out when absent) */
@@ -206,6 +210,7 @@ export function SettingsPanel({
   displayName,
   displayNameError,
   askNameOnEntry,
+  openRouterPort,
   voicePriority,
   bufferAsks,
   inputDevices,
@@ -236,6 +241,7 @@ export function SettingsPanel({
   update,
   onDisplayNameChange,
   onAskNameOnEntryChange,
+  onOpenRouterPortChange,
   onVoicePriorityChange,
   onBufferAsksChange,
   onInputDeviceChange,
@@ -305,6 +311,8 @@ export function SettingsPanel({
             onDisplayNameChange={onDisplayNameChange}
             askNameOnEntry={askNameOnEntry}
             onAskNameOnEntryChange={onAskNameOnEntryChange}
+            openRouterPort={openRouterPort}
+            onOpenRouterPortChange={onOpenRouterPortChange}
             voicePriority={voicePriority}
             onVoicePriorityChange={onVoicePriorityChange}
             bufferAsks={bufferAsks}

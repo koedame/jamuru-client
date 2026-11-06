@@ -1155,6 +1155,8 @@ export interface AppConfig {
   ask_name_on_entry: boolean;
   /** Whether the audio packets are marked as voice so a Wi-Fi sends them first (on until the person turns it off; read when a session starts) */
   voice_priority: boolean;
+  /** Whether the router is asked to open the audio port (UPnP, ADR-113; on until the person turns it off; read when a room is entered) */
+  open_router_port: boolean;
   /** Audio sample rate in Hz. Valid values: 44100, 48000, 96000 (ADR-013) */
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
@@ -1308,6 +1310,13 @@ export async function bufferRequestSetPolicy(policy: BufferAskPolicy): Promise<v
  */
 export async function configSetVoicePriority(enabled: boolean): Promise<void> {
   return invoke("config_set_voice_priority", { enabled });
+}
+
+/**
+ * Turn asking the router to open the audio port on or off (takes effect when the room is next entered)
+ */
+export async function configSetOpenRouterPort(enabled: boolean): Promise<void> {
+  return invoke("config_set_open_router_port", { enabled });
 }
 
 /**

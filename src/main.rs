@@ -23,9 +23,9 @@ use jamjam::audio_session::{self, Command, InputSignal, LinkTarget, Params, Runn
 use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, Timing};
 use jamjam::network::{
     bind_audio_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate,
-    ConnectionStats, EnterError, EnterRequest, Entered, LatencyBreakdown, LinkHealth, LinkIdentity,
-    LocalLatencyInfo, NetworkError, PeerLatencyInfo, RoomEntry, RoomInfo, SignalingClient,
-    SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
+    ConnectionStats, EnterError, EnterRequest, Entered, Gathered, LatencyBreakdown, LinkHealth,
+    LinkIdentity, LocalLatencyInfo, NetworkError, PeerLatencyInfo, PortMapping, RoomEntry,
+    RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
 };
 use uuid::Uuid;
 
@@ -278,6 +278,8 @@ struct AudioSettings {
     output_limiter: bool,
     /// Whether the audio packets are marked as voice, as the app saves it
     voice_priority: bool,
+    /// Whether the router is asked to forward the audio port, as the app saves it
+    open_router_port: bool,
     /// How a WASAPI device is opened (Windows), as the app saves it
     wasapi_mode: jamjam::audio::WasapiMode,
     /// Which channels of a multi-channel interface are read and played on (1-based), as
@@ -342,6 +344,7 @@ impl AudioArgs {
             input_limiter: config.input_limiter,
             output_limiter: config.output_limiter,
             voice_priority: config.voice_priority,
+            open_router_port: config.open_router_port,
             wasapi_mode: config.wasapi_mode,
             input_channels: (config.input_channel_l, config.input_channel_r),
             output_channels: (config.output_channel_l, config.output_channel_r),
@@ -1387,6 +1390,9 @@ struct AudioSession {
     /// What the room is told of the audio socket
     local_addr: SocketAddr,
     candidates: Vec<AddressCandidate>,
+    /// The router's forward of the audio port, which the room's addresses include; closed with
+    /// the session
+    port_mapping: Option<PortMapping>,
     /// The participants linked to, by the name the room knows them by
     names: HashMap<Uuid, String>,
     /// The links whose coming up has been told
@@ -1409,7 +1415,15 @@ impl AudioSession {
         let socket = bind_audio_std(0)?;
         let local_addr = socket.local_addr()?;
         info!("Local UDP socket: {}", local_addr);
-        let candidates = gather_candidates_on(&socket).await.unwrap_or_default();
+        let Gathered {
+            candidates,
+            port_mapping,
+        } = gather_candidates_on(&socket, settings.open_router_port)
+            .await
+            .unwrap_or(Gathered {
+                candidates: Vec::new(),
+                port_mapping: None,
+            });
         info!("Gathered {} address candidates", candidates.len());
 
         let shared = Shared::new();
@@ -1460,6 +1474,7 @@ impl AudioSession {
             identity,
             local_addr,
             candidates,
+            port_mapping,
             names: HashMap::new(),
             told_up: HashSet::new(),
         })
@@ -1551,10 +1566,14 @@ impl AudioSession {
             thread,
             settings,
             names,
+            port_mapping,
             ..
         } = self;
         let _ = controls.commands.send(Command::Stop);
         let _ = tokio::task::spawn_blocking(move || thread.join()).await;
+        if let Some(port_mapping) = port_mapping {
+            port_mapping.close().await;
+        }
         let reports = summaries(&names, controls.shared.ended_reports());
         for report in &reports {
             print_link_stats(report, &settings);
@@ -1839,6 +1858,7 @@ mod tests {
             input_limiter: true,
             output_limiter: true,
             voice_priority: false,
+            open_router_port: false,
             wasapi_mode: Default::default(),
             input_channels: (1, Some(2)),
             output_channels: (1, Some(2)),

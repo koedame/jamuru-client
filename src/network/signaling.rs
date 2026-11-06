@@ -17,6 +17,7 @@ use super::device_identity::DeviceIdentity;
 use super::discovery::discover_signaling_url;
 use super::error::{NetworkError, SignalingFailure};
 use super::link_facts::route_preference;
+use super::port_mapping::{self, PortMapping, PortMappingError};
 use super::transport::IpFamilies;
 use crate::telemetry::{AppStart, AudioEnv};
 
@@ -90,6 +91,23 @@ impl AddressCandidate {
         Self {
             address,
             candidate_type: CandidateType::Host,
+            priority,
+        }
+    }
+
+    /// Create a candidate for an address the router forwards to this app because it was asked
+    /// to (UPnP, ADR-113). On the wire it is a server reflexive candidate - a peer treats it
+    /// as a public address to send to, whatever the way it was found - but ranked above the
+    /// ones STUN found: a symmetric NAT gives STUN's address to the server alone, while a
+    /// mapping the router was asked for takes anyone's packets.
+    pub fn port_mapped(address: SocketAddr) -> Self {
+        let type_pref: u32 = 110;
+        let local_pref: u32 = 65534;
+        let priority = (type_pref << 24) | (local_pref << 8) | 255;
+
+        Self {
+            address,
+            candidate_type: CandidateType::ServerReflexive,
             priority,
         }
     }
@@ -781,13 +799,27 @@ pub async fn gather_candidates(audio_socket: &Arc<tokio::net::UdpSocket>) -> Vec
     gather_candidates_using(audio_socket, super::stun::DEFAULT_STUN_SERVERS).await
 }
 
+/// What [`gather_candidates_on`] found: the candidates, and the router port forward that one of
+/// them is, which holds only while it is kept
+pub struct Gathered {
+    pub candidates: Vec<AddressCandidate>,
+    pub port_mapping: Option<PortMapping>,
+}
+
 /// [`gather_candidates`] for a socket that is not yet handed to the runtime, such as the one
 /// whose port the room is to be told before the audio session starts.
 ///
 /// Asks through a duplicate descriptor, which shares the socket - the same port, the same NAT
 /// mapping - and leaves `socket` untouched for whatever will read it afterwards (a
 /// [`UdpMux`](super::UdpMux), which would swallow the reply). `None` if no duplicate could be made.
-pub async fn gather_candidates_on(socket: &std::net::UdpSocket) -> Option<Vec<AddressCandidate>> {
+///
+/// With `ask_router`, the router is also asked to forward the socket's port (UPnP, ADR-113)
+/// while STUN is asked; keep the returned [`Gathered::port_mapping`] as long as the socket is
+/// in use.
+pub async fn gather_candidates_on(
+    socket: &std::net::UdpSocket,
+    ask_router: bool,
+) -> Option<Gathered> {
     let asking = match socket.try_clone().and_then(tokio::net::UdpSocket::from_std) {
         Ok(socket) => Arc::new(socket),
         Err(e) => {
@@ -795,7 +827,57 @@ pub async fn gather_candidates_on(socket: &std::net::UdpSocket) -> Option<Vec<Ad
             return None;
         }
     };
-    Some(gather_candidates(&asking).await)
+    let stun_servers = super::stun::DEFAULT_STUN_SERVERS;
+    Some(if ask_router {
+        gather_candidates_mapped(&asking, stun_servers, Some(port_mapping::open)).await
+    } else {
+        Gathered {
+            candidates: gather_candidates_using(&asking, stun_servers).await,
+            port_mapping: None,
+        }
+    })
+}
+
+/// [`gather_candidates_using`], and with `open` the router asked to forward the audio port at
+/// the same time, its public address added as a candidate.
+///
+/// The router is asked while STUN is, so a network with no router that answers costs the
+/// search's wait and not more. A router that does not map the port leaves the candidates STUN
+/// gave, exactly as without `open`.
+pub async fn gather_candidates_mapped<F, Fut>(
+    audio_socket: &Arc<tokio::net::UdpSocket>,
+    stun_servers: &[&str],
+    open: Option<F>,
+) -> Gathered
+where
+    F: FnOnce(u16) -> Fut,
+    Fut: std::future::Future<Output = Result<PortMapping, PortMappingError>>,
+{
+    let (Some(open), Ok(local)) = (open, audio_socket.local_addr()) else {
+        return Gathered {
+            candidates: gather_candidates_using(audio_socket, stun_servers).await,
+            port_mapping: None,
+        };
+    };
+    let (mut candidates, mapping) = tokio::join!(
+        gather_candidates_using(audio_socket, stun_servers),
+        open(local.port())
+    );
+    let port_mapping = match mapping {
+        Ok(mapping) => {
+            candidates.push(AddressCandidate::port_mapped(mapping.external_addr()));
+            sort_and_dedupe(&mut candidates);
+            Some(mapping)
+        }
+        Err(e) => {
+            info!("No port forward on the router, using STUN only: {}", e);
+            None
+        }
+    };
+    Gathered {
+        candidates,
+        port_mapping,
+    }
 }
 
 /// [`gather_candidates`] with an explicit STUN server list.
@@ -835,16 +917,19 @@ pub async fn gather_candidates_using(
 
     keep_the_ipv6_address_stun_saw(&mut candidates);
 
-    // Sort by priority (highest first)
-    candidates.sort_by_key(|c| std::cmp::Reverse(c.priority));
-
-    // One candidate per address, the highest priority kept: an IPv6 host has no NAT, so STUN
-    // reports its own address back.
-    let mut seen = std::collections::HashSet::new();
-    candidates.retain(|c| seen.insert(c.address));
+    sort_and_dedupe(&mut candidates);
 
     info!("Gathered {} address candidates", candidates.len());
     candidates
+}
+
+/// Sorts by priority (highest first), and keeps one candidate per address, the highest priority:
+/// an IPv6 host has no NAT, so STUN reports its own address back; a router that keeps the
+/// mapping it was asked for also gives the audio socket that same public port toward STUN.
+fn sort_and_dedupe(candidates: &mut Vec<AddressCandidate>) {
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.priority));
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|c| seen.insert(c.address));
 }
 
 /// Drops the IPv6 host candidates other than the address STUN saw, when it saw one.

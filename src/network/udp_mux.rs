@@ -8,6 +8,7 @@
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use parking_lot::Mutex;
 use tokio::net::UdpSocket;
@@ -21,14 +22,52 @@ use super::transport::{bind_std, canonical_addr, UdpTransport, RECV_BUFFER_SIZE}
 /// dropped, as a socket's own buffer does.
 const LANE_CAPACITY: usize = 1024;
 
+/// How many addresses a lane takes from besides the ones the peer was offered at: the ones it was
+/// heard from since, once a packet from there got through its link
+const LEARNED_ADDRS: usize = 4;
+
+/// Datagrams from an address no link expects that are handed on at once, and how many more per
+/// second. A link follows a peer to a new address by the first packet it opens from there, so a few
+/// are enough; the rest is what anyone on the internet can send to an open port (ADR-113).
+const UNKNOWN_BURST: f64 = 64.0;
+const UNKNOWN_PER_SEC: f64 = 32.0;
+
 /// A datagram and where it came from
 pub(super) type Datagram = (Vec<u8>, SocketAddr);
+
+/// Lets a limited number of datagrams from unexpected addresses through
+struct UnknownSources {
+    tokens: f64,
+    at: Instant,
+}
+
+impl UnknownSources {
+    fn new(now: Instant) -> Self {
+        Self {
+            tokens: UNKNOWN_BURST,
+            at: now,
+        }
+    }
+
+    fn allow(&mut self, now: Instant) -> bool {
+        let passed = now.saturating_duration_since(self.at).as_secs_f64();
+        self.tokens = (self.tokens + passed * UNKNOWN_PER_SEC).min(UNKNOWN_BURST);
+        self.at = now;
+        if self.tokens < 1.0 {
+            return false;
+        }
+        self.tokens -= 1.0;
+        true
+    }
+}
 
 struct LaneState {
     waiting: VecDeque<Datagram>,
     /// The addresses the peer sends from. `None` while the lane takes nothing: before its
     /// connection starts, and after it ended.
     peer_addrs: Option<Vec<SocketAddr>>,
+    /// How many of `peer_addrs` came from `claim`; the rest were learned
+    offered: usize,
 }
 
 struct LaneShared {
@@ -45,7 +84,35 @@ pub(super) struct Lane {
 impl Lane {
     /// Takes what `peer_addrs` send from now on
     pub(super) fn claim(&self, peer_addrs: &[SocketAddr]) {
-        self.shared.state.lock().peer_addrs = Some(peer_addrs.to_vec());
+        let mut state = self.shared.state.lock();
+        let learned: Vec<SocketAddr> = match &state.peer_addrs {
+            Some(addrs) => addrs[state.offered.min(addrs.len())..]
+                .iter()
+                .filter(|addr| !peer_addrs.contains(addr))
+                .copied()
+                .collect(),
+            None => Vec::new(),
+        };
+        state.offered = peer_addrs.len();
+        let mut all = peer_addrs.to_vec();
+        all.extend(learned);
+        state.peer_addrs = Some(all);
+    }
+
+    /// Takes what `addr` sends too, because a packet that got through the link came from there.
+    /// Keeps the latest few.
+    pub(super) fn learn(&self, addr: SocketAddr) {
+        let mut state = self.shared.state.lock();
+        let offered = state.offered;
+        if let Some(addrs) = state.peer_addrs.as_mut() {
+            if addrs.contains(&addr) {
+                return;
+            }
+            if addrs.len() >= offered + LEARNED_ADDRS {
+                addrs.remove(offered);
+            }
+            addrs.push(addr);
+        }
     }
 
     /// Takes nothing from now on, and lets go of what is waiting
@@ -93,8 +160,15 @@ impl Drop for Lane {
 
 /// Hands `bytes` to the lanes it is for: those whose peer sends from `from`, or every lane
 /// when no peer is known there. A peer whose address changed is still its link's to tell by
-/// its keys, as it is when a connection has the socket to itself.
-fn deliver(lanes: &[Arc<LaneShared>], bytes: Vec<u8>, from: SocketAddr) {
+/// its keys, as it is when a connection has the socket to itself. Only a limited number of
+/// datagrams from addresses no peer is known at get that far (`unknown`): every lane opens
+/// them, so they are what a sender who is nobody's peer could make the room's links work on.
+fn deliver(
+    lanes: &[Arc<LaneShared>],
+    bytes: Vec<u8>,
+    from: SocketAddr,
+    unknown: &mut UnknownSources,
+) {
     let taking = |lane: &Arc<LaneShared>, known_only: bool| {
         let state = lane.state.lock();
         match &state.peer_addrs {
@@ -106,6 +180,13 @@ fn deliver(lanes: &[Arc<LaneShared>], bytes: Vec<u8>, from: SocketAddr) {
         lanes.iter().filter(|lane| taking(lane, true)).collect();
     if targets.is_empty() {
         targets = lanes.iter().filter(|lane| taking(lane, false)).collect();
+        if !targets.is_empty() && !unknown.allow(Instant::now()) {
+            trace!(
+                "Dropping a datagram from {}: too many from unknown addresses",
+                from
+            );
+            return;
+        }
     }
 
     let Some((last, others)) = targets.split_last() else {
@@ -160,6 +241,7 @@ impl UdpMux {
         let routing = lanes.clone();
         let reader = tokio::spawn(async move {
             let mut buf = vec![0u8; RECV_BUFFER_SIZE];
+            let mut unknown = UnknownSources::new(Instant::now());
             loop {
                 match reading.recv_from(&mut buf).await {
                     // A datagram that fills the buffer may have been cut short
@@ -168,7 +250,12 @@ impl UdpMux {
                     }
                     Ok((len, from)) => {
                         let lanes = routing.lock().clone();
-                        deliver(&lanes, buf[..len].to_vec(), canonical_addr(from));
+                        deliver(
+                            &lanes,
+                            buf[..len].to_vec(),
+                            canonical_addr(from),
+                            &mut unknown,
+                        );
                     }
                     Err(e) => error!("Receive error: {}", e),
                 }
@@ -195,6 +282,7 @@ impl UdpMux {
             state: Mutex::new(LaneState {
                 waiting: VecDeque::new(),
                 peer_addrs: None,
+                offered: 0,
             }),
             arrived: Notify::new(),
         });
@@ -229,6 +317,7 @@ mod tests {
             state: Mutex::new(LaneState {
                 waiting: VecDeque::new(),
                 peer_addrs: peer_addrs.map(|addrs| addrs.iter().map(|a| addr(a)).collect()),
+                offered: peer_addrs.map_or(0, |addrs| addrs.len()),
             }),
             arrived: Notify::new(),
         })
@@ -251,7 +340,12 @@ mod tests {
             lane(Some(&["192.0.2.3:5000"])),
         ];
 
-        deliver(&lanes, vec![7], addr("192.0.2.3:5000"));
+        deliver(
+            &lanes,
+            vec![7],
+            addr("192.0.2.3:5000"),
+            &mut UnknownSources::new(Instant::now()),
+        );
 
         assert!(waiting(&lanes[0]).is_empty());
         assert_eq!(waiting(&lanes[1]), vec![vec![7]]);
@@ -262,8 +356,18 @@ mod tests {
     fn a_datagram_from_any_of_a_peers_addresses_goes_to_its_lane() {
         let lanes = vec![lane(Some(&["192.168.1.20:5000", "203.0.113.7:6000"]))];
 
-        deliver(&lanes, vec![1], addr("192.168.1.20:5000"));
-        deliver(&lanes, vec![2], addr("203.0.113.7:6000"));
+        deliver(
+            &lanes,
+            vec![1],
+            addr("192.168.1.20:5000"),
+            &mut UnknownSources::new(Instant::now()),
+        );
+        deliver(
+            &lanes,
+            vec![2],
+            addr("203.0.113.7:6000"),
+            &mut UnknownSources::new(Instant::now()),
+        );
 
         assert_eq!(waiting(&lanes[0]), vec![vec![1], vec![2]]);
     }
@@ -279,7 +383,12 @@ mod tests {
             lane(Some(&["192.168.1.20:5000"])),
         ];
 
-        deliver(&lanes, vec![7], addr("192.168.1.20:5000"));
+        deliver(
+            &lanes,
+            vec![7],
+            addr("192.168.1.20:5000"),
+            &mut UnknownSources::new(Instant::now()),
+        );
 
         assert_eq!(waiting(&lanes[0]), vec![vec![7]]);
         assert_eq!(waiting(&lanes[1]), vec![vec![7]]);
@@ -293,7 +402,12 @@ mod tests {
             lane(Some(&["192.0.2.3:5000"])),
         ];
 
-        deliver(&lanes, vec![7], addr("198.51.100.9:4000"));
+        deliver(
+            &lanes,
+            vec![7],
+            addr("198.51.100.9:4000"),
+            &mut UnknownSources::new(Instant::now()),
+        );
 
         assert_eq!(waiting(&lanes[0]), vec![vec![7]]);
         assert_eq!(waiting(&lanes[1]), vec![vec![7]]);
@@ -304,7 +418,12 @@ mod tests {
     fn a_lane_whose_connection_has_not_started_or_has_ended_takes_nothing() {
         let lanes = vec![lane(None), lane(Some(&["192.0.2.3:5000"]))];
 
-        deliver(&lanes, vec![7], addr("198.51.100.9:4000"));
+        deliver(
+            &lanes,
+            vec![7],
+            addr("198.51.100.9:4000"),
+            &mut UnknownSources::new(Instant::now()),
+        );
 
         assert!(waiting(&lanes[0]).is_empty());
         assert_eq!(waiting(&lanes[1]), vec![vec![7]]);
@@ -315,7 +434,12 @@ mod tests {
         let lanes = vec![lane(Some(&["192.0.2.2:5000"]))];
 
         for i in 0..LANE_CAPACITY + 5 {
-            deliver(&lanes, vec![(i % 251) as u8], addr("192.0.2.2:5000"));
+            deliver(
+                &lanes,
+                vec![(i % 251) as u8],
+                addr("192.0.2.2:5000"),
+                &mut UnknownSources::new(Instant::now()),
+            );
         }
 
         let held = waiting(&lanes[0]);
@@ -331,7 +455,12 @@ mod tests {
         let transport = mux.transport();
         transport.expect_peer_at(&[addr("192.0.2.2:5000")]);
         for _ in 0..backlog {
-            deliver(&mux.lanes.lock(), vec![7], addr("192.0.2.2:5000"));
+            deliver(
+                &mux.lanes.lock(),
+                vec![7],
+                addr("192.0.2.2:5000"),
+                &mut UnknownSources::new(Instant::now()),
+            );
         }
 
         let taken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -379,5 +508,100 @@ mod tests {
         drop(transport);
 
         assert!(mux.lanes.lock().is_empty());
+    }
+
+    /// Verifies: REQ-CON-165
+    #[test]
+    fn when_datagrams_from_unknown_addresses_keep_coming_then_only_a_few_are_handed_on() {
+        let lanes = vec![lane(Some(&["192.0.2.2:5000"]))];
+        let mut unknown = UnknownSources::new(Instant::now());
+
+        for i in 0..500u16 {
+            deliver(
+                &lanes,
+                vec![1],
+                addr(&format!("203.0.113.9:{}", 10000 + i)),
+                &mut unknown,
+            );
+        }
+
+        let handed_on = waiting(&lanes[0]).len();
+        assert!((64..=66).contains(&handed_on), "{handed_on}");
+    }
+
+    /// Verifies: REQ-CON-165
+    #[test]
+    fn when_unknown_addresses_have_used_up_the_allowance_then_a_peers_datagrams_still_come() {
+        let lanes = vec![lane(Some(&["192.0.2.2:5000"]))];
+        let mut unknown = UnknownSources::new(Instant::now());
+        for i in 0..500u16 {
+            deliver(
+                &lanes,
+                vec![1],
+                addr(&format!("203.0.113.9:{}", 10000 + i)),
+                &mut unknown,
+            );
+        }
+        lanes[0].state.lock().waiting.clear();
+
+        deliver(&lanes, vec![9], addr("192.0.2.2:5000"), &mut unknown);
+
+        assert_eq!(waiting(&lanes[0]), vec![vec![9]]);
+    }
+
+    #[test]
+    fn when_time_passes_then_unknown_addresses_are_allowed_again() {
+        let start = Instant::now();
+        let mut unknown = UnknownSources::new(start);
+        let spent = (0..70).filter(|_| unknown.allow(start)).count();
+        assert_eq!(spent, 64);
+
+        assert!(!unknown.allow(start));
+        assert!(unknown.allow(start + std::time::Duration::from_secs(1)));
+    }
+
+    /// Verifies: REQ-CON-165
+    #[test]
+    fn when_a_packet_got_through_from_a_new_address_then_its_datagrams_are_no_longer_limited() {
+        let shared = lane(Some(&["192.0.2.2:5000"]));
+        let owner = Lane {
+            shared: shared.clone(),
+            lanes: Arc::new(Mutex::new(Vec::new())),
+        };
+        let lanes = vec![shared.clone()];
+        let mut unknown = UnknownSources::new(Instant::now());
+        for i in 0..500u16 {
+            deliver(
+                &lanes,
+                vec![1],
+                addr(&format!("203.0.113.9:{}", 10000 + i)),
+                &mut unknown,
+            );
+        }
+        shared.state.lock().waiting.clear();
+
+        owner.learn(addr("198.51.100.4:7000"));
+        deliver(&lanes, vec![5], addr("198.51.100.4:7000"), &mut unknown);
+
+        assert_eq!(waiting(&shared), vec![vec![5]]);
+    }
+
+    #[test]
+    fn when_more_addresses_are_learned_than_fit_then_the_oldest_goes_and_the_offered_one_stays() {
+        let shared = lane(Some(&["192.0.2.2:5000"]));
+        let owner = Lane {
+            shared: shared.clone(),
+            lanes: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        for port in 7000..7000 + LEARNED_ADDRS as u16 + 2 {
+            owner.learn(addr(&format!("198.51.100.4:{port}")));
+        }
+
+        let addrs = shared.state.lock().peer_addrs.clone().unwrap();
+        assert_eq!(addrs.len(), 1 + LEARNED_ADDRS);
+        assert_eq!(addrs[0], addr("192.0.2.2:5000"));
+        assert!(!addrs.contains(&addr("198.51.100.4:7000")));
+        assert!(addrs.contains(&addr("198.51.100.4:7005")));
     }
 }

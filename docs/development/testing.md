@@ -41,6 +41,14 @@ cargo test -- --nocapture
 | `tests/audio_quality_test.rs` | `docs-spec/behavior/audio-quality.feature` |
 | `tests/latency_test.rs` | `docs-spec/behavior/latency.feature` |
 | `tests/i18n_test.rs` | `docs-spec/behavior/i18n.feature` |
+| `tests/port_mapping_test.rs` | ルーターへのポート開放（UPnP）。偽のルーター（SSDP と SOAP）に対する統合テスト |
+
+## ルーターのポート開放（UPnP）
+
+ルーターにポートを開けてもらう機能（ADR-113）は、2 通りで確かめます。
+
+- `cargo test --test port_mapping_test`: 手元のループバックに立てた偽のルーターに対して、頼みが通る・断られる・同じ番号が使用中・二重の NAT・ルーター無し・更新・閉じる、を確かめます。毎回回ります。
+- `tests/upnp/run.sh`: 本物のルーター（miniupnpd）をコンテナで動かし、ルーターの先の端末から送ったデータグラムが音声のソケットに届くか、閉じると転送の規則が消えるか、UPnP の無いルーターでも STUN だけで続くか、設定オフでルーターに触れないかを確かめます。docker と、コンテナに `NET_ADMIN` を渡せる権限が要ります。CI では回しません。
 
 ## ルームの人数
 

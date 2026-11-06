@@ -295,6 +295,8 @@ pub fn run() {
         }
         tauri::RunEvent::Exit => {
             let _stage = watchdog.enter_stage(jamjam::telemetry::HangStage::AppExit);
+            // The router keeps a port forward until its lease ends: take ours away
+            tauri::async_runtime::block_on(handle.state::<StreamingState>().close_port_mapping());
             handle
                 .state::<UsageState>()
                 .app_exiting(&handle.state::<StreamingState>());
