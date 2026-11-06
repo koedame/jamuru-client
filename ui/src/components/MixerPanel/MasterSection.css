@@ -79,11 +79,9 @@
 /* Mask hides the unlit right portion of the bar. */
 .master-section__mask {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   background: var(--color-bg-secondary);
-  transition: width 50ms linear;
+  transform-origin: right;
 }
 
 .master-section--muted .master-section__fill {
