@@ -212,10 +212,17 @@ async fn open_unbounded(
     options: Options,
     local_port: u16,
 ) -> Result<PortMapping, PortMappingError> {
+    let allowed = options.search.allowed_gateway_ips.clone();
     let gateway = search_gateway(options.search)
         .await
         .map_err(|e| PortMappingError::NoRouter(e.to_string()))?;
     debug!("Found a router that maps ports at {}", gateway.addr);
+    if !on_local_network(gateway.addr.ip(), &allowed) {
+        return Err(PortMappingError::NoRouter(format!(
+            "{} answered from outside the local network",
+            gateway.addr.ip()
+        )));
+    }
 
     let external_ip = gateway
         .get_external_ip()
@@ -254,7 +261,8 @@ async fn open_unbounded(
 }
 
 /// Maps the audio port to the same outside port or, when the router already forwards that to
-/// someone else, to a few others. A router that keeps only mappings with no end gets one.
+/// someone else, to a few others. A router that keeps only mappings with no end gets none: if the
+/// app were killed, the forward would stay and later send the port's traffic to whatever binds it.
 async fn add_first_free_port(mapped: &mut Mapped) -> Result<(), PortMappingError> {
     let mut ports = vec![mapped.local.port()];
     ports.extend((0..OTHER_PORT_TRIES).map(|_| {
@@ -263,13 +271,7 @@ async fn add_first_free_port(mapped: &mut Mapped) -> Result<(), PortMappingError
     let mut last = String::new();
     for port in ports {
         mapped.external_port = port;
-        let mut result = mapped.add().await;
-        if matches!(result, Err(AddPortError::OnlyPermanentLeasesSupported)) {
-            debug!("The router keeps only mappings with no end");
-            mapped.lease_secs = 0;
-            result = mapped.add().await;
-        }
-        match result {
+        match mapped.add().await {
             Ok(()) => return Ok(()),
             Err(AddPortError::PortInUse) => {
                 last = "the port is forwarded to another machine".into()
@@ -312,6 +314,12 @@ fn local_ip_toward(gateway: IpAddr) -> std::io::Result<Ipv4Addr> {
     }
 }
 
+/// Whether `ip` is an address a home router has: private or link-local IPv4. A router answering
+/// from anywhere else is not the one in this house. `allowed` are the addresses the caller named.
+fn on_local_network(ip: IpAddr, allowed: &[IpAddr]) -> bool {
+    allowed.contains(&ip) || matches!(ip, IpAddr::V4(v4) if v4.is_private() || v4.is_link_local())
+}
+
 /// Whether a peer on the internet can send to `ip`: not a private, shared (carrier-grade NAT),
 /// link-local or otherwise reserved IPv4 address
 fn is_public(ip: IpAddr) -> bool {
@@ -344,6 +352,23 @@ mod tests {
         assert!(!public("169.254.1.1"));
         assert!(!public("127.0.0.1"));
         assert!(!public("0.0.0.0"));
+    }
+
+    #[test]
+    fn when_a_router_answers_from_a_home_address_then_it_is_on_the_local_network() {
+        assert!(on_local_network("192.168.1.1".parse().unwrap(), &[]));
+        assert!(on_local_network("10.0.0.1".parse().unwrap(), &[]));
+        assert!(on_local_network("169.254.1.1".parse().unwrap(), &[]));
+    }
+
+    #[test]
+    fn when_a_router_answers_from_a_public_or_local_machine_address_then_it_is_not_on_the_local_network(
+    ) {
+        assert!(!on_local_network("203.0.113.9".parse().unwrap(), &[]));
+        assert!(!on_local_network("127.0.0.1".parse().unwrap(), &[]));
+        assert!(!on_local_network("2001:db8::1".parse().unwrap(), &[]));
+        let named = ["127.0.0.1".parse().unwrap()];
+        assert!(on_local_network("127.0.0.1".parse().unwrap(), &named));
     }
 
     #[test]

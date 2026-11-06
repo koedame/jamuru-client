@@ -409,13 +409,15 @@ async fn mapping_is_kept_then_it_is_renewed_before_the_lease_ends() {
 
 /// Verifies: REQ-CON-165
 #[tokio::test]
-async fn router_keeps_only_permanent_mappings_then_one_is_made_and_closed_with_the_session() {
+async fn router_keeps_only_permanent_mappings_then_none_is_made() {
     let router = FakeRouter::start(Mood::KeepsOnlyPermanent).await;
 
-    let mapping = open_with(router.options(3600), 41004).await.unwrap();
+    let result = open_with(router.options(3600), 41004).await;
 
-    assert_eq!(router.forwards()[0].lease_secs, 0);
-    mapping.close().await;
+    assert!(
+        matches!(result, Err(PortMappingError::Refused(_))),
+        "{result:?}"
+    );
     assert!(router.forwards().is_empty());
 }
 
