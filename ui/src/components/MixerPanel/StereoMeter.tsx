@@ -22,21 +22,27 @@ export interface StereoMeterProps {
   peakReleaseTime?: number;
 }
 
-export function StereoMeter({
+export interface StereoMeterViewProps extends Omit<StereoMeterProps, "peakReleaseTime"> {
+  /** Left channel peak (0-100) */
+  peakL: number;
+  /** Right channel peak (0-100) */
+  peakR: number;
+}
+
+/** The meter drawn from levels and peaks it is given. A strip that also
+ *  shows the peak as a number holds the peaks once and gives them to both. */
+export function StereoMeterView({
   levelL,
   levelR,
+  peakL,
+  peakR,
   height,
   isMuted = false,
-  peakReleaseTime = 1500,
-}: StereoMeterProps) {
-  // Shared with ChannelStrip/MasterSection's numeric peak-dB read-outs, so
-  // the marker on this bar and any dB number derived from it always agree.
-  const peaks = usePeakHold(levelL, levelR, { releaseTime: peakReleaseTime });
-
+}: StereoMeterViewProps) {
   const percentL = clampPercent(levelL);
   const percentR = clampPercent(levelR);
-  const peakPercentL = clampPercent(peaks.peakL);
-  const peakPercentR = clampPercent(peaks.peakR);
+  const peakPercentL = clampPercent(peakL);
+  const peakPercentR = clampPercent(peakR);
 
   return (
     <div
@@ -46,18 +52,23 @@ export function StereoMeter({
       <div className="stereo-meter__box">
         <div className="stereo-meter__bar">
           <div className="stereo-meter__fill" />
-          <div className="stereo-meter__mask" style={{ height: `${100 - percentL}%` }} />
-          <div className="stereo-meter__peak" style={{ bottom: `${peakPercentL}%` }} />
+          <div className="stereo-meter__mask" style={{ transform: `scaleY(${(100 - percentL) / 100})` }} />
+          <div className="stereo-meter__peak" style={{ transform: `translateY(${-peakPercentL}%)` }} />
         </div>
         <div className="stereo-meter__bar">
           <div className="stereo-meter__fill" />
-          <div className="stereo-meter__mask" style={{ height: `${100 - percentR}%` }} />
-          <div className="stereo-meter__peak" style={{ bottom: `${peakPercentR}%` }} />
+          <div className="stereo-meter__mask" style={{ transform: `scaleY(${(100 - percentR) / 100})` }} />
+          <div className="stereo-meter__peak" style={{ transform: `translateY(${-peakPercentR}%)` }} />
         </div>
         <div className="stereo-meter__zero" />
       </div>
     </div>
   );
+}
+
+export function StereoMeter({ peakReleaseTime = 1500, ...props }: StereoMeterProps) {
+  const peaks = usePeakHold(props.levelL, props.levelR, { releaseTime: peakReleaseTime });
+  return <StereoMeterView {...props} peakL={peaks.peakL} peakR={peaks.peakR} />;
 }
 
 export default StereoMeter;

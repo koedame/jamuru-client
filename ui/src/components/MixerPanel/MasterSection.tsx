@@ -48,7 +48,7 @@ export function MasterSection({ levelL, levelR, isMuted = false }: MasterSection
               <div className="master-section__fill" />
               <div
                 className="master-section__mask"
-                style={{ width: `${100 - percent}%` }}
+                style={{ transform: `scaleX(${(100 - percent) / 100})` }}
               />
               <div className="master-section__zero" />
             </div>

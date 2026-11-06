@@ -46,28 +46,36 @@
   );
 }
 
-/* Mask covers the unlit top portion of the bar. */
+/* Mask covers the unlit top portion of the bar. It is always as tall as the
+   bar and scaled from the top, so a level change moves a compositor layer
+   instead of re-running layout (the level changes every 100 ms per channel). */
 .stereo-meter__mask {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  inset: 0;
   background: var(--color-bg-tertiary);
-  transition: height 50ms linear;
+  transform-origin: top;
 }
 
 .stereo-meter--muted .stereo-meter__fill {
   background: var(--color-text-secondary);
 }
 
+/* The marker is a bar-high box lifted by the peak level (a percentage of its
+   own height, which is the bar's), with the 2px line at its bottom edge. */
 .stereo-meter__peak {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.stereo-meter__peak::after {
+  content: "";
   position: absolute;
   left: 0;
   right: 0;
+  bottom: -1px;
   height: 2px;
   background: var(--color-text-primary);
-  transform: translateY(50%);
-  pointer-events: none;
 }
 
 /* 0 dB reference line across the box, near the top of the scale. */
