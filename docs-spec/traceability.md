@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 356 |
+| 要求 総数 | 357 |
 | うち must | 324 |
-| うち should | 32 |
-| 検証済み | 330 |
+| うち should | 33 |
+| 検証済み | 331 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 3 |
 
@@ -151,6 +151,7 @@
 | REQ-CON-167 | should | 入室前の診断は、IPv6 と UPnP を実際に確かめる。IPv6 は、公開できるアドレスがあり、かつ音声と同じソケットで STUN サーバーから IPv6 の答えが返ったときだけ「使える」とし、アドレスはあるが答えが無いときは「外に出られない」とする。UPnP は、ルーターを探して外側のアドレスを尋ねるだけで、ポートは開けず、ルーターの状態を変えない。結果は「応えた・設定がオフで確かめていない・応えない・断られた・外側にもう 1 つルーターがある」に分ける。設定「ルーターのポートを自動で開く」がオフのときは、診断でもルーターに尋ねない | `docs-spec/requirements.md` | `src/diagnostics/network.rs`::ipv6_is_usable_only_when_an_address_exists_and_a_server_answered_over_it<br/>`src/diagnostics/network.rs`::only_global_unicast_addresses_count_as_ipv6_that_gets_out<br/>`src/diagnostics/network.rs`::what_the_router_said_to_the_look_becomes_a_status<br/>`tests/port_mapping_test.rs`::no_router_answers_then_looking_for_it_says_there_is_none<br/>`tests/port_mapping_test.rs`::router_is_behind_another_nat_then_looking_for_it_says_so<br/>`tests/port_mapping_test.rs`::router_is_looked_for_then_it_answers_and_nothing_is_forwarded |
 | REQ-CON-168 | should | 入室前の診断が見つけた繋がりにくさは、「何が起きているか」と「何をすればよいか」を利用者の言葉で 1 組にして出す。相手ごとにポートが変わる・UPnP がオフ／応えない／断られた／ルーターが二重・IPv6 が外に出られない・STUN が答えない、のそれぞれに、設定の場所やルーターで変えることを添える。IPv6 が使えるときは、相手ごとに変わるポートを警告ではなく情報にとどめる。どの相手とも繋がりやすい回線では、繋がりに関する問題は出さない | `docs-spec/requirements.md` | `src/diagnostics/network.rs`::when_ipv6_works_a_per_destination_mapping_is_only_information<br/>`src/diagnostics/network.rs`::when_peers_are_hard_to_reach_the_problems_say_what_to_do<br/>`src/diagnostics/network.rs`::when_stun_did_not_answer_it_is_said_and_when_ipv6_has_no_route_it_is_noted<br/>`src/diagnostics/network.rs`::when_the_network_reaches_everyone_and_ipv6_is_absent_nothing_is_raised |
 | REQ-CON-169 | should | 入室前の診断は、音声の入出力の機器を開かない（マイクの許可を求める画面や、機器全体のバッファの変更や、セッション中の機器との取り合いを起こさないため）。機器が使えるかは、一覧と 48 kHz への対応と、macOS ではマイクの許可の状態（許可されていない・まだ決まっていない）で判断し、許可されていないときは直し方を出す。最小バッファは OS ごとの目安として示し、実測ではないことを画面に書く | `docs-spec/requirements.md` | `src/diagnostics/audio.rs`::when_the_microphone_is_not_decided_the_diagnosis_notes_it<br/>`src/diagnostics/audio.rs`::when_the_microphone_is_refused_the_diagnosis_says_so |
+| REQ-CON-170 | should | どの相手とも音声のソケットが応答を得られなかったとき、相手が同じ公開 IPv4 アドレスを異なるポートで複数提示していれば（宛先ごとに別のポートを割り当てる NAT の内側にいる）、相手が送り出すポートを予測して送る。音声と同じソケットからアドレスの違う STUN サーバーに同じ回に聞いて、返ったポートが違うときだけ、反射型候補として最大 2 つ多く提示する（ワイヤ形式は変えない）。ポートが近ければ次のポートの前後 3 ポートずつ（2 巡）を 3 窓、ポートが同じ中間ビットを共有する（ポートセット）ならそのセットを毎秒 250 パケットで掃引し、応答のなかった試行は 20 秒から 5 分まで倍々の間隔で最大 5 回やり直す。応答は乱数のトークンを持つ経路確認の返事だけを受け入れ、その送り元へ経路を移す。ポートを無作為に選ぶ NAT・提示のない相手には何も予測しない（[ADR-115](./adr/ADR-115-predict-the-port-behind-a-symmetric-nat.md)） | `docs-spec/requirements.md` | `src/network/connection.rs`::when_a_packet_comes_from_a_guessed_port_without_proof_the_route_stays_where_it_is<br/>`src/network/connection.rs`::when_a_probe_answer_carries_another_ports_token_it_is_not_the_answer_from_the_guessed_port<br/>`src/network/connection.rs`::when_the_peer_is_behind_a_nat_that_gives_each_destination_its_own_port_the_route_goes_to_the_port_it_was_given<br/>`src/network/connection.rs`::when_the_peer_is_not_behind_such_a_nat_no_port_is_guessed<br/>`tests/port_prediction_test.rs`::when_the_nat_gives_each_server_a_port_of_its_own_the_port_each_saw_is_offered<br/>`tests/port_prediction_test.rs`::when_the_nat_keeps_one_port_for_the_socket_only_that_port_is_offered |
 | REQ-CORE-001 | must | `zero-latency` プリセットのアプリ起因片道遅延が 2.0ms 以下である | `docs-spec/requirements.md` | `tests/latency_test.rs`::zero_latency_preset_stays_within_two_milliseconds |
 | REQ-CORE-002 | must | 既定コーデックは非圧縮 PCM（ワイヤ上は 24-bit 符号付き整数を、1 パケットごとに損失なく詰めたもの）であり、コーデック起因の遅延が 0ms である | `docs-spec/requirements.md` | `tests/audio_quality_test.rs`::test_pcm_codec_packs_without_loss_and_never_beyond_the_samples |
 | REQ-CORE-003 | must | 音声処理（AEC / NS / AGC）を一切適用せず、0 dBFS 以下の入力サンプルをビット単位で保存する（0 dBFS を超える音だけは REQ-AUD-048 のリミッターが止める） | `docs-spec/requirements.md` | `tests/audio_quality_test.rs`::test_audio_is_transmitted_without_processing |
