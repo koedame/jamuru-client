@@ -143,7 +143,7 @@ pub const METHODS: &[Method] = &[
         name: "debug.os_hints",
         access: Access::TOOLS,
         kind: Kind::Native,
-        summary: "セッションが OS に伝える「遅延に厳しい音声だ」という申告のうち、off に挙げたもの（activity・timer・throttling・socket_buffers）を、次のセッションから外す。空の配列で全部戻す。申告の有無で遅延と揺れがどう変わるかを測るため",
+        summary: "セッションが OS に伝える「遅延に厳しい音声だ」という申告のうち、true にしたもの（activity・timer・throttling・socket_buffers）を、次のセッションから外す。全部 false（または指定なし）で戻す。申告の有無で遅延と揺れがどう変わるかを測るため",
     },
     Method {
         name: "debug.window_state",
@@ -830,32 +830,39 @@ fn window_state<R: Runtime>(
     Ok(json!({ "state": params.state }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct OsHintsParams {
-    /// Names of the hints to leave out: `activity`, `timer`, `throttling`, `socket_buffers`.
-    off: Vec<String>,
+    /// Leave out the macOS activity.
+    activity: bool,
+    /// Leave out the Windows one-millisecond timer.
+    timer: bool,
+    /// Leave out the Windows opt-out from power throttling.
+    throttling: bool,
+    /// Leave out the larger audio socket buffers.
+    socket_buffers: bool,
 }
 
 /// Leaves out some of what a session tells the system about itself, from the next session on.
 fn os_hints(params: OsHintsParams) -> Result<Value, RpcError> {
     use jamjam::audio_session::os_hints::{hint, turn_off};
 
-    let mut mask = 0;
-    for name in &params.off {
-        mask |= match name.as_str() {
-            "activity" => hint::ACTIVITY,
-            "timer" => hint::TIMER,
-            "throttling" => hint::THROTTLING,
-            "socket_buffers" => hint::SOCKET_BUFFERS,
-            other => {
-                return Err(RpcError::invalid_params(format!(
-                    "{other:?} is not one of \"activity\", \"timer\", \"throttling\" and \"socket_buffers\""
-                )))
-            }
-        };
-    }
+    let mask = [
+        (params.activity, hint::ACTIVITY),
+        (params.timer, hint::TIMER),
+        (params.throttling, hint::THROTTLING),
+        (params.socket_buffers, hint::SOCKET_BUFFERS),
+    ]
+    .into_iter()
+    .filter(|(off, _)| *off)
+    .fold(0, |mask, (_, bit)| mask | bit);
     turn_off(mask);
-    Ok(json!({ "off": params.off }))
+    Ok(json!({
+        "activity": params.activity,
+        "timer": params.timer,
+        "throttling": params.throttling,
+        "socket_buffers": params.socket_buffers,
+    }))
 }
 
 /// What went wrong with the received audio in this session, or the last one:
