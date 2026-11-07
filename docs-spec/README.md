@@ -98,6 +98,7 @@
 | [ADR-105](./adr/ADR-105-fill-lost-audio-from-the-sound-around-it.md) | FEC で直せなかった損失を、前後の波形（過去のコピーと両側からの線形予測）で埋める。供給が止まったときの予測は選択肢として持つ（既定は無音のまま）。遅延は足さない |
 | [ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md) | 音声パケットを損失なく詰めて送る（FLAC の固定予測 + Rice 符号。声で約 25 %、大きな雑音で約 91 %）。大きさは 8 段階に丸めて漏れを減らす。プロトコル版を 3 に上げる |
 | [ADR-113](./adr/ADR-113-ask-the-router-to-open-the-audio-port.md) | ルーターに UPnP で音声の UDP ポートを 1 つ開けてもらい、返された外側のアドレスを候補に足す（リース 1 時間・退室で閉じる・断られたら STUN だけ）。既定はオン、設定で切れる。NAT-PMP / PCP は入れない |
+| [ADR-115](./adr/ADR-115-predict-the-port-behind-a-symmetric-nat.md) | 宛先ごとにポートを変える NAT の内側の相手へ、ポートを予測して送る（窓・ポートセットの掃引・送る量の上限）。診断の NAT 判定も 1 つのソケットで行う |
 
 ---
 

@@ -6,7 +6,9 @@
 //! STUN more than one server (ADR-115). What those ports are like says how to guess the next:
 //!
 //! - ports a little apart (a NAT that hands out the next free port): the port toward the peer
-//!   is the next one, or a few after it, so a few ports around the next one are tried;
+//!   is the next one, or a few after it, so a few ports around the next one are tried. Ports
+//!   that are no further apart than this are also ports a NAT that picks at random inside a
+//!   small block might give, so when they share their middle bits the set is tried after;
 //! - ports that share their middle bits but differ above and below (a NAT whose ports are
 //!   restricted to a set, as with MAP-E: each user is given every 16 ports out of each of 63
 //!   blocks of 1024): the port is one of that set, so the set is tried in turn;
@@ -33,11 +35,11 @@ const WINDOWS: u16 = 3;
 /// peer's NAT had made the mapping
 const PASSES_PER_WINDOW: usize = 2;
 
-/// How long one packet of a pass waits for the one before it
+/// How long one packet of a window waits for the one before it
 const SEQUENTIAL_SPACING: Duration = Duration::from_millis(10);
 
 /// How long a pass waits for the one before it
-const SEQUENTIAL_PAUSE: Duration = Duration::from_millis(100);
+const PASS_PAUSE: Duration = Duration::from_millis(100);
 
 /// The blocks of ports a NAT with a restricted port set takes from, and how many ports one user
 /// has in each block. The first block, below port 1024, is not given to users.
@@ -58,10 +60,18 @@ const MAX_RETRIES: usize = 5;
 /// The first port the guess may name: below it are the ports a NAT keeps for the system's own
 const FIRST_PORT: u32 = 1024;
 
+/// Addresses to send to one after another, each `spacing` after the one before
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Pass {
+    pub(super) addrs: Vec<SocketAddr>,
+    pub(super) spacing: Duration,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Pattern {
-    /// The next free port after `expected` is guessed, and a few around it
-    Sequential { expected: u16 },
+    /// The next free port after `expected` is guessed, and a few around it; and, when the ports
+    /// offered also fit a set with `set` for its middle bits, the set after those
+    Sequential { expected: u16, set: Option<u16> },
     /// Any port of the set that has `middle` between the block number and the offset
     PortSet { middle: u16 },
 }
@@ -120,6 +130,7 @@ impl PortPrediction {
             let step = *steps.last()?;
             Pattern::Sequential {
                 expected: newest.saturating_add(step),
+                set: shared_middle(&ports),
             }
         } else if let Some(middle) = shared_middle(&ports) {
             Pattern::PortSet { middle }
@@ -153,12 +164,13 @@ impl PortPrediction {
         *v4.ip() == self.ip
             && !self.offered.contains(&v4.port())
             && match self.pattern {
-                Pattern::Sequential { expected } => {
+                Pattern::Sequential { expected, set } => {
                     let first = i32::from(expected) - i32::from(WINDOW_RADIUS);
                     let last = i32::from(expected)
                         + i32::from(WINDOW_RADIUS)
                         + i32::from(WINDOW_SHIFT) * i32::from(WINDOWS - 1);
                     (first..=last).contains(&i32::from(v4.port()))
+                        || set.is_some_and(|middle| in_port_set(v4.port(), middle))
                 }
                 Pattern::PortSet { middle } => in_port_set(v4.port(), middle),
             }
@@ -166,7 +178,7 @@ impl PortPrediction {
 
     /// The addresses to send to, one pass after another. A window of ports is sent twice before
     /// the next window, which is further from the expected port.
-    pub(super) fn passes(&self) -> Vec<Vec<SocketAddr>> {
+    pub(super) fn passes(&self) -> Vec<Pass> {
         let at = |port: u32| {
             (port >= FIRST_PORT && port <= u32::from(u16::MAX))
                 .then(|| u16::try_from(port).ok())
@@ -174,46 +186,40 @@ impl PortPrediction {
                 .filter(|port| !self.offered.contains(port))
                 .map(|port| SocketAddr::new(IpAddr::V4(self.ip), port))
         };
+        let sweep = |middle: u16| Pass {
+            addrs: (1..=PORT_SET_BLOCKS)
+                .flat_map(|block| {
+                    (0..PORT_SET_PER_BLOCK).map(move |offset| (block << 10) | (middle << 4) | offset)
+                })
+                .filter_map(|port| at(u32::from(port)))
+                .collect(),
+            spacing: Duration::from_millis(1000 / SWEEP_PER_SECOND),
+        };
         match self.pattern {
-            Pattern::Sequential { expected } => (0..WINDOWS)
+            Pattern::Sequential { expected, set } => (0..WINDOWS)
                 .flat_map(|window| {
                     let from = u32::from(expected) + u32::from(WINDOW_SHIFT) * u32::from(window);
-                    let pass: Vec<SocketAddr> = (0..WINDOW_SHIFT)
+                    let addrs: Vec<SocketAddr> = (0..WINDOW_SHIFT)
                         .filter_map(|i| {
                             at((from + u32::from(i)).checked_sub(u32::from(WINDOW_RADIUS))?)
                         })
                         .collect();
+                    let pass = Pass {
+                        addrs,
+                        spacing: SEQUENTIAL_SPACING,
+                    };
                     std::iter::repeat_n(pass, PASSES_PER_WINDOW)
                 })
-                .filter(|pass| !pass.is_empty())
+                .filter(|pass| !pass.addrs.is_empty())
+                .chain(set.map(sweep))
                 .collect(),
-            Pattern::PortSet { middle } => {
-                let sweep: Vec<SocketAddr> = (1..=PORT_SET_BLOCKS)
-                    .flat_map(|block| {
-                        (0..PORT_SET_PER_BLOCK)
-                            .map(move |offset| (block << 10) | (middle << 4) | offset)
-                    })
-                    .filter_map(|port| at(u32::from(port)))
-                    .collect();
-                vec![sweep]
-            }
-        }
-    }
-
-    /// How long a packet of a pass waits for the one before it
-    pub(super) fn spacing(&self) -> Duration {
-        match self.pattern {
-            Pattern::Sequential { .. } => SEQUENTIAL_SPACING,
-            Pattern::PortSet { .. } => Duration::from_millis(1000 / SWEEP_PER_SECOND),
+            Pattern::PortSet { middle } => vec![sweep(middle)],
         }
     }
 
     /// How long a pass waits for the one before it
     pub(super) fn pause(&self) -> Duration {
-        match self.pattern {
-            Pattern::Sequential { .. } => SEQUENTIAL_PAUSE,
-            Pattern::PortSet { .. } => Duration::ZERO,
-        }
+        PASS_PAUSE
     }
 
     /// How long to wait before the `retry`th try again (the first is `0`) after a try that was
@@ -228,7 +234,7 @@ impl PortPrediction {
 
     /// The most packets a try sends, and with every retry
     pub(super) fn packets_per_try(&self) -> usize {
-        self.passes().iter().map(Vec::len).sum()
+        self.passes().iter().map(|pass| pass.addrs.len()).sum()
     }
 }
 
@@ -265,8 +271,12 @@ mod tests {
         PortPrediction::from_offered(&offered, 7)
     }
 
-    fn ports(pass: &[SocketAddr]) -> Vec<u16> {
-        pass.iter().map(SocketAddr::port).collect()
+    fn ports(pass: &Pass) -> Vec<u16> {
+        pass.addrs.iter().map(SocketAddr::port).collect()
+    }
+
+    fn sent(prediction: &PortPrediction) -> Vec<u16> {
+        prediction.passes().iter().flat_map(ports).collect()
     }
 
     #[test]
@@ -297,35 +307,37 @@ mod tests {
 
     #[test]
     fn when_a_peer_offers_the_next_port_the_ports_around_the_one_after_are_tried_twice_each() {
+        // Two ports share their middle bits too rarely to be a set: only the windows are tried
         let prediction = predicted(&["203.0.113.7:40000", "203.0.113.7:40001"]).unwrap();
         let passes = prediction.passes();
         assert_eq!(passes.len(), 6);
         // The expected port is 40002; the offered ones are not sent again
-        assert_eq!(ports(&passes[0]), vec![39999, 40000, 40001, 40002, 40003, 40004, 40005]
-            .into_iter()
-            .filter(|p| *p != 40000 && *p != 40001)
-            .collect::<Vec<_>>());
+        assert_eq!(ports(&passes[0]), vec![39999, 40002, 40003, 40004, 40005]);
         assert_eq!(passes[0], passes[1]);
         assert_eq!(ports(&passes[2]), (40006..=40012).collect::<Vec<_>>());
         assert_eq!(passes[2], passes[3]);
         assert_eq!(ports(&passes[4]), (40013..=40019).collect::<Vec<_>>());
         assert_eq!(passes[4], passes[5]);
-        assert!(passes.iter().flatten().all(|a| a.ip() == addr("203.0.113.7:1").ip()));
+        assert!(passes
+            .iter()
+            .flat_map(|pass| &pass.addrs)
+            .all(|a| a.ip() == addr("203.0.113.7:1").ip()));
     }
 
     #[test]
     fn when_the_peer_offers_ports_a_few_apart_the_step_is_carried_on() {
         let prediction = predicted(&["203.0.113.7:40000", "203.0.113.7:40004"]).unwrap();
         // The next is 40008, three either side of it
-        assert!(prediction.passes()[0].contains(&addr("203.0.113.7:40005")));
-        assert!(prediction.passes()[0].contains(&addr("203.0.113.7:40011")));
-        assert!(!prediction.passes()[0].contains(&addr("203.0.113.7:40012")));
+        let first = ports(&prediction.passes()[0]);
+        assert!(first.contains(&40005));
+        assert!(first.contains(&40011));
+        assert!(!first.contains(&40012));
     }
 
     #[test]
     fn when_the_ports_are_near_the_top_of_the_range_none_beyond_it_is_sent() {
         let prediction = predicted(&["203.0.113.7:65530", "203.0.113.7:65531"]).unwrap();
-        let sent: Vec<u16> = prediction.passes().iter().flatten().map(SocketAddr::port).collect();
+        let sent = sent(&prediction);
         assert!(!sent.is_empty());
         assert!(sent.iter().all(|&p| p >= 65529));
     }
@@ -333,7 +345,7 @@ mod tests {
     #[test]
     fn when_the_ports_are_near_the_bottom_none_below_1024_is_sent() {
         let prediction = predicted(&["203.0.113.7:1025", "203.0.113.7:1026"]).unwrap();
-        assert!(prediction.passes().iter().flatten().all(|a| a.port() >= 1024));
+        assert!(sent(&prediction).iter().all(|&p| p >= 1024));
     }
 
     #[test]
@@ -348,20 +360,51 @@ mod tests {
         let passes = prediction.passes();
         assert_eq!(passes.len(), 1);
         // 63 blocks of 16, less the three the peer offered
-        assert_eq!(passes[0].len(), 63 * 16 - 3);
-        assert!(passes[0].iter().all(|a| in_port_set(a.port(), 5)));
-        assert_eq!(prediction.spacing(), Duration::from_millis(4));
+        assert_eq!(passes[0].addrs.len(), 63 * 16 - 3);
+        assert!(passes[0].addrs.iter().all(|a| in_port_set(a.port(), 5)));
+        assert_eq!(passes[0].spacing, Duration::from_millis(4));
+    }
+
+    /// A NAT that picks any port inside a block of 16 offers ports that are only a few apart,
+    /// as one that counts up does.
+    #[test]
+    fn when_three_ports_are_a_few_apart_and_in_one_set_the_windows_are_tried_and_then_the_set() {
+        let prediction = predicted(&[
+            "203.0.113.7:20083",
+            "203.0.113.7:20092",
+            "203.0.113.7:20093",
+        ])
+        .unwrap();
+        let passes = prediction.passes();
+        assert_eq!(passes.len(), 7);
+        assert_eq!(passes[0].spacing, SEQUENTIAL_SPACING);
+        let sweep = passes.last().unwrap();
+        assert_eq!(sweep.spacing, Duration::from_millis(4));
+        // Every port of the block the ports are in is in the sweep, but for those offered
+        assert!(sweep.addrs.contains(&addr("203.0.113.7:20080")));
+        assert!(sweep.addrs.contains(&addr("203.0.113.7:20095")));
+        assert!(!sweep.addrs.contains(&addr("203.0.113.7:20092")));
+        assert!(prediction.covers(addr("203.0.113.7:20080")));
+        assert!(prediction.covers(addr("203.0.113.7:41584")));
     }
 
     #[test]
     fn when_a_pass_is_sent_at_the_pace_the_packets_of_one_try_take_a_few_seconds() {
+        let time = |prediction: &PortPrediction| {
+            let passes = prediction.passes();
+            passes
+                .iter()
+                .map(|pass| pass.spacing * pass.addrs.len() as u32 + prediction.pause())
+                .sum::<Duration>()
+        };
         let sweep = predicted(&["203.0.113.7:1104", "203.0.113.7:5200", "203.0.113.7:33875"])
             .unwrap();
-        assert!(sweep.spacing() * sweep.packets_per_try() as u32 <= Duration::from_secs(5));
+        assert!(time(&sweep) <= Duration::from_secs(5), "{:?}", time(&sweep));
         let window = predicted(&["203.0.113.7:40000", "203.0.113.7:40001"]).unwrap();
-        let passes = window.passes().len() as u32;
-        let time = window.spacing() * window.packets_per_try() as u32 + window.pause() * passes;
-        assert!(time <= Duration::from_secs(2), "{time:?}");
+        assert!(time(&window) <= Duration::from_secs(2), "{:?}", time(&window));
+        let both = predicted(&["203.0.113.7:20083", "203.0.113.7:20092", "203.0.113.7:20093"])
+            .unwrap();
+        assert!(time(&both) <= Duration::from_secs(7), "{:?}", time(&both));
     }
 
     #[test]

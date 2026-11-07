@@ -2243,7 +2243,7 @@ impl Connection {
                     .map(|last| last.elapsed() >= silent_after)
                     .unwrap_or(true)
             };
-            let (spacing, pause) = (prediction.spacing(), prediction.pause());
+            let pause = prediction.pause();
             let mut retry = 0;
             let mut first = true;
             let mut heard = packets_received.load(Ordering::Relaxed);
@@ -2268,7 +2268,7 @@ impl Connection {
                 let heard_before = packets_received.load(Ordering::Relaxed);
                 let mut answered = false;
                 'try_: for pass in prediction.passes() {
-                    for addr in pass {
+                    for addr in pass.addrs {
                         if disconnected() {
                             return;
                         }
@@ -2289,7 +2289,7 @@ impl Connection {
                                 Err(_) => tokio::time::sleep(SEND_RETRY_INTERVAL).await,
                             }
                         }
-                        tokio::time::sleep(spacing).await;
+                        tokio::time::sleep(pass.spacing).await;
                     }
                     tokio::time::sleep(pause).await;
                 }
