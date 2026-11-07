@@ -1,0 +1,187 @@
+name: Room check
+
+# Puts many headless participants into one room on the staging server and
+# checks that everyone hears everyone (ADR-117). The participants run on
+# several GitHub-hosted runners, so the room also shows whether runners reach
+# each other peer to peer.
+#
+# It connects to a deployed server whose address is a repository secret; the
+# server's source is not part of this repository and does not run here.
+# It starts on a schedule (once a night) or by hand, so that a pull request
+# from a fork never reaches the secret. The log carries a verdict and numbers
+# per participant, nothing the server sent.
+#
+# The runners' CPUs are shared, so this says nothing about performance.
+
+on:
+  schedule:
+    # 2:30 AM JST (17:30 UTC previous day)
+    - cron: '30 17 * * *'
+  workflow_dispatch:
+    inputs:
+      runners:
+        description: Runners the participants are spread over
+        default: '4'
+      per_runner:
+        description: Participants on each runner (runners x this is at most 16)
+        default: '4'
+      slot_seconds:
+        description: Seconds each participant speaks, one after another
+        default: '3'
+      min_heard:
+        description: Share of its turn in which every speaker must be heard
+        default: '0.9'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  RUNNERS: ${{ inputs.runners || '4' }}
+  PER_RUNNER: ${{ inputs.per_runner || '4' }}
+  SLOT_SECONDS: ${{ inputs.slot_seconds || '3' }}
+  MIN_HEARD: ${{ inputs.min_heard || '0.9' }}
+  # Seconds between the room being created and the measuring window starting:
+  # the time the other runners have to start and join.
+  LEAD_SECONDS: '150'
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runners: ${{ steps.plan.outputs.runners }}
+      total: ${{ steps.plan.outputs.total }}
+    steps:
+      - id: plan
+        run: |
+          case "$RUNNERS$PER_RUNNER$SLOT_SECONDS" in
+            *[!0-9]*) echo "inputs must be whole numbers"; exit 1 ;;
+          esac
+          total=$((RUNNERS * PER_RUNNER))
+          if [ "$total" -lt 2 ] || [ "$total" -gt 16 ]; then
+            echo "runners x per_runner must be from 2 to 16, got $total"
+            exit 1
+          fi
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          echo "runners=$(seq 0 $((RUNNERS - 1)) | paste -sd, - | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build jamuru
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libssl-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo target
+        uses: actions/cache@v6
+        with:
+          path: target
+          key: cargo-target-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build the CLI
+        run: cargo build --release --locked --bin jamuru
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: room-check-binary
+          path: target/release/jamuru
+          retention-days: 1
+
+  room:
+    name: Runner ${{ matrix.runner }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [plan, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(needs.plan.outputs.runners) }}
+    env:
+      WORK: ${{ github.workspace }}/room-work
+      JAMJAM_SERVER_URL_BETA: ${{ secrets.JAMJAM_SERVER_URL_BETA }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: room-check-binary
+          path: ${{ github.workspace }}/bin
+
+      - name: Make binary executable
+        run: chmod +x bin/jamuru
+
+      # Runner 0 creates the room. Its first participant stays in it while the
+      # next steps run, and the invite code reaches the other runners in a file
+      # encrypted with the server address, so the artifact reveals nothing.
+      - name: Create the room
+        if: matrix.runner == 0
+        run: |
+          python3 scripts/room-check.py start-host --work "$WORK" --binary bin/jamuru \
+            --total "${{ needs.plan.outputs.total }}" --slot "$SLOT_SECONDS" --lead "$LEAD_SECONDS"
+
+      - name: Publish the room
+        if: matrix.runner == 0
+        uses: actions/upload-artifact@v7
+        with:
+          name: room-rendezvous-${{ github.run_attempt }}
+          path: ${{ env.WORK }}/rendezvous/room.enc
+          retention-days: 1
+
+      - name: Find the room
+        if: matrix.runner != 0
+        run: python3 scripts/room-check.py fetch --work "$WORK"
+
+      - name: Join and measure
+        run: |
+          python3 scripts/room-check.py run --work "$WORK" --binary bin/jamuru \
+            --runner "${{ matrix.runner }}" --per-runner "$PER_RUNNER"
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: room-result-${{ matrix.runner }}
+          path: ${{ env.WORK }}/results/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  summary:
+    name: Verdict
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [plan, room]
+    if: always() && needs.plan.result == 'success'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: room-result-*
+          path: results
+
+      - name: Verdict
+        run: python3 scripts/room-check.py summary --results results --total "${{ needs.plan.outputs.total }}" --min-heard "$MIN_HEARD"

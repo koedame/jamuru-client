@@ -9,6 +9,7 @@ use std::thread;
 
 use super::links::{senders_of, Link, LinkSetup, LinkStage};
 use super::shared::{LinkReport, Shared, MAX_LINKS};
+use super::socket_buffers::enlarge_socket_buffers;
 use super::stand_in::StandIns;
 use super::{send, Command, Params, PEER_APP_TOO_OLD};
 use crate::audio::mic_access::SystemMic;
@@ -116,6 +117,7 @@ pub(super) async fn run(
     if voice_priority {
         mark_voice(&prepared_socket);
     }
+    enlarge_socket_buffers(&prepared_socket);
     let mux = UdpMux::from_std(prepared_socket)
         .map_err(|e| format!("Failed to adopt the prepared audio socket: {}", e))?;
 

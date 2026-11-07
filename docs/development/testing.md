@@ -42,6 +42,7 @@ cargo test -- --nocapture
 | `tests/latency_test.rs` | `docs-spec/behavior/latency.feature` |
 | `tests/i18n_test.rs` | `docs-spec/behavior/i18n.feature` |
 | `tests/port_mapping_test.rs` | ルーターへのポート開放（UPnP）。偽のルーター（SSDP と SOAP）に対する統合テスト |
+| `tests/port_prediction_test.rs` | 宛先ごとにポートを変える NAT の模型（ループバック）が、候補に複数のポートを並べること |
 
 ## ルーターのポート開放（UPnP）
 
@@ -49,6 +50,14 @@ cargo test -- --nocapture
 
 - `cargo test --test port_mapping_test`: 手元のループバックに立てた偽のルーターに対して、頼みが通る・断られる・同じ番号が使用中・二重の NAT・ルーター無し・更新・閉じる、を確かめます。毎回回ります。
 - `tests/upnp/run.sh`: 本物のルーター（miniupnpd）をコンテナで動かし、ルーターの先の端末から送ったデータグラムが音声のソケットに届くか、閉じると転送の規則が消えるか、UPnP の無いルーターでも STUN だけで続くか、設定オフでルーターに触れないかを確かめます。docker と、コンテナに `NET_ADMIN` を渡せる権限が要ります。CI では回しません。
+
+## 宛先ごとにポートを変える NAT（ポートの予測）
+
+相手の NAT が宛先ごとにポートを変えるとき、相手の送り出すポートを予測して送る機能（ADR-115）は、3 通りで確かめます。
+
+- `cargo test --lib port_prediction` と `cargo test --lib network::connection`: ポートの並びごとの予測・送る量の上限・応答だけを受け入れること・NAT の模型（ループバック）で経路が相手の実際のポートへ移ること。毎回回ります。
+- `cargo test --test port_prediction_test`: 宛先ごとにポートを変える NAT が候補に複数のポートを並べ、1 つのポートを使う NAT は並べないこと。毎回回ります。
+- `tests/nat/run.sh [ケース名 ...]`: 2 つのルーター（カーネルの iptables）の内側のアプリが、STUN サーバーを介して接続できるかを、NAT の組み合わせごとに確かめます（cone・random・宛先アドレスごとに順に割り当てる sequential・ポートセットの portset）。`NAT_LAB_AUDIO_SECS=10` を付けると、経路が決まったあとに音声を送り、遅延と欠落も出します。`NAT_LAB_PEER=<バイナリ>` で別の版のアプリと比べられます。docker と、コンテナに `NET_ADMIN` を渡せる権限が要ります。CI では回しません。
 
 ## ルームの人数
 
@@ -61,6 +70,7 @@ cargo test -- --nocapture
 | コアの結合テスト（`tests/mesh_connection_test.rs`） | 16 人 | 16 人（全員が全員の音を受ける） | 毎回 |
 | 実アプリ 1 台と軽い相手 9 個（最適化ビルド） | 相手 15 人 | 相手 9 人（全パケット受信・空読み 0・往復 4.0 ms・受信スレッド約 25%） | 10/13、16 スレッド |
 | 実アプリを 1 台のホストに N 個立てる（`jamjam-room-check.py`、最適化ビルド） | 16 人 | 6 人は全員が全員の音を聞いた。10 人は 1 回目は聞こえたが、続けると欠けた（ホストが飽和、load 30 超）ので品質の結論にしない | 10/13、16 スレッド |
+| 実アプリを GitHub-hosted runner に分けて立てる（`room-check.yml`、最適化ビルド。ADR-117） | 16 人 | 16 人（4 台×4 人・2 台×8 人のどちらも、全員が全員の番を 93〜100 % の窓で聞いた。他人の番に聞こえたことは無い）。runner の CPU は共有なので性能の結論にはしない | 11/7、毎晩 |
 | GUI E2E（デバッグビルド、`tests/e2e/tests/gui.rs`） | 相手 15 人 | 相手 2 人（3 人のルーム） | 10/14、16 スレッド、ホストの load 17〜21 |
 | 人数ぶんの別々のマシン | 16 人 | 未検証 | — |
 

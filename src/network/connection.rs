@@ -20,6 +20,7 @@ use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket, RecoveredPacket};
 use super::link_facts::{route_handicap, route_preference, LinkFacts, RouteOverride};
+use super::port_prediction::PortPrediction;
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
 use super::signaling::usable_candidates;
@@ -45,6 +46,11 @@ const ROUND_INTERVAL: Duration = Duration::from_millis(80);
 /// NAT that lets in only what we have sent to, ours were dropped until the peer's own
 /// first probe opened its side, and the scheduled rounds are over by then.
 const TRIGGERED_PROBES: usize = 3;
+
+/// How many times a probe that could not be sent is sent again, and how long apart. A send that
+/// fails for want of room in the socket's buffer is likely to go through a moment later.
+const SEND_RETRIES: usize = 3;
+const SEND_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 /// How long the keep-alive goes to the peer's other addresses, once the peer has gone
 /// unheard long enough to doubt the one in use. An address the peer published is not
@@ -143,6 +149,10 @@ struct Route {
     others: Vec<(SocketAddr, bool)>,
     /// When `current` was taken up, or the peer last answered a ping
     answered_at: Instant,
+    /// The ports guessed for a peer none of whose offered addresses answered: it is behind a NAT
+    /// that gives each destination a port of its own (ADR-115). What comes from one of them is
+    /// the peer's, and the route follows an answer from there.
+    predicted: Option<PortPrediction>,
 }
 
 /// Whether the keep-alive goes to the peer's other addresses too, when the peer has
@@ -157,12 +167,27 @@ impl Route {
             current,
             others,
             answered_at: Instant::now(),
+            predicted: None,
         }
     }
 
     /// Whether `addr` is one of the peer's addresses
     fn knows(&self, addr: SocketAddr) -> bool {
-        addr == self.current || self.others.iter().any(|&(other, _)| other == addr)
+        addr == self.current
+            || self.others.iter().any(|&(other, _)| other == addr)
+            || self.guessed(addr)
+    }
+
+    /// Whether `addr` is one of the ports guessed for the peer
+    fn guessed(&self, addr: SocketAddr) -> bool {
+        self.predicted.as_ref().is_some_and(|p| p.covers(addr))
+    }
+
+    /// Whether `token` is what a probe to `addr` carried, among the ones sent to guessed ports
+    fn is_answer_from_guessed(&self, token: u32, addr: SocketAddr) -> bool {
+        self.predicted
+            .as_ref()
+            .is_some_and(|p| p.covers(addr) && p.is_token_for(token, addr))
     }
 
     /// The peer answered a ping, so what we send reaches it
@@ -180,16 +205,25 @@ impl Route {
 
     /// Moves to `from` when a packet arrived from there, we can send to it,
     /// and the peer has not answered for `after`. Returns the address left.
-    fn follow(&mut self, from: SocketAddr, after: Duration) -> Option<SocketAddr> {
+    ///
+    /// An address that is only guessed at is moved to when `proven` says the packet shows the
+    /// peer is there: the answer to a probe sent to it, or a packet opened by an encrypted link.
+    fn follow(&mut self, from: SocketAddr, after: Duration, proven: bool) -> Option<SocketAddr> {
         if from == self.current || self.answered_at.elapsed() < after {
             return None;
         }
         let index = self
             .others
             .iter()
-            .position(|&(addr, sendable)| addr == from && sendable)?;
+            .position(|&(addr, sendable)| addr == from && sendable);
+        if index.is_none() && !(proven && self.guessed(from)) {
+            return None;
+        }
         let left = std::mem::replace(&mut self.current, from);
-        self.others[index] = (left, true);
+        match index {
+            Some(index) => self.others[index] = (left, true),
+            None => self.others.push((left, true)),
+        }
         self.answered_at = Instant::now();
         Some(left)
     }
@@ -885,6 +919,8 @@ pub struct Connection {
     audio_channels: usize,
     /// Reconnection thresholds
     reconnect_config: ReconnectConfig,
+    /// Whether 127/8 counts as a public address for guessing a peer's port (tests only)
+    predict_on_loopback: bool,
     /// Notified when the connection state changes
     state_change_callback: Option<Arc<StateChangeCallback>>,
     /// Liveness monitor task
@@ -912,6 +948,8 @@ pub struct Connection {
     pending_latency_info: Arc<Mutex<Option<LatencyInfoMessage>>>,
     /// Sends our key until the peer has it, and what waited for the keys
     secure_link_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Sends to the ports guessed for a peer behind a NAT that changes its port per destination
+    prediction_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Sends `packet` as the link allows: encrypted when the keys are agreed, and not at all
@@ -984,6 +1022,7 @@ impl Connection {
             fec_group_size: None,
             audio_channels: 1,
             reconnect_config: ReconnectConfig::default().validated(),
+            predict_on_loopback: false,
             state_change_callback: None,
             liveness_handle: None,
             sequence_tracker: Arc::new(std::sync::Mutex::new(SequenceTracker::new())),
@@ -997,6 +1036,7 @@ impl Connection {
             secure_link: Arc::new(SecureLink::unbound()),
             pending_latency_info: Arc::new(Mutex::new(None)),
             secure_link_handle: None,
+            prediction_handle: None,
         })
     }
 
@@ -1267,7 +1307,17 @@ impl Connection {
                     .enumerate()
                     .find_map(|(i, &addr)| probing.sendable(i).then_some(addr))
                     .unwrap_or(candidates[0]);
-                *self.route.lock() = Route::new(fallback, other_candidates(fallback));
+                let mut route = Route::new(fallback, other_candidates(fallback));
+                // Nothing answered. A peer that offered the same public address with several
+                // ports is behind a NAT that gives each destination a port of its own, and
+                // the port it will send from is none of the ones offered: guess it (ADR-115).
+                let prediction = PortPrediction::from_offered(
+                    candidates,
+                    rand::random::<[u8; 32]>(),
+                    self.predict_on_loopback,
+                );
+                route.predicted.clone_from(&prediction);
+                *self.route.lock() = route;
 
                 // Record connection start time
                 if let Ok(mut start) = self.connection_start.lock() {
@@ -1282,6 +1332,13 @@ impl Connection {
                 self.start_keepalive_loop();
                 self.start_liveness_monitor();
                 self.start_secure_link_task();
+                if let Some(prediction) = prediction {
+                    info!(
+                        "No candidate answered and the peer's router changes its port per destination: guessing {} ports",
+                        prediction.packets_per_try()
+                    );
+                    self.start_port_prediction(prediction);
+                }
 
                 Ok(())
             }
@@ -1303,6 +1360,9 @@ impl Connection {
             handle.abort();
         }
         if let Some(handle) = self.secure_link_handle.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.prediction_handle.take() {
             handle.abort();
         }
 
@@ -1423,6 +1483,14 @@ impl Connection {
     /// starts.
     pub fn set_reconnect_config(&mut self, config: ReconnectConfig) {
         self.reconnect_config = config.validated();
+    }
+
+    /// Lets addresses on this machine (127/8) count as public ones when guessing the port of a
+    /// peer behind a NAT (ADR-115), so that a test can stand in for the internet on one
+    /// machine. The app never calls it: there, a peer's loopback address is not one to probe.
+    #[doc(hidden)]
+    pub fn predict_ports_on_loopback(&mut self) {
+        self.predict_on_loopback = true;
     }
 
     /// Set the callback invoked when the connection state changes
@@ -1793,21 +1861,33 @@ impl Connection {
                 // Its key counts: until the keys are agreed nothing else it sends
                 // is accepted, and no key can come back to it before the route
                 // is there.
-                let follow_after =
+                let mut follow_after =
                     reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
+                // A packet opened by an encrypted link comes from the peer whatever its address
+                let encrypted = matches!(opened, Opened::Packet(_))
+                    && secure_link.security() == LinkSecurity::Encrypted;
+                // An answer to a probe sent to a guessed port, from that port, shows the guess
+                // was right and that what we send there reaches the peer: no need to wait. A
+                // port that is only guessed at is not moved to on anything less.
+                let mut proven = encrypted;
+                if let Opened::Packet(packet) = &opened {
+                    if let Some((true, token)) = packet.route_probe_token() {
+                        if route.lock().is_answer_from_guessed(token, addr) {
+                            follow_after = Duration::ZERO;
+                            proven = true;
+                        }
+                    }
+                }
                 // The network may have changed the address the peer is seen from since it
-                // was offered. A packet that was opened by an encrypted link comes from the
-                // peer whatever its address, so it may be answered there. Without keys
-                // the source address could be anyone's.
-                if matches!(opened, Opened::Packet(_))
-                    && secure_link.security() == LinkSecurity::Encrypted
-                {
+                // was offered, so an encrypted packet may be answered where it came from.
+                // Without keys the source address could be anyone's.
+                if encrypted {
                     route.lock().learn_roamed(addr, follow_after);
                     if !from_a_peer_address {
                         transport.also_expect_peer_at(addr);
                     }
                 }
-                let followed = route.lock().follow(addr, follow_after);
+                let followed = route.lock().follow(addr, follow_after, proven);
                 if let Some(left) = followed {
                     info!(
                         "The peer answers nothing on {}; sending to {} instead",
@@ -2155,6 +2235,111 @@ impl Connection {
         });
 
         self.keepalive_handle = Some(handle);
+    }
+
+    /// Sends to the ports guessed for a peer behind a NAT that changes its port per
+    /// destination, until the peer is heard (ADR-115)
+    ///
+    /// The peer's NAT lets in what comes from an address it has sent to, and has sent to us from
+    /// a port that none of the addresses it offered names. Sending there, from the address it
+    /// is to be sent to from, makes the packet that is to the right port one it accepts, and its
+    /// answer comes from the port that was right. What is sent is bounded: a few ports at the
+    /// pace of one every 10 ms, or a port set at 250 a second, and again after waits that
+    /// double from 20 seconds to 5 minutes, a few times, then not at all until the peer has
+    /// been heard and has gone silent again.
+    fn start_port_prediction(&mut self, prediction: PortPrediction) {
+        if let Some(handle) = self.prediction_handle.take() {
+            handle.abort();
+        }
+        let transport = self.transport.clone();
+        let state = self.state.clone();
+        let secure_link = self.secure_link.clone();
+        let packets_received = self.packets_received.clone();
+        let last_received = self.last_received.clone();
+        let silent_after = self.reconnect_config.detect_after;
+
+        let handle = tokio::spawn(async move {
+            let sequence = AtomicU32::new(3_000_000);
+            let disconnected = || {
+                ConnectionState::from_u8(state.load(Ordering::SeqCst))
+                    == ConnectionState::Disconnected
+            };
+            let silent = || {
+                last_received
+                    .lock()
+                    .map(|last| last.elapsed() >= silent_after)
+                    .unwrap_or(true)
+            };
+            let pause = prediction.pause();
+            let mut retry = 0;
+            let mut first = true;
+            let mut heard = packets_received.load(Ordering::Relaxed);
+            loop {
+                if disconnected() {
+                    return;
+                }
+                // A peer heard since the last try starts the retries over
+                let now_heard = packets_received.load(Ordering::Relaxed);
+                if now_heard > heard {
+                    retry = 0;
+                    heard = now_heard;
+                }
+                // A peer that is heard has no port to guess. The first try is not held back:
+                // the check that found nothing has just ended.
+                if !first && !silent() {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    continue;
+                }
+                first = false;
+
+                let heard_before = packets_received.load(Ordering::Relaxed);
+                let mut answered = false;
+                'try_: for pass in prediction.passes() {
+                    for addr in pass.addrs {
+                        if disconnected() {
+                            return;
+                        }
+                        if packets_received.load(Ordering::Relaxed) > heard_before {
+                            answered = true;
+                            break 'try_;
+                        }
+                        for attempt in 0..=SEND_RETRIES {
+                            let packet = Packet::route_probe(
+                                sequence.fetch_add(1, Ordering::Relaxed),
+                                prediction.token(addr.port()),
+                            );
+                            match send_sealed(&transport, &secure_link, packet, addr).await {
+                                Ok(_) => break,
+                                Err(e) if attempt == SEND_RETRIES => {
+                                    debug!("Failed to probe the guessed port {}: {}", addr, e)
+                                }
+                                Err(_) => tokio::time::sleep(SEND_RETRY_INTERVAL).await,
+                            }
+                        }
+                        tokio::time::sleep(pass.spacing).await;
+                    }
+                    tokio::time::sleep(pause).await;
+                }
+                if answered {
+                    continue;
+                }
+                let Some(wait) = prediction.retry_after(retry) else {
+                    // The tries are used up: nothing more is sent until the peer is heard
+                    debug!("Gave up guessing the peer's port until it is heard");
+                    while packets_received.load(Ordering::Relaxed) <= heard_before {
+                        if disconnected() {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                    continue;
+                };
+                retry += 1;
+                tokio::time::sleep(wait).await;
+            }
+        });
+
+        self.prediction_handle = Some(handle);
     }
 
     /// Sends our key to the peer until it has shown it has it
@@ -2505,7 +2690,7 @@ mod tests {
         let vpn = addr("100.64.0.2:5000");
         let mut route = Route::new(lan, vec![(vpn, true)]);
 
-        assert_eq!(route.follow(vpn, Duration::ZERO), Some(lan));
+        assert_eq!(route.follow(vpn, Duration::ZERO, true), Some(lan));
 
         assert_eq!(route.current, vpn);
         assert_eq!(route.others, vec![(lan, true)]);
@@ -2519,7 +2704,7 @@ mod tests {
         let mut route = Route::new(lan, vec![(vpn, true)]);
         route.answered();
 
-        assert_eq!(route.follow(vpn, Duration::from_secs(60)), None);
+        assert_eq!(route.follow(vpn, Duration::from_secs(60), true), None);
 
         assert_eq!(route.current, lan);
     }
@@ -2531,7 +2716,7 @@ mod tests {
         let vpn = addr("100.64.0.2:5000");
         let mut route = Route::new(lan, vec![(vpn, false)]);
 
-        assert_eq!(route.follow(vpn, Duration::ZERO), None);
+        assert_eq!(route.follow(vpn, Duration::ZERO, true), None);
 
         assert_eq!(route.current, lan);
     }
@@ -2542,9 +2727,51 @@ mod tests {
         let lan = addr("192.168.1.10:5000");
         let mut route = Route::new(lan, vec![(addr("100.64.0.2:5000"), true)]);
 
-        assert_eq!(route.follow(addr("203.0.113.9:5000"), Duration::ZERO), None);
+        assert_eq!(
+            route.follow(addr("203.0.113.9:5000"), Duration::ZERO, true),
+            None
+        );
 
         assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-170
+    #[test]
+    fn when_a_packet_comes_from_a_guessed_port_without_proof_the_route_stays_where_it_is() {
+        let lan = addr("192.168.1.10:5000");
+        let mut route = Route::new(lan, vec![]);
+        route.predicted = PortPrediction::from_offered(
+            &[addr("203.0.113.7:40000"), addr("203.0.113.7:40001")],
+            [7; 32],
+            false,
+        );
+        let guessed = addr("203.0.113.7:40002");
+        assert!(route.guessed(guessed));
+
+        assert_eq!(route.follow(guessed, Duration::ZERO, false), None);
+        assert_eq!(route.current, lan);
+
+        assert_eq!(route.follow(guessed, Duration::ZERO, true), Some(lan));
+        assert_eq!(route.current, guessed);
+    }
+
+    /// Verifies: REQ-CON-170
+    #[test]
+    fn when_a_probe_answer_carries_another_ports_token_it_is_not_the_answer_from_the_guessed_port()
+    {
+        let mut route = Route::new(addr("192.168.1.10:5000"), vec![]);
+        let prediction = PortPrediction::from_offered(
+            &[addr("203.0.113.7:40000"), addr("203.0.113.7:40001")],
+            [7; 32],
+            false,
+        )
+        .unwrap();
+        let token = prediction.token(40002);
+        route.predicted = Some(prediction);
+
+        assert!(route.is_answer_from_guessed(token, addr("203.0.113.7:40002")));
+        assert!(!route.is_answer_from_guessed(token, addr("203.0.113.7:40003")));
+        assert!(!route.is_answer_from_guessed(token ^ 1, addr("203.0.113.7:40002")));
     }
 
     /// Verifies: REQ-CON-136
@@ -2556,7 +2783,7 @@ mod tests {
 
         route.learn_roamed(moved, Duration::ZERO);
 
-        assert_eq!(route.follow(moved, Duration::ZERO), Some(lan));
+        assert_eq!(route.follow(moved, Duration::ZERO, true), Some(lan));
         assert_eq!(route.current, moved);
     }
 
@@ -2571,7 +2798,7 @@ mod tests {
         route.learn_roamed(moved, Duration::from_secs(60));
 
         assert!(!route.knows(moved));
-        assert_eq!(route.follow(moved, Duration::from_secs(60)), None);
+        assert_eq!(route.follow(moved, Duration::from_secs(60), true), None);
         assert_eq!(route.current, lan);
     }
 
@@ -3119,6 +3346,187 @@ mod tests {
         }
     }
 
+    /// A NAT in front of `inside` that gives each address `inside` sends to a port of its own on
+    /// `127.0.0.2`, and lets in from an address only what came from the address that port was
+    /// made for (a symmetric NAT that hands out the next free port, or the free port of
+    /// `port_after` when `inside` sends to more addresses than are named).
+    ///
+    /// `inside` sends to `fronts[i]` to send to `destinations[i]`; a destination that is `None`
+    /// is one nobody answers at (a private address the peer offered), but it still takes a port.
+    /// The `first_ports` ports are taken before, as by the servers STUN is asked. Returns the
+    /// fronts and the ports taken by STUN.
+    struct SymmetricNat {
+        fronts: Vec<SocketAddr>,
+        taken_by_stun: Vec<SocketAddr>,
+        mapped: Arc<Mutex<Vec<Option<SocketAddr>>>>,
+    }
+
+    async fn symmetric_nat(
+        inside: SocketAddr,
+        destinations: Vec<Option<SocketAddr>>,
+        first_ports: usize,
+    ) -> SymmetricNat {
+        // Ports in a row, so that "the next free one" is the next number
+        let mut pool: Vec<Arc<tokio::net::UdpSocket>> = Vec::new();
+        'search: loop {
+            pool.clear();
+            let base: u16 = 20000 + (rand::random::<u16>() % 30000);
+            for i in 0..24u16 {
+                match tokio::net::UdpSocket::bind(("127.0.0.2", base + i)).await {
+                    Ok(socket) => pool.push(Arc::new(socket)),
+                    Err(_) => continue 'search,
+                }
+            }
+            break;
+        }
+        let ports: Vec<SocketAddr> = pool.iter().map(|s| s.local_addr().unwrap()).collect();
+        let mut fronts = Vec::new();
+        let next = Arc::new(std::sync::atomic::AtomicUsize::new(first_ports));
+        // Which front each port was made for
+        let owner: Arc<Mutex<Vec<Option<usize>>>> = Arc::new(Mutex::new(vec![None; pool.len()]));
+        let mapped: Arc<Mutex<Vec<Option<SocketAddr>>>> =
+            Arc::new(Mutex::new(vec![None; destinations.len()]));
+        let front_sockets: Vec<Arc<tokio::net::UdpSocket>> = {
+            let mut sockets = Vec::new();
+            for _ in &destinations {
+                sockets.push(Arc::new(
+                    tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+                ));
+            }
+            sockets
+        };
+        for (i, front) in front_sockets.iter().enumerate() {
+            fronts.push(front.local_addr().unwrap());
+            let (front, pool, ports, next, owner, mapped) = (
+                front.clone(),
+                pool.clone(),
+                ports.clone(),
+                next.clone(),
+                owner.clone(),
+                mapped.clone(),
+            );
+            let destination = destinations[i];
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                while let Ok((len, from)) = front.recv_from(&mut buf).await {
+                    if from != inside {
+                        continue;
+                    }
+                    let index = {
+                        let mut mapped = mapped.lock();
+                        match mapped[i] {
+                            Some(addr) => ports.iter().position(|p| *p == addr).unwrap(),
+                            None => {
+                                let index = next.fetch_add(1, Ordering::SeqCst);
+                                mapped[i] = Some(ports[index]);
+                                owner.lock()[index] = Some(i);
+                                index
+                            }
+                        }
+                    };
+                    if let Some(destination) = destination {
+                        let _ = pool[index].send_to(&buf[..len], destination).await;
+                    }
+                }
+            });
+        }
+        for (index, socket) in pool.iter().enumerate() {
+            let (socket, owner, fronts_to_inside) =
+                (socket.clone(), owner.clone(), front_sockets.clone());
+            let destinations = destinations.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                while let Ok((len, from)) = socket.recv_from(&mut buf).await {
+                    let made_for = owner.lock()[index];
+                    if let Some(i) = made_for {
+                        if destinations[i] == Some(from) {
+                            let _ = fronts_to_inside[i].send_to(&buf[..len], inside).await;
+                        }
+                    }
+                }
+            });
+        }
+        SymmetricNat {
+            fronts,
+            taken_by_stun: ports[..first_ports].to_vec(),
+            mapped,
+        }
+    }
+
+    /// A peer behind a NAT that gives each destination a port of its own offers the ports STUN
+    /// saw, which are not the port it sends from. The other side guesses the port, and the
+    /// guess that is right is answered.
+    ///
+    /// Verifies: REQ-CON-170
+    #[tokio::test]
+    async fn when_the_peer_is_behind_a_nat_that_gives_each_destination_its_own_port_the_route_goes_to_the_port_it_was_given(
+    ) {
+        let mut behind_nat = conn().await;
+        let mut guessing = conn().await;
+        guessing.predict_ports_on_loopback();
+        trust_each_other(&mut behind_nat, &mut guessing);
+        // Two private addresses it offered before the one that is `guessing`'s take ports too
+        let nat = symmetric_nat(
+            behind_nat.local_addr(),
+            vec![None, None, Some(guessing.local_addr())],
+            2,
+        )
+        .await;
+        let (_silent, nowhere) = silent();
+        let offered_by_nat = nat.taken_by_stun.clone();
+        let mut behind_nat_candidates = nat.fronts.clone();
+        behind_nat_candidates.insert(0, nowhere);
+        let guessing_candidates = [nowhere, offered_by_nat[0], offered_by_nat[1]];
+        let (from_nat, from_guessing) = tokio::join!(
+            behind_nat.connect_with_candidates(&behind_nat_candidates),
+            guessing.connect_with_candidates(&guessing_candidates)
+        );
+        from_nat.unwrap();
+        from_guessing.unwrap();
+
+        let given = nat.mapped.lock()[2].expect("the NAT gave the peer's address a port");
+        let moved = async {
+            while guessing.remote_addr() != given {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(6), moved)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the route is {} and not {} (offered {:?})",
+                    guessing.remote_addr(),
+                    given,
+                    offered_by_nat
+                )
+            });
+        assert!(!offered_by_nat.contains(&given));
+    }
+
+    /// A peer that offers one port per public address has nothing to guess, and a peer that
+    /// answers needs none.
+    ///
+    /// Verifies: REQ-CON-170
+    #[tokio::test]
+    async fn when_the_peer_is_not_behind_such_a_nat_no_port_is_guessed() {
+        let mut a = conn().await;
+        let mut b = conn().await;
+        trust_each_other(&mut a, &mut b);
+        let (_silent, nowhere) = silent();
+        let b_at = b.local_addr();
+        let a_at = a.local_addr();
+        let (a_candidates, b_candidates) = ([nowhere, b_at], [nowhere, a_at]);
+        let (from_a, from_b) = tokio::join!(
+            a.connect_with_candidates(&a_candidates),
+            b.connect_with_candidates(&b_candidates)
+        );
+        from_a.unwrap();
+        from_b.unwrap();
+        assert!(a.prediction_handle.is_none());
+        assert!(b.prediction_handle.is_none());
+        assert_eq!(a.route.lock().predicted, None);
+    }
+
     /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_a_peer_that_is_already_connected_gets_a_route_probe_it_replies_with_the_token() {
@@ -3423,13 +3831,13 @@ mod tests {
             rtt.rtt_samples.push_back(ms);
         }
         let wait = config.answer_wait(rtt.slowest_recent());
-        assert_eq!(route.follow(vpn, Duration::ZERO), Some(lan));
+        assert_eq!(route.follow(vpn, Duration::ZERO, true), Some(lan));
 
         // The answer is due one interval plus a round trip after the move: still inside
         // the wait, so a packet from the old address does not move the route back
         let due = config.keep_alive_interval + Duration::from_millis(1600);
         assert!(due < wait);
-        assert_eq!(route.follow(lan, wait), None);
+        assert_eq!(route.follow(lan, wait, true), None);
         assert_eq!(route.current, vpn);
     }
 
