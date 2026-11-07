@@ -1504,7 +1504,15 @@ export type ProblemSeverity = "Error" | "Warning" | "Info";
 export type ProblemCode =
   | { type: "NoConnectivity" }
   | { type: "NoIpv6" }
-  | { type: "SymmetricNat" }
+  | { type: "PerDestinationNat" }
+  | { type: "UpnpOff" }
+  | { type: "UpnpNoRouter" }
+  | { type: "UpnpRefused" }
+  | { type: "UpnpDoubleNat" }
+  | { type: "Ipv6Unreachable" }
+  | { type: "StunUnanswered" }
+  | { type: "MicrophoneRefused" }
+  | { type: "MicrophoneUndecided" }
   | { type: "UnstableConnection" }
   | { type: "WifiConnection" }
   | { type: "HighJitter"; data: { jitter_ms: number } }
@@ -1564,15 +1572,19 @@ export interface IpSupport {
 }
 
 /**
- * NAT type classification
+ * How the router maps the audio port, as STUN servers at different addresses
+ * see it from one socket
  */
-export type NatType =
-  | "NoNat"
-  | "FullCone"
-  | "RestrictedCone"
-  | "PortRestrictedCone"
-  | "Symmetric"
-  | "Unknown";
+export type NatType = "NoNat" | "Stable" | "PerDestination" | "Unknown";
+
+/** Whether IPv6 gets out of this host */
+export type Ipv6Status = "Usable" | "NoRoute" | "NoAddress";
+
+/** What the router did when looked for with UPnP (nothing is forwarded) */
+export type UpnpStatus = "Answers" | "Off" | "NoRouter" | "Refused" | "DoubleNat";
+
+/** Which peers the network makes hard to reach */
+export type PeerReach = "Wide" | "Narrow" | "Unknown";
 
 /**
  * Connection stability metrics
@@ -1610,8 +1622,14 @@ export interface SignalingDiagnostics {
 export interface NetworkDiagnosticsResult {
   /** IP support detection */
   ip_support: IpSupport;
-  /** Detected NAT type */
+  /** How the router maps the audio port */
   nat_type: NatType;
+  /** Whether IPv6 gets out */
+  ipv6: Ipv6Status;
+  /** What the router said when looked for with UPnP */
+  upnp: UpnpStatus;
+  /** Which peers this network reaches */
+  peer_reach: PeerReach;
   /** Connection stability grade */
   connection_stability: DiagnosticGrade;
   /** Measured jitter in milliseconds */
@@ -1823,10 +1841,10 @@ export const WindowLabels = {
 export type WindowLabel = (typeof WindowLabels)[keyof typeof WindowLabels];
 
 /**
- * Open the settings window
+ * Open the settings window, on `tab` when one is given
  */
-export async function windowOpenSettings(): Promise<void> {
-  return invoke("window_open_settings");
+export async function windowOpenSettings(tab?: string): Promise<void> {
+  return invoke("window_open_settings", { tab });
 }
 
 /**

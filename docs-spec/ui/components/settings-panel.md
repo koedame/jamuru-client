@@ -315,6 +315,7 @@ stateDiagram-v2
 - **running**: 中央にローダー（`--color-accent`、回転）＋「診断を実行中...」＋ 進捗バー（accent fill）＋ 3ステップ（ネットワーク→オーディオ→CPU）＋ `onCancelDiagnostics` 指定時にキャンセルボタン
   - ステップ状態は `progress` から導出: `progress ≥ (i+1)*100/3` で done（check）、区間内で active（loader 回転）、それ以前は pending（circle）。active 行は `progressMessage` を表示
 - **complete**: スコア（`score/100`, Inter）＋ 再診断ボタン（refresh アイコン）＋ 結果カード（ネットワーク／オーディオ／CPU／推奨設定）＋ 問題点
+  - ネットワークのカードは先頭に「繋がりやすさ」（`peer_reach`: どの相手とも繋がりやすい=success／繋がりにくい相手がいる=warning／確かめられなかった）、続けて公開 IP・NAT（`nat_type`: NAT なし・どの相手にも同じポート・相手ごとにポートが変わる・確かめられなかった）・IPv6（使えます／アドレスはありますが外に出られません／使えません）・UPnP（応答した／設定がオフで確かめていない／応答なし／断られた／外側にもう 1 つルーター）を出す（REQ-GUI-038、[ADR-114](../../adr/ADR-114-check-the-connection-and-devices-before-joining.md)）。オーディオのカードの「最小バッファ（目安）」は実測ではない
   - 各カード: 見出しアイコン＋タイトル＋グレードバッジ（A=success / B=warning / C=danger / Unknown=非表示）、行は `label`＋`value`（mono）。RTT・ジッタ・パケットロスは良好時 `--color-success`
   - 問題点: 件数バッジ＋カード（カテゴリ／重大度バッジ。Warning=warning、Error=danger、Info=中立）
 - **前回についての節**（プライバシータブの先頭。`onSendPreviousHang` 指定かつ `previousHang` があるときだけ）: 見出し「前回について」＋ 前回どの処理（終了処理・再起動・更新の適用・音声デバイスを開く処理・不明のどれか）で止まっていたようかを書いた説明文 ＋「報告を送る」「送らない」ボタン。どちらかを押すと `previousHangAnswered` になり、節は短い確認表示（「わかりました。」）に切り替わる（[ADR-056](../../adr/ADR-056-hang-detection-and-reporting.md)）。`previousHangAttachesLog` が true のとき（1.0.0 未満のアプリ版）、説明文は「送る」で現在の `jamuru.log` も添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く（[ADR-059](../../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）

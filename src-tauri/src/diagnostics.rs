@@ -40,6 +40,7 @@ pub async fn diagnostics_run_complete(
     let config = config_state.get()?;
     let result = jamjam::diagnostics::run_complete_diagnostics(
         &signaling,
+        config.open_router_port,
         config.input_device_id.as_deref(),
         config.output_device_id.as_deref(),
     )
@@ -55,7 +56,8 @@ pub async fn diagnostics_run_network(
     identity_state: State<'_, DeviceIdentityState>,
 ) -> Result<NetworkDiagnosticsResult, String> {
     let signaling = signaling_client(&app, &config_state, &identity_state)?;
-    let result = NetworkDiagnostics::run(&signaling).await;
+    let config = config_state.get()?;
+    let result = NetworkDiagnostics::run(&signaling, config.open_router_port).await;
     Ok(result)
 }
 
@@ -91,6 +93,7 @@ pub async fn diagnostics_get_recommended_preset(
     let config = config_state.get()?;
     let result = jamjam::diagnostics::run_complete_diagnostics(
         &signaling,
+        config.open_router_port,
         config.input_device_id.as_deref(),
         config.output_device_id.as_deref(),
     )
@@ -109,6 +112,7 @@ pub async fn diagnostics_check_zero_latency(
     let config = config_state.get()?;
     let result = jamjam::diagnostics::run_complete_diagnostics(
         &signaling,
+        config.open_router_port,
         config.input_device_id.as_deref(),
         config.output_device_id.as_deref(),
     )

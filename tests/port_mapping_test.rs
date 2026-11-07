@@ -11,8 +11,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use jamjam::network::port_mapping::{open_with, Options, PortMappingError};
-use jamjam::network::{gather_candidates_mapped, AddressCandidate, CandidateType};
+use jamjam::network::port_mapping::{open_with, probe_with, Options, PortMappingError};
+use jamjam::network::{gather_candidates_mapped, AddressCandidate, CandidateType, StunClient};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
@@ -543,4 +543,86 @@ async fn the_router_is_not_asked_when_the_setting_is_off() {
 
     assert!(gathered.port_mapping.is_none());
     assert!(router.adds().is_empty());
+}
+
+/// Looking for the router (the connection check) only asks for its outside address: nothing is
+/// forwarded and the router is left as it was.
+///
+/// Verifies: REQ-CON-167
+#[tokio::test]
+async fn router_is_looked_for_then_it_answers_and_nothing_is_forwarded() {
+    let router = FakeRouter::start(Mood::Accepts).await;
+
+    let answer = probe_with(router.options(3600)).await.unwrap();
+
+    assert_eq!(answer.external_ip, OUTSIDE.parse::<Ipv4Addr>().unwrap());
+    assert!(router.adds().is_empty());
+    assert!(router.forwards().is_empty());
+}
+
+/// Verifies: REQ-CON-167
+#[tokio::test]
+async fn no_router_answers_then_looking_for_it_says_there_is_none() {
+    let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let mut options = Options::default();
+    options.search.broadcast_address = silent.local_addr().unwrap();
+    options.search.timeout = Some(Duration::from_millis(300));
+    options.search.single_search_timeout = Some(Duration::from_millis(300));
+
+    let result = probe_with(options).await;
+
+    assert!(
+        matches!(result, Err(PortMappingError::NoRouter(_))),
+        "{result:?}"
+    );
+}
+
+/// Verifies: REQ-CON-167
+#[tokio::test]
+async fn router_is_behind_another_nat_then_looking_for_it_says_so() {
+    let router = FakeRouter::start(Mood::BehindAnotherNat).await;
+
+    let result = probe_with(router.options(3600)).await;
+
+    assert!(
+        matches!(result, Err(PortMappingError::NotPublic(_))),
+        "{result:?}"
+    );
+    assert!(router.adds().is_empty());
+}
+
+/// Every server is asked from the one socket in the same round, so what each saw can be
+/// compared: this is what tells a router that maps per destination from one that does not.
+///
+/// Verifies: REQ-CON-166
+#[tokio::test]
+async fn several_servers_are_asked_then_each_says_where_it_saw_the_socket() {
+    let first_saw: SocketAddr = "198.51.100.7:40000".parse().unwrap();
+    let second_saw: SocketAddr = "198.51.100.7:40001".parse().unwrap();
+    let first = spawn_stun_server(first_saw).await.to_string();
+    let second = spawn_stun_server(second_saw).await.to_string();
+    let audio = audio_socket().await;
+
+    let mut seen: Vec<SocketAddr> = StunClient::new(audio)
+        .mappings_seen_by(&[&first, &second, &first])
+        .await
+        .into_iter()
+        .map(|r| r.mapped_address)
+        .collect();
+    seen.sort();
+
+    assert_eq!(seen, vec![first_saw, second_saw]);
+}
+
+/// Verifies: REQ-CON-166
+#[tokio::test]
+async fn no_server_answers_then_nothing_is_seen() {
+    let silent = UdpSocket::bind("127.0.0.3:0").await.unwrap();
+    let audio = audio_socket().await;
+
+    let seen = StunClient::new(audio)
+        .mappings_seen_by(&[&silent.local_addr().unwrap().to_string()])
+        .await;
+
+    assert!(seen.is_empty());
 }

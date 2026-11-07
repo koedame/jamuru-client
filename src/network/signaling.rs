@@ -41,9 +41,9 @@ pub const MAX_PEERS_PER_ROOM: usize = 16;
 /// then sent keep-alives for as long as the peer is silent.
 pub const MAX_PEER_CANDIDATES: usize = 32;
 
-/// How many servers besides the first are asked what port they see the audio socket at: three
-/// ports tell a NAT that gives each destination a port from one that gives them at random
-/// (ADR-115)
+/// How many ports besides the first one STUN saw are offered when the servers see the audio
+/// socket at different ports: three ports tell a NAT that gives each destination a port from one
+/// that gives them at random (ADR-115)
 const OTHER_VIEWS: usize = 2;
 
 /// The feature an app announces when it creates or joins a room to say it
@@ -925,16 +925,17 @@ pub async fn gather_candidates_using(
     // are told to the peer too, and it guesses from them where to send (ADR-115). A NAT that
     // keeps one port reports the same to every server, and nothing is added.
     if let Some(first) = reflexive.iter().find(|r| r.mapped_address.is_ipv4()) {
-        let others = stun
-            .observe_from_other_servers(stun_servers, first, OTHER_VIEWS)
-            .await;
         let before = candidates.len();
-        for addr in others {
-            if addr != first.mapped_address {
+        for seen in stun.mappings_seen_by(stun_servers).await {
+            let addr = seen.mapped_address;
+            let new = addr.is_ipv4()
+                && addr != first.mapped_address
+                && !candidates.iter().any(|c| c.address == addr);
+            if new && candidates.len() - before < OTHER_VIEWS {
                 candidates.push(AddressCandidate::server_reflexive(addr));
                 info!(
-                    "Added server reflexive candidate seen by another server: {}",
-                    addr
+                    "Added server reflexive candidate seen by {}: {}",
+                    seen.server, addr
                 );
             }
         }
