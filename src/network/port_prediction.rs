@@ -16,10 +16,11 @@
 //!
 //! This module only says where to send and how fast. The sending is the connection's.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
+
+use hkdf::Hkdf;
+use sha2::Sha256;
 
 /// Two public ports of one peer further apart than this are not "the next free port"
 const SEQUENTIAL_STEP_MAX: u16 = 16;
@@ -87,19 +88,26 @@ pub(super) struct PortPrediction {
     offered: Vec<u16>,
     /// Kept to ourselves: the token of a probe is made from it, so that an answer can be told
     /// from a forged one by someone who has not seen the probe
-    secret: u64,
+    secret: [u8; 32],
 }
 
 /// Whether `ip` is an address a peer is reached at over the internet, so that the same address
 /// offered with several ports is a NAT's doing and not several interfaces' (a host candidate
 /// has the one port of the socket)
-fn is_public_v4(ip: Ipv4Addr) -> bool {
+fn is_public_v4(ip: Ipv4Addr, allow_loopback: bool) -> bool {
     let octets = ip.octets();
-    !ip.is_private()
+    (allow_loopback || !ip.is_loopback())
+        && !ip.is_private()
         && !ip.is_link_local()
         && !ip.is_unspecified()
         && !ip.is_multicast()
         && !ip.is_broadcast()
+        // 0.0.0.0/8, the IETF protocol assignments (192.0.0.0/24), the benchmarking range
+        // (198.18.0.0/15) and the reserved class E (240.0.0.0/4)
+        && octets[0] != 0
+        && !(octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
+        && !(octets[0] == 198 && (18..20).contains(&octets[1]))
+        && octets[0] < 240
         // Shared address space of a carrier's NAT, and of Tailscale
         && !(octets[0] == 100 && (64..128).contains(&octets[1]))
 }
@@ -107,7 +115,14 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
 impl PortPrediction {
     /// What the addresses a peer offered say about its NAT: `None` when it offers no public IPv4
     /// address twice with different ports, or when its ports are not of a kind that can be guessed
-    pub(super) fn from_offered(offered: &[SocketAddr], secret: u64) -> Option<Self> {
+    ///
+    /// `allow_loopback` lets 127/8 count as a public address, for tests that stand in for the
+    /// internet on one machine. Otherwise a peer could have the ports of this machine probed.
+    pub(super) fn from_offered(
+        offered: &[SocketAddr],
+        secret: [u8; 32],
+        allow_loopback: bool,
+    ) -> Option<Self> {
         let ports_of = |ip: Ipv4Addr| -> Vec<u16> {
             let mut ports: Vec<u16> = offered
                 .iter()
@@ -121,7 +136,7 @@ impl PortPrediction {
             ports
         };
         let (ip, ports) = offered.iter().find_map(|addr| match addr {
-            SocketAddr::V4(v4) if is_public_v4(*v4.ip()) => {
+            SocketAddr::V4(v4) if is_public_v4(*v4.ip(), allow_loopback) => {
                 Some((*v4.ip(), ports_of(*v4.ip()))).filter(|(_, ports)| ports.len() > 1)
             }
             _ => None,
@@ -148,15 +163,18 @@ impl PortPrediction {
         })
     }
 
-    /// The token a probe to `port` carries, and its answer carries back. It is 31 bits taken
-    /// from a hash of the secret and the port, so one who has not seen the probe cannot guess it
-    /// (a guess is right once in 2^31), and a token is only good for the port it was sent to.
+    /// The token a probe to `port` carries, and its answer carries back. It is 31 bits of
+    /// HKDF-SHA256 (a keyed PRF) of the secret with the port as its context, so one who has not
+    /// seen the probe cannot guess it (a guess is right once in 2^31), and a token is only good
+    /// for the port it was sent to.
     /// The top bit keeps it apart from the tokens of the connectivity check, which count
     /// rounds from zero.
     pub(super) fn token(&self, port: u16) -> u32 {
-        let mut hasher = DefaultHasher::new();
-        (self.secret, port).hash(&mut hasher);
-        0x8000_0000 | (hasher.finish() as u32 & 0x7FFF_FFFF)
+        let mut out = [0u8; 4];
+        Hkdf::<Sha256>::new(None, &self.secret)
+            .expand(&port.to_be_bytes(), &mut out)
+            .expect("4 bytes is a valid HKDF output length");
+        0x8000_0000 | (u32::from_be_bytes(out) & 0x7FFF_FFFF)
     }
 
     /// Whether `token` is what a probe to `addr` carries
@@ -277,7 +295,7 @@ mod tests {
 
     fn predicted(offered: &[&str]) -> Option<PortPrediction> {
         let offered: Vec<SocketAddr> = offered.iter().map(|a| addr(a)).collect();
-        PortPrediction::from_offered(&offered, 7)
+        PortPrediction::from_offered(&offered, [7; 32], false)
     }
 
     fn ports(pass: &Pass) -> Vec<u16> {
@@ -464,9 +482,28 @@ mod tests {
         assert!(token >= 0x8000_0000);
         let other = PortPrediction::from_offered(
             &[addr("203.0.113.7:40000"), addr("203.0.113.7:40001")],
-            8,
+            [8; 32],
+            false,
         )
         .unwrap();
         assert!(!other.is_token_for(token, from));
+    }
+
+    #[test]
+    fn when_a_peer_offers_ports_on_an_address_of_this_machine_or_a_reserved_range_nothing_is_guessed(
+    ) {
+        for ip in [
+            "127.0.0.1",
+            "0.1.2.3",
+            "192.0.0.9",
+            "198.18.4.4",
+            "198.19.4.4",
+            "240.0.0.1",
+        ] {
+            let a = format!("{ip}:40000");
+            let b = format!("{ip}:40001");
+            assert_eq!(predicted(&[&a, &b]), None, "{ip}");
+        }
+        assert!(predicted(&["198.20.4.4:40000", "198.20.4.4:40001"]).is_some());
     }
 }

@@ -201,7 +201,10 @@ impl Route {
 
     /// Moves to `from` when a packet arrived from there, we can send to it,
     /// and the peer has not answered for `after`. Returns the address left.
-    fn follow(&mut self, from: SocketAddr, after: Duration) -> Option<SocketAddr> {
+    ///
+    /// An address that is only guessed at is moved to when `proven` says the packet shows the
+    /// peer is there: the answer to a probe sent to it, or a packet opened by an encrypted link.
+    fn follow(&mut self, from: SocketAddr, after: Duration, proven: bool) -> Option<SocketAddr> {
         if from == self.current || self.answered_at.elapsed() < after {
             return None;
         }
@@ -209,7 +212,7 @@ impl Route {
             .others
             .iter()
             .position(|&(addr, sendable)| addr == from && sendable);
-        if index.is_none() && !self.guessed(from) {
+        if index.is_none() && !(proven && self.guessed(from)) {
             return None;
         }
         let left = std::mem::replace(&mut self.current, from);
@@ -912,6 +915,8 @@ pub struct Connection {
     audio_channels: usize,
     /// Reconnection thresholds
     reconnect_config: ReconnectConfig,
+    /// Whether 127/8 counts as a public address for guessing a peer's port (tests only)
+    predict_on_loopback: bool,
     /// Notified when the connection state changes
     state_change_callback: Option<Arc<StateChangeCallback>>,
     /// Liveness monitor task
@@ -1013,6 +1018,7 @@ impl Connection {
             fec_group_size: None,
             audio_channels: 1,
             reconnect_config: ReconnectConfig::default().validated(),
+            predict_on_loopback: false,
             state_change_callback: None,
             liveness_handle: None,
             sequence_tracker: Arc::new(std::sync::Mutex::new(SequenceTracker::new())),
@@ -1301,7 +1307,11 @@ impl Connection {
                 // Nothing answered. A peer that offered the same public address with several
                 // ports is behind a NAT that gives each destination a port of its own, and
                 // the port it will send from is none of the ones offered: guess it (ADR-115).
-                let prediction = PortPrediction::from_offered(candidates, rand::random());
+                let prediction = PortPrediction::from_offered(
+                    candidates,
+                    rand::random::<[u8; 32]>(),
+                    self.predict_on_loopback,
+                );
                 route.predicted.clone_from(&prediction);
                 *self.route.lock() = route;
 
@@ -1469,6 +1479,14 @@ impl Connection {
     /// starts.
     pub fn set_reconnect_config(&mut self, config: ReconnectConfig) {
         self.reconnect_config = config.validated();
+    }
+
+    /// Lets addresses on this machine (127/8) count as public ones when guessing the port of a
+    /// peer behind a NAT (ADR-115), so that a test can stand in for the internet on one
+    /// machine. The app never calls it: there, a peer's loopback address is not one to probe.
+    #[doc(hidden)]
+    pub fn predict_ports_on_loopback(&mut self) {
+        self.predict_on_loopback = true;
     }
 
     /// Set the callback invoked when the connection state changes
@@ -1839,28 +1857,31 @@ impl Connection {
                 // is there.
                 let mut follow_after =
                     reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
+                // A packet opened by an encrypted link comes from the peer whatever its address
+                let encrypted = matches!(opened, Opened::Packet(_))
+                    && secure_link.security() == LinkSecurity::Encrypted;
                 // An answer to a probe sent to a guessed port, from that port, shows the guess
-                // was right and that what we send there reaches the peer: no need to wait
+                // was right and that what we send there reaches the peer: no need to wait. A
+                // port that is only guessed at is not moved to on anything less.
+                let mut proven = encrypted;
                 if let Opened::Packet(packet) = &opened {
                     if let Some((true, token)) = packet.route_probe_token() {
                         if route.lock().is_answer_from_guessed(token, addr) {
                             follow_after = Duration::ZERO;
+                            proven = true;
                         }
                     }
                 }
                 // The network may have changed the address the peer is seen from since it
-                // was offered. A packet that was opened by an encrypted link comes from the
-                // peer whatever its address, so it may be answered there. Without keys
-                // the source address could be anyone's.
-                if matches!(opened, Opened::Packet(_))
-                    && secure_link.security() == LinkSecurity::Encrypted
-                {
+                // was offered, so an encrypted packet may be answered where it came from.
+                // Without keys the source address could be anyone's.
+                if encrypted {
                     route.lock().learn_roamed(addr, follow_after);
                     if !from_a_peer_address {
                         transport.also_expect_peer_at(addr);
                     }
                 }
-                let followed = route.lock().follow(addr, follow_after);
+                let followed = route.lock().follow(addr, follow_after, proven);
                 if let Some(left) = followed {
                     info!(
                         "The peer answers nothing on {}; sending to {} instead",
@@ -2663,7 +2684,7 @@ mod tests {
         let vpn = addr("100.64.0.2:5000");
         let mut route = Route::new(lan, vec![(vpn, true)]);
 
-        assert_eq!(route.follow(vpn, Duration::ZERO), Some(lan));
+        assert_eq!(route.follow(vpn, Duration::ZERO, true), Some(lan));
 
         assert_eq!(route.current, vpn);
         assert_eq!(route.others, vec![(lan, true)]);
@@ -2677,7 +2698,7 @@ mod tests {
         let mut route = Route::new(lan, vec![(vpn, true)]);
         route.answered();
 
-        assert_eq!(route.follow(vpn, Duration::from_secs(60)), None);
+        assert_eq!(route.follow(vpn, Duration::from_secs(60), true), None);
 
         assert_eq!(route.current, lan);
     }
@@ -2689,7 +2710,7 @@ mod tests {
         let vpn = addr("100.64.0.2:5000");
         let mut route = Route::new(lan, vec![(vpn, false)]);
 
-        assert_eq!(route.follow(vpn, Duration::ZERO), None);
+        assert_eq!(route.follow(vpn, Duration::ZERO, true), None);
 
         assert_eq!(route.current, lan);
     }
@@ -2700,9 +2721,51 @@ mod tests {
         let lan = addr("192.168.1.10:5000");
         let mut route = Route::new(lan, vec![(addr("100.64.0.2:5000"), true)]);
 
-        assert_eq!(route.follow(addr("203.0.113.9:5000"), Duration::ZERO), None);
+        assert_eq!(
+            route.follow(addr("203.0.113.9:5000"), Duration::ZERO, true),
+            None
+        );
 
         assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-170
+    #[test]
+    fn when_a_packet_comes_from_a_guessed_port_without_proof_the_route_stays_where_it_is() {
+        let lan = addr("192.168.1.10:5000");
+        let mut route = Route::new(lan, vec![]);
+        route.predicted = PortPrediction::from_offered(
+            &[addr("203.0.113.7:40000"), addr("203.0.113.7:40001")],
+            [7; 32],
+            false,
+        );
+        let guessed = addr("203.0.113.7:40002");
+        assert!(route.guessed(guessed));
+
+        assert_eq!(route.follow(guessed, Duration::ZERO, false), None);
+        assert_eq!(route.current, lan);
+
+        assert_eq!(route.follow(guessed, Duration::ZERO, true), Some(lan));
+        assert_eq!(route.current, guessed);
+    }
+
+    /// Verifies: REQ-CON-170
+    #[test]
+    fn when_a_probe_answer_carries_another_ports_token_it_is_not_the_answer_from_the_guessed_port()
+    {
+        let mut route = Route::new(addr("192.168.1.10:5000"), vec![]);
+        let prediction = PortPrediction::from_offered(
+            &[addr("203.0.113.7:40000"), addr("203.0.113.7:40001")],
+            [7; 32],
+            false,
+        )
+        .unwrap();
+        let token = prediction.token(40002);
+        route.predicted = Some(prediction);
+
+        assert!(route.is_answer_from_guessed(token, addr("203.0.113.7:40002")));
+        assert!(!route.is_answer_from_guessed(token, addr("203.0.113.7:40003")));
+        assert!(!route.is_answer_from_guessed(token ^ 1, addr("203.0.113.7:40002")));
     }
 
     /// Verifies: REQ-CON-136
@@ -2714,7 +2777,7 @@ mod tests {
 
         route.learn_roamed(moved, Duration::ZERO);
 
-        assert_eq!(route.follow(moved, Duration::ZERO), Some(lan));
+        assert_eq!(route.follow(moved, Duration::ZERO, true), Some(lan));
         assert_eq!(route.current, moved);
     }
 
@@ -2729,7 +2792,7 @@ mod tests {
         route.learn_roamed(moved, Duration::from_secs(60));
 
         assert!(!route.knows(moved));
-        assert_eq!(route.follow(moved, Duration::from_secs(60)), None);
+        assert_eq!(route.follow(moved, Duration::from_secs(60), true), None);
         assert_eq!(route.current, lan);
     }
 
@@ -3394,6 +3457,7 @@ mod tests {
     ) {
         let mut behind_nat = conn().await;
         let mut guessing = conn().await;
+        guessing.predict_ports_on_loopback();
         trust_each_other(&mut behind_nat, &mut guessing);
         // Two private addresses it offered before the one that is `guessing`'s take ports too
         let nat = symmetric_nat(
@@ -3761,13 +3825,13 @@ mod tests {
             rtt.rtt_samples.push_back(ms);
         }
         let wait = config.answer_wait(rtt.slowest_recent());
-        assert_eq!(route.follow(vpn, Duration::ZERO), Some(lan));
+        assert_eq!(route.follow(vpn, Duration::ZERO, true), Some(lan));
 
         // The answer is due one interval plus a round trip after the move: still inside
         // the wait, so a packet from the old address does not move the route back
         let due = config.keep_alive_interval + Duration::from_millis(1600);
         assert!(due < wait);
-        assert_eq!(route.follow(lan, wait), None);
+        assert_eq!(route.follow(lan, wait, true), None);
         assert_eq!(route.current, vpn);
     }
 
