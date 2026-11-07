@@ -30,8 +30,11 @@ on:
         description: macOS runners (at most 5 run at once)
         default: '2'
       per_runner:
-        description: Participants on each runner (runners x this is at most 16)
+        description: Participants on each Linux and Windows runner (all together at most 16)
         default: '2'
+      macos_per_runner:
+        description: Participants on each macOS runner (it has 3 CPUs, and two of them could not keep up)
+        default: '1'
       slot_seconds:
         description: Seconds each participant speaks, one after another
         default: '3'
@@ -46,8 +49,9 @@ permissions:
 env:
   LINUX: ${{ inputs.linux || '2' }}
   WINDOWS: ${{ inputs.windows || '2' }}
-  MACOS: ${{ inputs.macos || '2' }}
+  MACOS: ${{ inputs.macos || '3' }}
   PER_RUNNER: ${{ inputs.per_runner || '2' }}
+  MACOS_PER_RUNNER: ${{ inputs.macos_per_runner || '1' }}
   SLOT_SECONDS: ${{ inputs.slot_seconds || '3' }}
   MIN_HEARD: ${{ inputs.min_heard || '0.9' }}
   # Seconds between the room being created and the measuring window starting:
@@ -64,10 +68,11 @@ jobs:
       runners: ${{ steps.plan.outputs.runners }}
       systems: ${{ steps.plan.outputs.systems }}
       total: ${{ steps.plan.outputs.total }}
+      layout: ${{ steps.plan.outputs.layout }}
     steps:
       - id: plan
         run: |
-          case "$LINUX$WINDOWS$MACOS$PER_RUNNER$SLOT_SECONDS" in
+          case "$LINUX$WINDOWS$MACOS$PER_RUNNER$MACOS_PER_RUNNER$SLOT_SECONDS" in
             *[!0-9]*) echo "inputs must be whole numbers"; exit 1 ;;
           esac
           if [ "$LINUX" -lt 1 ] || [ "$MACOS" -gt 5 ]; then
@@ -86,14 +91,15 @@ jobs:
               count = int(os.environ[system["system"].upper()])
               if count:
                   used.append(system)
+              each = int(os.environ["MACOS_PER_RUNNER" if system["system"] == "macos" else "PER_RUNNER"])
               for _ in range(count):
-                  runners.append(dict(system, runner=len(runners)))
-          per_runner = int(os.environ["PER_RUNNER"])
-          total = len(runners) * per_runner
+                  runners.append(dict(system, runner=len(runners), count=each))
+          total = sum(runner["count"] for runner in runners)
           if total < 2 or total > 16:
-              raise SystemExit(f"runners x per_runner must be from 2 to 16, got {total}")
+              raise SystemExit(f"the participants must be from 2 to 16, got {total}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"total={total}\n")
+              out.write(f"layout={','.join(str(runner['count']) for runner in runners)}\n")
               out.write(f"runners={json.dumps(runners)}\n")
               out.write(f"systems={json.dumps(used)}\n")
           PY
@@ -189,7 +195,7 @@ jobs:
         if: matrix.runner == 0
         run: |
           ${{ matrix.python }} scripts/room-check.py start-host --work "$WORK" --binary bin/jamuru \
-            --total "${{ needs.plan.outputs.total }}" --slot "$SLOT_SECONDS" --lead "$LEAD_SECONDS"
+            --layout "${{ needs.plan.outputs.layout }}" --slot "$SLOT_SECONDS" --lead "$LEAD_SECONDS"
 
       - name: Publish the room
         if: matrix.runner == 0
@@ -206,7 +212,7 @@ jobs:
       - name: Join and measure
         run: |
           ${{ matrix.python }} scripts/room-check.py run --work "$WORK" --binary bin/jamuru \
-            --runner "${{ matrix.runner }}" --per-runner "$PER_RUNNER"
+            --runner "${{ matrix.runner }}" --layout "${{ needs.plan.outputs.layout }}"
 
       - name: Keep the numbers
         if: always()

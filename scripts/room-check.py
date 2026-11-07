@@ -96,6 +96,21 @@ def name_of(index):
     return f"p{index:02d}"
 
 
+def layout_of(text):
+    """Participants on each runner, from `2,2,1`."""
+    return [int(part) for part in text.split(",")]
+
+
+def runner_of(layout, index):
+    """The runner participant `index` runs on: the participants are numbered runner by runner."""
+    first = 0
+    for runner, count in enumerate(layout):
+        if index < first + count:
+            return runner
+        first += count
+    raise ValueError(f"participant {index} is beyond the layout {layout}")
+
+
 def room_name_of(index):
     """The name a participant enters the room under: the run, the attempt and the participant."""
     run = os.environ.get("GITHUB_RUN_ID", "local")
@@ -272,7 +287,7 @@ def start_host(args):
     server = server_url(args.server_env)
     work = Path(args.work)
     start_at = time.time() + args.lead
-    turns, end_at = schedule(start_at, args.total, args.slot)
+    turns, end_at = schedule(start_at, sum(layout_of(args.layout)), args.slot)
     process, out = launch(
         binary_of(args.binary), work, 0, "create-room", server, None, turns[0], start_at - QUIET_SECONDS, end_at
     )
@@ -290,7 +305,10 @@ def start_host(args):
         print("host: no invite code")
         sys.exit(1)
     (work / "host.pid").write_text(str(process.pid))
-    room = {"code": code, "start_at": start_at, "slot": args.slot, "total": args.total}
+    room = {
+        "code": code, "start_at": start_at, "slot": args.slot,
+        "total": sum(layout_of(args.layout)), "layout": layout_of(args.layout),
+    }
     (work / "room.json").write_text(json.dumps(room))
     published = work / "rendezvous"
     published.mkdir(exist_ok=True)
@@ -347,11 +365,9 @@ def run(args):
     room = json.loads((work / "room.json").read_text())
     total, slot = room["total"], room["slot"]
     turns, end_at = schedule(room["start_at"], total, slot)
-    own = [
-        args.runner * args.per_runner + k
-        for k in range(args.per_runner)
-        if args.runner * args.per_runner + k < total
-    ]
+    layout = room["layout"]
+    first = sum(layout[:args.runner])
+    own = list(range(first, first + layout[args.runner]))
     runner = probe_runner()
     print(
         f"runner {args.runner}: {runner['os']} {runner['cpus']} cpus, "
@@ -377,7 +393,7 @@ def run(args):
     results = work / "results"
     results.mkdir(exist_ok=True)
     for index in own:
-        result = analyze(work, index, args.per_runner, room)
+        result = analyze(work, index, room)
         result["runner_facts"] = runner
         (results / f"{name_of(index)}.json").write_text(json.dumps(result))
         print(describe(result))
@@ -584,11 +600,12 @@ def turn_windows(speaker, offset, slot, tail_windows, start_to_end):
     return list(range(max(first, 0), min(last, tail_windows)))
 
 
-def analyze(work, index, per_runner, room):
+def analyze(work, index, room):
     """What participant `index` heard of each of the others in their turns."""
     out = work / "out" / name_of(index)
     total, slot = room["total"], room["slot"]
-    result = {"id": index, "runner": index // per_runner}
+    layout = room["layout"]
+    result = {"id": index, "runner": runner_of(layout, index)}
     result.update(read_time(str(out) + ".time"))
     report = {}
     try:
@@ -646,7 +663,7 @@ def analyze(work, index, per_runner, room):
         network, playout = peer.get("network", {}), peer.get("playout", {})
         facts = peer.get("link") or {}
         route = facts.get("route")
-        if other // per_runner == index // per_runner or route == "loopback":
+        if runner_of(layout, other) == result["runner"] or route == "loopback":
             scope = "machine"
         elif route == "lan":
             scope = "network"
@@ -783,7 +800,7 @@ def main():
     host = commands.add_parser("start-host")
     common(host)
     host.add_argument("--binary", required=True)
-    host.add_argument("--total", type=int, required=True)
+    host.add_argument("--layout", required=True, help="participants on each runner, such as 2,2,1")
     host.add_argument("--slot", type=int, required=True, help="seconds each participant speaks")
     host.add_argument("--lead", type=int, required=True, help="seconds the others have to arrive")
     host.set_defaults(handler=start_host)
@@ -797,7 +814,7 @@ def main():
     common(measure)
     measure.add_argument("--binary", required=True)
     measure.add_argument("--runner", type=int, required=True)
-    measure.add_argument("--per-runner", type=int, required=True)
+    measure.add_argument("--layout", required=True, help="participants on each runner, such as 2,2,1")
     measure.set_defaults(handler=run)
 
     watch = commands.add_parser("supervise")
