@@ -117,6 +117,8 @@ const fallbackKey = (fallbacks: WasapiFallback[]) =>
 
 export interface MainScreenProps {
   onSettingsClick?: () => void;
+  /** Opens the connection and device check (the connection panel shows its link only when given) */
+  onCheckConnectionClick?: () => void;
   /** Set in the window of someone helping: who they are helping */
   helper?: { name: string };
 }
@@ -142,7 +144,7 @@ function withPeer(
   return { ...mixer, peers: { ...mixer.peers, [peerId]: { ...current, ...patch } } };
 }
 
-export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
+export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: MainScreenProps) {
   const { t, i18n } = useTranslation();
   const helping = helper !== undefined;
   // Null until the backend has answered; the app starts by connecting.
@@ -983,6 +985,7 @@ export function MainScreen({ onSettingsClick, helper }: MainScreenProps) {
           onCancel={handleCancelConnection}
           onRetry={handleCancelConnection}
           onOpenSettings={handleSettingsClick}
+          onCheckConnection={onCheckConnectionClick}
           title="jamuru"
           welcomeTitle={t("session.welcome.title")}
           welcomeSubtitle={t("session.welcome.subtitle")}

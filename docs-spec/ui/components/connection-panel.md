@@ -126,6 +126,8 @@ interface ConnectionPanelProps {
   onCancel?: () => void;
   /** 設定ボタンクリック */
   onOpenSettings?: () => void;
+  /** 「回線と機器を確かめる」クリック。指定時のみリンクを表示（REQ-GUI-037） */
+  onCheckConnection?: () => void;
 }
 ```
 
@@ -144,6 +146,7 @@ interface ConnectionPanelProps {
 | `JoinButton` | 参加ボタン（プライマリ、accent-blue塗り、固定幅100px） |
 | `TestRoomCard` | テストルームへのワンクリック接続カード（緑ボーダー+アイコン+説明文） |
 | `SettingsButton` | 設定画面を開くボタン |
+| `CheckConnectionLink` | 「回線と機器を確かめる」リンク（テストルームカードの下、控えめな下線つきテキスト）。押すと設定ウィンドウを診断とサポートタブで開く（[ADR-114](../../adr/ADR-114-check-the-connection-and-devices-before-joining.md)） |
 | `LoadingSpinner` | 接続中のスピナー |
 | `ErrorMessage` | エラーメッセージ表示 |
 

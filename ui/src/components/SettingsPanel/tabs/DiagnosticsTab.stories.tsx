@@ -31,7 +31,10 @@ const goodResult: CompleteDiagnosticsResult = {
       public_ipv4: "203.0.113.10",
       public_ipv6: null,
     },
-    nat_type: "FullCone",
+    nat_type: "Stable",
+    ipv6: "NoAddress",
+    upnp: "Answers",
+    peer_reach: "Wide",
     connection_stability: "A",
     jitter_ms: 3,
     stability_metrics: {
@@ -100,12 +103,14 @@ const problemResult: CompleteDiagnosticsResult = {
   network: {
     ...goodResult.network,
     connection_stability: "C",
-    nat_type: "Symmetric",
+    nat_type: "PerDestination",
+    upnp: "NoRouter",
+    peer_reach: "Narrow",
     problems: [
       {
         severity: "Warning",
         category: "network",
-        code: { type: "SymmetricNat" },
+        code: { type: "PerDestinationNat" },
       },
     ],
   },
@@ -115,7 +120,12 @@ const problemResult: CompleteDiagnosticsResult = {
     {
       severity: "Warning",
       category: "network",
-      code: { type: "SymmetricNat" },
+      code: { type: "PerDestinationNat" },
+    },
+    {
+      severity: "Info",
+      category: "network",
+      code: { type: "UpnpNoRouter" },
     },
     {
       severity: "Error",

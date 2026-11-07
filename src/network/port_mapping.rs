@@ -211,12 +211,34 @@ pub async fn open_with(options: Options, local_port: u16) -> Result<PortMapping,
         .unwrap_or(Err(PortMappingError::TimedOut))
 }
 
-async fn open_unbounded(
-    options: Options,
-    local_port: u16,
-) -> Result<PortMapping, PortMappingError> {
+/// What a read-only look at the router found: it answers, and its outside address is a public one
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouterAnswer {
+    /// The router's outside address, which a peer on the internet can send to
+    pub external_ip: Ipv4Addr,
+}
+
+/// Looks for the router the way [`open`] does and reads its outside address, without asking it
+/// to forward anything (the router is left as it was). For telling a person whether the
+/// router answers; whether it would then forward the port is only known by asking.
+///
+/// Gives up after a few seconds, like [`open_with`].
+pub async fn probe() -> Result<RouterAnswer, PortMappingError> {
+    probe_with(Options::default()).await
+}
+
+/// [`probe`] for the router found by `options`
+pub async fn probe_with(options: Options) -> Result<RouterAnswer, PortMappingError> {
+    let (_gateway, external_ip) = tokio::time::timeout(OPEN_TIMEOUT, find_router(&options))
+        .await
+        .unwrap_or(Err(PortMappingError::TimedOut))?;
+    Ok(RouterAnswer { external_ip })
+}
+
+/// The router on the local network that answers the search, and its public outside address
+async fn find_router(options: &Options) -> Result<(Gateway<Tokio>, Ipv4Addr), PortMappingError> {
     let allowed = options.search.allowed_gateway_ips.clone();
-    let gateway = search_everywhere(&options).await?;
+    let gateway = search_everywhere(options).await?;
     debug!("Found a router that maps ports at {}", gateway.addr);
     if !on_local_network(gateway.addr.ip(), &allowed) {
         return Err(PortMappingError::NoRouter(format!(
@@ -229,9 +251,17 @@ async fn open_unbounded(
         .get_external_ip()
         .await
         .map_err(|e| PortMappingError::Refused(e.to_string()))?;
-    if !is_public(external_ip) {
-        return Err(PortMappingError::NotPublic(external_ip));
+    match external_ip {
+        IpAddr::V4(v4) if is_public(external_ip) => Ok((gateway, v4)),
+        other => Err(PortMappingError::NotPublic(other)),
     }
+}
+
+async fn open_unbounded(
+    options: Options,
+    local_port: u16,
+) -> Result<PortMapping, PortMappingError> {
+    let (gateway, external_ip) = find_router(&options).await?;
 
     let local_ip = local_ip_toward(gateway.addr.ip()).map_err(|e| {
         PortMappingError::Refused(format!("no local address toward the router: {}", e))
@@ -251,7 +281,7 @@ async fn open_unbounded(
         external_ip, mapped.external_port, mapped.local
     );
 
-    let external = SocketAddr::new(external_ip, mapped.external_port);
+    let external = SocketAddr::new(external_ip.into(), mapped.external_port);
     let mapped = Arc::new(mapped);
     let renewal = (mapped.lease_secs > 0).then(|| tokio::spawn(renew(mapped.clone())));
     Ok(PortMapping {

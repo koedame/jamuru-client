@@ -85,6 +85,14 @@ function App() {
     }
   }, []);
 
+  const handleCheckConnection = useCallback(async () => {
+    try {
+      await windowOpenSettings("diagnostics");
+    } catch (e) {
+      console.error("Failed to open the connection check:", e);
+    }
+  }, []);
+
   if (currentScreen === "settings") {
     return <SettingsScreen />;
   }
@@ -100,7 +108,7 @@ function App() {
 
   return (
     <ConsentGate onShown={sayAppIsUp}>
-      <MainScreen onSettingsClick={handleOpenSettings} />
+      <MainScreen onSettingsClick={handleOpenSettings} onCheckConnectionClick={handleCheckConnection} />
     </ConsentGate>
   );
 }

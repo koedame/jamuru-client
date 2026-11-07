@@ -14,8 +14,12 @@ import {
   DeviceSource,
   DiagnosticGrade,
   DiagnosticProblem,
+  Ipv6Status,
+  NatType,
+  PeerReach,
   ProblemCode,
   RecommendedPreset,
+  UpnpStatus,
 } from "../../../lib/tauri";
 import {
   PlayIcon,
@@ -181,20 +185,64 @@ function formatProblem(code: ProblemCode, t: TFunction): { message: string; sugg
   };
 }
 
-function formatNatType(natType: string, t: TFunction): string {
+function formatNatType(natType: NatType, t: TFunction): string {
   switch (natType) {
     case "NoNat":
-      return t("diagnostics.natTypes.noNat");
-    case "FullCone":
-      return t("diagnostics.natTypes.fullCone");
-    case "RestrictedCone":
-      return t("diagnostics.natTypes.restrictedCone");
-    case "PortRestrictedCone":
-      return t("diagnostics.natTypes.portRestrictedCone");
-    case "Symmetric":
-      return t("diagnostics.natTypes.symmetric");
+      return t("settings.diagnostics.natTypes.noNat");
+    case "Stable":
+      return t("settings.diagnostics.natTypes.stable");
+    case "PerDestination":
+      return t("settings.diagnostics.natTypes.perDestination");
     default:
-      return t("diagnostics.natTypes.unknown");
+      return t("settings.diagnostics.natTypes.unknown");
+  }
+}
+
+function formatIpv6(status: Ipv6Status, t: TFunction): string {
+  switch (status) {
+    case "Usable":
+      return t("settings.diagnostics.ipv6Status.usable");
+    case "NoRoute":
+      return t("settings.diagnostics.ipv6Status.noRoute");
+    default:
+      return t("settings.diagnostics.ipv6Status.noAddress");
+  }
+}
+
+function formatUpnp(status: UpnpStatus, t: TFunction): string {
+  switch (status) {
+    case "Answers":
+      return t("settings.diagnostics.upnpStatus.answers");
+    case "Off":
+      return t("settings.diagnostics.upnpStatus.off");
+    case "Refused":
+      return t("settings.diagnostics.upnpStatus.refused");
+    case "DoubleNat":
+      return t("settings.diagnostics.upnpStatus.doubleNat");
+    default:
+      return t("settings.diagnostics.upnpStatus.noRouter");
+  }
+}
+
+function formatReach(reach: PeerReach, t: TFunction): string {
+  switch (reach) {
+    case "Wide":
+      return t("settings.diagnostics.reach.wide");
+    case "Narrow":
+      return t("settings.diagnostics.reach.narrow");
+    default:
+      return t("settings.diagnostics.reach.unknown");
+  }
+}
+
+function reachTone(reach: PeerReach): Tone {
+  switch (reach) {
+    case "Wide":
+      return "good";
+    case "Narrow":
+      return "warn";
+    default:
+      return "default";
   }
 }
 
@@ -590,12 +638,27 @@ export function DiagnosticsTab({
           grade={network.connection_stability}
         >
           <Row
+            label={t("settings.diagnostics.reachLabel", "Reachability")}
+            value={formatReach(network.peer_reach, t)}
+            tone={reachTone(network.peer_reach)}
+          />
+          <Row
             label={t("settings.diagnostics.publicIp", "Public IP")}
             value={network.ip_support.public_ipv4 || t("settings.diagnostics.notAvailable")}
           />
           <Row
-            label={t("settings.diagnostics.natType", "NAT Type")}
+            label={t("settings.diagnostics.natType", "NAT")}
             value={formatNatType(network.nat_type, t)}
+          />
+          <Row
+            label={t("settings.diagnostics.ipv6", "IPv6")}
+            value={formatIpv6(network.ipv6, t)}
+            tone={network.ipv6 === "Usable" ? "good" : "default"}
+          />
+          <Row
+            label={t("settings.diagnostics.upnp", "UPnP")}
+            value={formatUpnp(network.upnp, t)}
+            tone={network.upnp === "Answers" ? "good" : "default"}
           />
           <Row
             label={t("settings.diagnostics.rtt", "RTT")}
@@ -641,7 +704,7 @@ export function DiagnosticsTab({
             value={audio.selected_input?.supports_48khz ? t("settings.diagnostics.yes", "Yes") : t("settings.diagnostics.no", "No")}
           />
           <Row
-            label={t("settings.diagnostics.minBuffer", "Min Buffer")}
+            label={t("settings.diagnostics.minBuffer", "Min Buffer (guide)")}
             value={
               audio.low_latency_support.min_buffer_size !== null
                 ? t("settings.diagnostics.samples", { count: audio.low_latency_support.min_buffer_size })
