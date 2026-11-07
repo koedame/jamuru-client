@@ -28,7 +28,7 @@ on:
         default: '2'
       macos:
         description: macOS runners (at most 5 run at once)
-        default: '3'
+        default: '2'
       per_runner:
         description: Participants on each Linux and Windows runner (all together at most 16)
         default: '2'
@@ -49,7 +49,7 @@ permissions:
 env:
   LINUX: ${{ inputs.linux || '2' }}
   WINDOWS: ${{ inputs.windows || '2' }}
-  MACOS: ${{ inputs.macos || '3' }}
+  MACOS: ${{ inputs.macos || '2' }}
   PER_RUNNER: ${{ inputs.per_runner || '2' }}
   MACOS_PER_RUNNER: ${{ inputs.macos_per_runner || '1' }}
   SLOT_SECONDS: ${{ inputs.slot_seconds || '3' }}
