@@ -16,6 +16,8 @@
 //!
 //! This module only says where to send and how fast. The sending is the connection's.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -83,8 +85,9 @@ pub(super) struct PortPrediction {
     pattern: Pattern,
     /// The ports the peer offered: they are sent to anyway, so not again
     offered: Vec<u16>,
-    /// Told to the peer in every probe, so that an answer can be told from a forged one
-    nonce: u16,
+    /// Kept to ourselves: the token of a probe is made from it, so that an answer can be told
+    /// from a forged one by someone who has not seen the probe
+    secret: u64,
 }
 
 /// Whether `ip` is an address a peer is reached at over the internet, so that the same address
@@ -104,7 +107,7 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
 impl PortPrediction {
     /// What the addresses a peer offered say about its NAT: `None` when it offers no public IPv4
     /// address twice with different ports, or when its ports are not of a kind that can be guessed
-    pub(super) fn from_offered(offered: &[SocketAddr], nonce: u16) -> Option<Self> {
+    pub(super) fn from_offered(offered: &[SocketAddr], secret: u64) -> Option<Self> {
         let ports_of = |ip: Ipv4Addr| -> Vec<u16> {
             let mut ports: Vec<u16> = offered
                 .iter()
@@ -141,14 +144,19 @@ impl PortPrediction {
             ip,
             pattern,
             offered: ports,
-            nonce,
+            secret,
         })
     }
 
-    /// The token a probe to `port` carries, and its answer carries back. The top bit keeps it
-    /// apart from the tokens of the connectivity check, which count rounds from zero.
+    /// The token a probe to `port` carries, and its answer carries back. It is 31 bits taken
+    /// from a hash of the secret and the port, so one who has not seen the probe cannot guess it
+    /// (a guess is right once in 2^31), and a token is only good for the port it was sent to.
+    /// The top bit keeps it apart from the tokens of the connectivity check, which count
+    /// rounds from zero.
     pub(super) fn token(&self, port: u16) -> u32 {
-        (u32::from(0x8000 | (self.nonce & 0x7FFF)) << 16) | u32::from(port)
+        let mut hasher = DefaultHasher::new();
+        (self.secret, port).hash(&mut hasher);
+        0x8000_0000 | (hasher.finish() as u32 & 0x7FFF_FFFF)
     }
 
     /// Whether `token` is what a probe to `addr` carries
@@ -453,7 +461,7 @@ mod tests {
         assert!(!prediction.is_token_for(token, addr("203.0.113.7:40004")));
         assert!(!prediction.is_token_for(prediction.token(40004), from));
         // The top bit keeps it apart from the check's tokens, which count rounds from zero
-        assert!(token >> 16 >= 0x8000);
+        assert!(token >= 0x8000_0000);
         let other = PortPrediction::from_offered(
             &[addr("203.0.113.7:40000"), addr("203.0.113.7:40001")],
             8,
