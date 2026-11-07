@@ -55,10 +55,17 @@ pub const PRESENCE_UNANSWERED_AFTER: Duration = Duration::from_secs(3);
 
 /// How often an app pings the signaling server while in a room. The server keeps when it last
 /// heard from each connection, which is what [`Presence`] reports.
-pub const SERVER_PING_EVERY: Duration = Duration::from_secs(10);
+pub const SERVER_PING_EVERY: Duration = Duration::from_secs(4);
 
-/// How late a ping may be before the connection is taken as dead.
-pub const SERVER_PING_SLACK: Duration = Duration::from_secs(5);
+/// How late a ping may be before the participant's line is taken as dead. Together with
+/// [`SERVER_PING_EVERY`] it stays under the time an audio link waits before it gives up and the
+/// room is entered again (10 s), so a room of two names the broken side before the link is
+/// started over.
+pub const SERVER_PING_SLACK: Duration = Duration::from_secs(2);
+
+/// A signaling connection that has heard nothing from the server for this long is dead: the
+/// server answers a ping at once, so this is several pings long.
+pub const CONNECTION_DEAD_AFTER: Duration = Duration::from_secs(15);
 
 /// A participant heard from this long after this app stopped hearing them has a line that is up.
 const HEARD_AFTER: Duration = Duration::from_secs(1);
@@ -684,6 +691,15 @@ mod tests {
         let late = (SERVER_PING_EVERY + SERVER_PING_SLACK).as_millis() as u64;
         room.presence(late + 500, &[(2, late + 600)]);
         assert_eq!(room.side(2, late + 500), Some(Side::Theirs));
+    }
+
+    /// Verifies: REQ-CON-163
+    #[test]
+    fn when_in_a_room_of_two_their_line_broke_the_side_is_named_before_the_audio_link_gives_up() {
+        // The link gives up after 10 s and the room is entered again, which starts the
+        // question over: the server's answer has to be in before that.
+        let gives_up = Duration::from_secs(10);
+        assert!(SERVER_PING_EVERY + SERVER_PING_SLACK + PRESENCE_EVERY < gives_up);
     }
 
     /// Verifies: REQ-CON-163

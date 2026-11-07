@@ -5,7 +5,7 @@
 //! the status the screen reads.
 
 use jamjam::network::dropout::{
-    Dropouts, Heard, Line, LinkView, Network, DROPOUT_AFTER, SERVER_PING_EVERY, SERVER_PING_SLACK,
+    Dropouts, Heard, Line, LinkView, Network, CONNECTION_DEAD_AFTER, DROPOUT_AFTER,
 };
 use jamjam::network::has_default_route;
 use jamjam::network::settings_help::PeerBody;
@@ -22,10 +22,10 @@ const BUDGET_WINDOW: Duration = Duration::from_secs(10);
 /// program, so it is not asked at every tick.
 const NETWORK_FRESH_FOR: Duration = Duration::from_secs(2);
 
-/// Whether the signaling connection has been quiet for longer than a ping may be late: nothing
+/// Whether the signaling connection has been quiet for longer than [`CONNECTION_DEAD_AFTER`]: nothing
 /// came in, though the server answers a ping at once.
 pub(super) fn connection_is_dead(conn: &SignalingConnection) -> bool {
-    conn.quiet_for() > SERVER_PING_EVERY + SERVER_PING_SLACK
+    conn.quiet_for() > CONNECTION_DEAD_AFTER
 }
 
 fn lock(state: &SignalingState) -> std::sync::MutexGuard<'_, Dropouts> {
