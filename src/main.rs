@@ -24,8 +24,9 @@ use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, 
 use jamjam::network::{
     bind_audio_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate,
     ConnectionStats, EnterError, EnterRequest, Entered, Gathered, LatencyBreakdown, LinkHealth,
-    LinkIdentity, LinkSnapshot, LocalLatencyInfo, NetworkError, PeerLatencyInfo, PortMapping, RoomEntry,
-    RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
+    LinkIdentity, LinkSnapshot, LocalLatencyInfo, NetworkError, PeerLatencyInfo, PortMapping,
+    RoomEntry, RoomInfo, SignalingClient, SignalingConnection, SignalingMessage,
+    CLOCK_SKEW_NOTICE_SECS,
 };
 use uuid::Uuid;
 
@@ -2110,7 +2111,8 @@ mod tests {
 
     /// Verifies: REQ-CLI-013
     #[test]
-    fn the_spread_of_the_samples_gives_the_minimum_the_median_the_95th_percentile_and_the_maximum() {
+    fn the_spread_of_the_samples_gives_the_minimum_the_median_the_95th_percentile_and_the_maximum()
+    {
         let samples: Vec<f32> = (1..=100).map(|n| n as f32).collect();
 
         let spread = spread_json(&samples);
@@ -2126,13 +2128,7 @@ mod tests {
     /// Verifies: REQ-CLI-007
     #[test]
     fn a_session_nobody_linked_to_reports_no_peer_and_empty_counters() {
-        let report = session_report(
-            &settings(),
-            &[],
-            Duration::ZERO,
-            None,
-            &Observed::default(),
-        );
+        let report = session_report(&settings(), &[], Duration::ZERO, None, &Observed::default());
 
         assert_eq!(report["peer"], serde_json::Value::Null);
         assert_eq!(report["network"]["packets_received"], 0);
