@@ -28,7 +28,7 @@ on:
         default: '2'
       macos:
         description: macOS runners (at most 5 run at once)
-        default: '2'
+        default: '3'
       per_runner:
         description: Participants on each Linux and Windows runner (all together at most 16)
         default: '2'
