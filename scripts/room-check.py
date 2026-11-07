@@ -174,9 +174,15 @@ def launch(binary, work, index, command, server, room, turn, quiet_at, end_at):
         "--end-at", str(end_at),
         "--", *jamuru,
     ]
-    env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"))
+    # On Windows the settings are where the system says, not where HOME points,
+    # so the directory is named: two participants must not share an identity.
+    env = dict(
+        os.environ,
+        HOME=str(home),
+        XDG_CONFIG_HOME=str(home / ".config"),
+        JAMJAM_CONFIG_DIR=str(home / "config"),
+    )
     log = open(str(out) + ".log", "wb")
-    # On Windows the settings are where the system says, not where HOME points.
     detach = (
         {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         if os.name == "nt" else {"start_new_session": True}
@@ -231,7 +237,9 @@ def supervise(args):
         time.sleep(0.1)
     elapsed = time.time() - started
     if usage is not None:
-        text = f"{usage.ru_utime} {usage.ru_stime} {elapsed} {usage.ru_maxrss}\n"
+        # Kilobytes, except on macOS where the system counts bytes.
+        rss_kb = usage.ru_maxrss / 1024 if sys.platform == "darwin" else usage.ru_maxrss
+        text = f"{usage.ru_utime} {usage.ru_stime} {elapsed} {int(rss_kb)}\n"
     else:
         # What the system does not tell about a child that has ended is left out.
         text = f"- - {elapsed} -\n"
@@ -629,7 +637,6 @@ def analyze(work, index, per_runner, room):
         "os": os.environ.get("RUNNER_OS", report.get("os", "")).lower(),
         "version": report.get("jamjam_version"),
         "commit": os.environ.get("GITHUB_SHA", "")[:10] or None,
-        "underruns": report.get("audio", {}).get("underruns"),
     })
     links = []
     for peer in report.get("peers", []):
@@ -645,6 +652,9 @@ def analyze(work, index, per_runner, room):
             scope = "network"
         else:
             scope = "direct"
+        if scope != "machine" and not playout.get("frames_played"):
+            # Up on an address that never answered (or not up at all): nothing was heard on it.
+            scope = "unreached"
         address = peer.get("addr")
         links.append({
             "peer": other,
@@ -657,6 +667,7 @@ def analyze(work, index, per_runner, room):
             # The kind of route is told by the address; the address itself is not kept.
             "scope": scope,
             "route": route,
+            "route_confirmed": facts.get("route_confirmed"),
             "family": facts.get("family"),
             "connect_ms": facts.get("connect_ms"),
             "first_audio_ms": facts.get("first_audio_ms"),
@@ -669,6 +680,15 @@ def analyze(work, index, per_runner, room):
             "end_to_end_spread_ms": peer.get("end_to_end_spread_ms"),
             "address_hash": hashed(address.rsplit(":", 1)[0].strip("[]")) if address else None,
         })
+    # A peer that left and came back, or whose link was opened again, has several: the one
+    # that carried the most is the link, the others are counted.
+    best = {}
+    opened = {}
+    for link in links:
+        opened[link["peer"]] = opened.get(link["peer"], 0) + 1
+        if link["peer"] not in best or link["played"] > best[link["peer"]]["played"]:
+            best[link["peer"]] = link
+    links = [dict(best[peer], opened=opened[peer]) for peer in sorted(best)]
     result["links"] = links
     came_up = [link["connected_after_seconds"] for link in links if link["connected_after_seconds"] is not None]
     result["all_linked_seconds"] = max(came_up) if len(came_up) == total - 1 else None
@@ -679,7 +699,7 @@ def describe(result):
     heard = list(result["heard"].values())
     low = min(heard) if heard else 0.0
     cpu = ""
-    if result.get("elapsed_seconds"):
+    if result.get("elapsed_seconds") and "cpu_seconds" in result:
         cpu = f", cpu {100 * result['cpu_seconds'] / result['elapsed_seconds']:.0f}%"
     return f"{name_of(result['id'])}: heard {sum(1 for h in heard if h > 0)} of {len(heard)} speakers, lowest share {low:.2f}{cpu}"
 

@@ -885,8 +885,8 @@ fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
         "the time to come up should be in the report: {linked}"
     );
     assert!(
-        linked["buffer_ms"].is_f64() && report["audio"]["underruns"].is_u64(),
-        "the receive buffer and the underruns should be in the report: {report}"
+        linked["buffer_ms"].is_f64(),
+        "the receive buffer should be in the report: {report}"
     );
     assert!(
         !linked["link"].to_string().contains(&address),

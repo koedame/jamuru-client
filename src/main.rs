@@ -663,8 +663,6 @@ struct Observed {
     links: HashMap<String, LinkSeries>,
     /// Seconds from entering the room to the link coming up
     connected_after: HashMap<String, f64>,
-    /// Times the audio callback found nothing to play
-    underruns: u64,
 }
 
 /// Minimum, median, 95th percentile, maximum and standard deviation of `values`, or `null`
@@ -692,6 +690,7 @@ fn spread_json(values: &[f32]) -> serde_json::Value {
 fn route_json(link: &LinkSummary) -> serde_json::Value {
     serde_json::json!({
         "route": link.facts.route,
+        "route_confirmed": link.facts.route_confirmed,
         "family": link.addr.map(|addr| if addr.is_ipv6() { "ipv6" } else { "ipv4" }),
         "connect_ms": link.facts.connect_ms,
         "first_audio_ms": link.facts.first_audio_ms,
@@ -743,7 +742,6 @@ fn session_report(
             "codec": format!("{:?}", settings.preset.codec_type()).to_lowercase(),
             "sample_rate": settings.sample_rate,
             "frame_size": settings.frame_size,
-            "underruns": observed.underruns,
         },
         "os": std::env::consts::OS,
         "network": network_json(&stats),
@@ -1022,7 +1020,6 @@ async fn run_room_session(
 
     let session = backend.audio().take();
     if let Some(session) = session {
-        observed.underruns = session.underruns();
         let reports = session.finish().await;
 
         if let Some(path) = &run.report_json {
@@ -1668,11 +1665,6 @@ impl AudioSession {
         }
     }
 
-    /// How many times the audio callback found nothing to play so far
-    fn underruns(&self) -> u64 {
-        self.controls.shared.underrun_count.load(Ordering::SeqCst)
-    }
-
     /// Stops the audio, closes every link and prints what each looked like.
     async fn finish(self) -> Vec<LinkSummary> {
         let Self {
@@ -2083,6 +2075,7 @@ mod tests {
 
         let peer = &report["peers"][0];
         assert_eq!(peer["link"]["route"], "public");
+        assert_eq!(peer["link"]["route_confirmed"], true);
         assert_eq!(peer["link"]["family"], "ipv6");
         assert_eq!(peer["link"]["connect_ms"], 840);
         assert_eq!(peer["link"]["route_moves"], 2);
