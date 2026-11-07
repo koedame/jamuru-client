@@ -1,0 +1,55 @@
+/**
+ * DropoutNotice styles
+ */
+
+.dropout-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  font-size: var(--font-size-tiny);
+  color: var(--color-text-secondary);
+}
+
+.dropout-notice__alert {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-xs);
+}
+
+.dropout-notice__heading {
+  color: var(--color-danger);
+  font-weight: var(--font-weight-bold);
+}
+
+.dropout-notice__seconds {
+  font-family: var(--font-family-mono);
+  color: var(--color-danger);
+}
+
+.dropout-notice__unstable {
+  color: var(--color-warning);
+}
+
+/* In the roster the side goes on a line of its own under the name and the seconds */
+.dropout-notice--row .dropout-notice__side {
+  flex-basis: 100%;
+}
+
+/* A mixer strip is a narrow column: everything centred and stacked */
+.dropout-notice--strip {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+}
+
+.dropout-notice--strip .dropout-notice__alert {
+  flex-direction: column;
+  align-items: center;
+}
+
+/* A line that does not fit breaks into two even halves, not a word and a stray character */
+.dropout-notice--strip .dropout-notice__heading,
+.dropout-notice--strip .dropout-notice__side {
+  text-wrap: balance;
+}

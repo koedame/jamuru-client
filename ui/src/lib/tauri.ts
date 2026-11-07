@@ -819,6 +819,20 @@ export interface PeerLinkStatus {
   level: number;
   /** The buffer their audio is played from (ADR-097) */
   buffer: PeerBuffer;
+  /** Set while nothing arrives from them and they have not left (REQ-CON-161) */
+  dropout: PeerDropout | null;
+  /** Went quiet twice or more in the last quarter of an hour (REQ-CON-162) */
+  unstable: boolean;
+}
+
+/** Whose line is cut when a participant's audio stopped (REQ-CON-163) */
+export type DropoutSide = "mine" | "theirs" | "between" | "checking" | "unknown";
+
+/** A participant whose audio stopped without a leave notice */
+export interface PeerDropout {
+  /** How long nothing has arrived, in seconds */
+  silent_secs: number;
+  side: DropoutSide;
 }
 
 /** The longest a receive buffer may be, in tenths of a millisecond (ADR-097) */

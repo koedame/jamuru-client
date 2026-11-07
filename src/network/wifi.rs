@@ -12,6 +12,14 @@ pub fn default_route_is_wifi() -> Option<bool> {
     platform::default_route_is_wifi()
 }
 
+/// Whether this machine has a route out of the local network at all, as the system's route table
+/// says. `Some(false)` is the Wi-Fi switched off or the cable pulled: nothing can reach the
+/// internet, which is this machine's own line broken (REQ-CON-163). `None` when that could not be
+/// found out, so the caller does not take the silence for an answer.
+pub fn has_default_route() -> Option<bool> {
+    platform::has_default_route()
+}
+
 /// The interface the IPv4 default route leaves by, out of the text of
 /// Linux's `/proc/net/route`. Of several default routes the one with the
 /// lowest metric wins, as the kernel picks it.
@@ -78,6 +86,11 @@ mod platform {
         let sys = Path::new("/sys/class/net").join(interface);
         Some(sys.join("wireless").exists() || sys.join("phy80211").exists())
     }
+
+    pub fn has_default_route() -> Option<bool> {
+        let route_table = std::fs::read_to_string("/proc/net/route").ok()?;
+        Some(super::linux_default_interface(&route_table).is_some())
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -89,6 +102,23 @@ mod platform {
         let interface = super::macos_default_interface(&route)?;
         let ports = run("/usr/sbin/networksetup", &["-listallhardwareports"])?;
         Some(super::macos_interface_is_wifi(&ports, interface))
+    }
+
+    pub fn has_default_route() -> Option<bool> {
+        // `route` exits with an error and says "not in table" when there is no default route
+        let output = Command::new("/sbin/route")
+            .args(["-n", "get", "default"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let error = String::from_utf8_lossy(&output.stderr);
+        if super::macos_default_interface(&text).is_some() {
+            Some(true)
+        } else if error.contains("not in table") || text.contains("not in table") {
+            Some(false)
+        } else {
+            None
+        }
     }
 
     fn run(program: &str, args: &[&str]) -> Option<String> {
@@ -127,11 +157,29 @@ mod platform {
         }
         Some(row.Type == IF_TYPE_IEEE80211)
     }
+
+    /// `ERROR_NETWORK_UNREACHABLE`: what `GetBestInterface` answers when no route leads out.
+    const ERROR_NETWORK_UNREACHABLE: u32 = 1231;
+
+    pub fn has_default_route() -> Option<bool> {
+        let outside = u32::from_ne_bytes([8, 8, 8, 8]);
+        let mut index = 0u32;
+        // SAFETY: `index` is a live `u32` the call writes through.
+        match unsafe { GetBestInterface(outside, &mut index) } {
+            0 => Some(true),
+            ERROR_NETWORK_UNREACHABLE => Some(false),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod platform {
     pub fn default_route_is_wifi() -> Option<bool> {
+        None
+    }
+
+    pub fn has_default_route() -> Option<bool> {
         None
     }
 }

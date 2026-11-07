@@ -141,6 +141,52 @@ export const Default: Story = {
   },
 };
 
+/** One participant's audio stopped without a leave notice: their strip says so and whose line is cut */
+export const AudioStopped: Story = {
+  args: {
+    channels: [
+      {
+        id: "local-1",
+        name: "You",
+        type: "local" as const,
+        sampleRate: 48000,
+        channelCount: 2,
+        levelL: 65,
+        levelR: 60,
+        volume: 80,
+        pan: 0,
+        isMuted: false,
+      },
+      {
+        id: "remote-1",
+        name: "Alice",
+        type: "remote" as const,
+        sampleRate: 48000,
+        channelCount: 2,
+        levelL: 0,
+        levelR: 0,
+        volume: 75,
+        pan: -30,
+        isMuted: false,
+        dropout: { silent_secs: 12, side: "theirs" as const },
+        unstable: true,
+      },
+      {
+        id: "remote-2",
+        name: "Bob",
+        type: "remote" as const,
+        sampleRate: 48000,
+        channelCount: 2,
+        levelL: 50,
+        levelR: 48,
+        volume: 80,
+        pan: 30,
+        isMuted: false,
+      },
+    ],
+  },
+};
+
 /** No channel yet: only the title (a session with no audio link) */
 export const Empty: Story = {
   args: { channels: [] },

@@ -4,6 +4,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -377,6 +378,9 @@ pub enum SignalingMessage {
         local_addr: Option<SocketAddr>,
     },
     ListRooms,
+    /// Asks how long ago the server last heard from each of the other participants' connections
+    /// (REQ-CON-164). Answered with [`SignalingMessage::Presence`].
+    GetPresence,
 
     // Server -> Client
     RoomCreated {
@@ -410,6 +414,11 @@ pub enum SignalingMessage {
     },
     RoomList {
         rooms: Vec<RoomInfo>,
+    },
+    /// The participants of the asker's room, the asker included, each with how long ago the
+    /// server last heard from their connection. A participant who is not listed is not in the room.
+    Presence {
+        peers: Vec<PeerPresence>,
     },
     Error {
         message: String,
@@ -446,6 +455,23 @@ pub enum SignalingMessage {
         body: serde_json::Map<String, serde_json::Value>,
     },
 }
+
+/// One participant in a [`SignalingMessage::Presence`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerPresence {
+    pub peer_id: Uuid,
+    /// How long ago, in milliseconds, the server last heard a ping from their connection;
+    /// `None` when it never has: an app that does not ping, or one that has only just come in.
+    #[serde(default)]
+    pub idle_ms: Option<u64>,
+}
+
+/// The text an app sends the server to show its connection is alive, and the server answers
+/// without waking the room (REQ-CON-164).
+pub const PING_TEXT: &str = "ping";
+
+/// What the server answers [`PING_TEXT`] with.
+pub const PONG_TEXT: &str = "pong";
 
 /// Rustls 0.23 requires exactly one process-wide default `CryptoProvider`
 /// and refuses to auto-select one when more than one crypto backend crate
@@ -667,7 +693,10 @@ impl SignalingClient {
 
         debug!("Connected to signaling server: {}", signaling_url);
 
-        Ok(SignalingConnection { ws_stream })
+        Ok(SignalingConnection {
+            ws_stream,
+            last_heard: Instant::now(),
+        })
     }
 }
 
@@ -676,9 +705,17 @@ pub struct SignalingConnection {
     ws_stream: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
+    /// When anything last came in over the connection: a message, an answer to a ping.
+    last_heard: Instant,
 }
 
 impl SignalingConnection {
+    /// How long nothing has come in over the connection. The server answers a ping at once, so
+    /// a connection that is quiet for longer than a ping is late is not carrying anything.
+    pub fn quiet_for(&self) -> Duration {
+        self.last_heard.elapsed()
+    }
+
     /// Send a message to the server
     pub async fn send(&mut self, msg: SignalingMessage) -> Result<(), NetworkError> {
         let json = serde_json::to_string(&msg)
@@ -692,15 +729,27 @@ impl SignalingConnection {
         Ok(())
     }
 
-    /// Send a WebSocket ping frame. `recv()` only puts bytes on the wire when
-    /// there is a message to relay, so a client that is merely listening
-    /// (connected to the server but not yet in a room, or in a quiet room)
-    /// can go silent long enough to hit an edge/proxy idle timeout. The host
-    /// calls this on a timer to keep the connection alive regardless of
-    /// application traffic.
-    pub async fn send_ping(&mut self) -> Result<(), NetworkError> {
+    /// Sends a WebSocket ping frame, which the server's runtime answers at once and which costs
+    /// the server nothing. For a connection that is not in a room, where there is nothing to tell
+    /// the others; see [`Self::send_ping`] for one that is.
+    pub async fn send_frame_ping(&mut self) -> Result<(), NetworkError> {
         self.ws_stream
             .send(Message::Ping(Vec::new().into()))
+            .await
+            .map_err(|e| NetworkError::SignalingError(format!("Ping failed: {}", e)))?;
+        Ok(())
+    }
+
+    /// Sends the server a ping, which it answers at once ([`PONG_TEXT`]). `recv()` only puts
+    /// bytes on the wire when there is a message to relay, so a client that is merely listening
+    /// (connected to the server but not yet in a room, or in a quiet room) can go silent long
+    /// enough to hit an edge/proxy idle timeout. The host calls this on a timer to keep the
+    /// connection alive regardless of application traffic, and the answer shows the connection
+    /// is carrying something both ways ([`Self::quiet_for`]). The server also keeps when it last
+    /// heard one, and tells the others in the room (REQ-CON-164).
+    pub async fn send_ping(&mut self) -> Result<(), NetworkError> {
+        self.ws_stream
+            .send(Message::Text(PING_TEXT.into()))
             .await
             .map_err(|e| NetworkError::SignalingError(format!("Ping failed: {}", e)))?;
         Ok(())
@@ -715,7 +764,12 @@ impl SignalingConnection {
     /// is still an error - that is a real incompatibility, not a newer message.
     pub async fn recv(&mut self) -> Result<SignalingMessage, NetworkError> {
         loop {
-            match self.ws_stream.next().await {
+            let frame = self.ws_stream.next().await;
+            if matches!(frame, Some(Ok(_))) {
+                self.last_heard = Instant::now();
+            }
+            match frame {
+                Some(Ok(Message::Text(text))) if text.as_str() == PONG_TEXT => continue,
                 Some(Ok(Message::Text(text))) => match serde_json::from_str(&text) {
                     Ok(msg) => return Ok(msg),
                     Err(e) if is_of_unknown_type(&text) => {

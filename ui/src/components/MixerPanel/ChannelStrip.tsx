@@ -10,6 +10,8 @@ import { PanSlider } from "./PanSlider";
 import { StereoMeterView } from "./StereoMeter";
 import { StereoFader } from "./StereoFader";
 import { AudioQualityBadge } from "./AudioQualityBadge";
+import { DropoutNotice } from "../DropoutNotice";
+import type { PeerDropout } from "../../lib/tauri";
 import { usePeakHold } from "./usePeakHold";
 import { levelToDb } from "./mixerScale";
 import { HeadphonesIcon, MicIcon, MicOffIcon, VolumeIcon, VolumeOffIcon } from "../../lib/icons";
@@ -38,6 +40,10 @@ export interface ChannelStripProps {
   pan: number;
   /** Whether the channel is muted */
   isMuted: boolean;
+  /** Set while nothing arrives from the participant and they have not left (remote only) */
+  dropout?: PeerDropout | null;
+  /** Went quiet twice or more in the last quarter of an hour (remote only) */
+  unstable?: boolean;
   /** Callback when volume changes */
   onVolumeChange?: (volume: number) => void;
   /** Callback when pan changes */
@@ -108,6 +114,8 @@ export function ChannelStrip({
   onPanChange,
   onMuteToggle,
   isMonitoring = false,
+  dropout = null,
+  unstable = false,
   onMonitorToggle,
 }: ChannelStripProps) {
   const { t } = useTranslation();
@@ -151,6 +159,8 @@ export function ChannelStrip({
         </div>
         <ChannelMeter levelL={levelL} levelR={levelR} isMuted={isMuted} />
       </div>
+
+      <DropoutNotice dropout={dropout} unstable={unstable} variant="strip" />
 
       <div className="channel-strip__name">{displayName}</div>
 
