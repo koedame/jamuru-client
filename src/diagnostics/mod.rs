@@ -12,8 +12,8 @@ pub use audio::{
 };
 pub use cpu::{CpuDiagnostics, CpuDiagnosticsResult};
 pub use network::{
-    ConnectionStability, IpSupport, NatType, NetworkDiagnostics, NetworkDiagnosticsResult,
-    SignalingDiagnostics,
+    ConnectionStability, IpSupport, Ipv6Status, NatType, NetworkDiagnostics,
+    NetworkDiagnosticsResult, PeerReach, SignalingDiagnostics, UpnpStatus,
 };
 
 use serde::{Deserialize, Serialize};
@@ -90,8 +90,26 @@ pub enum ProblemCode {
     NoConnectivity,
     /// IPv6 is not available (IPv4-only)
     NoIpv6,
-    /// Symmetric NAT detected, making P2P harder
-    SymmetricNat,
+    /// The router maps the audio port per destination, so a peer behind a router that does
+    /// the same cannot be reached over IPv4
+    PerDestinationNat,
+    /// The router was not looked for: the setting that lets the app ask it is off
+    UpnpOff,
+    /// No router that maps ports answered
+    UpnpNoRouter,
+    /// A router answered and refused
+    UpnpRefused,
+    /// The router's outside address is not a public one (another router or the provider's NAT
+    /// sits in front of it)
+    UpnpDoubleNat,
+    /// A global IPv6 address exists but no STUN server answered over it
+    Ipv6Unreachable,
+    /// Too few STUN servers answered to tell how the router maps ports (UDP may not get out)
+    StunUnanswered,
+    /// The system does not let the app use the microphone
+    MicrophoneRefused,
+    /// The system has not been asked, or not answered, whether the app may use the microphone
+    MicrophoneUndecided,
     /// Connection stability graded C
     UnstableConnection,
     /// The default route leaves by a Wi-Fi interface
@@ -188,14 +206,16 @@ pub struct CompleteDiagnosticsResult {
 
 /// Run complete diagnostics. `configured_input`/`configured_output` are the
 /// device ids Settings has configured (`None` for "use the OS default"),
-/// passed through to `AudioDiagnostics::run`.
+/// passed through to `AudioDiagnostics::run`. `ask_router` is the setting that
+/// lets the app talk to the router (`NetworkDiagnostics::run`).
 pub async fn run_complete_diagnostics(
     signaling: &crate::network::SignalingClient,
+    ask_router: bool,
     configured_input: Option<&str>,
     configured_output: Option<&str>,
 ) -> CompleteDiagnosticsResult {
     // Run diagnostics (network is async, others are sync)
-    let network = NetworkDiagnostics::run(signaling).await;
+    let network = NetworkDiagnostics::run(signaling, ask_router).await;
     let audio = AudioDiagnostics::run(configured_input, configured_output).await;
     let cpu = CpuDiagnostics::run();
 
@@ -315,7 +335,10 @@ mod tests {
                 public_ipv4: Some("198.51.100.10".to_string()),
                 public_ipv6: None,
             },
-            nat_type: NatType::FullCone,
+            nat_type: NatType::Stable,
+            ipv6: Ipv6Status::NoAddress,
+            upnp: UpnpStatus::Off,
+            peer_reach: PeerReach::Wide,
             connection_stability: stability,
             jitter_ms: Some(jitter_ms),
             stability_metrics: ConnectionStability {

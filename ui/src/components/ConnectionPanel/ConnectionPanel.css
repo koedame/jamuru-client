@@ -354,6 +354,27 @@
   transition: background-color 0.15s ease;
 }
 
+.connection-panel__check-link {
+  align-self: center;
+  padding: var(--space-xs) var(--space-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.connection-panel__check-link:hover {
+  color: var(--color-text-primary);
+}
+
+.connection-panel__check-link:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
 .connection-panel__test-room:hover {
   background: var(--color-bg-elevated);
 }

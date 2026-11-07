@@ -207,6 +207,47 @@ impl StunClient {
         found
     }
 
+    /// The address each of `servers` sees this socket at, over IPv4, with every server asked in
+    /// the same round. Servers that did not answer are left out, and so is a server at an
+    /// address another one has.
+    ///
+    /// A router that gives the socket one outside port whoever it talks to makes every answer
+    /// the same; one that maps per destination makes them differ.
+    pub async fn mappings_seen_by(&self, servers: &[&str]) -> Vec<StunResult> {
+        if !IpFamilies::of_tokio(&self.socket).v4 {
+            return Vec::new();
+        }
+        let mut targets: Vec<(SocketAddr, [u8; 12])> = Vec::new();
+        let mut names: Vec<(SocketAddr, &str)> = Vec::new();
+        for server in servers {
+            match resolve(server, true).await {
+                Ok(addr) if !names.iter().any(|(a, _)| *a == addr) => {
+                    targets.push((addr, rand::random()));
+                    names.push((addr, server));
+                }
+                Ok(_) => {}
+                Err(e) => warn!("STUN request to {} failed: {}", server, e),
+            }
+        }
+        if targets.is_empty() {
+            return Vec::new();
+        }
+        let answers = self
+            .ask(&targets, Some(OTHER_FAMILY_GRACE))
+            .await
+            .unwrap_or_default();
+        answers
+            .into_iter()
+            .filter_map(|(target, mapped)| {
+                let server = names.iter().find(|(a, _)| *a == target)?.1;
+                Some(StunResult {
+                    mapped_address: mapped,
+                    server: server.to_string(),
+                })
+            })
+            .collect()
+    }
+
     /// Sends one binding request to each of `targets` and collects the answers: the
     /// address each target reports, until all have answered or the wait is over. With a
     /// `grace`, the wait ends that long after the first answer.

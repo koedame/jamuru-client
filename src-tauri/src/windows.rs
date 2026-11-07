@@ -287,13 +287,13 @@ pub fn toggle_chat_window(app: &AppHandle) -> tauri::Result<()> {
 // Tauri Commands for window management
 // ============================================================================
 
-/// Open settings window
+/// Open settings window, on `tab` when one of [`SETTINGS_TABS`] is given
 ///
 /// The commands that can create a window are `async`: WebView2 deadlocks the
 /// main thread when a window is built from a synchronous command.
 #[tauri::command]
-pub async fn window_open_settings(app: AppHandle) -> Result<(), String> {
-    create_settings_window(&app).map_err(|e| e.to_string())
+pub async fn window_open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
+    create_settings_window_at(&app, tab.as_deref()).map_err(|e| e.to_string())
 }
 
 /// Close settings window

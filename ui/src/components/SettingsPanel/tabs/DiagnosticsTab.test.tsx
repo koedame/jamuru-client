@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { DiagnosticsTab } from './DiagnosticsTab';
+import type { CompleteDiagnosticsResult } from '../../../lib/tauri';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -158,5 +159,93 @@ describe('DiagnosticsTab report a problem section (ADR-058)', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('送信できませんでした');
     expect(screen.getByTestId('diagnostics-report-problem-send')).toHaveTextContent('Try again');
+  });
+});
+
+describe('DiagnosticsTab connection summary', () => {
+  const result = (
+    peerReach: 'Wide' | 'Narrow' | 'Unknown',
+  ): CompleteDiagnosticsResult =>
+    ({
+      overall_score: 80,
+      recommended_preset: 'Balanced',
+      zero_latency_compatible: false,
+      network: {
+        ip_support: {
+          ipv4_available: true,
+          ipv6_available: false,
+          ipv4_addresses: [],
+          ipv6_addresses: [],
+          public_ipv4: null,
+          public_ipv6: null,
+        },
+        nat_type: 'PerDestination',
+        ipv6: 'NoAddress',
+        upnp: 'Off',
+        peer_reach: peerReach,
+        connection_stability: 'A',
+        jitter_ms: null,
+        stability_metrics: {
+          avg_rtt_ms: null,
+          min_rtt_ms: null,
+          max_rtt_ms: null,
+          successful_probes: 0,
+          failed_probes: 0,
+          packet_loss_rate: 0,
+        },
+        signaling: { connected: true, connection_time_ms: 10, error: null },
+        problems: [],
+      },
+      audio: {
+        input_devices: [],
+        output_devices: [],
+        selected_input: null,
+        selected_output: null,
+        input_source: 'OsDefault',
+        output_source: 'OsDefault',
+        asio_devices: [],
+        low_latency_support: {
+          supports_32: false,
+          supports_64: false,
+          min_buffer_size: null,
+          estimated_min_latency_ms: null,
+        },
+        overall_grade: 'A',
+        problems: [],
+      },
+      cpu: {
+        system: { cpu_cores: 4 },
+        benchmarks: [],
+        realtime_capable: true,
+        grade: 'A',
+        problems: [],
+      },
+      problems: [],
+    }) as unknown as CompleteDiagnosticsResult;
+
+  // Verifies: REQ-GUI-038
+  it.each([
+    ['Wide', 'settings.diagnostics.reach.wide'],
+    ['Narrow', 'settings.diagnostics.reach.narrow'],
+    ['Unknown', 'settings.diagnostics.reach.unknown'],
+  ] as const)(
+    'the network reaches %s, the summary row says so',
+    (reach, key) => {
+      render(<DiagnosticsTab state='complete' result={result(reach)} />);
+
+      expect(screen.getByText(key)).toBeInTheDocument();
+    },
+  );
+
+  // Verifies: REQ-GUI-038
+  it('IPv6 and UPnP are shown as rows of the network card', () => {
+    render(<DiagnosticsTab state='complete' result={result('Narrow')} />);
+
+    expect(
+      screen.getByText('settings.diagnostics.ipv6Status.noAddress'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('settings.diagnostics.upnpStatus.off'),
+    ).toBeInTheDocument();
   });
 });

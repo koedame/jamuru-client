@@ -52,6 +52,8 @@ export interface ConnectionPanelProps {
   onRetry?: () => void;
   /** Callback when settings button is clicked */
   onOpenSettings?: () => void;
+  /** Callback when "check the connection and devices" is clicked; the link shows only when given */
+  onCheckConnection?: () => void;
   /** Title text (header logo) */
   title?: string;
   /** Welcome heading shown above the create/join form */
@@ -95,6 +97,7 @@ export function ConnectionPanel({
   onCancel,
   onRetry,
   onOpenSettings,
+  onCheckConnection,
   title = "jamuru",
   welcomeTitle: welcomeTitleProp,
   welcomeSubtitle: welcomeSubtitleProp,
@@ -340,6 +343,16 @@ export function ConnectionPanel({
             </button>
           )}
 
+          {onCheckConnection && (
+            <button
+              type="button"
+              className="connection-panel__check-link"
+              data-testid="connection-panel-check-connection"
+              onClick={onCheckConnection}
+            >
+              {t("session.checkConnection.button")}
+            </button>
+          )}
         </form>
       </main>
     </div>

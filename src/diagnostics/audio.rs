@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use super::{DiagnosticGrade, DiagnosticProblem, ProblemCode, ProblemSeverity};
+use crate::audio::mic_access::{MicAccess, MicSystem, SystemMic};
 use crate::audio::{
     bounded, list_input_devices, list_output_devices, resolve_input_device, resolve_output_device,
     stable_device_id, AudioDevice, AudioError, DeviceId, LIST_TIMEOUT,
@@ -246,6 +247,7 @@ impl AudioDiagnostics {
         Self::run_with(
             Arc::new(read_devices_from_driver),
             LIST_TIMEOUT,
+            SystemMic.status(),
             configured_input,
             configured_output,
         )
@@ -255,10 +257,27 @@ impl AudioDiagnostics {
     async fn run_with(
         read: ReadDevices,
         timeout: Duration,
+        microphone: MicAccess,
         configured_input: Option<&str>,
         configured_output: Option<&str>,
     ) -> AudioDiagnosticsResult {
         let mut problems = Vec::new();
+
+        // Asked of the system without bringing its question up: an input that is opened
+        // before it is answered waits for the person (see `mic_access`).
+        match microphone {
+            MicAccess::Granted => {}
+            MicAccess::Refused => problems.push(DiagnosticProblem {
+                severity: ProblemSeverity::Error,
+                category: "audio".to_string(),
+                code: ProblemCode::MicrophoneRefused,
+            }),
+            MicAccess::Undecided => problems.push(DiagnosticProblem {
+                severity: ProblemSeverity::Info,
+                category: "audio".to_string(),
+                code: ProblemCode::MicrophoneUndecided,
+            }),
+        }
 
         // Resolve the input/output device the same way `streaming_start`
         // would: the configured id if there is one, otherwise the OS default.
@@ -642,7 +661,14 @@ mod tests {
             })
         };
 
-        let result = AudioDiagnostics::run_with(read, Duration::from_millis(200), None, None).await;
+        let result = AudioDiagnostics::run_with(
+            read,
+            Duration::from_millis(200),
+            MicAccess::Granted,
+            None,
+            None,
+        )
+        .await;
 
         ticker.abort();
         drop(release);
@@ -664,7 +690,14 @@ mod tests {
     ) {
         let (read, release) = reader(Some(Direction::Input));
 
-        let result = AudioDiagnostics::run_with(read, Duration::from_millis(200), None, None).await;
+        let result = AudioDiagnostics::run_with(
+            read,
+            Duration::from_millis(200),
+            MicAccess::Granted,
+            None,
+            None,
+        )
+        .await;
 
         drop(release);
         let codes = problem_codes(&result);
@@ -689,7 +722,14 @@ mod tests {
     async fn when_the_output_driver_hangs_the_output_is_reported_unresponsive() {
         let (read, release) = reader(Some(Direction::Output));
 
-        let result = AudioDiagnostics::run_with(read, Duration::from_millis(200), None, None).await;
+        let result = AudioDiagnostics::run_with(
+            read,
+            Duration::from_millis(200),
+            MicAccess::Granted,
+            None,
+            None,
+        )
+        .await;
 
         drop(release);
         let codes = problem_codes(&result);
@@ -700,11 +740,67 @@ mod tests {
     }
 
     /// Verifies: REQ-AUD-123
+    /// Given the system has refused the app the microphone
+    /// When the audio is diagnosed
+    /// Then an error says so, and no question is raised by the diagnosis
+    ///
+    /// Verifies: REQ-CON-169
+    #[tokio::test]
+    async fn when_the_microphone_is_refused_the_diagnosis_says_so() {
+        let (read, _release) = reader(None);
+        let result = AudioDiagnostics::run_with(
+            read,
+            Duration::from_secs(5),
+            MicAccess::Refused,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(problem_codes(&result).contains(&"MicrophoneRefused".to_string()));
+        assert!(result
+            .problems
+            .iter()
+            .any(|p| matches!(p.code, ProblemCode::MicrophoneRefused)
+                && p.severity == ProblemSeverity::Error));
+    }
+
+    /// Given the system has not been asked about the microphone yet
+    /// When the audio is diagnosed
+    /// Then it is noted, as information
+    ///
+    /// Verifies: REQ-CON-169
+    #[tokio::test]
+    async fn when_the_microphone_is_not_decided_the_diagnosis_notes_it() {
+        let (read, _release) = reader(None);
+        let result = AudioDiagnostics::run_with(
+            read,
+            Duration::from_secs(5),
+            MicAccess::Undecided,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(result
+            .problems
+            .iter()
+            .any(|p| matches!(p.code, ProblemCode::MicrophoneUndecided)
+                && p.severity == ProblemSeverity::Info));
+    }
+
     #[tokio::test]
     async fn when_the_driver_answers_no_unresponsive_problem_is_reported() {
         let (read, _release) = reader(None);
 
-        let result = AudioDiagnostics::run_with(read, Duration::from_secs(5), None, None).await;
+        let result = AudioDiagnostics::run_with(
+            read,
+            Duration::from_secs(5),
+            MicAccess::Granted,
+            None,
+            None,
+        )
+        .await;
 
         let codes = problem_codes(&result);
         assert!(!codes.contains(&"InputDeviceUnresponsive".to_string()));
