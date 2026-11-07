@@ -7,13 +7,16 @@ name: Room check
 #
 # It connects to a deployed server whose address is a repository secret; the
 # server's source is not part of this repository and does not run here.
-# It starts only by hand (a nightly run is added once the manual runs are
-# stable), so that a pull request from a fork never reaches the secret. The log carries a verdict and numbers
+# It starts on a schedule (once a night) or by hand, so that a pull request
+# from a fork never reaches the secret. The log carries a verdict and numbers
 # per participant, nothing the server sent.
 #
 # The runners' CPUs are shared, so this says nothing about performance.
 
 on:
+  schedule:
+    # 2:30 AM JST (17:30 UTC previous day)
+    - cron: '30 17 * * *'
   workflow_dispatch:
     inputs:
       runners:

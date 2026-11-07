@@ -24,7 +24,7 @@ Accepted
 - 部屋を作る runner が招待コードを他の runner に渡す。ワークフローの成果物は読めるので、接続先（secret）を鍵にして暗号化した
   ファイルで渡す
 - 接続先は secret `JAMJAM_SERVER_URL_BETA` で渡し、ソースにもログにも書かない（[ADR-030](./ADR-030-signaling-url-by-build-profile.md)）
-- 起動は `workflow_dispatch` と、手動の実行が安定してから足す `schedule`（夜間に 1 回）だけ。fork からの pull request には secret が渡らない。
+- 起動は `schedule`（夜間に 1 回）と `workflow_dispatch` だけ。fork からの pull request には secret が渡らない。
   公開リポジトリに self-hosted runner を付けない
 - ログに出すのは合否と、参加者ごとの数値（音が入っていた窓の割合・聞こえた相手の数・音が欠けた割合・往復の時間・CPU の使用率）だけ。
   サーバーの応答・`jamuru` の出力・接続元のアドレスは出さず、成果物にも入れない
@@ -33,6 +33,9 @@ Accepted
 - runner の CPU は共有なので、性能の実測には使わない
 
 ## Consequences
+
+- 手動の実行で、16 人（4 台の runner に 4 人ずつ、2 台に 8 人ずつ）が全員の番を 93〜100 % の窓で聞き、他人の番に聞こえたことは無かった
+  （2026-11-07）。1 台の runner に載せられるのは、相手 15 人を受ける参加者で 8 人くらいまで（1 人あたり CPU 31〜38 %、4 コアのうち約 3 コア）
 
 - 機材を足さずに、16 人の部屋と、runner どうし（別のデータセンターの回線）の P2P を毎晩確かめられる
 - 確かめられるのは、いまステージングに出ているサーバーとの組み合わせだけ。まだ出していないサーバーの変更は、
