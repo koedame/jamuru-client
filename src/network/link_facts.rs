@@ -7,7 +7,7 @@
 //! two durations, never the peer's address.
 
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -169,6 +169,8 @@ pub struct LinkSnapshot {
     pub connect_ms: Option<u64>,
     /// Milliseconds from the link going up to the first audio packet.
     pub first_audio_ms: Option<u64>,
+    /// How many times the route moved to another address after the link went up.
+    pub route_moves: u32,
 }
 
 impl LinkSnapshot {
@@ -185,6 +187,7 @@ pub struct LinkFacts {
     route_confirmed: AtomicBool,
     connect_ms: AtomicU64,
     first_audio_ms: AtomicU64,
+    route_moves: AtomicU32,
     up_at: Mutex<Option<Instant>>,
 }
 
@@ -195,6 +198,7 @@ impl LinkFacts {
             route_confirmed: AtomicBool::new(false),
             connect_ms: AtomicU64::new(NOT_MEASURED),
             first_audio_ms: AtomicU64::new(NOT_MEASURED),
+            route_moves: AtomicU32::new(0),
             up_at: Mutex::new(None),
         }
     }
@@ -219,6 +223,7 @@ impl LinkFacts {
         self.route
             .store(LinkRoute::of(addr).to_u8(), Ordering::Relaxed);
         self.route_confirmed.store(false, Ordering::Relaxed);
+        self.route_moves.fetch_add(1, Ordering::Relaxed);
     }
 
     /// An audio packet arrived. Only the first one since the link went up counts.
@@ -250,6 +255,7 @@ impl LinkFacts {
             route_confirmed: route.map(|_| self.route_confirmed.load(Ordering::Relaxed)),
             connect_ms: measured(&self.connect_ms),
             first_audio_ms: measured(&self.first_audio_ms),
+            route_moves: self.route_moves.load(Ordering::Relaxed),
         }
     }
 }
@@ -398,6 +404,7 @@ mod tests {
         assert_eq!(snapshot.route, Some(LinkRoute::Public));
         assert_eq!(snapshot.route_confirmed, Some(false));
         assert_eq!(snapshot.connect_ms, connect_ms);
+        assert_eq!(snapshot.route_moves, 1);
     }
 
     #[test]

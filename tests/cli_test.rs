@@ -774,6 +774,7 @@ impl Drop for EchoPeer {
 /// runs.
 ///
 /// Verifies: REQ-CLI-007
+/// Verifies: REQ-CLI-013
 #[test]
 fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
     let _alone = one_audio_session_at_a_time();
@@ -872,6 +873,25 @@ fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
         report["playout"]["frames_played"].as_u64().unwrap_or(0) > 0,
         "the play-out counters should be in the report: {}",
         report
+    );
+
+    // What a run over many machines compares: the system, the kind of address and how soon
+    // the link was up - and no address.
+    let linked = &report["peers"][0];
+    assert_eq!(report["os"], std::env::consts::OS);
+    assert_eq!(linked["link"]["family"], "ipv4");
+    assert!(
+        linked["link"]["connect_ms"].is_u64() && linked["connected_after_seconds"].is_f64(),
+        "the time to come up should be in the report: {linked}"
+    );
+    assert!(
+        linked["buffer_ms"].is_f64() && report["audio"]["underruns"].is_u64(),
+        "the receive buffer and the underruns should be in the report: {report}"
+    );
+    assert!(
+        !linked["link"].to_string().contains(&address),
+        "the kind of address is reported, not the address: {}",
+        linked["link"]
     );
 }
 

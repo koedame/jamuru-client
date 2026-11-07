@@ -16,6 +16,22 @@ an encrypted file (`fetch` reads it); each runner then starts its own
 participants (`run`) and measures them. `summary` joins the results of all
 runners into a pass or fail.
 
+The runners are of different systems (Linux, Windows, macOS), so one room also
+measures every listening system against every speaking system. Each participant
+joins under the name `r<run>a<attempt>-p<NN>`: the number of the workflow run and
+of the participant, which is what a record kept by the server is matched with
+(an address says little - the participants of a runner share one, and one runner
+may be seen under several).
+
+Beside the verdict, each participant's result has what is needed to follow the
+quality over versions and to explain it: the system and the version, how soon
+each link came up, the kind of route of each link and the family of its
+address, the round trip of the link and of the whole audio path with its
+spread, the receive buffer, and what the runner is (its CPU count, the
+datacenter as the cloud's own metadata tells it, whether IPv6 works, and how its
+NAT maps ports). An address is never written: where two must be compared, a
+keyed hash stands for it, and the key is of this run alone.
+
 The output of this script is the only thing that reaches the log: pass or fail
 and numbers per participant. What the server answers, what `jamuru` prints and
 where the participants connected from are never printed.
@@ -25,14 +41,22 @@ Standard library only, so that CI installs nothing it does not pin.
 
 import argparse
 import array
+import hashlib
+import hmac
+import ipaddress
 import json
 import math
 import os
-import signal
+import platform
+import re
+import secrets
+import socket
 import statistics
+import struct
 import subprocess
 import sys
 import time
+import urllib.request
 import zipfile
 from operator import mul
 from pathlib import Path
@@ -72,8 +96,28 @@ def name_of(index):
     return f"p{index:02d}"
 
 
+def room_name_of(index):
+    """The name a participant enters the room under: the run, the attempt and the participant."""
+    run = os.environ.get("GITHUB_RUN_ID", "local")
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+    return f"r{run}a{attempt}-{name_of(index)}"
+
+
+def participant_of(room_name):
+    """The number of the participant a name in the room belongs to, or None."""
+    found = re.search(r"(?:^|-)p(\d+)$", room_name)
+    return int(found.group(1)) if found else None
+
+
 def tone_of(index):
     return TONE_BASE_HZ + TONE_STEP_HZ * index
+
+
+def binary_of(path):
+    """`jamuru`, or `jamuru.exe` where that is what the build made."""
+    path = Path(path)
+    exe = path.with_name(path.name + ".exe")
+    return exe if not path.exists() and exe.exists() else path
 
 
 def server_url(env_name):
@@ -109,7 +153,7 @@ def launch(binary, work, index, command, server, room, turn, quiet_at, end_at):
         "--server",
         server,
         "--name",
-        name_of(index),
+        room_name_of(index),
         "--input-tone",
         str(tone_of(index)),
         "--output-file",
@@ -132,13 +176,18 @@ def launch(binary, work, index, command, server, room, turn, quiet_at, end_at):
     ]
     env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"))
     log = open(str(out) + ".log", "wb")
+    # On Windows the settings are where the system says, not where HOME points.
+    detach = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name == "nt" else {"start_new_session": True}
+    )
     process = subprocess.Popen(
         args,
         stdin=subprocess.DEVNULL,
         stdout=log,
         stderr=subprocess.STDOUT,
         env=env,
-        start_new_session=True,
+        **detach,
     )
     return process, out
 
@@ -147,15 +196,20 @@ def supervise(args):
     """Runs a command through its turn and until `--end-at`, and writes what it cost.
 
     The session reads its commands from standard input: `/mute` and `/unmute`
-    switch what it sends.
+    switch what it sends, `/quit` ends it the way Ctrl+C does (so it writes its
+    report) on every system.
     """
     started = time.time()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     child = subprocess.Popen(command, stdin=subprocess.PIPE)
     steps = [(args.quiet_at, b"/mute\n"), (args.speak_from, b"/unmute\n"), (args.speak_until, b"/mute\n")]
-    interrupted_at = None
+    quit_at = None
+    usage = None
     while True:
-        done, _, usage = os.wait4(child.pid, os.WNOHANG)
+        if hasattr(os, "wait4"):
+            done, _, usage = os.wait4(child.pid, os.WNOHANG)
+        else:
+            done = child.poll() is not None
         if done:
             break
         now = time.time()
@@ -165,20 +219,28 @@ def supervise(args):
                 child.stdin.flush()
             except OSError:
                 steps.clear()
-        if interrupted_at is None and now >= args.end_at:
-            child.send_signal(signal.SIGINT)
-            interrupted_at = now
-        elif interrupted_at is not None and now >= interrupted_at + 30:
+        if quit_at is None and now >= args.end_at:
+            quit_at = now
+            try:
+                child.stdin.write(b"/quit\n")
+                child.stdin.flush()
+            except OSError:
+                pass
+        elif quit_at is not None and now >= quit_at + 30:
             child.kill()
         time.sleep(0.1)
-    Path(args.out + ".time").write_text(
-        f"{usage.ru_utime} {usage.ru_stime} {time.time() - started} {usage.ru_maxrss}\n"
-    )
+    elapsed = time.time() - started
+    if usage is not None:
+        text = f"{usage.ru_utime} {usage.ru_stime} {elapsed} {usage.ru_maxrss}\n"
+    else:
+        # What the system does not tell about a child that has ended is left out.
+        text = f"- - {elapsed} -\n"
+    Path(args.out + ".time").write_text(text)
 
 
 def encrypt(plain, destination, key):
     subprocess.run(
-        ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-salt", "-pass", "env:ROOM_CHECK_KEY",
+        ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-md", "sha256", "-salt", "-pass", "env:ROOM_CHECK_KEY",
          "-out", str(destination)],
         input=plain.encode(),
         env=dict(os.environ, ROOM_CHECK_KEY=key),
@@ -188,7 +250,7 @@ def encrypt(plain, destination, key):
 
 def decrypt(source, key):
     done = subprocess.run(
-        ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-pass", "env:ROOM_CHECK_KEY",
+        ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-md", "sha256", "-pass", "env:ROOM_CHECK_KEY",
          "-in", str(source)],
         env=dict(os.environ, ROOM_CHECK_KEY=key),
         capture_output=True,
@@ -204,7 +266,7 @@ def start_host(args):
     start_at = time.time() + args.lead
     turns, end_at = schedule(start_at, args.total, args.slot)
     process, out = launch(
-        Path(args.binary), work, 0, "create-room", server, None, turns[0], start_at - QUIET_SECONDS, end_at
+        binary_of(args.binary), work, 0, "create-room", server, None, turns[0], start_at - QUIET_SECONDS, end_at
     )
     code = None
     deadline = time.time() + 90
@@ -282,12 +344,18 @@ def run(args):
         for k in range(args.per_runner)
         if args.runner * args.per_runner + k < total
     ]
+    runner = probe_runner()
+    print(
+        f"runner {args.runner}: {runner['os']} {runner['cpus']} cpus, "
+        f"ipv6 {'works' if runner['ipv6'].get('servers_answered') else 'does not answer'}, "
+        f"nat {'per destination' if runner['nat'].get('port_changes') else 'same port for all'}"
+    )
     processes = []
     for index in own:
         if index == 0:
             continue
         processes.append(launch(
-            Path(args.binary), work, index, "join-room", server, room["code"],
+            binary_of(args.binary), work, index, "join-room", server, room["code"],
             turns[index], room["start_at"] - QUIET_SECONDS, end_at,
         )[0])
     for process in processes:
@@ -302,8 +370,139 @@ def run(args):
     results.mkdir(exist_ok=True)
     for index in own:
         result = analyze(work, index, args.per_runner, room)
+        result["runner_facts"] = runner
         (results / f"{name_of(index)}.json").write_text(json.dumps(result))
         print(describe(result))
+
+
+STUN_SERVERS = (("stun.l.google.com", 19302), ("stun.cloudflare.com", 3478))
+STUN_COOKIE = 0x2112A442
+# Azure's own metadata about the machine it runs on; answers only from inside it.
+CLOUD_METADATA = "http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01&format=json"
+
+
+def hashed(text):
+    """Stands for `text` where two things are compared: keyed with this run's own key.
+
+    The key is made of the server address (a secret) and the number of the run, so
+    the same address has the same hash on every runner of the run - and in no
+    other run, nor for anyone who does not have the secret.
+    """
+    server = os.environ.get("JAMJAM_SERVER_URL_BETA", "")
+    key = f"{server}|{os.environ.get('GITHUB_RUN_ID', 'local')}".encode()
+    return hmac.new(key, str(text).encode(), hashlib.sha256).hexdigest()[:12]
+
+
+def stun_mapped(sock, family, host, port):
+    """The address and port a STUN server sees `sock` from, or None."""
+    try:
+        target = socket.getaddrinfo(host, port, family, socket.SOCK_DGRAM)[0][4]
+    except OSError:
+        return None
+    transaction = secrets.token_bytes(12)
+    request = struct.pack("!HHI", 0x0001, 0, STUN_COOKIE) + transaction
+    for _ in range(2):
+        try:
+            sock.sendto(request, target)
+            data, _ = sock.recvfrom(2048)
+        except OSError:
+            continue
+        if len(data) < 20 or data[8:20] != transaction:
+            continue
+        at = 20
+        while at + 4 <= len(data):
+            kind, size = struct.unpack("!HH", data[at:at + 4])
+            value = data[at + 4:at + 4 + size]
+            if kind == 0x0020 and size >= 8:
+                port_seen = struct.unpack("!H", value[2:4])[0] ^ (STUN_COOKIE >> 16)
+                if value[1] == 1:
+                    raw = bytes(a ^ b for a, b in zip(value[4:8], struct.pack("!I", STUN_COOKIE)))
+                elif value[1] == 2 and size >= 20:
+                    mask = struct.pack("!I", STUN_COOKIE) + transaction
+                    raw = bytes(a ^ b for a, b in zip(value[4:20], mask))
+                else:
+                    break
+                return str(ipaddress.ip_address(raw)), port_seen
+            at += 4 + size + (-size % 4)
+    return None
+
+
+def nat_probe(family):
+    """What the NAT does to a socket's port, and the address it shows, of one IP family.
+
+    Two servers are asked from one socket: a NAT that hands out the same port
+    for any destination can be crossed by a peer that guesses nothing; one that
+    changes it per destination (a symmetric NAT) cannot.
+    """
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    sock.settimeout(1.5)
+    try:
+        sock.bind(("", 0))
+        seen = [m for m in (stun_mapped(sock, family, h, p) for h, p in STUN_SERVERS) if m]
+    except OSError:
+        seen = []
+    finally:
+        sock.close()
+    found = {"servers_answered": len(seen)}
+    if seen:
+        found["public_hash"] = hashed(seen[0][0])
+        found["address_changes"] = len({m[0] for m in seen}) > 1
+        found["port_changes"] = len({m[1] for m in seen}) > 1
+    return found
+
+
+def local_network_hash(family, probe_address):
+    """A hash of the network the machine's own address is in (a /24, or a /64), or None.
+
+    Connecting a UDP socket sends nothing: it only makes the system choose the
+    address it would send from.
+    """
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    try:
+        sock.connect((probe_address, 9))
+        own = sock.getsockname()[0].split("%")[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
+    bits = 24 if family == socket.AF_INET else 64
+    return hashed(ipaddress.ip_network(f"{own}/{bits}", strict=False).network_address)
+
+
+def cloud_facts():
+    """Where the cloud says the runner is, from its own metadata; empty if it says nothing."""
+    request = urllib.request.Request(CLOUD_METADATA, headers={"Metadata": "true"})
+    try:
+        with urllib.request.urlopen(request, timeout=2) as answer:
+            data = json.load(answer)
+    except (OSError, ValueError):
+        return {}
+    found = {
+        "region": data.get("location"),
+        "zone": data.get("zone") or None,
+        "vm_size": data.get("vmSize"),
+    }
+    if data.get("vmId"):
+        found["machine_hash"] = hashed(data["vmId"])
+    return {name: value for name, value in found.items() if value is not None}
+
+
+def probe_runner():
+    """What this runner is: system, size, where, and how it reaches the Internet."""
+    found = {
+        "os": os.environ.get("RUNNER_OS", platform.system()).lower(),
+        "arch": os.environ.get("RUNNER_ARCH", platform.machine()).lower(),
+        "image": os.environ.get("ImageVersion", ""),
+        "cpus": os.cpu_count(),
+        "cloud": cloud_facts(),
+        "inner_network_hash": local_network_hash(socket.AF_INET, "192.0.2.1"),
+        "nat": nat_probe(socket.AF_INET),
+    }
+    v6 = {"route": local_network_hash(socket.AF_INET6, "2001:db8::1") is not None}
+    if v6["route"]:
+        v6.update(nat_probe(socket.AF_INET6))
+    found["ipv6"] = v6
+    return found
 
 
 def read_time(path):
@@ -311,11 +510,11 @@ def read_time(path):
         user, system, elapsed, rss_kb = Path(path).read_text().split()[-4:]
     except (OSError, ValueError):
         return {}
-    return {
-        "cpu_seconds": float(user) + float(system),
-        "elapsed_seconds": float(elapsed),
-        "max_rss_mb": int(rss_kb) / 1024,
-    }
+    found = {"elapsed_seconds": float(elapsed)}
+    if user != "-":
+        found["cpu_seconds"] = float(user) + float(system)
+        found["max_rss_mb"] = int(rss_kb) / 1024
+    return found
 
 
 def tone_tables(frequency, rate):
@@ -426,22 +625,53 @@ def analyze(work, index, per_runner, room):
         loud = [w for w in elsewhere if series[w] >= PRESENT_AMPLITUDE]
         leak[str(speaker)] = len(loud) / len(elsewhere) if elsewhere else 0.0
     result.update({"heard": heard, "level": level, "leak": leak, "offset": best_offset})
+    result.update({
+        "os": os.environ.get("RUNNER_OS", report.get("os", "")).lower(),
+        "version": report.get("jamjam_version"),
+        "commit": os.environ.get("GITHUB_SHA", "")[:10] or None,
+        "underruns": report.get("audio", {}).get("underruns"),
+    })
     links = []
     for peer in report.get("peers", []):
-        name = peer.get("name", "")
-        if not (name.startswith("p") and name[1:].isdigit()):
+        other = participant_of(peer.get("name", ""))
+        if other is None:
             continue
         network, playout = peer.get("network", {}), peer.get("playout", {})
+        facts = peer.get("link") or {}
+        route = facts.get("route")
+        if other // per_runner == index // per_runner or route == "loopback":
+            scope = "machine"
+        elif route == "lan":
+            scope = "network"
+        else:
+            scope = "direct"
+        address = peer.get("addr")
         links.append({
-            "peer": int(name[1:]),
+            "peer": other,
             "packets_received": network.get("packets_received", 0),
             "rtt_ms": network.get("rtt_ms"),
             "loss": network.get("packet_loss_rate", 0.0),
             "played": playout.get("frames_played", 0),
             "concealed": playout.get("frames_concealed", 0),
             "late": playout.get("frames_late", 0),
+            # The kind of route is told by the address; the address itself is not kept.
+            "scope": scope,
+            "route": route,
+            "family": facts.get("family"),
+            "connect_ms": facts.get("connect_ms"),
+            "first_audio_ms": facts.get("first_audio_ms"),
+            "route_moves": facts.get("route_moves"),
+            "connected_after_seconds": peer.get("connected_after_seconds"),
+            "buffer_ms": peer.get("buffer_ms"),
+            "delay_frames": playout.get("delay_frames"),
+            "end_to_end_ms": peer.get("end_to_end_ms"),
+            "rtt_spread_ms": peer.get("rtt_spread_ms"),
+            "end_to_end_spread_ms": peer.get("end_to_end_spread_ms"),
+            "address_hash": hashed(address.rsplit(":", 1)[0].strip("[]")) if address else None,
         })
     result["links"] = links
+    came_up = [link["connected_after_seconds"] for link in links if link["connected_after_seconds"] is not None]
+    result["all_linked_seconds"] = max(came_up) if len(came_up) == total - 1 else None
     return result
 
 
@@ -462,6 +692,7 @@ def summary(args):
     failures = []
     lines = []
     same_runner, across_runners, leaks = [], [], []
+    by_system = {}
     for index in range(args.total):
         result = by_id.get(index)
         if result is None:
@@ -471,6 +702,8 @@ def summary(args):
         for speaker, share in result["heard"].items():
             other = by_id.get(int(speaker))
             (same_runner if other and other["runner"] == result["runner"] else across_runners).append(share)
+            if other:
+                by_system.setdefault((result.get("os") or "?", other.get("os") or "?"), []).append(share)
             if share < args.min_heard:
                 failures.append(f"{name_of(index)} heard {name_of(int(speaker))} in {share:.2f} of its turn")
         for speaker, share in result["leak"].items():
@@ -483,10 +716,10 @@ def summary(args):
         concealed_share = concealed / (played + concealed) if played + concealed else 0.0
         cpu = (
             100 * result["cpu_seconds"] / result["elapsed_seconds"]
-            if result.get("elapsed_seconds") else float("nan")
+            if result.get("elapsed_seconds") and "cpu_seconds" in result else float("nan")
         )
         lines.append(
-            f"{name_of(index)} runner {result['runner']}: "
+            f"{name_of(index)} runner {result['runner']} {result.get('os') or '?'}: "
             f"lowest {min(result['heard'].values(), default=0.0):.2f} "
             f"links {sum(1 for link in result['links'] if link['played'] > 0)} "
             f"concealed {100 * concealed_share:.1f}% "
@@ -500,6 +733,10 @@ def summary(args):
             lines.append(f"{label}: {len(shares)} pairs, lowest {min(shares):.2f}, mean {statistics.mean(shares):.2f}")
         else:
             lines.append(f"{label}: no pairs")
+    for (listening, speaking), shares in sorted(by_system.items()):
+        lines.append(
+            f"{listening} hears {speaking}: {len(shares)} pairs, lowest {min(shares):.2f}, mean {statistics.mean(shares):.2f}"
+        )
     if leaks:
         lines.append(f"heard in others' turns: highest {max(leaks):.2f}")
     verdict = "FAIL" if failures else "PASS"
