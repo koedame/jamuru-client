@@ -15,6 +15,7 @@ mod fec;
 mod latency;
 mod link_facts;
 pub mod port_mapping;
+mod port_prediction;
 mod priority;
 mod quality;
 pub mod recording_notice;

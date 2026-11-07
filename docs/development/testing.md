@@ -42,6 +42,7 @@ cargo test -- --nocapture
 | `tests/latency_test.rs` | `docs-spec/behavior/latency.feature` |
 | `tests/i18n_test.rs` | `docs-spec/behavior/i18n.feature` |
 | `tests/port_mapping_test.rs` | ルーターへのポート開放（UPnP）。偽のルーター（SSDP と SOAP）に対する統合テスト |
+| `tests/port_prediction_test.rs` | 宛先ごとにポートを変える NAT の模型（ループバック）が、候補に複数のポートを並べること |
 
 ## ルーターのポート開放（UPnP）
 
@@ -49,6 +50,14 @@ cargo test -- --nocapture
 
 - `cargo test --test port_mapping_test`: 手元のループバックに立てた偽のルーターに対して、頼みが通る・断られる・同じ番号が使用中・二重の NAT・ルーター無し・更新・閉じる、を確かめます。毎回回ります。
 - `tests/upnp/run.sh`: 本物のルーター（miniupnpd）をコンテナで動かし、ルーターの先の端末から送ったデータグラムが音声のソケットに届くか、閉じると転送の規則が消えるか、UPnP の無いルーターでも STUN だけで続くか、設定オフでルーターに触れないかを確かめます。docker と、コンテナに `NET_ADMIN` を渡せる権限が要ります。CI では回しません。
+
+## 宛先ごとにポートを変える NAT（ポートの予測）
+
+相手の NAT が宛先ごとにポートを変えるとき、相手の送り出すポートを予測して送る機能（ADR-115）は、3 通りで確かめます。
+
+- `cargo test --lib port_prediction` と `cargo test --lib network::connection`: ポートの並びごとの予測・送る量の上限・応答だけを受け入れること・NAT の模型（ループバック）で経路が相手の実際のポートへ移ること。毎回回ります。
+- `cargo test --test port_prediction_test`: 宛先ごとにポートを変える NAT が候補に複数のポートを並べ、1 つのポートを使う NAT は並べないこと。毎回回ります。
+- `tests/nat/run.sh [ケース名 ...]`: 2 つのルーター（カーネルの iptables）の内側のアプリが、STUN サーバーを介して接続できるかを、NAT の組み合わせごとに確かめます（cone・random・宛先アドレスごとに順に割り当てる sequential・ポートセットの portset）。`NAT_LAB_AUDIO_SECS=10` を付けると、経路が決まったあとに音声を送り、遅延と欠落も出します。`NAT_LAB_PEER=<バイナリ>` で別の版のアプリと比べられます。docker と、コンテナに `NET_ADMIN` を渡せる権限が要ります。CI では回しません。
 
 ## ルームの人数
 

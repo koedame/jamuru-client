@@ -99,6 +99,7 @@
 | [ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md) | 音声パケットを損失なく詰めて送る（FLAC の固定予測 + Rice 符号。声で約 25 %、大きな雑音で約 91 %）。大きさは 8 段階に丸めて漏れを減らす。プロトコル版を 3 に上げる |
 | [ADR-113](./adr/ADR-113-ask-the-router-to-open-the-audio-port.md) | ルーターに UPnP で音声の UDP ポートを 1 つ開けてもらい、返された外側のアドレスを候補に足す（リース 1 時間・退室で閉じる・断られたら STUN だけ）。既定はオン、設定で切れる。NAT-PMP / PCP は入れない |
 | [ADR-114](./adr/ADR-114-check-the-connection-and-devices-before-joining.md) | 入室前の診断を、既存の診断タブの拡張として作る。NAT はひとつのソケットから複数の STUN で測り、IPv6 は実際に外へ出られるかで、UPnP は尋ねるだけで確かめる。機器は開かない。「繋がりやすさ」と直し方を利用者の言葉で出す |
+| [ADR-115](./adr/ADR-115-predict-the-port-behind-a-symmetric-nat.md) | 宛先ごとにポートを変える NAT の内側の相手へ、ポートを予測して送る（窓・ポートセットの掃引・送る量の上限） |
 | [ADR-116](./adr/ADR-116-tell-the-os-the-session-is-latency-critical.md) | セッションの間だけ、OS に遅延に厳しい音声のアプリだと伝える（macOS は App Nap を止め、Windows は 1 ms のタイマーと EcoQoS の取り下げ）。音声のソケットのバッファを 1 MiB にする。測って要らなかったものは足さない |
 
 ---
