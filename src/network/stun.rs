@@ -43,6 +43,10 @@ pub const DEFAULT_STUN_SERVERS_V6: &[&str] = &[
 /// How long the other IP family is waited for once one has answered
 const OTHER_FAMILY_GRACE: Duration = Duration::from_millis(1000);
 
+/// How long the address another server sees the audio socket at is waited for. It only tells
+/// whether the NAT keeps one port for the socket, so it must not hold up entering a room.
+const OBSERVE_TIMEOUT_MS: u64 = 1000;
+
 /// Result of a STUN binding request
 #[derive(Debug, Clone)]
 pub struct StunResult {
@@ -50,6 +54,8 @@ pub struct StunResult {
     pub mapped_address: SocketAddr,
     /// STUN server that was used
     pub server: String,
+    /// The address of the server that answered
+    pub server_addr: SocketAddr,
 }
 
 /// STUN client for discovering public address
@@ -111,14 +117,17 @@ impl StunClient {
     pub async fn binding_request(&self, server: &str) -> Result<StunResult, NetworkError> {
         let families = IpFamilies::of_tokio(&self.socket);
         let server_addr = resolve(server, families.v4).await?;
-        let mut answers = self.ask(&[(server_addr, rand::random())], None).await?;
-        let (_, mapped_address) = answers
+        let mut answers = self
+            .ask(&[(server_addr, rand::random())], None, self.timeout_ms)
+            .await?;
+        let (server_addr, mapped_address) = answers
             .pop()
             .ok_or_else(|| NetworkError::StunFailed("Timeout".to_string()))?;
         info!("STUN discovered public address: {}", mapped_address);
         Ok(StunResult {
             mapped_address,
             server: server.to_string(),
+            server_addr,
         })
     }
 
@@ -177,7 +186,10 @@ impl StunClient {
             if targets.is_empty() {
                 continue;
             }
-            let answers = match self.ask(&targets, Some(OTHER_FAMILY_GRACE)).await {
+            let answers = match self
+                .ask(&targets, Some(OTHER_FAMILY_GRACE), self.timeout_ms)
+                .await
+            {
                 Ok(answers) => answers,
                 Err(e) => {
                     warn!("STUN request to {} failed: {}", server, e);
@@ -194,6 +206,7 @@ impl StunClient {
                 found.push(StunResult {
                     mapped_address: mapped,
                     server: server.to_string(),
+                    server_addr: target,
                 });
             }
             // A round that found something has had its grace: a family that was asked and
@@ -207,9 +220,49 @@ impl StunClient {
         found
     }
 
+    /// The address the audio socket is seen at by up to `wanted` servers other than the one
+    /// that gave `first`, each at an address of its own (IPv4): the ports they report
+    ///
+    /// A NAT that keeps one port for the socket reports the same port to every server. One
+    /// that gives each destination a port of its own reports a different one to each, and those
+    /// are what a peer needs to guess the port it is to send to (ADR-115). Asked together, from
+    /// the audio socket. Servers that do not answer in time are left out.
+    pub async fn observe_from_other_servers(
+        &self,
+        servers: &[&str],
+        first: &StunResult,
+        wanted: usize,
+    ) -> Vec<SocketAddr> {
+        let mut seen_at = vec![first.server_addr.ip()];
+        let mut targets: Vec<(SocketAddr, [u8; 12])> = Vec::new();
+        for server in servers {
+            if targets.len() == wanted {
+                break;
+            }
+            match resolve(server, true).await {
+                Ok(addr) if !seen_at.contains(&addr.ip()) => {
+                    seen_at.push(addr.ip());
+                    targets.push((addr, rand::random()));
+                }
+                Ok(_) => {}
+                Err(e) => debug!("No second look through {}: {}", server, e),
+            }
+        }
+        if targets.is_empty() {
+            return Vec::new();
+        }
+        match self.ask(&targets, None, OBSERVE_TIMEOUT_MS).await {
+            Ok(answers) => answers.into_iter().map(|(_, mapped)| mapped).collect(),
+            Err(e) => {
+                debug!("No second look at the public address: {}", e);
+                Vec::new()
+            }
+        }
+    }
+
     /// Sends one binding request to each of `targets` and collects the answers: the
-    /// address each target reports, until all have answered or the wait is over. With a
-    /// `grace`, the wait ends that long after the first answer.
+    /// address each target reports, until all have answered or the wait is over (`timeout_ms`).
+    /// With a `grace`, the wait ends that long after the first answer.
     ///
     /// The socket is the audio socket, so anything else that reaches it in the meantime
     /// (a peer's keep-alive) is skipped rather than ending the query.
@@ -217,6 +270,7 @@ impl StunClient {
         &self,
         targets: &[(SocketAddr, [u8; 12])],
         grace: Option<Duration>,
+        timeout_ms: u64,
     ) -> Result<Vec<(SocketAddr, SocketAddr)>, NetworkError> {
         let local = self
             .socket
@@ -248,7 +302,7 @@ impl StunClient {
         }
         let targets = &sent[..];
 
-        let mut deadline = Instant::now() + Duration::from_millis(self.timeout_ms);
+        let mut deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut buf = [0u8; 576]; // Minimum STUN message size
         let mut answers: Vec<(SocketAddr, SocketAddr)> = Vec::new();
         while answers.len() < targets.len() {
@@ -700,6 +754,7 @@ mod tests {
             .ask(
                 &[(v4_server, [1; 12]), (silent_addr, [2; 12])],
                 Some(OTHER_FAMILY_GRACE),
+                5000,
             )
             .await
             .unwrap();

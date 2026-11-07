@@ -41,6 +41,11 @@ pub const MAX_PEERS_PER_ROOM: usize = 16;
 /// then sent keep-alives for as long as the peer is silent.
 pub const MAX_PEER_CANDIDATES: usize = 32;
 
+/// How many servers besides the first are asked what port they see the audio socket at: three
+/// ports tell a NAT that gives each destination a port from one that gives them at random
+/// (ADR-115)
+const OTHER_VIEWS: usize = 2;
+
 /// The feature an app announces when it creates or joins a room to say it
 /// takes [`SignalingMessage::PeerMessage`]s (ADR-043). The server relays peer
 /// messages only to apps that announced it, so an older app never receives
@@ -909,10 +914,34 @@ pub async fn gather_candidates_using(
     if reflexive.is_empty() {
         warn!("No server reflexive candidate");
     }
-    for result in reflexive {
+    for result in &reflexive {
         let addr = result.mapped_address;
         candidates.push(AddressCandidate::server_reflexive(addr));
         info!("Added server reflexive candidate: {}", addr);
+    }
+
+    // A NAT that gives each destination its own port (such as the one in front of a peer on a
+    // MAP-E line) sends a peer's packets to a port STUN did not see. The ports other servers see
+    // are told to the peer too, and it guesses from them where to send (ADR-115). A NAT that
+    // keeps one port reports the same to every server, and nothing is added.
+    if let Some(first) = reflexive.iter().find(|r| r.mapped_address.is_ipv4()) {
+        let others = stun
+            .observe_from_other_servers(stun_servers, first, OTHER_VIEWS)
+            .await;
+        let before = candidates.len();
+        for addr in others {
+            if addr != first.mapped_address {
+                candidates.push(AddressCandidate::server_reflexive(addr));
+                info!("Added server reflexive candidate seen by another server: {}", addr);
+            }
+        }
+        if candidates.len() > before {
+            warn!(
+                "The router gives the audio socket a different port for each destination (seen at {} and {} more)",
+                first.mapped_address,
+                candidates.len() - before
+            );
+        }
     }
 
     keep_the_ipv6_address_stun_saw(&mut candidates);

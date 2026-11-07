@@ -6,7 +6,7 @@
 //! - Connection stability (RTT, jitter, packet loss)
 //! - Signaling server connectivity
 
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -346,40 +346,24 @@ impl NetworkDiagnostics {
             }
         }
 
-        // Try multiple STUN servers to detect NAT type
-        let mut mapped_addresses: Vec<SocketAddr> = Vec::new();
-
-        for server in DEFAULT_STUN_SERVERS.iter().take(3) {
-            if let Ok(socket) = UdpSocket::bind("0.0.0.0:0").await {
-                let client = StunClient::with_timeout(socket, 2000);
-                if let Ok(result) = client.binding_request(server).await {
-                    mapped_addresses.push(result.mapped_address);
-                }
-            }
-        }
-
-        if mapped_addresses.is_empty() {
+        // Ask several STUN servers from one socket: a NAT that keeps one port per socket
+        // reports the same address to all of them, one that picks a port per destination does not
+        let Ok(socket) = UdpSocket::bind("0.0.0.0:0").await else {
             return NatType::Unknown;
-        }
+        };
+        let client = StunClient::with_timeout(socket, 2000);
+        let Ok(first) = client.discover_public_address_from(DEFAULT_STUN_SERVERS).await else {
+            return NatType::Unknown;
+        };
+        let others = client
+            .observe_from_other_servers(DEFAULT_STUN_SERVERS, &first, 2)
+            .await;
 
-        // Check if all mapped addresses are the same
-        let first_addr: &SocketAddr = &mapped_addresses[0];
-        let all_same_ip = mapped_addresses
-            .iter()
-            .all(|a: &SocketAddr| a.ip() == first_addr.ip());
-        let all_same_port = mapped_addresses
-            .iter()
-            .all(|a: &SocketAddr| a.port() == first_addr.port());
-
-        if all_same_ip && all_same_port {
-            // Same IP and port from different servers - likely Full Cone or Restricted
+        if others.is_empty() {
+            NatType::Unknown
+        } else if others.iter().all(|a| *a == first.mapped_address) {
             NatType::FullCone
-        } else if all_same_ip && !all_same_port {
-            // Same IP but different ports - Port Restricted or Symmetric
-            // Need more sophisticated testing to distinguish
-            NatType::PortRestrictedCone
         } else {
-            // Different IPs - Symmetric NAT
             NatType::Symmetric
         }
     }
