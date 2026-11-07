@@ -345,6 +345,7 @@ def start_host(args):
 def fetch_artifact(work, name, member, timeout):
     """Waits for the artifact `name` of this workflow run and extracts `member` from it into `work`."""
     repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
+    work.mkdir(parents=True, exist_ok=True)
     deadline = time.time() + timeout
     while time.time() < deadline:
         listed = subprocess.run(
