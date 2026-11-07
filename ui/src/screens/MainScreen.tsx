@@ -22,6 +22,7 @@ import { ConnectionPanel, type ConnectionState, type ConnectionErrorKind } from 
 import { MixerPanel, MasterSection, type Channel } from "../components/MixerPanel";
 import { RecordingMark, RecordingPanel, useRoomRecording } from "../components/RecordingPanel";
 import { ChatPanelAdapter } from "../components/ChatPanel";
+import { DropoutNotice } from "../components/DropoutNotice";
 import { ConnectionIndicator, type ConnectionStatus } from "../components/ConnectionIndicator";
 import { PeerLinkDialog } from "../components/PeerLinkDialog";
 import { useBufferRequests } from "../components/BufferRequest";
@@ -915,6 +916,8 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
           volume: peerState.volume,
           pan: peerState.pan,
           isMuted: peerState.muted,
+          dropout: link?.dropout ?? null,
+          unstable: link?.unstable ?? false,
         });
       });
     }
@@ -1143,6 +1146,9 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
                         </span>
                       )}
                     </button>
+                    {link && (
+                      <DropoutNotice dropout={link.dropout} unstable={link.unstable} variant="row" />
+                    )}
                   </li>
                   );
                 })}

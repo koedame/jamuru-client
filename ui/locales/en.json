@@ -208,6 +208,18 @@
       "dropped": "Writing fell behind, so part of the sound is missing"
     }
   },
+  "dropout": {
+    "heading": "No audio arriving",
+    "seconds": "{{seconds}} s",
+    "side": {
+      "mine": "Your connection seems to be down",
+      "theirs": "Their connection seems to be down",
+      "between": "The path between you seems to be down",
+      "checking": "Finding out which side is down"
+    },
+    "unstable": "Unstable",
+    "unstableHint": "The audio cut out 2 or more times in the last 15 minutes"
+  },
   "mixer": {
     "title": "Mixer",
     "self": "You",

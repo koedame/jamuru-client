@@ -322,7 +322,7 @@ sequenceDiagram
 クライアント↔サーバー間の双方向通信で使用される。
 
 **相手あてのメッセージの中身（`PeerMessage.body`）。** トピックの名前 1 つをキーにしたオブジェクトで、いまあるのは
-`settings_help`（設定の手伝い。[ADR-044](../adr/ADR-044-portals-and-permissions.md) §5）・`recording`（録音しているか。`{"on": bool}`。[ADR-095](../adr/ADR-095-record-the-room-to-wav.md)）・`device_delay`（機器の遅延。下記）。`settings_help` の中身は `kind` で区別する:
+`settings_help`（設定の手伝い。[ADR-044](../adr/ADR-044-portals-and-permissions.md) §5）・`recording`（録音しているか。`{"on": bool}`。[ADR-095](../adr/ADR-095-record-the-room-to-wav.md)）・`device_delay`（機器の遅延。下記）・`link_view`（各参加者の音声がどれだけ前まで届いていたか。下記）。`settings_help` の中身は `kind` で区別する:
 `ask`（手伝われたい側から、手伝って）・`request`（手伝う側から、手伝う。手伝われる側が頼んだ相手からのものだけを受ける）・`accepted`（始めた。`session` は手伝われる側が中継に繋いで待っている手伝いの番号。128 ビットの乱数の
 16 進 32 桁で、手伝う側は同じ番号で中継に繋ぐ）・`declined`（断る。手伝う側からは「今はできない」、`busy` なら別の人を手伝っている。手伝われる側からは、中継を開けず始められなかった）・
 `stop`（手伝いをやめる。`role` は送り手の側 `helper` / `helped`。`session` は終わった手伝いの番号で、答えの前の依頼には付かない。`role` が `helped` で番号が無い `stop` は、答える前の依頼の取り下げ。番号があるときは、その番号の手伝いだけを終える。同じ相手と手伝いをやり直したあとに前の手伝いの `stop` が遅れて届いても、やり直した手伝いを終えないため。番号が無いときは、送り手との手伝いを終える）・
@@ -333,6 +333,8 @@ sequenceDiagram
 知らないトピックは読まずに捨てる（新しいアプリからのもの）。数値は整数の ID と設定値だけで、±(2^53−1) に収まる。
 
 `device_delay`（REQ-CON-035、[ADR-098](../adr/ADR-098-device-delay-is-measured-by-sound-and-timed-to-the-sample.md)）は `{"delay_ms": number | null}`。送り手の機器の遅延で、0.1 ms 単位。`null` は「いまの機器には測った値が無い」。範囲は 0〜500 で、外の値は受け手が捨てる。機器の名前・測った時刻・ばらつきは載せない。測ったとき・値が変わったとき・無効になったときにルームの全員へ、入室した人には入室時に個別に送る。
+
+`link_view`（REQ-CON-163、[ADR-112](../adr/ADR-112-say-whose-line-broke-when-the-audio-stops.md)）は `{"links": [{"peer": "<参加者 ID>", "ago_ms": number}], "ask": bool}`。送り手のアプリが、ルームの各参加者の音声を最後に受け取ってから経った時間（ミリ秒）で、`peer` は音声を繋いでいる相手、`ago_ms` は 0 以上の整数。`ask` が立っているのは、送り手が誰かの音声を受け取れなくなっていて、他の参加者にも同じものを返してほしいとき。ルームの全員へ送る（自分の分は読み飛ばす）。1 通に載せる相手は 16 人まで（それより後ろは受け手が捨てる）。音声そのもの・名前・住所は載せない。誰かの音声が止まっているあいだだけ 2 秒ごとに送り、全員が聞こえているあいだは送らない。
 
 **知らない種類は読み飛ばす（REQ-CON-030）。** `SignalingConnection::recv()` は、`type` がこの列挙に無いメッセージを
 捨てて次のメッセージを待つ。サーバーにメッセージの種類を足しても、配布済みのアプリはルームから落ちない。
@@ -349,6 +351,9 @@ enum SignalingMessage {
     /// ルーム一覧を取得。アプリは接続を試すためのルーム（テストルーム）を探すのに使う。
     /// 何を返すかはサーバーが決める（開いているルームの一覧ではない）
     ListRooms,
+    /// ルームの全員について、サーバーが最後に生存確認（`ping`）を受けてからの経過を尋ねる。
+    /// 返事は `Presence`。ルームに入っていない接続には返事をしない（5.3 章）
+    GetPresence,
     /// ルームを作成
     CreateRoom {
         room_name: String,
@@ -435,6 +440,19 @@ enum SignalingMessage {
         from_name: Option<String>,
         body: serde_json::Map<String, serde_json::Value>,
     },
+
+    // --- Server → Client ---
+    /// `GetPresence` への返事。尋ねた本人を含むルームの参加者のそれぞれについて、サーバーが
+    /// その接続の `ping` に最後に `pong` を返してから経った時間（ミリ秒）。一度も `ping` を
+    /// 送っていない参加者は `idle_ms` が `None`（`#[serde(default)]`）。載っていない参加者はルームにいない
+    Presence {
+        peers: Vec<PeerPresence>,
+    },
+}
+
+struct PeerPresence {
+    peer_id: Uuid,
+    idle_ms: Option<u64>,
 }
 
 /// ピア情報（複数アドレス候補対応）
@@ -534,6 +552,16 @@ stateDiagram-v2
    アプリは、署名の対象が自分の `link_key` でも自分の一時鍵でも、相手の `link_key` で署名されたものを受け付ける。
 
 シグナリングは `wss` なので、経路上の第三者は `link_key` を書き換えられない。鍵を配るサーバーは信じる前提になる。
+
+### 5.3 生存確認（`ping` / `pong`）と在室の確認（`GetPresence`）
+
+シグナリングの接続が死んだことに気づくのが遅いと、「相手の回線が切れた」のか「自分の回線が切れた」のかを見分けられない（[ADR-112](../adr/ADR-112-say-whose-line-broke-when-the-audio-stops.md)）。そのため、アプリは次を行う（REQ-CON-164）。
+
+1. ルームにいるあいだ、4 秒ごとにテキストフレーム `ping` を送る。サーバーは `pong` だけを即座に返す（JSON ではなく、メッセージにも数えない）。ルームの外では WebSocket の Ping フレームを送る。
+2. `pong` を含め、15 秒のあいだ何も届かなかった接続は、アプリが死んだものとして閉じ、繋ぎ直しの経路（REQ-RMT-028）に乗せる。
+3. 音声が止まった参加者が 2 人きりの部屋の相手なら、アプリは `GetPresence` を 2 秒ごとに（10 秒に 6 通まで）送り、`Presence` で相手の接続の静けさを知る。相手の接続が `ping` を送っているのに音声だけが届かなければ「2 人のあいだの経路」、相手の `ping` も途絶えていれば「相手の回線」と判断する。
+4. サーバーが `pong` を返さない・`Presence` に答えないときは、自分の回線の問題と判断する。
+5. `ping` を知らない頃のアプリは `idle_ms` が `None` になる。これは「長く静か」とは別で、判断の材料にしない。
 
 ---
 
