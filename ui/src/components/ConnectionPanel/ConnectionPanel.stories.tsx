@@ -31,6 +31,7 @@ export const Default: Story = {
     onCreateRoom: fn(),
     onJoinRoom: fn(),
     onOpenSettings: fn(),
+    onCheckConnection: fn(),
   },
 };
 

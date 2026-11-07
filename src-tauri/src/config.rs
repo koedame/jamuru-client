@@ -277,6 +277,16 @@ pub fn config_set_voice_priority(
     Ok(())
 }
 
+/// Turn asking the router to forward the audio port on or off; takes effect when the room is next entered
+#[tauri::command]
+pub fn config_set_open_router_port(
+    enabled: bool,
+    state: tauri::State<'_, ConfigState>,
+) -> Result<(), String> {
+    state.modify(|config| config.open_router_port = enabled)?;
+    Ok(())
+}
+
 // =============================================================================
 // Language Commands
 // =============================================================================

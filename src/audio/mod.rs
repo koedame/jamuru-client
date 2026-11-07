@@ -9,6 +9,7 @@ mod asio_roster;
 mod buffer_fit;
 mod channels;
 pub(crate) mod codec;
+mod conceal;
 pub mod delay_meter;
 mod device;
 pub mod device_loop;
@@ -51,6 +52,7 @@ pub use codec::{
     create_codec, decode_pcm24, encode_pcm24, AudioCodec, CodecConfig, CodecError, CodecType,
     OpusCodec, PcmCodec, PCM_BYTES_PER_SAMPLE,
 };
+pub use conceal::Concealer;
 pub(crate) use device::stable_device_id;
 pub use device::{
     choose_device, device_in_use, driver_name_of, find_device, is_asio_id, list_input_devices,

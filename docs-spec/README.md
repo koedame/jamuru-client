@@ -95,7 +95,11 @@
 | [ADR-093](./adr/ADR-093-one-dual-stack-audio-socket.md) | 音声ソケットは `[::]` の 1 本のデュアルスタックにして、IPv4 と IPv6 の両方の相手と同じソケットで送受信する。候補に IPv6 のグローバルアドレスを足し、STUN は IPv4・IPv6 の両方に問い合わせる。アドレスの綴りは IPv4 に正規化する。経路は今までどおり往復時間を測って選ぶ |
 | [ADR-094](./adr/ADR-094-limiters-on-what-is-sent-and-what-is-played.md) | 送る音と聞こえる音に、遅延を足さない（先読みしない）リミッターを付ける。天井は 0 dBFS で、それ以下の音はビット単位で変えない。既定は両方 ON（ADR-005 の「既定は常に OFF」をこれにだけ当てはめない） |
 | [ADR-096](./adr/ADR-096-send-pcm-as-24-bit-integers.md) | PCM は 24-bit 符号付き整数で送る（32-bit float をやめ、帯域を約 22 % 減らす）。±1.0 を超えるサンプルは切り詰めて数える。取り違えを防ぐためプロトコル版を 2 に上げる |
+| [ADR-105](./adr/ADR-105-fill-lost-audio-from-the-sound-around-it.md) | FEC で直せなかった損失を、前後の波形（過去のコピーと両側からの線形予測）で埋める。供給が止まったときの予測は選択肢として持つ（既定は無音のまま）。遅延は足さない |
 | [ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md) | 音声パケットを損失なく詰めて送る（FLAC の固定予測 + Rice 符号。声で約 25 %、大きな雑音で約 91 %）。大きさは 8 段階に丸めて漏れを減らす。プロトコル版を 3 に上げる |
+| [ADR-113](./adr/ADR-113-ask-the-router-to-open-the-audio-port.md) | ルーターに UPnP で音声の UDP ポートを 1 つ開けてもらい、返された外側のアドレスを候補に足す（リース 1 時間・退室で閉じる・断られたら STUN だけ）。既定はオン、設定で切れる。NAT-PMP / PCP は入れない |
+| [ADR-114](./adr/ADR-114-check-the-connection-and-devices-before-joining.md) | 入室前の診断を、既存の診断タブの拡張として作る。NAT はひとつのソケットから複数の STUN で測り、IPv6 は実際に外へ出られるかで、UPnP は尋ねるだけで確かめる。機器は開かない。「繋がりやすさ」と直し方を利用者の言葉で出す |
+| [ADR-115](./adr/ADR-115-predict-the-port-behind-a-symmetric-nat.md) | 宛先ごとにポートを変える NAT の内側の相手へ、ポートを予測して送る（窓・ポートセットの掃引・送る量の上限） |
 
 ---
 

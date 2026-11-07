@@ -134,6 +134,9 @@
     },
     "names": {
       "separator": "・"
+    },
+    "checkConnection": {
+      "button": "回線と機器を確かめる"
     }
   },
   "audio": {
@@ -242,6 +245,8 @@
     "general": {
       "display": "表示",
       "connection": "接続",
+      "openRouterPort": "ルーターのポートを自動で開く",
+      "openRouterPortHint": "入室しているあいだだけ、UPnP でルーターに UDP のポートを 1 つ開けてもらい、相手と直接つながりやすくします。退室するかアプリを閉じると閉じます。ルーターが UPnP に対応していないか、オフのときは何もしません。次に入室するときから変わります",
       "voicePriority": "音声を優先して送る",
       "voicePriorityHint": "音声のパケットに印を付け、Wi-Fi のルーターが他の通信より先に送れるようにします。同じ Wi-Fi で他の人が通信していて音が途切れるときに試し、かえって悪くなるときはオフにしてください。macOS では使えません。次の接続から変わります",
       "serverUrl": {
@@ -414,7 +419,7 @@
       "audio": "オーディオ",
       "cpu": "CPU",
       "publicIp": "パブリックIP",
-      "natType": "NAT種別",
+      "natType": "NAT",
       "rtt": "RTT",
       "jitter": "ジッタ",
       "packetLoss": "パケットロス",
@@ -424,7 +429,7 @@
       "deviceSourceOsDefault": "OSの既定デバイス",
       "sampleRateLabel": "サンプルレート",
       "supports48khz": "48kHz対応",
-      "minBuffer": "最小バッファ",
+      "minBuffer": "最小バッファ（目安）",
       "estimatedLatency": "推定遅延",
       "cores": "コア数",
       "realtime": "リアルタイム",
@@ -456,9 +461,41 @@
           "message": "IPv6 が利用できません",
           "suggestion": "IPv4 が使用されます。ほとんどの接続ではこれで問題ありません。"
         },
-        "symmetricNat": {
-          "message": "シンメトリック NAT を検出しました",
-          "suggestion": "P2P接続が難しい場合があります。別のネットワークやVPNの利用を検討してください。"
+        "perDestinationNat": {
+          "message": "このルーターは、相手ごとに別のポートで通信します",
+          "suggestion": "同じようにポートを変えるルーターの先にいる人とは、IPv4 では繋がりにくくなります。"
+        },
+        "upnpOff": {
+          "message": "ルーターのポートを自動で開く設定がオフです",
+          "suggestion": "設定の「一般」で「ルーターのポートを自動で開く」をオンにすると、繋がりにくい相手が減ります。"
+        },
+        "upnpNoRouter": {
+          "message": "ルーターが UPnP に応答しませんでした",
+          "suggestion": "ルーターの設定で UPnP をオンにすると、繋がりにくい相手が減ります。ルーターを再起動すると応答することもあります。"
+        },
+        "upnpRefused": {
+          "message": "ルーターが UPnP を断りました",
+          "suggestion": "ルーターの設定で UPnP をオンにすると、繋がりにくい相手が減ります。"
+        },
+        "upnpDoubleNat": {
+          "message": "ルーターの外側に、もう 1 つルーターがあります",
+          "suggestion": "回線の機器（ONU やホームゲートウェイ）のルーター機能を切るか、ブリッジにしてください。IPv6 が使えるなら、IPv6 で繋がります。"
+        },
+        "ipv6Unreachable": {
+          "message": "IPv6 のアドレスはありますが、外に出られません",
+          "suggestion": "ルーターの IPv6 の設定を確かめてください。使えなくても IPv4 で繋がります。"
+        },
+        "stunUnanswered": {
+          "message": "回線の見え方を確かめられませんでした",
+          "suggestion": "UDP の通信が外に出ていないかもしれません。VPN やセキュリティソフトを止めるか、別のネットワークで試してください。"
+        },
+        "microphoneRefused": {
+          "message": "OS がマイクの使用を許可していません",
+          "suggestion": "OS の設定の「プライバシー」にあるマイクで jamuru を許可してから、もう一度診断してください。"
+        },
+        "microphoneUndecided": {
+          "message": "マイクの使用がまだ許可されていません",
+          "suggestion": "入室するときに、OS が許可を求めます。先に OS の設定で許可しておくこともできます。"
         },
         "unstableConnection": {
           "message": "不安定なネットワーク接続を検出しました",
@@ -532,6 +569,32 @@
           "message": "32サンプルバッファでは音切れが発生する可能性があります",
           "suggestion": "より大きなバッファサイズ（64または128サンプル）の利用を検討してください"
         }
+      },
+      "reachLabel": "繋がりやすさ",
+      "ipv6": "IPv6",
+      "upnp": "UPnP（ルーターのポート開放）",
+      "natTypes": {
+        "noNat": "NAT なし（直接つながっています）",
+        "stable": "どの相手にも同じポートで見えます",
+        "perDestination": "相手ごとにポートが変わります",
+        "unknown": "確かめられませんでした"
+      },
+      "ipv6Status": {
+        "usable": "使えます",
+        "noRoute": "アドレスはありますが、外に出られません",
+        "noAddress": "使えません"
+      },
+      "upnpStatus": {
+        "answers": "ルーターが応答しました",
+        "off": "確かめていません（ポートの自動開放がオフ）",
+        "noRouter": "ルーターが応答しませんでした",
+        "refused": "ルーターが断りました",
+        "doubleNat": "ルーターの外側にもう 1 つルーターがあります"
+      },
+      "reach": {
+        "wide": "どの相手とも繋がりやすい回線です",
+        "narrow": "繋がりにくい相手がいます",
+        "unknown": "確かめられませんでした"
       }
     },
     "audio": {
@@ -842,14 +905,6 @@
     "publicIpv4": "パブリックIPv4",
     "publicIpv6": "パブリックIPv6",
     "natType": "NATタイプ",
-    "natTypes": {
-      "noNat": "直接接続（NATなし）",
-      "fullCone": "フルコーンNAT",
-      "restrictedCone": "制限コーンNAT",
-      "portRestrictedCone": "ポート制限コーンNAT",
-      "symmetric": "対称型NAT",
-      "unknown": "不明"
-    },
     "signalingServer": "シグナリングサーバー",
     "reachable": "到達可能",
     "unreachable": "到達不能",

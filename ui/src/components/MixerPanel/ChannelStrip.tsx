@@ -7,7 +7,7 @@
 
 import { useTranslation } from "react-i18next";
 import { PanSlider } from "./PanSlider";
-import { StereoMeter } from "./StereoMeter";
+import { StereoMeterView } from "./StereoMeter";
 import { StereoFader } from "./StereoFader";
 import { AudioQualityBadge } from "./AudioQualityBadge";
 import { usePeakHold } from "./usePeakHold";
@@ -59,6 +59,40 @@ function volumeToDb(volume: number): string {
   return db.toFixed(1);
 }
 
+/** The meter and its peak read-out. The peak falls on a timer while it is up;
+ *  holding it here draws only this column on each tick, not the whole strip. */
+function ChannelMeter({
+  levelL,
+  levelR,
+  isMuted,
+}: {
+  levelL: number;
+  levelR: number;
+  isMuted: boolean;
+}) {
+  // Use peak hold for stable dB display
+  const peaks = usePeakHold(levelL, levelR, { holdTime: 500, releaseTime: 1500 });
+  const maxPeak = isMuted ? 0 : Math.max(peaks.peakL, peaks.peakR);
+
+  return (
+    <div className="channel-strip__col">
+      {/* The meter's numeric read-out. data-peak carries the raw 0-100
+          level so a test can assert on the signal without parsing a dB
+          string (which is localised and rounded). */}
+      <span className="channel-strip__value" data-testid="channel-peak" data-peak={maxPeak}>
+        {levelToDb(maxPeak)}
+      </span>
+      <StereoMeterView
+        levelL={levelL}
+        levelR={levelR}
+        peakL={peaks.peakL}
+        peakR={peaks.peakR}
+        isMuted={isMuted}
+      />
+    </div>
+  );
+}
+
 export function ChannelStrip({
   id,
   name,
@@ -78,16 +112,10 @@ export function ChannelStrip({
 }: ChannelStripProps) {
   const { t } = useTranslation();
 
-  // Use peak hold for stable dB display
-  const peaks = usePeakHold(levelL, levelR, { holdTime: 500, releaseTime: 1500 });
-
   const displayName = type === "local" ? t("mixer.self") : name;
 
-  // Fader setting in dB and max peak level for display
+  // Fader setting in dB for display
   const faderDb = volumeToDb(volume);
-  const rawPeak = Math.max(peaks.peakL, peaks.peakR);
-  const maxPeak = isMuted ? 0 : rawPeak;
-  const peakDb = levelToDb(maxPeak);
 
   // Mic icon for local (mine) channels, speaker icon for remote channels
   const muteIcon =
@@ -121,15 +149,7 @@ export function ChannelStrip({
             label={t("mixer.channel.volumeLabel", { name: displayName })}
           />
         </div>
-        <div className="channel-strip__col">
-          {/* The meter's numeric read-out. data-peak carries the raw 0-100
-              level so a test can assert on the signal without parsing a dB
-              string (which is localised and rounded). */}
-          <span className="channel-strip__value" data-testid="channel-peak" data-peak={maxPeak}>
-            {peakDb}
-          </span>
-          <StereoMeter levelL={levelL} levelR={levelR} isMuted={isMuted} />
-        </div>
+        <ChannelMeter levelL={levelL} levelR={levelR} isMuted={isMuted} />
       </div>
 
       <div className="channel-strip__name">{displayName}</div>

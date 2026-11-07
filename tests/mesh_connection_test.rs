@@ -210,9 +210,10 @@ async fn audio_sealed_for_one_participant_is_not_played_by_another_it_is_sent_to
 
 /// Anyone who learns the audio port can send to it. What comes from an address no
 /// participant published is offered to every link, so every link has to turn it away:
-/// none plays it, and none stops carrying the audio of its own peer.
+/// none plays it, and none stops carrying the audio of its own peer. Only a limited number of
+/// them are offered to the links at all (ADR-113).
 ///
-/// Verifies: REQ-CON-033
+/// Verifies: REQ-CON-033, REQ-CON-165
 #[tokio::test]
 async fn datagrams_from_a_stranger_are_played_by_no_link_and_leave_every_link_working() {
     let room = room_of(3).await;
@@ -249,12 +250,10 @@ async fn datagrams_from_a_stranger_are_played_by_no_link_and_leave_every_link_wo
             "only what participant {other} sent is played on the link to {other}"
         );
         assert_eq!(room[0].links[&other].state(), ConnectionState::Connected);
-        // The forged packets did reach the link, which is what turned them away
-        assert!(
-            room[0].links[&other].stats().packets_refused >= 100,
-            "refused {}",
-            room[0].links[&other].stats().packets_refused
-        );
+        // The first of the forged packets did reach the link, which is what turned them away; the
+        // rest were stopped before the links, by the limit on what comes from unknown addresses
+        let refused = room[0].links[&other].stats().packets_refused;
+        assert!((20..100).contains(&refused), "refused {refused}");
     }
 }
 

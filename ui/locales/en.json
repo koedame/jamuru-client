@@ -135,6 +135,9 @@
     },
     "names": {
       "separator": ", "
+    },
+    "checkConnection": {
+      "button": "Check your connection and devices"
     }
   },
   "audio": {
@@ -244,6 +247,8 @@
     "general": {
       "display": "Display",
       "connection": "Connection",
+      "openRouterPort": "Open a router port automatically",
+      "openRouterPortHint": "While you are in a room, asks the router through UPnP to open one UDP port so others can reach you directly. It is closed when you leave or quit. Nothing happens if the router does not support UPnP or has it off. Applies the next time you enter a room",
       "voicePriority": "Send audio with priority",
       "voicePriorityHint": "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Try it when audio breaks up while others use the same Wi-Fi; turn it off if it gets worse. Not available on macOS. Applies from the next session",
       "serverUrl": {
@@ -416,7 +421,7 @@
       "audio": "Audio",
       "cpu": "CPU",
       "publicIp": "Public IP",
-      "natType": "NAT Type",
+      "natType": "NAT",
       "rtt": "RTT",
       "jitter": "Jitter",
       "packetLoss": "Packet Loss",
@@ -426,7 +431,7 @@
       "deviceSourceOsDefault": "OS default",
       "sampleRateLabel": "Sample Rate",
       "supports48khz": "48kHz",
-      "minBuffer": "Min Buffer",
+      "minBuffer": "Min Buffer (guide)",
       "estimatedLatency": "Est. Latency",
       "cores": "Cores",
       "realtime": "Realtime",
@@ -458,9 +463,41 @@
           "message": "IPv6 is not available",
           "suggestion": "IPv4 will be used instead. This is fine for most connections."
         },
-        "symmetricNat": {
-          "message": "Symmetric NAT detected",
-          "suggestion": "P2P connections may be difficult. Consider using a different network or VPN."
+        "perDestinationNat": {
+          "message": "This router uses a different port for each peer",
+          "suggestion": "Peers behind a router that does the same are hard to reach over IPv4."
+        },
+        "upnpOff": {
+          "message": "Opening the router's port automatically is off",
+          "suggestion": "Turn on \"Open a router port automatically\" under General in Settings to reach more peers."
+        },
+        "upnpNoRouter": {
+          "message": "The router did not answer UPnP",
+          "suggestion": "Turn UPnP on in the router's settings to reach more peers. Restarting the router sometimes helps."
+        },
+        "upnpRefused": {
+          "message": "The router refused UPnP",
+          "suggestion": "Turn UPnP on in the router's settings to reach more peers."
+        },
+        "upnpDoubleNat": {
+          "message": "Another router sits outside your router",
+          "suggestion": "Turn off the router function of the line's device (ONU or home gateway) or set it to bridge mode. If IPv6 works, peers connect over IPv6."
+        },
+        "ipv6Unreachable": {
+          "message": "IPv6 has an address but cannot reach out",
+          "suggestion": "Check the router's IPv6 settings. IPv4 still works without it."
+        },
+        "stunUnanswered": {
+          "message": "Could not check how your line looks from outside",
+          "suggestion": "UDP may not be getting out. Turn off the VPN or security software, or try another network."
+        },
+        "microphoneRefused": {
+          "message": "The OS does not let jamuru use the microphone",
+          "suggestion": "Allow jamuru under Microphone in the OS's Privacy settings, then run the check again."
+        },
+        "microphoneUndecided": {
+          "message": "The microphone has not been allowed yet",
+          "suggestion": "The OS asks when you join a room. You can also allow it in the OS settings first."
         },
         "unstableConnection": {
           "message": "Unstable network connection detected",
@@ -534,6 +571,32 @@
           "message": "32-sample buffer may cause audio glitches",
           "suggestion": "Consider using a larger buffer size (64 or 128 samples)"
         }
+      },
+      "reachLabel": "Reachability",
+      "ipv6": "IPv6",
+      "upnp": "UPnP (router port opening)",
+      "natTypes": {
+        "noNat": "No NAT (directly connected)",
+        "stable": "Every peer sees the same port",
+        "perDestination": "The port changes per peer",
+        "unknown": "Could not be checked"
+      },
+      "ipv6Status": {
+        "usable": "Works",
+        "noRoute": "Has an address but cannot reach out",
+        "noAddress": "Not available"
+      },
+      "upnpStatus": {
+        "answers": "The router answered",
+        "off": "Not checked (opening the port automatically is off)",
+        "noRouter": "The router did not answer",
+        "refused": "The router refused",
+        "doubleNat": "Another router sits outside your router"
+      },
+      "reach": {
+        "wide": "Easy to connect with anyone",
+        "narrow": "Some peers are hard to connect with",
+        "unknown": "Could not be checked"
       }
     },
     "audio": {
@@ -844,14 +907,6 @@
     "publicIpv4": "Public IPv4",
     "publicIpv6": "Public IPv6",
     "natType": "NAT Type",
-    "natTypes": {
-      "noNat": "Direct Connection (No NAT)",
-      "fullCone": "Full Cone NAT",
-      "restrictedCone": "Restricted Cone NAT",
-      "portRestrictedCone": "Port Restricted Cone NAT",
-      "symmetric": "Symmetric NAT",
-      "unknown": "Unknown"
-    },
     "signalingServer": "Signaling Server",
     "reachable": "Reachable",
     "unreachable": "Unreachable",

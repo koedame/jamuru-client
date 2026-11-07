@@ -268,7 +268,7 @@ interface SelectOption { value: string; label: string; disabled?: boolean; }
 
 1. 見出し「プロフィール」: 表示名（`stacked` + Input、hint「他の参加者に表示される名前です（1〜32文字）」、最大32文字、空は error）と、その下のスイッチ「入室前に名前を確認する」（hint「ルームを作る・入るたびに、使う名前を確かめます」。既定はオン。オフにするのは入室前の名前の確認の「次からこの名前を使用する」と同じ設定で、オンに戻すとまた確認が出る。`config_set_ask_name_on_entry` でその 1 項目だけを変える。REQ-CON-142）
 2. 見出し「表示」: 言語（`stacked` + `block` Select: 日本語 / English）
-3. 見出し「接続」: サーバー（`stacked` + Input。空なら既定のサーバーを使い、hint に実際の接続先を出す）と、その下のスイッチ「音声を優先して送る」（hint「音声のパケットに印を付け、Wi-Fi のルーターが他の通信より先に送れるようにします。同じ Wi-Fi で他の人が通信していて音が途切れるときに試し、かえって悪くなるときはオフにしてください。macOS では使えません。次の接続から変わります」。既定はオフ。`config_set_voice_priority` でその 1 項目だけを変える。REQ-CON-160）
+3. 見出し「接続」: サーバー（`stacked` + Input。空なら既定のサーバーを使い、hint に実際の接続先を出す）と、その下のスイッチ「音声を優先して送る」（hint「音声のパケットに印を付け、Wi-Fi のルーターが他の通信より先に送れるようにします。同じ Wi-Fi で他の人が通信していて音が途切れるときに試し、かえって悪くなるときはオフにしてください。macOS では使えません。次の接続から変わります」。既定はオフ。`config_set_voice_priority` でその 1 項目だけを変える。REQ-CON-160）と、スイッチ「ルーターのポートを自動で開く」（hint「入室しているあいだだけ、UPnP でルーターに UDP のポートを 1 つ開けてもらい、相手と直接つながりやすくします。退室するかアプリを閉じると閉じます。ルーターが UPnP に対応していないか、オフのときは何もしません。次に入室するときから変わります」。既定はオン。`config_set_open_router_port` でその 1 項目だけを変える。REQ-CON-165）
 
 ### プライバシータブ（PrivacyTab）
 
@@ -315,6 +315,7 @@ stateDiagram-v2
 - **running**: 中央にローダー（`--color-accent`、回転）＋「診断を実行中...」＋ 進捗バー（accent fill）＋ 3ステップ（ネットワーク→オーディオ→CPU）＋ `onCancelDiagnostics` 指定時にキャンセルボタン
   - ステップ状態は `progress` から導出: `progress ≥ (i+1)*100/3` で done（check）、区間内で active（loader 回転）、それ以前は pending（circle）。active 行は `progressMessage` を表示
 - **complete**: スコア（`score/100`, Inter）＋ 再診断ボタン（refresh アイコン）＋ 結果カード（ネットワーク／オーディオ／CPU／推奨設定）＋ 問題点
+  - ネットワークのカードは先頭に「繋がりやすさ」（`peer_reach`: どの相手とも繋がりやすい=success／繋がりにくい相手がいる=warning／確かめられなかった）、続けて公開 IP・NAT（`nat_type`: NAT なし・どの相手にも同じポート・相手ごとにポートが変わる・確かめられなかった）・IPv6（使えます／アドレスはありますが外に出られません／使えません）・UPnP（応答した／設定がオフで確かめていない／応答なし／断られた／外側にもう 1 つルーター）を出す（REQ-GUI-038、[ADR-114](../../adr/ADR-114-check-the-connection-and-devices-before-joining.md)）。オーディオのカードの「最小バッファ（目安）」は実測ではない
   - 各カード: 見出しアイコン＋タイトル＋グレードバッジ（A=success / B=warning / C=danger / Unknown=非表示）、行は `label`＋`value`（mono）。RTT・ジッタ・パケットロスは良好時 `--color-success`
   - 問題点: 件数バッジ＋カード（カテゴリ／重大度バッジ。Warning=warning、Error=danger、Info=中立）
 - **前回についての節**（プライバシータブの先頭。`onSendPreviousHang` 指定かつ `previousHang` があるときだけ）: 見出し「前回について」＋ 前回どの処理（終了処理・再起動・更新の適用・音声デバイスを開く処理・不明のどれか）で止まっていたようかを書いた説明文 ＋「報告を送る」「送らない」ボタン。どちらかを押すと `previousHangAnswered` になり、節は短い確認表示（「わかりました。」）に切り替わる（[ADR-056](../../adr/ADR-056-hang-detection-and-reporting.md)）。`previousHangAttachesLog` が true のとき（1.0.0 未満のアプリ版）、説明文は「送る」で現在の `jamuru.log` も添えることと、ログに何が入りうるか（サーバーのアドレス・音声デバイスの名前・ルーム ID・他の参加者の識別子）を書く（[ADR-059](../../adr/ADR-059-hang-report-attaches-the-log-before-1-0-0.md)）

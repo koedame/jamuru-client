@@ -119,7 +119,15 @@ const latency: DetailedLatency = {
 const diagnosticsProblems: DiagnosticProblem[] = [
   { severity: 'Error', category: 'network', code: { type: 'NoConnectivity' } },
   { severity: 'Info', category: 'network', code: { type: 'NoIpv6' } },
-  { severity: 'Warning', category: 'network', code: { type: 'SymmetricNat' } },
+  { severity: 'Warning', category: 'network', code: { type: 'PerDestinationNat' } },
+  { severity: 'Info', category: 'network', code: { type: 'UpnpOff' } },
+  { severity: 'Info', category: 'network', code: { type: 'UpnpNoRouter' } },
+  { severity: 'Info', category: 'network', code: { type: 'UpnpRefused' } },
+  { severity: 'Info', category: 'network', code: { type: 'UpnpDoubleNat' } },
+  { severity: 'Info', category: 'network', code: { type: 'Ipv6Unreachable' } },
+  { severity: 'Warning', category: 'network', code: { type: 'StunUnanswered' } },
+  { severity: 'Error', category: 'audio', code: { type: 'MicrophoneRefused' } },
+  { severity: 'Info', category: 'audio', code: { type: 'MicrophoneUndecided' } },
   { severity: 'Warning', category: 'network', code: { type: 'UnstableConnection' } },
   { severity: 'Warning', category: 'network', code: { type: 'WifiConnection' } },
   { severity: 'Warning', category: 'network', code: { type: 'HighJitter', data: { jitter_ms: 12.3 } } },
@@ -166,7 +174,10 @@ const diagnosticsResult: CompleteDiagnosticsResult = {
       public_ipv4: null,
       public_ipv6: null,
     },
-    nat_type: 'PortRestrictedCone',
+    nat_type: 'PerDestination',
+    ipv6: 'NoRoute',
+    upnp: 'DoubleNat',
+    peer_reach: 'Narrow',
     connection_stability: 'A',
     jitter_ms: null,
     stability_metrics: {
@@ -318,13 +329,19 @@ describe('components without hard-coded text', () => {
     const codes = bundle.settings.diagnostics.problemCodes;
 
     expect(screen.getByText(bundle.diagnostics.presets.ultraLowLatency)).toBeInTheDocument();
-    expect(screen.getByText(bundle.diagnostics.natTypes.portRestrictedCone)).toBeInTheDocument();
+    expect(screen.getByText(bundle.settings.diagnostics.natTypes.perDestination)).toBeInTheDocument();
     expect(screen.getAllByText(bundle.settings.diagnostics.notAvailable).length).toBeGreaterThan(0);
     expect(screen.getByText(fill(bundle.settings.diagnostics.samples, { count: 32 }))).toBeInTheDocument();
     // Backend-supplied problem codes (rm:887): a fixed-text one and one with
     // interpolated data, to prove the code -> locale lookup actually ran.
-    expect(screen.getByText(codes.symmetricNat.message)).toBeInTheDocument();
+    expect(screen.getByText(codes.perDestinationNat.message)).toBeInTheDocument();
     expect(screen.getByText(fill(codes.highJitter.message, { jitter: '12.3' }))).toBeInTheDocument();
+    expect(screen.getByText(bundle.settings.diagnostics.ipv6Status.noRoute)).toBeInTheDocument();
+    // The row's value and the problem's message use the same words
+    expect(screen.getAllByText(bundle.settings.diagnostics.upnpStatus.doubleNat).length).toBeGreaterThan(0);
+    expect(screen.getByText(bundle.settings.diagnostics.reach.narrow)).toBeInTheDocument();
+    expect(screen.getByText(codes.upnpDoubleNat.suggestion)).toBeInTheDocument();
+    expect(screen.getByText(codes.microphoneRefused.message)).toBeInTheDocument();
     expect(screen.getByText(codes.wifiConnection.message)).toBeInTheDocument();
     expect(screen.getByText(codes.wifiConnection.suggestion)).toBeInTheDocument();
     expect(screen.getByText(fill(codes.lowMemory.message, { mb: 256 }))).toBeInTheDocument();
@@ -336,6 +353,7 @@ describe('components without hard-coded text', () => {
         latinWords(container, [
           'RTT', 'CPU', 'NAT', 'IP', 'kHz', 'ms',
           'ASIO', 'ALL', 'Windows', 'WiFi', 'IPv', 'VPN', 'MB',
+          'UPnP', 'UDP', 'OS', 'ONU', 'jamuru',
           'ENODEV', 'signal', 'test', 'Mic', 'Speaker',
         ])
       ).toEqual([]);

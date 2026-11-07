@@ -159,7 +159,10 @@ const mockDiagnosticsResult: CompleteDiagnosticsResult = {
       public_ipv4: "203.0.113.50",
       public_ipv6: null,
     },
-    nat_type: "FullCone",
+    nat_type: "Stable",
+    ipv6: "NoAddress",
+    upnp: "Answers",
+    peer_reach: "Wide",
     connection_stability: "A",
     jitter_ms: 5.2,
     stability_metrics: {
@@ -294,7 +297,9 @@ export const DiagnosticsWithProblems: Story = {
       recommended_preset: "Balanced",
       network: {
         ...mockDiagnosticsResult.network,
-        nat_type: "Symmetric",
+        nat_type: "PerDestination",
+    upnp: "NoRouter",
+    peer_reach: "Narrow",
         connection_stability: "B",
         jitter_ms: 25.0,
         stability_metrics: {
@@ -312,7 +317,7 @@ export const DiagnosticsWithProblems: Story = {
         {
           severity: "Error",
           category: "network",
-          code: { type: "SymmetricNat" },
+          code: { type: "PerDestinationNat" },
         },
         {
           severity: "Info",

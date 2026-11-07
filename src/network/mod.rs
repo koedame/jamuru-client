@@ -14,6 +14,8 @@ mod error;
 mod fec;
 mod latency;
 mod link_facts;
+pub mod port_mapping;
+mod port_prediction;
 mod priority;
 mod quality;
 pub mod recording_notice;
@@ -54,6 +56,7 @@ pub use latency::{
     NetworkLatencyInfo, UpstreamLatency,
 };
 pub use link_facts::{LinkFacts, LinkRoute, LinkSnapshot};
+pub use port_mapping::PortMapping;
 pub use priority::mark_voice;
 pub use quality::{ConnectionQuality, QualityChange, QualityMonitor};
 pub use remote::{
@@ -64,10 +67,11 @@ pub use room_entry::{EnterError, EnterRequest, Entered, RoomEntry};
 pub use roster::{LinkHealth, Roster};
 pub use sequence_tracker::SequenceTracker;
 pub use signaling::{
-    candidates_to_addrs, ensure_crypto_provider_installed, gather_candidates, gather_candidates_on,
-    gather_candidates_using, gather_host_candidates, gather_host_candidates_for, invite_url,
-    parse_invite_url, AddressCandidate, CandidateType, ClientInfo, InvalidInviteCode, InviteCode,
-    PeerInfo, RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, DEVICE_ID_HEADER,
+    candidates_to_addrs, ensure_crypto_provider_installed, gather_candidates,
+    gather_candidates_mapped, gather_candidates_on, gather_candidates_using,
+    gather_host_candidates, gather_host_candidates_for, invite_url, parse_invite_url,
+    AddressCandidate, CandidateType, ClientInfo, Gathered, InvalidInviteCode, InviteCode, PeerInfo,
+    RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, DEVICE_ID_HEADER,
     DEVICE_PUBKEY_HEADER, DEVICE_SIGNATURE_HEADER, DEVICE_TIMESTAMP_HEADER, INVITE_URL_SCHEME,
     MAX_PEERS_PER_ROOM, MAX_PEER_CANDIDATES, PEER_MESSAGE_FEATURE,
 };

@@ -26,6 +26,10 @@ export interface GeneralTabProps {
   askNameOnEntry?: boolean;
   /** Called when the person turns the name confirmation on or off; the switch is left out when absent */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
+  /** Whether the router is asked to open the audio port, so peers behind a NAT can reach this app (ADR-113) */
+  openRouterPort?: boolean;
+  /** Called when the person turns it on or off; the switch is left out when absent */
+  onOpenRouterPortChange?: (enabled: boolean) => void;
   /** Whether the audio packets are marked as voice, so a Wi-Fi sends them ahead of other traffic (ADR-110) */
   voicePriority?: boolean;
   /** Called when the person turns the marking on or off; the switch is left out when absent */
@@ -52,6 +56,8 @@ export function GeneralTab({
   onDisplayNameChange,
   askNameOnEntry = true,
   onAskNameOnEntryChange,
+  openRouterPort = true,
+  onOpenRouterPortChange,
   voicePriority = false,
   onVoicePriorityChange,
   bufferAsks = "ask",
@@ -175,6 +181,27 @@ export function GeneralTab({
           autoComplete="off"
         />
       </FormField>
+
+      {onOpenRouterPortChange && (
+        <label className="tab-content__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={openRouterPort}
+            onChange={(e) => onOpenRouterPortChange(e.target.checked)}
+            data-testid="general-open-router-port-toggle"
+          />
+          <span>
+            {t("settings.general.openRouterPort", "Open a router port automatically")}
+            <span className="tab-content__switch-hint">
+              {t(
+                "settings.general.openRouterPortHint",
+                "While you are in a room, asks the router through UPnP to open one UDP port so others can reach you directly. It is closed when you leave or quit. Nothing happens if the router does not support UPnP or has it off. Applies the next time you enter a room"
+              )}
+            </span>
+          </span>
+        </label>
+      )}
 
       {onVoicePriorityChange && (
         <label className="tab-content__switch">

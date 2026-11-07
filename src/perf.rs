@@ -227,7 +227,7 @@ impl ProcessSampler {
     /// Starts sampling.
     pub fn start() -> Result<Self, String> {
         let pid = sysinfo::get_current_pid().map_err(|e| e.to_string())?;
-        let mut system = sysinfo::System::new();
+        let mut system = sysinfo::System::new().map_err(|e| e.to_string())?;
         refresh(&mut system);
         let cpu_time_at_start = system
             .processes()
@@ -330,7 +330,9 @@ fn is_serving(_pid: sysinfo::Pid, _group: &[sysinfo::Pid]) -> bool {
 /// The processor's brand string and its logical core count, for a debug
 /// report on what a measurement ran on. `None` where the OS does not say.
 pub fn cpu_description() -> (Option<String>, usize) {
-    let mut system = sysinfo::System::new();
+    let Ok(mut system) = sysinfo::System::new() else {
+        return (None, 0);
+    };
     system.refresh_cpu_specifics(sysinfo::CpuRefreshKind::nothing());
     let brand = system
         .cpus()

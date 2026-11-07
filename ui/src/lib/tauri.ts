@@ -1155,6 +1155,8 @@ export interface AppConfig {
   ask_name_on_entry: boolean;
   /** Whether the audio packets are marked as voice so a Wi-Fi sends them first (on until the person turns it off; read when a session starts) */
   voice_priority: boolean;
+  /** Whether the router is asked to open the audio port (UPnP, ADR-113; on until the person turns it off; read when a room is entered) */
+  open_router_port: boolean;
   /** Audio sample rate in Hz. Valid values: 44100, 48000, 96000 (ADR-013) */
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
@@ -1308,6 +1310,13 @@ export async function bufferRequestSetPolicy(policy: BufferAskPolicy): Promise<v
  */
 export async function configSetVoicePriority(enabled: boolean): Promise<void> {
   return invoke("config_set_voice_priority", { enabled });
+}
+
+/**
+ * Turn asking the router to open the audio port on or off (takes effect when the room is next entered)
+ */
+export async function configSetOpenRouterPort(enabled: boolean): Promise<void> {
+  return invoke("config_set_open_router_port", { enabled });
 }
 
 /**
@@ -1495,7 +1504,15 @@ export type ProblemSeverity = "Error" | "Warning" | "Info";
 export type ProblemCode =
   | { type: "NoConnectivity" }
   | { type: "NoIpv6" }
-  | { type: "SymmetricNat" }
+  | { type: "PerDestinationNat" }
+  | { type: "UpnpOff" }
+  | { type: "UpnpNoRouter" }
+  | { type: "UpnpRefused" }
+  | { type: "UpnpDoubleNat" }
+  | { type: "Ipv6Unreachable" }
+  | { type: "StunUnanswered" }
+  | { type: "MicrophoneRefused" }
+  | { type: "MicrophoneUndecided" }
   | { type: "UnstableConnection" }
   | { type: "WifiConnection" }
   | { type: "HighJitter"; data: { jitter_ms: number } }
@@ -1555,15 +1572,19 @@ export interface IpSupport {
 }
 
 /**
- * NAT type classification
+ * How the router maps the audio port, as STUN servers at different addresses
+ * see it from one socket
  */
-export type NatType =
-  | "NoNat"
-  | "FullCone"
-  | "RestrictedCone"
-  | "PortRestrictedCone"
-  | "Symmetric"
-  | "Unknown";
+export type NatType = "NoNat" | "Stable" | "PerDestination" | "Unknown";
+
+/** Whether IPv6 gets out of this host */
+export type Ipv6Status = "Usable" | "NoRoute" | "NoAddress";
+
+/** What the router did when looked for with UPnP (nothing is forwarded) */
+export type UpnpStatus = "Answers" | "Off" | "NoRouter" | "Refused" | "DoubleNat";
+
+/** Which peers the network makes hard to reach */
+export type PeerReach = "Wide" | "Narrow" | "Unknown";
 
 /**
  * Connection stability metrics
@@ -1601,8 +1622,14 @@ export interface SignalingDiagnostics {
 export interface NetworkDiagnosticsResult {
   /** IP support detection */
   ip_support: IpSupport;
-  /** Detected NAT type */
+  /** How the router maps the audio port */
   nat_type: NatType;
+  /** Whether IPv6 gets out */
+  ipv6: Ipv6Status;
+  /** What the router said when looked for with UPnP */
+  upnp: UpnpStatus;
+  /** Which peers this network reaches */
+  peer_reach: PeerReach;
   /** Connection stability grade */
   connection_stability: DiagnosticGrade;
   /** Measured jitter in milliseconds */
@@ -1814,10 +1841,10 @@ export const WindowLabels = {
 export type WindowLabel = (typeof WindowLabels)[keyof typeof WindowLabels];
 
 /**
- * Open the settings window
+ * Open the settings window, on `tab` when one is given
  */
-export async function windowOpenSettings(): Promise<void> {
-  return invoke("window_open_settings");
+export async function windowOpenSettings(tab?: string): Promise<void> {
+  return invoke("window_open_settings", { tab });
 }
 
 /**

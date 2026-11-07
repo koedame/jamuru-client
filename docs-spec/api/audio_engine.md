@@ -557,6 +557,7 @@ impl PlayoutBuffer {
 
 - 段数 + 1 フレーム溜まるまで再生を始めない（REQ-LAT-025）
 - 再生すべきフレームが無いとき、後続フレームが届いていれば補間（`Concealed`）、何も届いていなければ位置を進めずに待つ（`Starved`）。未到着を損失と扱うと、出力クロックに合わせて再生位置が送信側より先へ進み続け、以後のフレームがすべて遅着になる（REQ-LAT-029、ADR-026）
+- `Concealed` の出力は、`enable_waveform_concealment` で `Concealer`（`src/audio/conceal.rs`）を持たせたバッファでは、前後の波形から作った音になる（REQ-AUD-070、[ADR-105](../adr/ADR-105-fill-lost-audio-from-the-sound-around-it.md)）。作れないとき・持たせていないときは従来の繰り返しとフェードアウト（`PcmPlc`）。`ReceivePath` は持たせて始まる（`set_waveform_concealment(false)` で外せる）。`Starved` を過去からの予測で埋めるかは `set_starved_prediction`（既定 false、REQ-AUD-071）。どちらも読み出しの結果・順序・長さを変えず、`PlayoutStats::frames_filled` に補った回数が入る（REQ-AUD-072）
 - 再生位置を過ぎてから届いたフレームは破棄する（`WriteOutcome::Late`）
 
 ---
