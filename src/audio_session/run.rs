@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 
 use super::links::{senders_of, Link, LinkSetup, LinkStage};
+use super::os_hints::{enlarge_socket_buffers, OsHints};
 use super::shared::{LinkReport, Shared, MAX_LINKS};
 use super::stand_in::StandIns;
 use super::{send, Command, Params, PEER_APP_TOO_OLD};
@@ -111,11 +112,15 @@ pub(super) async fn run(
         wasapi_mode,
     };
 
+    // Told to the system for as long as the session runs
+    let _os_hints = OsHints::enter();
+
     // Everyone in the room sends to the one address this app told it, so every
     // link goes through that socket (the one `streaming_prepare` bound).
     if voice_priority {
         mark_voice(&prepared_socket);
     }
+    enlarge_socket_buffers(&prepared_socket);
     let mux = UdpMux::from_std(prepared_socket)
         .map_err(|e| format!("Failed to adopt the prepared audio socket: {}", e))?;
 
@@ -1039,7 +1044,9 @@ pub(super) async fn run(
         // from the play-out buffer itself, at the device's clock (ADR-028).
         // This loop only carries commands and statistics, so it waits.
         crate::perf::RECEIVE_LOOP.stop(pass_started);
+        let wait_started = crate::perf::start();
         tokio::time::sleep(POP_IDLE).await;
+        crate::perf::RECEIVE_LOOP_WAIT.stop(wait_started);
     }
 
     // Cleanup: signal send thread to stop and wait for it

@@ -139,6 +139,18 @@ pub const METHODS: &[Method] = &[
         kind: Kind::Native,
         summary: "開いている音声の入出力を、エラーを出さずにコールバックが呼ばれなくなった状態にする。mode は open（いま開いているものだけ。開き直せば戻る）・all（開き直しても戻らない）・off（解く）。止まったことに気づいて開き直すかを確かめるため",
     },
+    Method {
+        name: "debug.os_hints",
+        access: Access::TOOLS,
+        kind: Kind::Native,
+        summary: "セッションが OS に伝える「遅延に厳しい音声だ」という申告のうち、off に挙げたもの（activity・timer・throttling・socket_buffers）を、次のセッションから外す。空の配列で全部戻す。申告の有無で遅延と揺れがどう変わるかを測るため",
+    },
+    Method {
+        name: "debug.window_state",
+        access: Access::TOOLS,
+        kind: Kind::Native,
+        summary: "メイン画面を最小化・隠す・元に戻す。state は minimize・hide・restore。窓を隠したときに受信やタイマーが遅れるかを測るため",
+    },
 ];
 
 /// Runs the `debug.*` method `name`.
@@ -161,6 +173,8 @@ pub async fn call<R: Runtime>(
         "debug.device_hang" => device_hang(params(&call)?),
         "debug.stall_streams" => stall_streams(params(&call)?),
         "debug.audio_timing" => audio_timing(app),
+        "debug.os_hints" => os_hints(params(&call)?),
+        "debug.window_state" => window_state(app, params(&call)?),
         other => Err(RpcError::new(
             Code::UnknownMethod,
             format!("no method named {:?}", other),
@@ -782,6 +796,66 @@ fn stall_streams(params: StallStreamsParams) -> Result<Value, RpcError> {
         .ok_or_else(|| RpcError::invalid_params("mode is one of \"open\", \"all\" and \"off\""))?;
     jamjam::audio::fault::stall_streams(mode);
     Ok(json!({ "mode": params.mode }))
+}
+
+#[derive(Debug, Deserialize)]
+struct WindowStateParams {
+    /// `minimize`, `hide` or `restore`.
+    state: String,
+}
+
+/// Minimizes, hides or brings back the main window.
+fn window_state<R: Runtime>(
+    app: &AppHandle<R>,
+    params: WindowStateParams,
+) -> Result<Value, RpcError> {
+    let label = super::webview::MAIN_WINDOW;
+    let window = app.get_webview_window(label).ok_or_else(|| {
+        RpcError::new(
+            Code::NoWindow,
+            format!("the window {:?} is not open", label),
+        )
+    })?;
+    let done = match params.state.as_str() {
+        "minimize" => window.minimize(),
+        "hide" => window.hide(),
+        "restore" => window.show().and_then(|()| window.unminimize()),
+        _ => {
+            return Err(RpcError::invalid_params(
+                "state is one of \"minimize\", \"hide\" and \"restore\"",
+            ))
+        }
+    };
+    done.map_err(|e| RpcError::failed(e.to_string()))?;
+    Ok(json!({ "state": params.state }))
+}
+
+#[derive(Debug, Deserialize)]
+struct OsHintsParams {
+    /// Names of the hints to leave out: `activity`, `timer`, `throttling`, `socket_buffers`.
+    off: Vec<String>,
+}
+
+/// Leaves out some of what a session tells the system about itself, from the next session on.
+fn os_hints(params: OsHintsParams) -> Result<Value, RpcError> {
+    use jamjam::audio_session::os_hints::{hint, turn_off};
+
+    let mut mask = 0;
+    for name in &params.off {
+        mask |= match name.as_str() {
+            "activity" => hint::ACTIVITY,
+            "timer" => hint::TIMER,
+            "throttling" => hint::THROTTLING,
+            "socket_buffers" => hint::SOCKET_BUFFERS,
+            other => {
+                return Err(RpcError::invalid_params(format!(
+                    "{other:?} is not one of \"activity\", \"timer\", \"throttling\" and \"socket_buffers\""
+                )))
+            }
+        };
+    }
+    turn_off(mask);
+    Ok(json!({ "off": params.off }))
 }
 
 /// What went wrong with the received audio in this session, or the last one:
