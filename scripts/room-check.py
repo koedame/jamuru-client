@@ -90,6 +90,15 @@ SEARCH_SECONDS = 3
 DEFAULT_MIN_HEARD = 0.9
 ROOM_NAME = "room check"
 INVITE_PREFIX = "Invite code:"
+# The first turn starts this long after the last participant has entered the
+# room, which is when the connections between them are made.
+JOIN_SECONDS = 40
+# How long the host waits for every participant to enter the room. A runner
+# can wait a long time for a machine (macOS ones are capped at 5 at a time).
+JOINED_WAIT_SECONDS = 1200
+# How long a participant waits for the host to say when the turns start.
+START_WAIT_SECONDS = JOINED_WAIT_SECONDS + 300
+JOINED_PATTERN = re.compile(r"📥 (\S+) joined the room")
 
 
 def name_of(index):
@@ -142,6 +151,11 @@ def server_url(env_name):
     return url
 
 
+def start_file_of(work):
+    """Where the time the turns start is: the host writes it, the others copy it."""
+    return Path(work) / "start" / "start.json"
+
+
 def schedule(start_at, total, slot):
     """When each participant speaks, and when the run ends.
 
@@ -151,8 +165,8 @@ def schedule(start_at, total, slot):
     return turns, start_at + total * slot + TAIL_SECONDS
 
 
-def launch(binary, work, index, command, server, room, turn, quiet_at, end_at):
-    """Starts participant `index`; it speaks in `turn`, then leaves at `end_at`.
+def launch(binary, work, index, command, server, room, total, slot):
+    """Starts participant `index`; it speaks in its turn once the host has set the start.
 
     Each has its own HOME, so that no two share an identity or settings, and
     runs under `supervise`, which drives its mute switch, ends it the way
@@ -183,10 +197,10 @@ def launch(binary, work, index, command, server, room, turn, quiet_at, end_at):
     args = [
         sys.executable, __file__, "supervise",
         "--out", str(out),
-        "--quiet-at", str(quiet_at),
-        "--speak-from", str(turn[0]),
-        "--speak-until", str(turn[1]),
-        "--end-at", str(end_at),
+        "--start-file", str(start_file_of(work)),
+        "--index", str(index),
+        "--total", str(total),
+        "--slot", str(slot),
         "--", *jamuru,
     ]
     # On Windows the settings are where the system says, not where HOME points,
@@ -214,16 +228,18 @@ def launch(binary, work, index, command, server, room, turn, quiet_at, end_at):
 
 
 def supervise(args):
-    """Runs a command through its turn and until `--end-at`, and writes what it cost.
+    """Runs a command through its turn and until the run ends, and writes what it cost.
 
-    The session reads its commands from standard input: `/mute` and `/unmute`
-    switch what it sends, `/quit` ends it the way Ctrl+C does (so it writes its
-    report) on every system.
+    The turns start when the host writes `--start-file`, so the command may be
+    started long before. The session reads its commands from standard input:
+    `/mute` and `/unmute` switch what it sends, `/quit` ends it the way Ctrl+C
+    does (so it writes its report) on every system.
     """
     started = time.time()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     child = subprocess.Popen(command, stdin=subprocess.PIPE)
-    steps = [(args.quiet_at, b"/mute\n"), (args.speak_from, b"/unmute\n"), (args.speak_until, b"/mute\n")]
+    steps = None
+    end_at = None
     quit_at = None
     usage = None
     while True:
@@ -234,13 +250,24 @@ def supervise(args):
         if done:
             break
         now = time.time()
+        if steps is None:
+            try:
+                start_at = json.loads(Path(args.start_file).read_text())["start_at"]
+            except (OSError, ValueError, KeyError):
+                start_at = None
+            if start_at is not None:
+                turns, end_at = schedule(start_at, args.total, args.slot)
+                turn = turns[args.index]
+                steps = [(start_at - QUIET_SECONDS, b"/mute\n"), (turn[0], b"/unmute\n"), (turn[1], b"/mute\n")]
+            elif now >= started + START_WAIT_SECONDS:
+                steps, end_at = [], now
         while steps and now >= steps[0][0]:
             try:
                 child.stdin.write(steps.pop(0)[1])
                 child.stdin.flush()
             except OSError:
                 steps.clear()
-        if quit_at is None and now >= args.end_at:
+        if quit_at is None and end_at is not None and now >= end_at:
             quit_at = now
             try:
                 child.stdin.write(b"/quit\n")
@@ -283,14 +310,16 @@ def decrypt(source, key):
 
 
 def start_host(args):
-    """Creates the room as participant 0 and publishes how to join it."""
+    """Creates the room as participant 0 and publishes how to join it.
+
+    When the turns start is not known yet: the host says so once everyone has
+    entered (`join` on runner 0).
+    """
     server = server_url(args.server_env)
     work = Path(args.work)
-    start_at = time.time() + args.lead
-    turns, end_at = schedule(start_at, sum(layout_of(args.layout)), args.slot)
-    process, out = launch(
-        binary_of(args.binary), work, 0, "create-room", server, None, turns[0], start_at - QUIET_SECONDS, end_at
-    )
+    layout = layout_of(args.layout)
+    total = sum(layout)
+    process, out = launch(binary_of(args.binary), work, 0, "create-room", server, None, total, args.slot)
     code = None
     deadline = time.time() + 90
     while time.time() < deadline and code is None:
@@ -305,26 +334,19 @@ def start_host(args):
         print("host: no invite code")
         sys.exit(1)
     (work / "host.pid").write_text(str(process.pid))
-    room = {
-        "code": code, "start_at": start_at, "slot": args.slot,
-        "total": sum(layout_of(args.layout)), "layout": layout_of(args.layout),
-    }
+    room = {"code": code, "slot": args.slot, "total": total, "layout": layout}
     (work / "room.json").write_text(json.dumps(room))
     published = work / "rendezvous"
     published.mkdir(exist_ok=True)
     encrypt(json.dumps(room), published / "room.enc", server)
-    print(f"host: room created, the others have {int(start_at - time.time())} s to join")
+    print("host: room created")
 
 
-def fetch(args):
-    """Waits for the host's file in this workflow run and reads it."""
-    server = server_url(args.server_env)
-    work = Path(args.work)
-    work.mkdir(parents=True, exist_ok=True)
+def fetch_artifact(work, name, member, timeout):
+    """Waits for the artifact `name` of this workflow run and extracts `member` from it into `work`."""
     repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
-    attempt = os.environ["GITHUB_RUN_ATTEMPT"]
-    name = f"room-rendezvous-{attempt}"
-    deadline = time.time() + args.timeout
+    work.mkdir(parents=True, exist_ok=True)
+    deadline = time.time() + timeout
     while time.time() < deadline:
         listed = subprocess.run(
             ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/artifacts?name={name}",
@@ -333,7 +355,7 @@ def fetch(args):
         )
         artifact = listed.stdout.strip()
         if listed.returncode == 0 and artifact:
-            archive = work / "rendezvous.zip"
+            archive = work / f"{name}.zip"
             with open(archive, "wb") as handle:
                 done = subprocess.run(
                     ["gh", "api", f"repos/{repo}/actions/artifacts/{artifact}/zip"],
@@ -341,13 +363,48 @@ def fetch(args):
                 )
             if done.returncode == 0:
                 with zipfile.ZipFile(archive) as bundle:
-                    bundle.extract("room.enc", work)
-                (work / "room.json").write_text(decrypt(work / "room.enc", server))
-                print("fetch: got the room")
-                return
+                    bundle.extract(member, work)
+                return True
         time.sleep(5)
-    print("fetch: the host published nothing in time")
-    sys.exit(1)
+    return False
+
+
+def fetch(args):
+    """Waits for the host's file in this workflow run and reads it."""
+    server = server_url(args.server_env)
+    work = Path(args.work)
+    work.mkdir(parents=True, exist_ok=True)
+    attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+    if not fetch_artifact(work, f"room-rendezvous-{attempt}", "room.enc", args.timeout):
+        print("fetch: the host published nothing in time")
+        sys.exit(1)
+    (work / "room.json").write_text(decrypt(work / "room.enc", server))
+    print("fetch: got the room")
+
+
+def entered(work):
+    """The names of the participants the host has seen enter the room."""
+    log = Path(work) / "out" / (name_of(0) + ".log")
+    return set(JOINED_PATTERN.findall(log.read_text(errors="replace"))) if log.exists() else set()
+
+
+def wait_for_everyone(work, total):
+    """Waits until every other participant has entered the room, then sets when the turns start.
+
+    The start time follows the arrival of the last runner, so a runner that
+    waited long for a machine is still in the room when the turns begin. If
+    someone never comes, the turns start anyway after `JOINED_WAIT_SECONDS`;
+    the verdict then fails for the missing ones.
+    """
+    began = time.time()
+    while len(entered(work)) < total - 1 and time.time() < began + JOINED_WAIT_SECONDS:
+        time.sleep(1)
+    seen = len(entered(work)) + 1
+    print(f"host: {seen} of {total} participants entered the room after {int(time.time() - began)} s")
+    start_at = time.time() + JOIN_SECONDS
+    target = start_file_of(work)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps({"start_at": start_at}))
 
 
 def pid_alive(pid):
@@ -358,32 +415,58 @@ def pid_alive(pid):
     return True
 
 
-def run(args):
-    """Starts this runner's participants and measures them once the turns are over."""
+def own_participants(room, runner):
+    first = sum(room["layout"][:runner])
+    return list(range(first, first + room["layout"][runner]))
+
+
+def join(args):
+    """Starts this runner's participants. On runner 0 it then waits for everyone and sets the start.
+
+    The participants wait for the start by themselves, so nothing is lost when
+    a runner is late to get a machine.
+    """
     server = server_url(args.server_env)
     work = Path(args.work)
     room = json.loads((work / "room.json").read_text())
-    total, slot = room["total"], room["slot"]
-    turns, end_at = schedule(room["start_at"], total, slot)
-    layout = room["layout"]
-    first = sum(layout[:args.runner])
-    own = list(range(first, first + layout[args.runner]))
     runner = probe_runner()
     print(
         f"runner {args.runner}: {runner['os']} {runner['cpus']} cpus, "
         f"ipv6 {'works' if runner['ipv6'].get('servers_answered') else 'does not answer'}, "
         f"nat {'per destination' if runner['nat'].get('port_changes') else 'same port for all'}"
     )
-    processes = []
-    for index in own:
+    (work / "runner.json").write_text(json.dumps(runner))
+    for index in own_participants(room, args.runner):
         if index == 0:
             continue
-        processes.append(launch(
-            binary_of(args.binary), work, index, "join-room", server, room["code"],
-            turns[index], room["start_at"] - QUIET_SECONDS, end_at,
-        )[0])
-    for process in processes:
-        process.wait()
+        launch(binary_of(args.binary), work, index, "join-room", server, room["code"], room["total"], room["slot"])
+    if args.runner == 0:
+        wait_for_everyone(work, room["total"])
+
+
+def measure(args):
+    """Waits for this runner's participants to finish their run, and measures what they heard."""
+    work = Path(args.work)
+    room = json.loads((work / "room.json").read_text())
+    runner = json.loads((work / "runner.json").read_text())
+    target = start_file_of(work)
+    if args.runner != 0:
+        attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+        if not fetch_artifact(target.parent, f"room-start-{attempt}", "start.json", START_WAIT_SECONDS):
+            print("measure: the host did not say when the turns start")
+            sys.exit(1)
+        start_at = json.loads(target.read_text())["start_at"]
+        if time.time() > start_at - QUIET_SECONDS:
+            target.unlink()
+            print(f"measure: this runner arrived {int(time.time() - start_at)} s after the turns started")
+            sys.exit(1)
+    start_at = json.loads(target.read_text())["start_at"]
+    _, end_at = schedule(start_at, room["total"], room["slot"])
+    own = own_participants(room, args.runner)
+    deadline = end_at + 120
+    waiting = [work / "out" / (name_of(index) + ".time") for index in own]
+    while time.time() < deadline and not all(path.exists() for path in waiting):
+        time.sleep(1)
     host_pid = work / "host.pid"
     if host_pid.exists():
         pid = int(host_pid.read_text())
@@ -397,6 +480,12 @@ def run(args):
         result["runner_facts"] = runner
         (results / f"{name_of(index)}.json").write_text(json.dumps(result))
         print(describe(result))
+
+
+def run(args):
+    """`join` then `measure` in one step, for the runners other than the host."""
+    join(args)
+    measure(args)
 
 
 STUN_SERVERS = (("stun.l.google.com", 19302), ("stun.cloudflare.com", 3478))
@@ -802,7 +891,6 @@ def main():
     host.add_argument("--binary", required=True)
     host.add_argument("--layout", required=True, help="participants on each runner, such as 2,2,1")
     host.add_argument("--slot", type=int, required=True, help="seconds each participant speaks")
-    host.add_argument("--lead", type=int, required=True, help="seconds the others have to arrive")
     host.set_defaults(handler=start_host)
 
     get = commands.add_parser("fetch")
@@ -810,27 +898,28 @@ def main():
     get.add_argument("--timeout", type=int, default=600)
     get.set_defaults(handler=fetch)
 
-    measure = commands.add_parser("run")
-    common(measure)
-    measure.add_argument("--binary", required=True)
-    measure.add_argument("--runner", type=int, required=True)
-    measure.add_argument("--layout", required=True, help="participants on each runner, such as 2,2,1")
-    measure.set_defaults(handler=run)
+    for name, handler in (("run", run), ("join", join), ("measure", measure)):
+        sub = commands.add_parser(name)
+        common(sub)
+        sub.add_argument("--runner", type=int, required=True)
+        if name != "measure":
+            sub.add_argument("--binary", required=True)
+        sub.set_defaults(handler=handler)
 
     watch = commands.add_parser("supervise")
     watch.add_argument("--out", required=True)
-    watch.add_argument("--quiet-at", type=float, required=True)
-    watch.add_argument("--speak-from", type=float, required=True)
-    watch.add_argument("--speak-until", type=float, required=True)
-    watch.add_argument("--end-at", type=float, required=True)
+    watch.add_argument("--start-file", required=True)
+    watch.add_argument("--index", type=int, required=True)
+    watch.add_argument("--total", type=int, required=True)
+    watch.add_argument("--slot", type=int, required=True)
     watch.add_argument("command", nargs=argparse.REMAINDER)
     watch.set_defaults(handler=supervise)
 
-    join = commands.add_parser("summary")
-    join.add_argument("--results", required=True)
-    join.add_argument("--total", type=int, required=True)
-    join.add_argument("--min-heard", type=float, default=DEFAULT_MIN_HEARD)
-    join.set_defaults(handler=summary)
+    tally = commands.add_parser("summary")
+    tally.add_argument("--results", required=True)
+    tally.add_argument("--total", type=int, required=True)
+    tally.add_argument("--min-heard", type=float, default=DEFAULT_MIN_HEARD)
+    tally.set_defaults(handler=summary)
 
     args = parser.parse_args()
     args.handler(args)
