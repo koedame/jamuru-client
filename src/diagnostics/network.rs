@@ -352,7 +352,10 @@ impl NetworkDiagnostics {
             return NatType::Unknown;
         };
         let client = StunClient::with_timeout(socket, 2000);
-        let Ok(first) = client.discover_public_address_from(DEFAULT_STUN_SERVERS).await else {
+        let Ok(first) = client
+            .discover_public_address_from(DEFAULT_STUN_SERVERS)
+            .await
+        else {
             return NatType::Unknown;
         };
         let others = client

@@ -132,10 +132,10 @@ impl PortPrediction {
                 expected: newest.saturating_add(step),
                 set: shared_middle(&ports),
             }
-        } else if let Some(middle) = shared_middle(&ports) {
-            Pattern::PortSet { middle }
         } else {
-            return None;
+            Pattern::PortSet {
+                middle: shared_middle(&ports)?,
+            }
         };
         Some(Self {
             ip,
@@ -189,7 +189,8 @@ impl PortPrediction {
         let sweep = |middle: u16| Pass {
             addrs: (1..=PORT_SET_BLOCKS)
                 .flat_map(|block| {
-                    (0..PORT_SET_PER_BLOCK).map(move |offset| (block << 10) | (middle << 4) | offset)
+                    (0..PORT_SET_PER_BLOCK)
+                        .map(move |offset| (block << 10) | (middle << 4) | offset)
                 })
                 .filter_map(|port| at(u32::from(port)))
                 .collect(),
@@ -287,18 +288,28 @@ mod tests {
     #[test]
     fn when_a_peer_offers_ports_on_private_addresses_only_nothing_is_guessed() {
         assert_eq!(predicted(&["192.168.1.5:5000", "192.168.1.5:5001"]), None);
-        assert_eq!(predicted(&["100.101.102.103:5000", "100.101.102.103:5001"]), None);
+        assert_eq!(
+            predicted(&["100.101.102.103:5000", "100.101.102.103:5001"]),
+            None
+        );
     }
 
     #[test]
     fn when_a_peer_offers_ports_on_two_public_addresses_nothing_is_guessed() {
-        assert_eq!(predicted(&["203.0.113.7:40000", "198.51.100.9:40001"]), None);
+        assert_eq!(
+            predicted(&["203.0.113.7:40000", "198.51.100.9:40001"]),
+            None
+        );
     }
 
     #[test]
     fn when_a_peer_offers_ports_that_are_far_apart_and_in_no_set_nothing_is_guessed() {
         assert_eq!(
-            predicted(&["203.0.113.7:40000", "203.0.113.7:12345", "203.0.113.7:55555"]),
+            predicted(&[
+                "203.0.113.7:40000",
+                "203.0.113.7:12345",
+                "203.0.113.7:55555"
+            ]),
             None
         );
         // Two ports share their middle bits once in 64, which is not enough to take for a set
@@ -351,12 +362,8 @@ mod tests {
     #[test]
     fn when_a_peer_offers_three_ports_of_one_port_set_the_whole_set_is_swept_in_one_pass() {
         // Middle bits 0b000101: ports 1024 * block + 16 * 5 + offset
-        let prediction = predicted(&[
-            "203.0.113.7:1104",
-            "203.0.113.7:5200",
-            "203.0.113.7:33875",
-        ])
-        .unwrap();
+        let prediction =
+            predicted(&["203.0.113.7:1104", "203.0.113.7:5200", "203.0.113.7:33875"]).unwrap();
         let passes = prediction.passes();
         assert_eq!(passes.len(), 1);
         // 63 blocks of 16, less the three the peer offered
@@ -397,13 +404,21 @@ mod tests {
                 .map(|pass| pass.spacing * pass.addrs.len() as u32 + prediction.pause())
                 .sum::<Duration>()
         };
-        let sweep = predicted(&["203.0.113.7:1104", "203.0.113.7:5200", "203.0.113.7:33875"])
-            .unwrap();
+        let sweep =
+            predicted(&["203.0.113.7:1104", "203.0.113.7:5200", "203.0.113.7:33875"]).unwrap();
         assert!(time(&sweep) <= Duration::from_secs(5), "{:?}", time(&sweep));
         let window = predicted(&["203.0.113.7:40000", "203.0.113.7:40001"]).unwrap();
-        assert!(time(&window) <= Duration::from_secs(2), "{:?}", time(&window));
-        let both = predicted(&["203.0.113.7:20083", "203.0.113.7:20092", "203.0.113.7:20093"])
-            .unwrap();
+        assert!(
+            time(&window) <= Duration::from_secs(2),
+            "{:?}",
+            time(&window)
+        );
+        let both = predicted(&[
+            "203.0.113.7:20083",
+            "203.0.113.7:20092",
+            "203.0.113.7:20093",
+        ])
+        .unwrap();
         assert!(time(&both) <= Duration::from_secs(7), "{:?}", time(&both));
     }
 

@@ -932,7 +932,10 @@ pub async fn gather_candidates_using(
         for addr in others {
             if addr != first.mapped_address {
                 candidates.push(AddressCandidate::server_reflexive(addr));
-                info!("Added server reflexive candidate seen by another server: {}", addr);
+                info!(
+                    "Added server reflexive candidate seen by another server: {}",
+                    addr
+                );
             }
         }
         if candidates.len() > before {

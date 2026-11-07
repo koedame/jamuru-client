@@ -3320,7 +3320,9 @@ mod tests {
         let front_sockets: Vec<Arc<tokio::net::UdpSocket>> = {
             let mut sockets = Vec::new();
             for _ in &destinations {
-                sockets.push(Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap()));
+                sockets.push(Arc::new(
+                    tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+                ));
             }
             sockets
         };
@@ -3360,11 +3362,8 @@ mod tests {
             });
         }
         for (index, socket) in pool.iter().enumerate() {
-            let (socket, owner, fronts_to_inside) = (
-                socket.clone(),
-                owner.clone(),
-                front_sockets.clone(),
-            );
+            let (socket, owner, fronts_to_inside) =
+                (socket.clone(), owner.clone(), front_sockets.clone());
             let destinations = destinations.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 2048];

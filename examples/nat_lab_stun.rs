@@ -34,9 +34,7 @@ async fn main() {
                 reply.extend_from_slice(&0x0020u16.to_be_bytes());
                 reply.extend_from_slice(&8u16.to_be_bytes());
                 reply.extend_from_slice(&[0x00, 0x01]);
-                reply.extend_from_slice(
-                    &(from.port() ^ (MAGIC_COOKIE >> 16) as u16).to_be_bytes(),
-                );
+                reply.extend_from_slice(&(from.port() ^ (MAGIC_COOKIE >> 16) as u16).to_be_bytes());
                 reply.extend_from_slice(&(u32::from(*from.ip()) ^ MAGIC_COOKIE).to_be_bytes());
                 let _ = socket.send_to(&reply, from).await;
             }

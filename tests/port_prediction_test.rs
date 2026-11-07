@@ -14,6 +14,10 @@ use tokio::net::UdpSocket;
 
 const MAGIC_COOKIE: u32 = 0x2112A442;
 
+/// What an external port of the NAT sends back, and where to: each server's answer to the front
+/// made for that server
+type Replies = Vec<(SocketAddr, Arc<UdpSocket>)>;
+
 /// A STUN server at `bind` that reports the address a request came from
 async fn stun_server(bind: &str) -> SocketAddr {
     let socket = UdpSocket::bind(bind).await.expect("bind STUN");
@@ -65,7 +69,7 @@ async fn nat_toward(
         break;
     }
     // What each port gets back from a server goes out of the front made for that server
-    let mut listeners: Vec<(Arc<UdpSocket>, Vec<(SocketAddr, Arc<UdpSocket>)>)> = Vec::new();
+    let mut listeners: Vec<(Arc<UdpSocket>, Replies)> = Vec::new();
     let mut fronts = Vec::new();
     for (i, server) in servers.into_iter().enumerate() {
         let front = Arc::new(
@@ -76,7 +80,10 @@ async fn nat_toward(
         fronts.push(front.local_addr().unwrap().to_string());
         let external = pool[if per_destination { i } else { 0 }].clone();
         used.lock().push(external.local_addr().unwrap());
-        match listeners.iter_mut().find(|(socket, _)| Arc::ptr_eq(socket, &external)) {
+        match listeners
+            .iter_mut()
+            .find(|(socket, _)| Arc::ptr_eq(socket, &external))
+        {
             Some((_, replies)) => replies.push((server, front.clone())),
             None => listeners.push((external.clone(), vec![(server, front.clone())])),
         }

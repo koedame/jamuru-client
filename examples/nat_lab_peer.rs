@@ -50,10 +50,19 @@ async fn main() {
     let peer = arg("--peer").expect("--peer");
     let dir = arg("--dir").expect("--dir");
     let stun = arg("--stun").expect("--stun");
-    let wait = Duration::from_secs(arg("--wait-secs").and_then(|v| v.parse().ok()).unwrap_or(60));
-    let settle =
-        Duration::from_secs(arg("--settle-secs").and_then(|v| v.parse().ok()).unwrap_or(15));
-    let audio_secs: u64 = arg("--audio-secs").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let wait = Duration::from_secs(
+        arg("--wait-secs")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60),
+    );
+    let settle = Duration::from_secs(
+        arg("--settle-secs")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(15),
+    );
+    let audio_secs: u64 = arg("--audio-secs")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let servers: Vec<&str> = stun.split(',').collect();
 
     let gather_started = Instant::now();
