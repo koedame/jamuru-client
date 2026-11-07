@@ -12,6 +12,10 @@ name: Room check
 # from a fork never reaches the secret. The log carries a verdict and numbers
 # per participant, nothing the server sent.
 #
+# The turns start a short while after the last participant has entered the room,
+# not at a time fixed beforehand: a runner can wait minutes for a machine (macOS
+# ones are capped at 5 at a time), and the others wait for it in the room.
+#
 # The runners' CPUs are shared, so this says nothing about performance.
 
 on:
@@ -54,10 +58,6 @@ env:
   MACOS_PER_RUNNER: ${{ inputs.macos_per_runner || '1' }}
   SLOT_SECONDS: ${{ inputs.slot_seconds || '3' }}
   MIN_HEARD: ${{ inputs.min_heard || '0.9' }}
-  # Seconds between the room being created and the measuring window starting:
-  # the time the other runners have to start and join. Windows and macOS runners
-  # take longer to start than Linux ones.
-  LEAD_SECONDS: '210'
 
 jobs:
   plan:
@@ -156,7 +156,7 @@ jobs:
   room:
     name: Runner ${{ matrix.runner }} (${{ matrix.system }})
     runs-on: ${{ matrix.image }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: [plan, build]
     strategy:
       fail-fast: false
@@ -195,7 +195,7 @@ jobs:
         if: matrix.runner == 0
         run: |
           ${{ matrix.python }} scripts/room-check.py start-host --work "$WORK" --binary bin/jamuru \
-            --layout "${{ needs.plan.outputs.layout }}" --slot "$SLOT_SECONDS" --lead "$LEAD_SECONDS"
+            --layout "${{ needs.plan.outputs.layout }}" --slot "$SLOT_SECONDS"
 
       - name: Publish the room
         if: matrix.runner == 0
@@ -209,10 +209,31 @@ jobs:
         if: matrix.runner != 0
         run: ${{ matrix.python }} scripts/room-check.py fetch --work "$WORK"
 
+      # The others enter the room in their own step, and runner 0 then waits
+      # until all of them have, and says when the turns start.
+      - name: Join the room, wait for everyone
+        if: matrix.runner == 0
+        run: |
+          ${{ matrix.python }} scripts/room-check.py join --work "$WORK" --binary bin/jamuru --runner 0
+
+      - name: Publish the start
+        if: matrix.runner == 0
+        uses: actions/upload-artifact@v7
+        with:
+          name: room-start-${{ github.run_attempt }}
+          path: ${{ env.WORK }}/start/start.json
+          retention-days: 1
+
+      - name: Measure
+        if: matrix.runner == 0
+        run: |
+          ${{ matrix.python }} scripts/room-check.py measure --work "$WORK" --runner 0
+
       - name: Join and measure
+        if: matrix.runner != 0
         run: |
           ${{ matrix.python }} scripts/room-check.py run --work "$WORK" --binary bin/jamuru \
-            --runner "${{ matrix.runner }}" --layout "${{ needs.plan.outputs.layout }}"
+            --runner "${{ matrix.runner }}"
 
       - name: Keep the numbers
         if: always()
