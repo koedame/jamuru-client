@@ -3,6 +3,7 @@
 //! Steers the audio session of the core library (`jamjam::audio_session`), which runs on a
 //! dedicated audio thread that also carries the network, and publishes what the UI shows.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc as std_mpsc;
@@ -17,6 +18,7 @@ use jamjam::audio::{
 };
 pub use jamjam::audio_session::LinkTarget;
 use jamjam::audio_session::{self, BandwidthSnapshot, LinkReport, Params, Shared};
+use jamjam::network::dropout::{Heard, Side, Standing};
 use jamjam::network::{
     status_label, ConnectionStats, LatencyBreakdown, LinkHealth, LinkSnapshot, LocalLatencyInfo,
 };
@@ -61,6 +63,9 @@ pub struct StreamingState {
     /// (REQ-CON-138), what lifting the hold goes back to. `None` when nothing
     /// holds it.
     mute_hold: std::sync::Mutex<Option<MuteHold>>,
+    /// Which links are quiet and whose line it is, as the signaling side last worked it out
+    /// (REQ-CON-162)
+    standing: std::sync::Mutex<HashMap<Uuid, Standing>>,
     /// What a session started by a test captures and plays in place of the
     /// devices: the machine the tests run on may have none, and a test must
     /// not open the microphone of the one that has.
@@ -105,6 +110,7 @@ impl StreamingState {
             audio_families: std::sync::Mutex::new(jamjam::network::IpFamilies::V4_ONLY),
             port_mapping: std::sync::Mutex::new(None),
             mute_hold: std::sync::Mutex::new(None),
+            standing: std::sync::Mutex::new(HashMap::new()),
             #[cfg(test)]
             stand_ins: std::sync::Mutex::new(None),
         }
@@ -377,6 +383,34 @@ impl StreamingState {
     /// links were opened.
     pub fn link_healths(&self) -> Vec<(Uuid, LinkHealth)> {
         self.shared.link_healths()
+    }
+
+    /// When each audio link last received anything, in the order the links were opened
+    pub fn link_last_heard(&self) -> Vec<Heard> {
+        self.link_reports()
+            .iter()
+            .map(|(peer, report)| Heard {
+                peer: *peer,
+                at: report
+                    .stats
+                    .read()
+                    .ok()
+                    .and_then(|stats| stats.as_ref().and_then(|stats| stats.last_received_at)),
+            })
+            .collect()
+    }
+
+    /// Takes what the signaling side worked out of the quiet links, for the status to show
+    pub fn set_standing(&self, standing: HashMap<Uuid, Standing>) {
+        *self.standing.lock().unwrap_or_else(|e| e.into_inner()) = standing;
+    }
+
+    fn standing_of(&self, peer: &Uuid) -> Option<Standing> {
+        self.standing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(peer)
+            .copied()
     }
 
     /// The IP families the audio socket can use: IPv4 and IPv6 for the dual-stack socket
@@ -792,6 +826,19 @@ pub struct PeerLinkStatus {
     /// The buffer their audio is played from: what the user chose for it, what
     /// another participant asked of it, and what it stands at (ADR-097)
     pub buffer: PeerBufferStatus,
+    /// Set while nothing arrives from them and they have not left (REQ-CON-161)
+    pub dropout: Option<PeerDropout>,
+    /// Went quiet twice or more in the last quarter of an hour (REQ-CON-162)
+    pub unstable: bool,
+}
+
+/// A participant whose audio stopped without a leave notice, for IPC
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerDropout {
+    /// How long nothing has arrived, in seconds
+    pub silent_secs: u64,
+    /// Whose line is cut: "mine" | "theirs" | "between" | "checking" | "unknown" (REQ-CON-163)
+    pub side: Side,
 }
 
 /// The receive buffer of one participant, for IPC
@@ -1169,6 +1216,7 @@ pub async fn streaming_status(
             let stats = report.stats.read().ok().and_then(|s| s.clone());
             let bandwidth = report.bandwidth.read().ok().and_then(|b| *b);
             let connection_state = report.state();
+            let standing = state.standing_of(peer);
             let (network, latency) = match &stats {
                 Some(s) => {
                     let local_info = state
@@ -1214,6 +1262,13 @@ pub async fn streaming_status(
                         granted: view.granted,
                     }
                 },
+                dropout: standing
+                    .and_then(|standing| standing.dropout)
+                    .map(|dropout| PeerDropout {
+                        silent_secs: dropout.silent_for.as_secs(),
+                        side: dropout.side,
+                    }),
+                unstable: standing.is_some_and(|standing| standing.unstable),
             }
         })
         .collect();
@@ -1871,11 +1926,13 @@ mod tests {
                 "buffer",
                 "connection_error",
                 "connection_state",
+                "dropout",
                 "latency",
                 "level",
                 "network",
                 "peer_audio",
                 "peer_id",
+                "unstable",
             ]
         );
         assert_eq!(

@@ -58,6 +58,8 @@ function link(
     peer_audio: null,
     level: 0,
     buffer: { own: { mode: 'preset' }, delay_ms10: 0, granted: null },
+    dropout: null,
+    unstable: false,
   };
 }
 

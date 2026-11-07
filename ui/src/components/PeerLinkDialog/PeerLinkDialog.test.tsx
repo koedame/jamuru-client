@@ -26,6 +26,8 @@ const LINK: PeerLinkStatus = {
   peer_audio: null,
   level: 0,
   buffer: { own: { mode: "preset" }, delay_ms10: 53, granted: null },
+  dropout: null,
+  unstable: false,
 };
 
 function requests(changes: Partial<BufferRequests> = {}): BufferRequests {

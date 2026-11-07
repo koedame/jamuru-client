@@ -69,6 +69,8 @@ export function link(peerId: string, up: number, down: number, level: number): P
     peer_audio: null,
     level,
     buffer: { own: { mode: "preset" }, delay_ms10: 0, granted: null },
+    dropout: null,
+    unstable: false,
   } as PeerLinkStatus;
 }
 
