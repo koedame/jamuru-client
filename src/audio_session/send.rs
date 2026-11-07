@@ -156,9 +156,7 @@ pub(super) fn spawn(feed: SendFeed) -> std::thread::JoinHandle<()> {
                 timestamp = timestamp.wrapping_add(send_buffer_size as u32);
             } else {
                 // No data available, sleep briefly (100µs for low latency)
-                let wait_started = crate::perf::start();
                 std::thread::sleep(std::time::Duration::from_micros(100));
-                crate::perf::SEND_WAIT.stop(wait_started);
             }
         }
     })

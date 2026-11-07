@@ -1,6 +1,6 @@
 //! Measures what the size of the audio socket's receive buffer is worth: how many packets a
 //! receive thread that is kept away for a while loses, with the system's default buffer and with
-//! the one `audio_session::os_hints` asks for. The stream is that of 16 participants at 64-sample
+//! the one `audio_session::socket_buffers` asks for. The stream is that of 16 participants at 64-sample
 //! frames (750 packets per second each, about 420 bytes), sent to the socket over the loopback.
 //! Run by hand, on each system the app runs on:
 //!
@@ -11,7 +11,7 @@
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
 
-use jamjam::audio_session::os_hints::enlarge_socket_buffers;
+use jamjam::audio_session::socket_buffers::enlarge_socket_buffers;
 
 const PARTICIPANTS: u32 = 16;
 const PACKETS_PER_SECOND_EACH: u32 = 750;

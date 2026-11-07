@@ -13,10 +13,10 @@
 //! - Pre-allocated stereo conversion buffer
 
 mod links;
-pub mod os_hints;
 mod run;
 mod send;
 mod shared;
+pub mod socket_buffers;
 mod stand_in;
 
 use std::net::SocketAddr;

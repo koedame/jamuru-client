@@ -21,11 +21,6 @@ pub static INPUT_CALLBACK: Timer = Timer::new();
 pub static OUTPUT_CALLBACK: Timer = Timer::new();
 /// Passes of the streaming loop that carries commands and statistics.
 pub static RECEIVE_LOOP: Timer = Timer::new();
-/// The pause between two passes of the streaming loop, which asks for 250 µs: how long it took,
-/// so how much the system's timer rounds a short wait up.
-pub static RECEIVE_LOOP_WAIT: Timer = Timer::new();
-/// The pause of the send thread when there is nothing to send, which asks for 100 µs.
-pub static SEND_WAIT: Timer = Timer::new();
 
 static INPUT_XRUNS: AtomicU64 = AtomicU64::new(0);
 static OUTPUT_XRUNS: AtomicU64 = AtomicU64::new(0);
@@ -107,8 +102,6 @@ pub struct Report {
     pub input_callback: PassStats,
     pub output_callback: PassStats,
     pub receive_loop: PassStats,
-    pub receive_loop_wait: PassStats,
-    pub send_wait: PassStats,
     pub input_xruns: u64,
     pub output_xruns: u64,
     /// Streams opened again because they had stopped calling back
@@ -121,8 +114,6 @@ pub struct Window {
     input: (u64, u64),
     output: (u64, u64),
     receive: (u64, u64),
-    receive_wait: (u64, u64),
-    send_wait: (u64, u64),
     input_xruns: u64,
     output_xruns: u64,
     input_reopens: u64,
@@ -144,8 +135,6 @@ impl Window {
             input: mark(&INPUT_CALLBACK),
             output: mark(&OUTPUT_CALLBACK),
             receive: mark(&RECEIVE_LOOP),
-            receive_wait: mark(&RECEIVE_LOOP_WAIT),
-            send_wait: mark(&SEND_WAIT),
             input_xruns: INPUT_XRUNS.load(Ordering::Relaxed),
             output_xruns: OUTPUT_XRUNS.load(Ordering::Relaxed),
             input_reopens: INPUT_REOPENS.load(Ordering::Relaxed),
@@ -176,8 +165,6 @@ impl Window {
             input_callback: stats(&INPUT_CALLBACK, self.input),
             output_callback: stats(&OUTPUT_CALLBACK, self.output),
             receive_loop: stats(&RECEIVE_LOOP, self.receive),
-            receive_loop_wait: stats(&RECEIVE_LOOP_WAIT, self.receive_wait),
-            send_wait: stats(&SEND_WAIT, self.send_wait),
             input_xruns: INPUT_XRUNS
                 .load(Ordering::Relaxed)
                 .saturating_sub(self.input_xruns),
