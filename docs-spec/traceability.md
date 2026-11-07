@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 357 |
+| 要求 総数 | 358 |
 | うち must | 324 |
-| うち should | 33 |
-| 検証済み | 331 |
+| うち should | 34 |
+| 検証済み | 332 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 3 |
 
@@ -84,6 +84,7 @@
 | REQ-AUD-131 | must | 音声パケットのサンプルは、1 パケットごとに損失なく詰めて送る。復号した値は元の 24-bit 整数と 1 ビットも違わず、詰める前後で音は変わらない。詰め方は FLAC（RFC 9639）の固定予測（次数 0〜4）と Rice 符号で、パケットごとに最も短くなる次数・パラメータを選ぶ。ステレオは左右・左と差・差と右・中央と差のうち短いものを選ぶ。どのパケットも前のパケットなしに復号でき、詰めても小さくならないパケットは目印を付けて 24-bit のまま送る（元より 1 バイトしか増えない）。プロトコル版を 3 に上げる（[ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md)） | `docs-spec/requirements.md` | `src/audio/packed.rs`::what_is_packed_comes_back_as_the_same_24_bit_samples<br/>`tests/audio_quality_test.rs`::test_pcm_codec_packs_without_loss_and_never_beyond_the_samples |
 | REQ-AUD-132 | must | 詰めた音声パケットの大きさは、音の中身を細かく漏らさないよう、24-bit のままの大きさの 8 分の 1 刻みに切り上げる。刻みの余りは復号側が読み飛ばす。必要帯域の見積もり（`required_bps`）は詰めない場合の上限のままで、実際の帯域はそれ以下になる（[ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md)） | `docs-spec/requirements.md` | `src/audio/packed.rs`::the_size_of_a_packet_is_one_of_a_few_sizes |
 | REQ-AUD-133 | must | 詰めた音声パケットの復号は、壊れた・偽造されたパケットでも panic せず、確保する量も入力の大きさに比例する範囲に収まり、エラーを返す。復号は全チャンネルで 2048 サンプルまでの固定の領域（スタック）で行い、それを超える数を名乗るパケットは受け付けず、リアルタイムの音声スレッドで確保をしない（[ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md)） | `docs-spec/requirements.md` | `src/audio/packed.rs`::a_damaged_packet_is_refused_and_does_not_panic<br/>`src/audio/packed.rs`::a_packet_that_claims_more_samples_than_a_packet_holds_is_refused_before_anything_is_made_for_them |
+| REQ-AUD-134 | should | 音声のセッションは、音声のソケットの受信・送信バッファを、大きさが 1 MiB に満たなければ 1 MiB に広げる。OS が小さく丸めたときもそのまま動き、頼む前と後の大きさをログに残す。設計は [ADR-116](./adr/ADR-116-widen-the-audio-socket-buffers.md) | `docs-spec/requirements.md` | `src/audio_session/socket_buffers.rs`::when_the_socket_buffers_are_enlarged_then_they_are_not_smaller_than_before |
 | REQ-CLI-001 | must | CLI でルームを作成でき、招待コードが表示される。他の参加者はそのコードで参加し、チャットが双方に届く | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CLI-002 | must | セッション中のコマンド（`/mute` `/unmute` `/stats` `/help` `/quit`）が解釈され、ミュート状態が切り替わる。コマンド以外はチャットとして送られる | `docs-spec/requirements.md` | `src/main.rs`::muting_without_audio_reports_that_there_is_nothing_to_mute<br/>`src/main.rs`::only_commands_are_intercepted<br/>`src/main.rs`::session_commands_are_recognised_and_act |
 | REQ-CLI-003 | must | プリセットの選択を保存でき、GUI と同じ設定ファイルに書かれる。未知のプリセット名は拒否される | `docs-spec/requirements.md` | `tests/cli_test.rs`::preset_use_refuses_a_name_that_is_not_a_preset<br/>`tests/cli_test.rs`::preset_use_saves_the_choice_where_the_app_reads_it |
