@@ -46,3 +46,5 @@ ui/storybook-static/
 
 # Playwright MCP
 .playwright-mcp/
+
+__pycache__/
