@@ -299,8 +299,8 @@ def supervise(args):
     Path(args.out + ".time").write_text(text)
 
 
-def rendezvous_key():
-    """The key of what the runners tell each other through artifacts: the check's own secret."""
+def check_key():
+    """The check's own secret: it keys what the runners share through artifacts and the hashes in the report."""
     key = os.environ.get("ROOM_CHECK_KEY", "")
     if not key:
         print("ROOM_CHECK_KEY is not set")
@@ -309,7 +309,7 @@ def rendezvous_key():
 
 
 def encrypt(plain, destination):
-    key = rendezvous_key()
+    key = check_key()
     subprocess.run(
         ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-md", "sha256", "-salt", "-pass", "env:ROOM_CHECK_KEY",
          "-out", str(destination)],
@@ -320,7 +320,7 @@ def encrypt(plain, destination):
 
 
 def decrypt(source):
-    key = rendezvous_key()
+    key = check_key()
     done = subprocess.run(
         ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-md", "sha256", "-pass", "env:ROOM_CHECK_KEY",
          "-in", str(source)],
@@ -550,8 +550,7 @@ def hashed(text):
     the run, so the same address has the same hash on every runner of the run - and
     in no other run, nor for anyone who does not have the secret.
     """
-    secret = os.environ.get("ROOM_CHECK_KEY", "")
-    key = f"{secret}|{os.environ.get('GITHUB_RUN_ID', 'local')}".encode()
+    key = f"{check_key()}|{os.environ.get('GITHUB_RUN_ID', 'local')}".encode()
     return hmac.new(key, str(text).encode(), hashlib.sha256).hexdigest()[:12]
 
 
