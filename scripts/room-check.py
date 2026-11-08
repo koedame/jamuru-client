@@ -50,6 +50,7 @@ import os
 import platform
 import re
 import secrets
+import select
 import socket
 import statistics
 import struct
@@ -100,6 +101,8 @@ JOINED_WAIT_SECONDS = 1200
 # of whether the runners reach each other directly, and how long they then send to each other.
 UDP_WAIT_SECONDS = 600
 UDP_PROBE_SECONDS = 25
+# How many flows (socket pairs) each pair of runners is judged by.
+UDP_FLOWS = 16
 # The longest the check goes on sending after that, if nothing tells it to stop.
 UDP_KEEP_SECONDS = 3000
 # How long a participant waits for the host to say when the turns start.
@@ -650,13 +653,18 @@ def udp_folder(work):
 def udp_serve(args):
     """Checks whether this runner and each of the others reach each other by UDP, without the app.
 
-    One socket serves all of it. The others' NATs let a packet in only from an
-    address this one has sent to first, so every runner sends to every other at the
-    same time: the address each shows to a STUN server is told through an artifact
-    (encrypted, like the invite code), each waits until it has everyone's - the last
-    to come starts all - and then they send to each other for a while. A pair
-    "passes" when a packet came from the other side, and it takes both directions to
-    pass. Only how many packets came is kept, never an address.
+    On the macOS runners, some UDP flows are lost on the way while others between the
+    same two machines pass (11/8: a socket that heard nothing for the whole room next to
+    the app's sockets that worked, and the other way round), so one flow says little about
+    a pair. Each runner opens `UDP_FLOWS` sockets, and socket i of one runner talks to
+    socket i of each other: a pair of runners is judged by how many of its flows came.
+
+    The others' NATs let a packet in only from an address this one has sent to first, so
+    every runner sends to every other at the same time: the addresses each socket shows to
+    a STUN server are told through an artifact (encrypted, like the invite code), each waits
+    until it has everyone's - the last to come starts all - and then they send to each other
+    for a while, and go on at a lower rate until the measuring is over. Only how many
+    packets came is kept, never an address.
     """
     server = server_url(args.server_env)
     folder = udp_folder(args.work)
@@ -665,33 +673,44 @@ def udp_serve(args):
     runners = len(room["layout"])
     attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
     began = time.time()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(1.5)
+    socks, mapped_to = [], []
+    for _ in range(UDP_FLOWS):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(1.5)
+        try:
+            sock.bind(("", 0))
+            found = None
+            for host, port in STUN_SERVERS:
+                found = stun_mapped(sock, socket.AF_INET, host, port)
+                if found:
+                    break
+        except OSError:
+            found = None
+        if not found:
+            sock.close()
+            continue
+        sock.setblocking(False)
+        socks.append(sock)
+        mapped_to.append(found)
+    others = [r for r in range(runners) if r != args.runner]
+    # Every runner must have the same number of flows, or socket i has nobody to talk to.
     mine = {"runner": args.runner}
-    try:
-        sock.bind(("", 0))
-        for host, port in STUN_SERVERS:
-            mapped = stun_mapped(sock, socket.AF_INET, host, port)
-            if mapped:
-                mine.update(host=mapped[0], port=mapped[1])
-                break
-    except OSError:
-        pass
+    if len(socks) == UDP_FLOWS:
+        mine["endpoints"] = [list(found) for found in mapped_to]
     encrypt(json.dumps(mine), folder / "udp.enc", server)
-    result = {"checked": True, "endpoint": "host" in mine, "peers": {}, "unknown": []}
-    if "host" not in mine:
-        # Without an address of its own nothing can be told about this runner.
-        result["unknown"] = [r for r in range(runners) if r != args.runner]
+    result = {"checked": True, "endpoint": "endpoints" in mine, "flows": UDP_FLOWS, "peers": {}, "unknown": []}
+    if "endpoints" not in mine:
+        # Without addresses of its own nothing can be told about this runner.
+        result["unknown"] = others
         (folder / "result.json").write_text(json.dumps(result))
         return
 
-    # Wait for the others' addresses, keeping this one's mapping alive meanwhile.
+    # Wait for the others' addresses, keeping the mappings alive meanwhile.
     stun_request = struct.pack("!HHI", 0x0001, 0, STUN_COOKIE) + secrets.token_bytes(12)
     try:
         stun_target = socket.getaddrinfo(*STUN_SERVERS[0], socket.AF_INET, socket.SOCK_DGRAM)[0][4]
     except OSError:
         stun_target = None
-    others = [r for r in range(runners) if r != args.runner]
     targets = {}
     answered = set()
     deadline = began + UDP_WAIT_SECONDS
@@ -704,74 +723,89 @@ def udp_serve(args):
             if fetch_artifact(where, f"room-udp-{other}-{attempt}", "udp.enc", 0):
                 answered.add(other)
                 told = json.loads(decrypt(where / "udp.enc", server))
-                if "host" in told:
-                    targets[other] = (told["host"], told["port"])
+                if len(told.get("endpoints") or []) == UDP_FLOWS:
+                    targets[other] = [tuple(endpoint) for endpoint in told["endpoints"]]
         if time.time() - last_keepalive > 10 and stun_target:
-            try:
-                sock.sendto(stun_request, stun_target)
-            except OSError:
-                pass
+            for sock in socks:
+                try:
+                    sock.sendto(stun_request, stun_target)
+                except OSError:
+                    pass
             last_keepalive = time.time()
         if len(answered) < len(others):
             time.sleep(2)
     result["unknown"] = [r for r in others if r not in targets]
     result["waited_seconds"] = int(time.time() - began)
 
-    # Everyone sends to everyone, and counts what comes.
+    # Everyone sends to everyone, flow by flow, and counts what comes.
     token = f"room-check-udp {hashed('udp-probe')} ".encode()
-    sent = {r: 0 for r in targets}
-    got = {r: 0 for r in targets}
-    first = {}
-    sock.settimeout(0.05)
+    peers = {
+        str(other): {"flows": UDP_FLOWS, "sent": 0, "received": 0, "flows_received": 0, "first_ms": None,
+                     "during_sent": 0, "during_received": 0, "during_flows_received": 0}
+        for other in targets
+    }
+    seen = {str(other): set() for other in targets}
+    seen_during = {str(other): set() for other in targets}
     probing = time.time()
-    while time.time() < probing + UDP_PROBE_SECONDS:
-        for other, target in targets.items():
-            try:
-                sock.sendto(token + str(args.runner).encode(), target)
-                sent[other] += 1
-            except OSError:
-                pass
-        until = time.time() + 0.25
+
+    def send_all(key):
+        for other, endpoints in targets.items():
+            for index, endpoint in enumerate(endpoints):
+                try:
+                    socks[index].sendto(token + f"{args.runner}:{index}".encode(), endpoint)
+                    peers[str(other)][key] += 1
+                except OSError:
+                    pass
+
+    def receive(until, during):
         while time.time() < until:
-            try:
-                data, _ = sock.recvfrom(2048)
-            except socket.timeout:
-                continue
-            except OSError:
-                # A closed port on the other side makes Windows report it here; it is not an answer.
-                continue
-            if data.startswith(token) and data[len(token):].isdigit():
-                other = int(data[len(token):])
-                if other in got:
-                    got[other] += 1
-                    first.setdefault(other, int(1000 * (time.time() - probing)))
-    for other in targets:
-        result["peers"][str(other)] = {"sent": sent[other], "received": got[other], "first_ms": first.get(other)}
+            ready, _, _ = select.select(socks, [], [], 0.05)
+            for index, sock in enumerate(socks):
+                if sock not in ready:
+                    continue
+                while True:
+                    try:
+                        data, _ = sock.recvfrom(2048)
+                    except OSError:
+                        # Nothing more, or (on Windows) a closed port on the other side; neither is an answer.
+                        break
+                    if not data.startswith(token):
+                        continue
+                    try:
+                        other, flow = data[len(token):].decode().split(":")
+                        other, flow = str(int(other)), int(flow)
+                    except ValueError:
+                        continue
+                    if other not in peers or flow != index:
+                        continue
+                    entry = peers[other]
+                    if during:
+                        entry["during_received"] += 1
+                        seen_during[other].add(index)
+                    else:
+                        entry["received"] += 1
+                        seen[other].add(index)
+                        if entry["first_ms"] is None:
+                            entry["first_ms"] = int(1000 * (time.time() - probing))
+
+    while time.time() < probing + UDP_PROBE_SECONDS:
+        send_all("sent")
+        receive(time.time() + 0.25, False)
+    for other in peers:
+        peers[other]["flows_received"] = len(seen[other])
+    result["peers"] = peers
     (folder / "result.json").write_text(json.dumps(result))
 
-    # Go on at one packet a second until the measuring is over: a runner whose network lets
-    # packets through at first and not later (or the other way round) is told by the two parts.
-    for other in targets:
-        result["peers"][str(other)].update(during_sent=0, during_received=0)
+    # Go on at one packet a second per flow until the measuring is over: a pair whose flows
+    # come at first and not later (or the other way round) is told by the two parts.
     end = time.time() + UDP_KEEP_SECONDS
     while not (folder / "stop").exists() and time.time() < end:
-        for other, target in targets.items():
-            try:
-                sock.sendto(token + str(args.runner).encode(), target)
-                result["peers"][str(other)]["during_sent"] += 1
-            except OSError:
-                pass
-        until = time.time() + 1.0
-        while time.time() < until:
-            try:
-                data, _ = sock.recvfrom(2048)
-            except OSError:
-                continue
-            if data.startswith(token) and data[len(token):].isdigit():
-                other = str(int(data[len(token):]))
-                if other in result["peers"]:
-                    result["peers"][other]["during_received"] += 1
-    sock.close()
+        send_all("during_sent")
+        receive(time.time() + 1.0, True)
+    for other in peers:
+        peers[other]["during_flows_received"] = len(seen_during[other])
+    for sock in socks:
+        sock.close()
     (folder / "final.json").write_text(json.dumps(result))
 
 
@@ -1014,19 +1048,20 @@ def describe(result):
 
 
 def udp_status(udp, first, second):
-    """Whether packets passed both ways between two runners, before the turns and while they went on.
+    """Whether every UDP flow between two runners came, in both directions, before the turns and while they went on.
 
-    `udp` maps a runner to what it found. "open" and "closed" are told only when
-    both sent to the other and counted what came; otherwise it is None.
+    `udp` maps a runner to what it found. "open" (every flow came) and "impaired" (some
+    were lost) are told only when both sent to the other and counted what came;
+    otherwise it is None.
     """
-    seen = []
     for here, there in ((first, second), (second, first)):
         peer = ((udp.get(here) or {}).get("peers") or {}).get(str(there))
         if peer is None:
             return None
-        # Before the turns, and (when it was kept up) while they went on: both have to have come.
-        seen += [peer["received"], peer.get("during_received", 1)]
-    return "open" if all(seen) else "closed"
+        flows = peer.get("flows", 1)
+        if peer["flows_received"] < flows or peer.get("during_flows_received", flows) < flows:
+            return "impaired"
+    return "open"
 
 
 def summary(args):
@@ -1053,15 +1088,12 @@ def summary(args):
         for speaker, share in result["heard"].items():
             other = by_id.get(int(speaker))
             status = udp_status(udp, result["runner"], other["runner"]) if other and other["runner"] != result["runner"] else None
-            if status == "closed":
-                if share < args.min_heard:
-                    # Packets did not pass between these runners, with or without the app: the environment, not the app.
-                    blocked.append((index, int(speaker), share))
-                    continue
-                # The app got through where the check did not: it was measured, and the check was wrong here.
-                mismatches.append(f"{name_of(index)} heard {name_of(int(speaker))} although the check found no way through")
+            if status == "impaired" and share < args.min_heard:
+                # UDP flows between these runners were lost with or without the app: the environment, not the app.
+                blocked.append((index, int(speaker), share))
+                continue
             if status == "open" and share < args.min_heard:
-                mismatches.append(f"{name_of(index)} did not hear {name_of(int(speaker))} although the check found a way through")
+                mismatches.append(f"{name_of(index)} did not hear {name_of(int(speaker))} although every UDP flow between their runners came")
             (same_runner if other and other["runner"] == result["runner"] else across_runners).append(share)
             if other:
                 by_system.setdefault((result.get("os") or "?", other.get("os") or "?"), []).append(share)
@@ -1104,23 +1136,24 @@ def summary(args):
     verdicts = {pair: udp_status(udp, *pair) for pair in runner_pairs}
     if any(status for status in verdicts.values()):
         lines.append("")
-        lines.append("direct UDP between runners, before the turns (both ways needed):")
+        lines.append("UDP flows between runners, sent without the app (before the turns / during them):")
         for (a, b), status in verdicts.items():
             peer_a = ((udp.get(a) or {}).get("peers") or {}).get(str(b)) or {}
             peer_b = ((udp.get(b) or {}).get("peers") or {}).get(str(a)) or {}
-            counts = (
-                f" (before the turns {peer_a.get('received')} and {peer_b.get('received')} packets came, "
-                f"during them {peer_a.get('during_received')} and {peer_b.get('during_received')})"
-            ) if status else ""
+
+            def came(peer):
+                return f"{peer.get('flows_received')}/{peer.get('flows')} / {peer.get('during_flows_received')}/{peer.get('flows')}"
+
+            counts = f" (flows that came: {came(peer_a)} and {came(peer_b)})" if status else ""
             lines.append(f"  runner {a} {systems.get(a)} - runner {b} {systems.get(b)}: {status or 'not checked'}{counts}")
     if blocked:
         pairs = len({tuple(sorted((a, b))) for a, b in ((by_id[i]["runner"], by_id[j]["runner"]) for i, j, _ in blocked)})
         lines.append(
             f"NOT MEASURED because of the environment: {len(blocked)} listener-speaker pairs on {pairs} pairs of runners, "
-            "packets did not pass between them even without the app"
+            "where UDP flows were lost even without the app"
         )
     for mismatch in mismatches:
-        lines.append(f"  the check and the app disagree: {mismatch}")
+        lines.append(f"  {mismatch}")
     if len({result["runner"] for result in results}) > 1 and not across_runners:
         failures.append("no pair of different runners could be measured")
     verdict = "FAIL" if failures else "PASS"
