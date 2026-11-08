@@ -1,5 +1,9 @@
 name: Room check
 
+# A run started with a `source` input carries it in its title ("Room check [hourly]"),
+# so that runs started by a script can be told from the nightly one and from one started by hand.
+run-name: ${{ inputs.source && format('Room check [{0}]', inputs.source) || 'Room check' }}
+
 # Puts many headless participants into one room on the staging server and
 # checks that everyone hears everyone (ADR-117). The participants run on
 # several GitHub-hosted runners of three systems (Linux, Windows, macOS), so one
@@ -44,6 +48,9 @@ on:
       macos_per_runner:
         description: Participants on each macOS runner (it has 3 CPUs, and two of them could not keep up)
         default: '1'
+      source:
+        description: Label of whoever started this run, shown in the run title (empty for a run started by hand)
+        default: ''
       slot_seconds:
         description: Seconds each participant speaks, one after another
         default: '3'
