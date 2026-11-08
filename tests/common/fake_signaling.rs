@@ -36,12 +36,15 @@ struct State {
     /// In every room already: a peer that is not a connection to this server but a socket a test
     /// runs, such as one that echoes audio
     residents: Vec<PeerInfo>,
+    /// The `data` of every `CreateRoom` and `JoinRoom` received, oldest first
+    entering: Vec<serde_json::Value>,
 }
 
 /// The server. Runs until dropped.
 pub struct FakeSignaling {
     url: String,
     runtime: Option<tokio::runtime::Runtime>,
+    state: Arc<Mutex<State>>,
 }
 
 impl FakeSignaling {
@@ -91,17 +94,25 @@ impl FakeSignaling {
         let state = Arc::new(Mutex::new(State {
             rooms: Vec::new(),
             residents,
+            entering: Vec::new(),
         }));
+        let serving = state.clone();
         runtime.spawn(async move {
             let listener = TcpListener::from_std(listener).expect("listener");
             while let Ok((stream, _)) = listener.accept().await {
-                tokio::spawn(serve(stream, addr, state.clone()));
+                tokio::spawn(serve(stream, addr, serving.clone()));
             }
         });
         Self {
             url: format!("http://{}", addr),
             runtime: Some(runtime),
+            state,
         }
+    }
+
+    /// The `data` of the `CreateRoom` and `JoinRoom` messages received so far, oldest first
+    pub fn entering_messages(&self) -> Vec<serde_json::Value> {
+        self.state.lock().unwrap().entering.clone()
     }
 
     /// What `--server` takes
@@ -158,6 +169,14 @@ async fn serve(mut stream: TcpStream, addr: SocketAddr, state: Arc<Mutex<State>>
             continue;
         };
         let mut state = state.lock().unwrap();
+        if matches!(
+            message,
+            SignalingMessage::CreateRoom { .. } | SignalingMessage::JoinRoom { .. }
+        ) {
+            if let Ok(frame) = serde_json::from_str::<serde_json::Value>(&text) {
+                state.entering.push(frame["data"].clone());
+            }
+        }
         match message {
             SignalingMessage::CreateRoom {
                 peer_name,

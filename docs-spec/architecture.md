@@ -554,7 +554,7 @@ jamuru join-room --server <URL> --room <CODE>       # ルーム参加
 
 **全員と繋ぐ点も GUI と同じ**: ルームで音声アドレスを公開した参加者の全員に、音声を 1 本ずつ繋ぐ。誰と繋ぐか・相手が抜けたとき・途切れたときの判断は GUI と同じコアの `Roster`（`network/roster.rs`）、全員の音を足し合わせる再生は同じ `PeerMix`（`audio/peer_mix.rs`）、音声ソケットを相手ごとの接続で共有する `UdpMux` も同じで、CLI は判断の結果を実行するだけである（[ADR-077](./adr/ADR-077-every-participant-is-linked.md) §9）。`/stats` と終了時の統計は相手ごとに出し、`--report-json` の `peer`・`network`・`playout` は最初に繋いだ相手のもの、`peers` は全員のものである。
 
-**GUI と異なる点**（[ADR-027](./adr/ADR-027-cli-scope.md) に記録）: 音量・パン・診断・リアクションは CLI に無い（参加者ごとの音量・パンを持つ `PeerMix` は共通なので、足すのはコマンドだけで済む）。全員の音声が途切れて入り直す判断（`Audio::Rejoin`）は、CLI は入り直さず警告を出す。
+**GUI と異なる点**（[ADR-027](./adr/ADR-027-cli-scope.md) に記録）: 音量・パン・診断・リアクションは CLI に無い（参加者ごとの音量・パンを持つ `PeerMix` は共通なので、足すのはコマンドだけで済む）。全員の音声が途切れて入り直す判断（`Audio::Rejoin`）は、CLI は入り直さず警告を出す。入室のときにサーバーへ知らせる `client_info` は GUI と同じ関数（`jamjam::telemetry::client_info`）で組み、違いは GUI だけが WebView の版を足すこと（CLI は利用状況の送信の設定を保存された設定から読む）。
 
 ### 8.3 プリセット
 

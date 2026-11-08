@@ -29,6 +29,7 @@
 
 mod collector;
 mod crash;
+mod entry;
 mod event;
 mod hang;
 mod install;
@@ -38,6 +39,7 @@ pub mod snapshot;
 mod transport;
 
 pub use collector::{UsageReporter, MAX_BATCH_BYTES, MAX_BATCH_LINES};
+pub use entry::{client_info, read_audio_env_within, ReadAudioEnv};
 pub use event::{
     format_ts, AppStart, AudioEnv, AudioHost, Component, Crash, Device, DeviceKind, EndReason,
     ErrorCode, ErrorEvent, EventBody, Hang, HangStage, Record, SessionEnd, SessionMode,

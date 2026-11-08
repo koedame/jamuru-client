@@ -10,12 +10,11 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use jamjam::audio::bounded;
 use jamjam::config::AppConfig;
 use jamjam::network::{ClientInfo, NetworkError, SignalingFailure};
 use jamjam::telemetry::{
     snapshot, AppStart, AudioEnv, Component, EndReason, ErrorCode, EventBody, Hang, HttpTransport,
-    NoTransport, SessionMode, Transport, UsageReporter,
+    NoTransport, ReadAudioEnv, SessionMode, Transport, UsageReporter,
 };
 use tauri::{AppHandle, Manager, Runtime};
 
@@ -68,10 +67,6 @@ const AUDIO_ENV_TIMEOUT: Duration = Duration::from_secs(1);
 const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(test)]
 const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_millis(50);
-
-/// Reads the `audio_env` for the devices with these ids (`None`: the OS
-/// default).
-type ReadAudioEnv = Arc<dyn Fn(Option<&str>, Option<&str>) -> AudioEnv + Send + Sync>;
 
 /// Tauri-managed state: the reporter.
 #[derive(Clone)]
@@ -182,35 +177,27 @@ impl UsageState {
     }
 
     /// What this app tells the server about itself when it enters a room
-    /// ([`ClientInfo`]), whether or not usage reporting is on. Read fresh, so
-    /// it shows the settings and devices of this moment. A driver that does not
-    /// answer in time leaves the devices out; the rest is still sent.
-    ///
-    /// The audio devices (their names and IDs, which can carry a person's
-    /// name) are part of it only while usage reporting is on (ADR-065).
+    /// ([`ClientInfo`]), whether or not usage reporting is on. Built by
+    /// [`jamjam::telemetry::client_info`], which the CLI calls too; this adds
+    /// the WebView version, which only the app knows.
     pub async fn client_info(&self, config: &AppConfig) -> ClientInfo {
-        let audio = if self.reporter.is_enabled() {
-            audio_env_within(
-                self.read_audio_env.clone(),
-                config.input_device_id.clone(),
-                config.output_device_id.clone(),
+        let app_version = self.reporter.app_version().to_string();
+        let share_devices = self.reporter.is_enabled();
+        let config = config.clone();
+        let read = self.read_audio_env.clone();
+        let machine = app_start_of(&config);
+        tauri::async_runtime::spawn_blocking(move || {
+            jamjam::telemetry::client_info(
+                &app_version,
+                machine,
+                &config,
+                share_devices,
+                read,
+                AUDIO_ENV_TIMEOUT,
             )
-            .await
-            .unwrap_or(AudioEnv {
-                input: None,
-                output: None,
-                input_id: config.input_device_id.clone(),
-                output_id: config.output_device_id.clone(),
-            })
-        } else {
-            AudioEnv {
-                input: None,
-                output: None,
-                input_id: None,
-                output_id: None,
-            }
-        };
-        ClientInfo::new(self.reporter.app_version(), app_start_of(config), audio)
+        })
+        .await
+        .expect("building the room entry information does not panic")
     }
 
     /// Reports this launch: the crash of the last one if there was one, then
@@ -406,13 +393,10 @@ async fn audio_env_within(
     output_id: Option<String>,
 ) -> Option<AudioEnv> {
     tauri::async_runtime::spawn_blocking(move || {
-        bounded("reading the audio devices", AUDIO_ENV_TIMEOUT, move || {
-            read(input_id.as_deref(), output_id.as_deref())
-        })
+        jamjam::telemetry::read_audio_env_within(read, input_id, output_id, AUDIO_ENV_TIMEOUT)
     })
     .await
     .ok()?
-    .ok()
 }
 
 /// The NDJSON the next send will contain, for the "what is sent" view.
