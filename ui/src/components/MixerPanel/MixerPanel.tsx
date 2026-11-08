@@ -6,6 +6,7 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import type { PeerDropout } from "../../lib/tauri";
 import { ChannelStrip } from "./ChannelStrip";
 import "./MixerPanel.css";
 
@@ -32,6 +33,10 @@ export interface Channel {
   isMuted: boolean;
   /** Whether the user hears their own input directly (local channel only) */
   isMonitoring?: boolean;
+  /** Set while nothing arrives from the participant and they have not left (remote only) */
+  dropout?: PeerDropout | null;
+  /** Went quiet twice or more in the last quarter of an hour (remote only) */
+  unstable?: boolean;
 }
 
 export interface MixerPanelProps {
@@ -80,6 +85,8 @@ export function MixerPanel({
       pan={channel.pan}
       isMuted={channel.isMuted}
       isMonitoring={channel.isMonitoring}
+      dropout={channel.dropout}
+      unstable={channel.unstable}
       onVolumeChange={
         onChannelVolumeChange ? (volume) => onChannelVolumeChange(channel.id, volume) : undefined
       }

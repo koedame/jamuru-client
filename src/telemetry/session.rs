@@ -1,5 +1,6 @@
 //! Totals for one session, kept while it runs and written as `session_end`.
 
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
@@ -15,7 +16,11 @@ const MAX_LOCAL_IPS: usize = 16;
 #[derive(Debug, Clone)]
 pub struct SessionTally {
     started: Instant,
-    rtt_ms: Vec<f64>,
+    /// Round-trip readings counted by value in tenths of a millisecond, so
+    /// what is held grows with the number of distinct values, not with how
+    /// long the session runs.
+    rtt_tenths: BTreeMap<u32, u64>,
+    rtt_samples: u64,
     loss_pct_sum: f64,
     loss_pct_samples: u64,
     loss_pct_max: Option<f64>,
@@ -42,7 +47,8 @@ impl SessionTally {
     pub(crate) fn started_at(started: Instant) -> Self {
         Self {
             started,
-            rtt_ms: Vec::new(),
+            rtt_tenths: BTreeMap::new(),
+            rtt_samples: 0,
             loss_pct_sum: 0.0,
             loss_pct_samples: 0,
             loss_pct_max: None,
@@ -66,7 +72,11 @@ impl SessionTally {
     /// one arrives) and the share of packets lost (0.0 to 1.0).
     pub fn sample(&mut self, rtt_ms: Option<f32>, loss_rate: f32) {
         if let Some(rtt) = rtt_ms.filter(|rtt| rtt.is_finite() && *rtt >= 0.0) {
-            self.rtt_ms.push(f64::from(rtt));
+            // Saturates at `u32::MAX` tenths (about five days), far beyond any
+            // round trip a link reports.
+            let tenths = (f64::from(rtt) * 10.0).round() as u32;
+            *self.rtt_tenths.entry(tenths).or_insert(0) += 1;
+            self.rtt_samples += 1;
         }
         if loss_rate.is_finite() {
             let pct = f64::from(loss_rate).clamp(0.0, 1.0) * 100.0;
@@ -162,21 +172,36 @@ impl SessionTally {
         self.add_xruns(new);
     }
 
+    /// Nearest-rank percentile of the round-trip readings, in milliseconds to
+    /// 0.1.
+    fn rtt_percentile(&self, p: u64) -> Option<f64> {
+        if self.rtt_samples == 0 {
+            return None;
+        }
+        let rank = (p * self.rtt_samples).div_ceil(100).max(1);
+        let mut seen = 0;
+        for (&tenths, &count) in &self.rtt_tenths {
+            seen += count;
+            if seen >= rank {
+                return Some(f64::from(tenths) / 10.0);
+            }
+        }
+        None
+    }
+
     /// The `session_end` for a session that ends now.
     pub fn finish(&self, end_reason: EndReason) -> SessionEnd {
         self.finish_after(self.started.elapsed(), end_reason)
     }
 
     pub(crate) fn finish_after(&self, elapsed: Duration, end_reason: EndReason) -> SessionEnd {
-        let mut sorted = self.rtt_ms.clone();
-        sorted.sort_by(f64::total_cmp);
         SessionEnd {
             duration_s: elapsed.as_secs(),
             end_reason,
             reconnect_count: self.reconnect_count,
             peers_max: self.peers_max,
-            rtt_ms_p50: percentile(&sorted, 50),
-            rtt_ms_p95: percentile(&sorted, 95),
+            rtt_ms_p50: self.rtt_percentile(50),
+            rtt_ms_p95: self.rtt_percentile(95),
             loss_pct_mean: (self.loss_pct_samples > 0)
                 .then(|| round_tenth(self.loss_pct_sum / self.loss_pct_samples as f64)),
             loss_pct_max: self.loss_pct_max.map(round_tenth),
@@ -200,15 +225,6 @@ impl Default for SessionTally {
     }
 }
 
-/// Nearest-rank percentile of an ascending list, rounded to 0.1.
-fn percentile(sorted: &[f64], p: usize) -> Option<f64> {
-    if sorted.is_empty() {
-        return None;
-    }
-    let rank = (p * sorted.len()).div_ceil(100).max(1);
-    Some(round_tenth(sorted[rank - 1]))
-}
-
 fn round_tenth(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
 }
@@ -218,4 +234,114 @@ fn counter_growth(last: &mut u64, total: u64) -> u64 {
     let growth = if total >= *last { total - *last } else { total };
     *last = total;
     growth
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sorted-list way the percentiles were computed before the readings
+    /// were counted by value.
+    fn sorted_list_percentile(readings: &[f32], p: usize) -> Option<f64> {
+        let mut sorted: Vec<f64> = readings
+            .iter()
+            .filter(|rtt| rtt.is_finite() && **rtt >= 0.0)
+            .map(|rtt| f64::from(*rtt))
+            .collect();
+        sorted.sort_by(f64::total_cmp);
+        if sorted.is_empty() {
+            return None;
+        }
+        let rank = (p * sorted.len()).div_ceil(100).max(1);
+        Some(round_tenth(sorted[rank - 1]))
+    }
+
+    fn end_of(readings: &[f32]) -> SessionEnd {
+        let mut tally = SessionTally::new();
+        for rtt in readings {
+            tally.sample(Some(*rtt), 0.0);
+        }
+        tally.finish_after(Duration::from_secs(1), EndReason::Left)
+    }
+
+    fn pseudo_random_readings(count: usize, seed: u64) -> Vec<f32> {
+        let mut x = seed;
+        (0..count)
+            .map(|_| {
+                x = x
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                10.0 + ((x >> 33) % 8000) as f32 / 100.0
+            })
+            .collect()
+    }
+
+    /// Verifies: REQ-TEL-010
+    #[test]
+    fn when_readings_are_counted_by_value_the_percentiles_match_the_sorted_list() {
+        let cases: Vec<Vec<f32>> = vec![
+            vec![42.0],
+            vec![0.0],
+            vec![0.0, 0.04, 0.05, 0.06, 0.1],
+            vec![20.0; 1000],
+            [vec![15.0; 940], vec![80.0; 60]].concat(),
+            [vec![15.0; 949], vec![80.0; 51]].concat(),
+            (1..=100).map(|n| n as f32).collect(),
+            (1..=101).map(|n| n as f32 * 0.37).collect(),
+            vec![0.1, 0.1, 0.1, 999.9, 5000.0],
+            pseudo_random_readings(5000, 1),
+            pseudo_random_readings(777, 2),
+        ];
+        for readings in cases {
+            let end = end_of(&readings);
+            assert_eq!(
+                end.rtt_ms_p50,
+                sorted_list_percentile(&readings, 50),
+                "p50 of {} readings",
+                readings.len()
+            );
+            assert_eq!(
+                end.rtt_ms_p95,
+                sorted_list_percentile(&readings, 95),
+                "p95 of {} readings",
+                readings.len()
+            );
+        }
+    }
+
+    /// Verifies: REQ-TEL-010
+    #[test]
+    fn when_readings_are_invalid_or_missing_they_are_not_counted() {
+        let mut tally = SessionTally::new();
+        for rtt in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0] {
+            tally.sample(Some(rtt), 0.0);
+        }
+        tally.sample(None, 0.0);
+
+        let end = tally.finish_after(Duration::from_secs(1), EndReason::Left);
+
+        assert_eq!(end.rtt_ms_p50, None);
+        assert_eq!(end.rtt_ms_p95, None);
+    }
+
+    /// Verifies: REQ-TEL-010
+    #[test]
+    fn when_a_hundred_thousand_readings_arrive_only_the_distinct_values_are_held() {
+        let readings = pseudo_random_readings(100_000, 3);
+        let mut tally = SessionTally::new();
+        for rtt in &readings {
+            tally.sample(Some(*rtt), 0.0);
+        }
+
+        let mut distinct: Vec<u32> = readings
+            .iter()
+            .map(|rtt| (f64::from(*rtt) * 10.0).round() as u32)
+            .collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+
+        assert_eq!(tally.rtt_samples, 100_000);
+        assert_eq!(tally.rtt_tenths.len(), distinct.len());
+        assert!(tally.rtt_tenths.len() <= 1000);
+    }
 }

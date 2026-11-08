@@ -91,6 +91,10 @@ pub struct ConnectionStats {
     pub packets_sent: u64,
     /// Total packets received
     pub packets_received: u64,
+    /// When a packet last arrived, `None` while none has (REQ-CON-162). An instant rather than
+    /// an age, so a reader of the published statistics knows how long ago it was at the moment
+    /// it asks, not at the moment they were taken.
+    pub last_received_at: Option<Instant>,
     /// Audio packets that arrived, counting each arrival (cumulative)
     pub audio_packets_received: u64,
     /// Audio packets the peer's sequence numbers show as missing (cumulative).
@@ -1718,6 +1722,8 @@ impl Connection {
             bytes_received: self.bytes_received.load(Ordering::Relaxed),
             packets_sent: self.packets_sent.load(Ordering::Relaxed),
             packets_received: self.packets_received.load(Ordering::Relaxed),
+            last_received_at: (self.packets_received.load(Ordering::Relaxed) > 0)
+                .then(|| *self.last_received.lock().unwrap_or_else(|e| e.into_inner())),
             audio_packets_received,
             audio_packets_lost,
             fec_recovered: self

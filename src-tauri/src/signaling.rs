@@ -24,9 +24,11 @@ use crate::logging::strip_userinfo;
 use crate::streaming::StreamingState;
 use crate::usage::UsageState;
 pub mod buffer_asks;
+mod dropouts;
 
 use jamjam::network::buffer_request::{BufferEvent, BufferRequests, Policy};
 use jamjam::network::device_delay_notice::DeviceDelayNotice;
+use jamjam::network::dropout::{Dropouts, Network, SERVER_PING_EVERY};
 use jamjam::network::recording_notice::RecordingNotice;
 use jamjam::network::settings_help::{
     notice, Help, HelpError, HelpEvent, HelpMessage, Link, NoticeEvent, Out, PeerBody, Role,
@@ -36,11 +38,12 @@ use jamjam::telemetry::{Component, EndReason, SessionMode};
 /// Connection ID counter
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(1);
 
-/// How often the host pings an idle signaling connection to keep it alive
-/// through an edge/proxy idle timeout. Independent of the
-/// frontend's event polling, which only runs while inside a room and only
-/// puts bytes on the wire when there is a message to relay.
-const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20);
+/// How often the host pings the signaling connection: to keep it alive through an edge/proxy idle
+/// timeout, and to find out that it is dead. Independent of the frontend's event polling, which
+/// only runs while inside a room and only puts bytes on the wire when there is a message to
+/// relay. In a room the server also keeps when it last heard one, which is what it tells the
+/// others of this connection (REQ-CON-164).
+const KEEPALIVE_INTERVAL: Duration = SERVER_PING_EVERY;
 
 /// Reaction on a chat message
 #[derive(Debug, Clone, Serialize)]
@@ -156,6 +159,12 @@ pub struct SignalingState {
     delay_told: std::sync::Mutex<Option<(u32, Option<u32>)>>,
     /// The delays the participants told, in ms, by id
     peer_delays: std::sync::Mutex<HashMap<String, f64>>,
+    /// Which links are quiet, and whose line it is (ADR-112). Never held across an await.
+    dropouts: std::sync::Mutex<Dropouts>,
+    /// When the dropout logic last put a message on the connection
+    dropout_sent: std::sync::Mutex<VecDeque<Instant>>,
+    /// What the system last said of the machine's network, and when
+    network: std::sync::Mutex<Option<(Instant, Network)>>,
 }
 
 impl SignalingState {
@@ -176,6 +185,9 @@ impl SignalingState {
             own_delay: std::sync::Mutex::new(None),
             delay_told: std::sync::Mutex::new(None),
             peer_delays: std::sync::Mutex::new(HashMap::new()),
+            dropouts: std::sync::Mutex::new(Dropouts::new()),
+            dropout_sent: std::sync::Mutex::new(VecDeque::new()),
+            network: std::sync::Mutex::new(None),
         }
     }
 
@@ -333,7 +345,14 @@ fn spawn_keepalive<R: Runtime>(app: AppHandle<R>, conn_id: u32) {
             let Some(conn) = connections.get_mut(&conn_id) else {
                 return; // Disconnected.
             };
-            if let Err(e) = conn.send_ping().await {
+            // Only a connection in a room tells the others how long ago it was last heard from
+            let in_room = state.room_state.lock().await.is_some();
+            let pinged = if in_room {
+                conn.send_ping().await
+            } else {
+                conn.send_frame_ping().await
+            };
+            if let Err(e) = pinged {
                 tracing::debug!("Keep-alive ping for conn_id={} failed: {}", conn_id, e);
                 return; // signaling_poll_events will surface the loss.
             }
@@ -918,10 +937,24 @@ pub async fn signaling_poll_events(
         .unwrap_or_else(|e| e.into_inner()) = Some(conn_id);
     events.extend(buffer_asks::tick(conn, &state, &streaming).await);
     sync_delay_notice(conn, &state, conn_id).await;
+    let in_room = state.room_state.lock().await.is_some();
+    dropouts::tick(conn, &state, &streaming, in_room).await;
 
     // Poll with 50ms timeout to avoid blocking too long
     loop {
-        match timeout(Duration::from_millis(50), conn.recv()).await {
+        let received = timeout(Duration::from_millis(50), conn.recv()).await;
+        // The server answers a ping at once: a connection that has heard nothing for longer than a
+        // ping may be late is dead, though the socket has not been told so (REQ-CON-164)
+        let received = match received {
+            Err(_) if dropouts::connection_is_dead(conn) => {
+                Ok(Err(NetworkError::SignalingError(format!(
+                    "No answer from the server for {} s",
+                    conn.quiet_for().as_secs()
+                ))))
+            }
+            other => other,
+        };
+        match received {
             Ok(Ok(msg)) => {
                 match msg {
                     SignalingMessage::PeerJoined { peer } => {
@@ -1044,6 +1077,9 @@ pub async fn signaling_poll_events(
 
                         events.push(SignalingEvent::ChatMessageReceived { message: chat_msg });
                     }
+                    SignalingMessage::Presence { peers } => {
+                        dropouts::presence_received(&state, peers);
+                    }
                     SignalingMessage::PeerMessage {
                         from: Some(from),
                         from_name,
@@ -1091,6 +1127,18 @@ pub async fn signaling_poll_events(
                                     .is_some_and(|rs| rs.peer_id == from.to_string());
                                 if !is_own_notice {
                                     state.set_peer_delay(&from.to_string(), notice.stated());
+                                }
+                            }
+                            PeerBody::LinkView(view) => {
+                                // The room hands a participant's own broadcast back to them
+                                let own = state
+                                    .room_state
+                                    .lock()
+                                    .await
+                                    .as_ref()
+                                    .is_some_and(|room| room.peer_id == from.to_string());
+                                if !own {
+                                    dropouts::view_received(&state, from, view);
                                 }
                             }
                             PeerBody::Recording(RecordingNotice { on }) => {

@@ -146,6 +146,8 @@ function link(
     peer_audio: null,
     level: measured?.level ?? 0,
     buffer: { own: { mode: 'preset' }, delay_ms10: 0, granted: null },
+    dropout: null,
+    unstable: false,
   };
 }
 
@@ -555,6 +557,29 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(marked).toHaveLength(1);
     expect(row('Ben')).toContainElement(marked[0]);
     expect(marked[0]).toHaveAttribute('title', 'Highest latency');
+  });
+
+  // Verifies: REQ-CON-161, REQ-CON-163
+  it('3 人のルームで 1 人だけ音が止まっているとき、その人の名簿の行とミキサーのストリップにだけ、止まった秒数と切れた側を出すこと', async () => {
+    current = roomOfThree();
+    statusLinks = [
+      link('b', 'connected', { up: 4, down: 6 }),
+      {
+        ...link('c', 'connected', { up: 21, down: 23 }),
+        dropout: { silent_secs: 9, side: 'theirs' },
+      },
+    ];
+
+    render(<MainScreen />);
+
+    await waitFor(() => expect(row('Ben')).toHaveTextContent(i18n.t('dropout.heading')));
+    expect(row('Ben')).toHaveTextContent(i18n.t('dropout.seconds', { seconds: 9 }));
+    expect(row('Ben')).toHaveTextContent(i18n.t('dropout.side.theirs'));
+    expect(row('Aki')).not.toHaveTextContent(i18n.t('dropout.heading'));
+    const strips = screen.getAllByTestId('channel-strip');
+    const noticed = strips.filter((strip) => strip.querySelector('[data-testid="dropout-notice"]'));
+    expect(noticed).toHaveLength(1);
+    expect(noticed[0]).toHaveAttribute('data-channel-id', 'c');
   });
 
   // Verifies: REQ-LAT-102
