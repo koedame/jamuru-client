@@ -8,6 +8,9 @@
 //! - Linux: ~/.config/jamuru/config.toml
 //! - Windows: %APPDATA%\jamuru\config.toml
 //! - macOS: ~/Library/Application Support/jamuru/config.toml
+//!
+//! `JAMJAM_CONFIG_DIR` names the directory instead, for instances on one machine that
+//! must not share a device identity.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -406,7 +409,19 @@ impl AppConfig {
 /// Shared with `identity_store`, which stores `device_identity.json`
 /// alongside `config.toml`.
 pub fn config_dir() -> Option<PathBuf> {
-    ProjectDirs::from("", "", APP_NAME).map(|dirs| dirs.config_dir().to_path_buf())
+    config_dir_in(std::env::var_os(CONFIG_DIR_VARIABLE))
+}
+
+/// The environment variable that names the configuration directory, for several instances on
+/// one machine that must not share a device identity. On Windows the directory is the system's
+/// own (`%APPDATA%`), which `HOME` does not move.
+const CONFIG_DIR_VARIABLE: &str = "JAMJAM_CONFIG_DIR";
+
+fn config_dir_in(chosen: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    match chosen.filter(|dir| !dir.is_empty()) {
+        Some(dir) => Some(PathBuf::from(dir)),
+        None => ProjectDirs::from("", "", APP_NAME).map(|dirs| dirs.config_dir().to_path_buf()),
+    }
 }
 
 /// Get the configuration file path
@@ -491,9 +506,28 @@ pub fn save_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
 
     Ok(())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Verifies: REQ-CLI-014
+    #[test]
+    fn when_a_config_directory_is_named_it_is_the_one_used() {
+        assert_eq!(
+            config_dir_in(Some("/tmp/one-instance".into())),
+            Some(PathBuf::from("/tmp/one-instance"))
+        );
+    }
+
+    /// Verifies: REQ-CLI-014
+    #[test]
+    fn when_no_config_directory_is_named_the_systems_own_is_used() {
+        for unset in [None, Some(std::ffi::OsString::new())] {
+            let dir = config_dir_in(unset).expect("a home directory");
+            assert!(dir.ends_with(APP_NAME), "{dir:?}");
+        }
+    }
 
     fn measured_on(config: &AppConfig) -> DeviceDelay {
         DeviceDelay {

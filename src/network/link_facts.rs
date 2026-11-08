@@ -224,6 +224,8 @@ pub struct LinkSnapshot {
     pub punch_tries: u32,
     /// Whether this end sent first in the latest of those tries.
     pub punched_first: Option<bool>,
+    /// How many times the route moved to another address after the link went up.
+    pub route_moves: u32,
 }
 
 impl LinkSnapshot {
@@ -249,6 +251,7 @@ pub struct LinkFacts {
     punch_tries: AtomicU32,
     /// 0 = never punched again, 1 = second, 2 = first in the latest try
     punched_first: AtomicU8,
+    route_moves: AtomicU32,
     up_at: Mutex<Option<Instant>>,
 }
 
@@ -273,6 +276,7 @@ impl LinkFacts {
             sent_to_other: AtomicU64::new(0),
             punch_tries: AtomicU32::new(0),
             punched_first: AtomicU8::new(0),
+            route_moves: AtomicU32::new(0),
             up_at: Mutex::new(None),
         }
     }
@@ -297,6 +301,7 @@ impl LinkFacts {
         self.route
             .store(LinkRoute::of(addr).to_u8(), Ordering::Relaxed);
         self.route_confirmed.store(false, Ordering::Relaxed);
+        self.route_moves.fetch_add(1, Ordering::Relaxed);
         self.chosen_because(RouteReason::Followed);
     }
 
@@ -391,6 +396,7 @@ impl LinkFacts {
                 0 => None,
                 value => Some(value == 2),
             },
+            route_moves: self.route_moves.load(Ordering::Relaxed),
         }
     }
 }
@@ -539,6 +545,7 @@ mod tests {
         assert_eq!(snapshot.route, Some(LinkRoute::Public));
         assert_eq!(snapshot.route_confirmed, Some(false));
         assert_eq!(snapshot.connect_ms, connect_ms);
+        assert_eq!(snapshot.route_moves, 1);
     }
 
     #[test]
