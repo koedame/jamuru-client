@@ -1016,11 +1016,12 @@ def summary(args):
             other = by_id.get(int(speaker))
             status = udp_status(udp, result["runner"], other["runner"]) if other and other["runner"] != result["runner"] else None
             if status == "closed":
-                # Packets do not pass between these runners, with or without the app: the environment, not the app.
-                blocked.append((index, int(speaker), share))
-                if share >= args.min_heard:
-                    mismatches.append(f"{name_of(index)} heard {name_of(int(speaker))} although the check found no way through")
-                continue
+                if share < args.min_heard:
+                    # Packets did not pass between these runners, with or without the app: the environment, not the app.
+                    blocked.append((index, int(speaker), share))
+                    continue
+                # The app got through where the check did not: it was measured, and the check was wrong here.
+                mismatches.append(f"{name_of(index)} heard {name_of(int(speaker))} although the check found no way through")
             if status == "open" and share < args.min_heard:
                 mismatches.append(f"{name_of(index)} did not hear {name_of(int(speaker))} although the check found a way through")
             (same_runner if other and other["runner"] == result["runner"] else across_runners).append(share)
