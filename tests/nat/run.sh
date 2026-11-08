@@ -59,25 +59,30 @@ start_router() {
   local lan=$lan_a own=$wan_a other=$wan_b net=1
   if [ "$side" = b ]; then lan=$lan_b own=$wan_b other=$wan_a net=2; fi
   docker create --name "$prefix-router-$side" --cap-add NET_ADMIN \
-    --sysctl net.ipv4.ip_forward=1 -e WAN_PREFIX="$wan_prefix" -e STUNS="$stuns" \
+    --sysctl net.ipv4.ip_forward=1 ${NAT_LAB_UDP_TIMEOUT:+--sysctl net.netfilter.nf_conntrack_udp_timeout=$NAT_LAB_UDP_TIMEOUT} ${NAT_LAB_UDP_TIMEOUT:+-e UDP_TIMEOUT=$NAT_LAB_UDP_TIMEOUT} ${NAT_LAB_CT_EVENTS:+-e CT_EVENTS=1} -e WAN_PREFIX="$wan_prefix" -e STUNS="$stuns" \
     -e PEER_WAN="$other" -e BASE="$base_port" "$@" \
     --network "$wan" --ip "$own" "$router_image" >/dev/null
   docker network connect --ip "10.78.$net.2" "$lan" "$prefix-router-$side"
   docker start "$prefix-router-$side" >/dev/null
 }
 
-start_client() { # start_client <a|b> <peer args...>
+start_client() { # start_client <a|b> <peer args...>; connect_at_a / connect_at_b: epoch ms to connect at
   local side=$1; shift
+  local at_var=connect_at_$side connect_arg=""
+  if [ -n "${!at_var:-}" ]; then connect_arg="--connect-at-ms ${!at_var}"; fi
   local lan=$lan_a net=1 other=b
   if [ "$side" = b ]; then lan=$lan_b net=2 other=a; fi
   docker run -d --name "$prefix-$side" --cap-add NET_ADMIN --network "$lan" --ip "10.78.$net.10" \
     -v "$peer_bin":/peer:ro -v "$work":/lab "$client_image" \
-    sh -c "ip route replace default via 10.78.$net.2 && exec /peer --name $side --peer $other --dir /lab --stun $stun_arg --settle-secs $settle --audio-secs $audio \"\$@\"" sh "$@" >/dev/null
+    sh -c "ip route replace default via 10.78.$net.2 && exec /peer --name $side --peer $other --dir /lab --stun $stun_arg --settle-secs $settle --audio-secs $audio $connect_arg ${NAT_LAB_PEER_ARGS:-} \"\$@\"" sh "$@" >/dev/null
 }
 
-# run_case <name> <a mode> <b mode> <gap> <expected: heard|silent>
+# run_case <name> <a mode> <b mode> <gap> <expected: heard|silent> [skew ms] [records: a|b|ab]
+# skew: how many ms after B's first packet A's goes out (negative: before); empty leaves the two to
+# start when each has the other's offer. record=1: a router keeps the packets nobody had sent for
+# (the app's first packet to that address is then given another port). Which routers: a, b or ab
 run_case() {
-  local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5
+  local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5 skew=${6:--} record=${7:--}
   cleanup
   work=$work_root/$suffix-$name
   rm -rf "$work"; mkdir -p "$work"
@@ -88,9 +93,15 @@ run_case() {
     -v "$stun_bin":/stun:ro "$client_image" \
     sh -c "ip addr add ${wan_prefix}12/24 dev eth0; ip addr add ${wan_prefix}13/24 dev eth0; exec /stun $(for ip in $stun_ips; do printf '%s:3478 ' "$ip"; done)" >/dev/null
   docker start "$prefix-stun" >/dev/null
-  start_router a -e MODE="$mode_a" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1
-  start_router b -e MODE="$mode_b" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1
+  start_router a -e MODE="$mode_a" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1 -e RECORD_UNSOLICITED="$([[ $record == *a* ]] && echo 1 || echo 0)"
+  start_router b -e MODE="$mode_b" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1 -e RECORD_UNSOLICITED="$([[ $record == *b* ]] && echo 1 || echo 0)"
   sleep 1.5
+  connect_at_a="" connect_at_b=""
+  if [ "$skew" != - ]; then
+    # far enough on for both to have gathered and traded offers
+    local base_ms=$(( $(date +%s%3N) + 6000 ))
+    connect_at_b=$base_ms; connect_at_a=$((base_ms + skew))
+  fi
   start_client a
   start_client b
   for _ in $(seq $(( (60 + settle + audio) * 2 ))); do
@@ -132,11 +143,17 @@ cases=(
   "b-random             cone       random     0  silent"
   "both-random          random     random     0  silent"
   "b-portset            cone       portset    0  heard"
+  "record-b-b-first      cone       cone       0  heard  1000  b"
+  "record-b-a-first      cone       cone       0  silent -1000 b"
+  "record-b-same-time    cone       cone       0  silent 0     b"
+  "record-a-a-first      cone       cone       0  heard  -1000 a"
+  "record-a-b-first      cone       cone       0  silent 1000  a"
+  "record-both-a-first   cone       cone       0  silent -1000 ab"
 )
 for line in "${cases[@]}"; do
-  read -r name mode_a mode_b gap expected <<<"$line"
+  read -r name mode_a mode_b gap expected skew record <<<"$line"
   if [ "$#" -gt 0 ] && ! printf '%s\n' "$@" | grep -qx "$name"; then continue; fi
-  run_case "$name" "$mode_a" "$mode_b" "$gap" "$expected"
+  run_case "$name" "$mode_a" "$mode_b" "$gap" "$expected" "${skew:--}" "${record:--}"
 done
 
 echo

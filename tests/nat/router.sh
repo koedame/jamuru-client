@@ -27,9 +27,15 @@ iptables-legacy -t filter -A FORWARD -i "$WAN_IF" -o "$LAN_IF" -m state --state 
 # any record of it. Left alone, the kernel records it, and when the app then sends to that
 # address and port its mapping cannot keep the port, because the reply it expects is the
 # packet already recorded (the lab would break a peer that is not behind any odd NAT).
-ipset create seen hash:ip,port timeout 120
+# (the kernel forgets a flow nobody answered after UDP_TIMEOUT seconds, 30 unless changed; so does the set)
+ipset create seen hash:ip,port timeout "${UDP_TIMEOUT:-30}"
 iptables-legacy -t mangle -A POSTROUTING -o "$WAN_IF" -p udp -j SET --add-set seen dst,dst --exist
-iptables-legacy -t raw -A PREROUTING -i "$WAN_IF" -p udp -m set ! --match-set seen src,src -j DROP
+# RECORD_UNSOLICITED=1 leaves that packet alone, as a router that accepts what is addressed to
+# itself does: the kernel records it as a flow nobody answered, and the app's own first packet
+# to that address and port is then given another port by the translation
+if [ "${RECORD_UNSOLICITED:-0}" != 1 ]; then
+  iptables-legacy -t raw -A PREROUTING -i "$WAN_IF" -p udp -m set ! --match-set seen src,src -j DROP
+fi
 # Counts what the app sends out, for the send rate
 iptables-legacy -t mangle -A POSTROUTING -o "$WAN_IF" -p udp -j RETURN
 
@@ -74,6 +80,11 @@ case "$MODE" in
     exit 1
     ;;
 esac
+
+# CT_EVENTS=1 logs every change of the kernel's flow table (without the STUN servers), with the time
+if [ "${CT_EVENTS:-0}" = 1 ]; then
+  conntrack -E -p udp -o timestamp 2>/dev/null | grep -v 'dport=3478' | sed 's/^/CT /' &
+fi
 
 echo "router up: mode=$MODE wan=$WAN_IF ($WAN_IP) lan=$LAN_IF"
 # The packets that went out toward the wan, once a second, so the log shows the rate

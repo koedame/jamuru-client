@@ -7,9 +7,9 @@
 //! two durations, never the peer's address.
 
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -56,6 +56,45 @@ impl LinkRoute {
             1 => Some(Self::Lan),
             2 => Some(Self::Public),
             3 => Some(Self::Loopback),
+            _ => None,
+        }
+    }
+}
+
+/// Why the link runs on the address it does
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteReason {
+    /// The address answered the connectivity check and was the nearest that did
+    Answered,
+    /// The peer offered one address: there was nothing to choose
+    OnlyCandidate,
+    /// Nothing answered the check, and the first public address was taken
+    NoAnswerPublic,
+    /// Nothing answered the check, and no public address could be sent to: the first that could
+    NoAnswerFirst,
+    /// The peer was heard from another address than the one in use, and the link went there
+    Followed,
+}
+
+impl RouteReason {
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Answered => 1,
+            Self::OnlyCandidate => 2,
+            Self::NoAnswerPublic => 3,
+            Self::NoAnswerFirst => 4,
+            Self::Followed => 5,
+        }
+    }
+
+    fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::Answered),
+            2 => Some(Self::OnlyCandidate),
+            3 => Some(Self::NoAnswerPublic),
+            4 => Some(Self::NoAnswerFirst),
+            5 => Some(Self::Followed),
             _ => None,
         }
     }
@@ -169,6 +208,22 @@ pub struct LinkSnapshot {
     pub connect_ms: Option<u64>,
     /// Milliseconds from the link going up to the first audio packet.
     pub first_audio_ms: Option<u64>,
+    /// Why the link runs on the address it does.
+    pub route_reason: Option<RouteReason>,
+    /// When the first packet went to the peer, in milliseconds since the Unix epoch. It is what
+    /// two ends' first packets are put in order by: which went first and how far apart.
+    pub first_sent_unix_ms: Option<u64>,
+    /// When the first packet from the peer arrived, in milliseconds since the Unix epoch.
+    pub first_heard_unix_ms: Option<u64>,
+    /// How many private and how many other addresses the peer offered for the check.
+    pub candidates_lan: u8,
+    pub candidates_public: u8,
+    /// Packets sent to an address of the peer other than the one in use.
+    pub sent_to_other: u64,
+    /// How many times the sending started over after a quiet while the peer was not heard.
+    pub punch_tries: u32,
+    /// Whether this end sent first in the latest of those tries.
+    pub punched_first: Option<bool>,
 }
 
 impl LinkSnapshot {
@@ -185,7 +240,22 @@ pub struct LinkFacts {
     route_confirmed: AtomicBool,
     connect_ms: AtomicU64,
     first_audio_ms: AtomicU64,
+    route_reason: AtomicU8,
+    first_sent_unix_ms: AtomicU64,
+    first_heard_unix_ms: AtomicU64,
+    candidates_lan: AtomicU8,
+    candidates_public: AtomicU8,
+    sent_to_other: AtomicU64,
+    punch_tries: AtomicU32,
+    /// 0 = never punched again, 1 = second, 2 = first in the latest try
+    punched_first: AtomicU8,
     up_at: Mutex<Option<Instant>>,
+}
+
+fn unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX - 1))
 }
 
 impl LinkFacts {
@@ -195,6 +265,14 @@ impl LinkFacts {
             route_confirmed: AtomicBool::new(false),
             connect_ms: AtomicU64::new(NOT_MEASURED),
             first_audio_ms: AtomicU64::new(NOT_MEASURED),
+            route_reason: AtomicU8::new(0),
+            first_sent_unix_ms: AtomicU64::new(NOT_MEASURED),
+            first_heard_unix_ms: AtomicU64::new(NOT_MEASURED),
+            candidates_lan: AtomicU8::new(0),
+            candidates_public: AtomicU8::new(0),
+            sent_to_other: AtomicU64::new(0),
+            punch_tries: AtomicU32::new(0),
+            punched_first: AtomicU8::new(0),
             up_at: Mutex::new(None),
         }
     }
@@ -219,6 +297,58 @@ impl LinkFacts {
         self.route
             .store(LinkRoute::of(addr).to_u8(), Ordering::Relaxed);
         self.route_confirmed.store(false, Ordering::Relaxed);
+        self.chosen_because(RouteReason::Followed);
+    }
+
+    /// Why the link runs on the address it went up on.
+    pub(crate) fn chosen_because(&self, reason: RouteReason) {
+        self.route_reason.store(reason.to_u8(), Ordering::Relaxed);
+    }
+
+    /// The check is about to send to `candidates`, the peer's addresses.
+    pub(crate) fn candidates_offered(&self, candidates: &[SocketAddr]) {
+        let lan = candidates
+            .iter()
+            .filter(|addr| LinkRoute::of(**addr) == LinkRoute::Lan)
+            .count();
+        self.candidates_lan
+            .store(u8::try_from(lan).unwrap_or(u8::MAX), Ordering::Relaxed);
+        self.candidates_public.store(
+            u8::try_from(candidates.len() - lan).unwrap_or(u8::MAX),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// A packet went to the peer. Only the first one counts.
+    pub(crate) fn sent_first(&self) {
+        let _ = self.first_sent_unix_ms.compare_exchange(
+            NOT_MEASURED,
+            unix_ms(),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    }
+
+    /// A packet from the peer arrived. Only the first one counts.
+    pub(crate) fn heard(&self) {
+        let _ = self.first_heard_unix_ms.compare_exchange(
+            NOT_MEASURED,
+            unix_ms(),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    }
+
+    /// A packet went to an address of the peer other than the one in use.
+    pub(crate) fn sent_to_other(&self) {
+        self.sent_to_other.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The sending started over after a quiet, this end being first or second.
+    pub(crate) fn punched_again(&self, first: bool) {
+        self.punch_tries.fetch_add(1, Ordering::Relaxed);
+        self.punched_first
+            .store(if first { 2 } else { 1 }, Ordering::Relaxed);
     }
 
     /// An audio packet arrived. Only the first one since the link went up counts.
@@ -250,6 +380,17 @@ impl LinkFacts {
             route_confirmed: route.map(|_| self.route_confirmed.load(Ordering::Relaxed)),
             connect_ms: measured(&self.connect_ms),
             first_audio_ms: measured(&self.first_audio_ms),
+            route_reason: RouteReason::from_u8(self.route_reason.load(Ordering::Relaxed)),
+            first_sent_unix_ms: measured(&self.first_sent_unix_ms),
+            first_heard_unix_ms: measured(&self.first_heard_unix_ms),
+            candidates_lan: self.candidates_lan.load(Ordering::Relaxed),
+            candidates_public: self.candidates_public.load(Ordering::Relaxed),
+            sent_to_other: self.sent_to_other.load(Ordering::Relaxed),
+            punch_tries: self.punch_tries.load(Ordering::Relaxed),
+            punched_first: match self.punched_first.load(Ordering::Relaxed) {
+                0 => None,
+                value => Some(value == 2),
+            },
         }
     }
 }
