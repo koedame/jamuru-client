@@ -671,26 +671,43 @@ def chrony_clock():
     return parse_chrony_tracking(done.stdout) if done.returncode == 0 else None
 
 
-def sntp_ask(host):
-    """One SNTP question: how far this clock is ahead of the server's, and the most that can be wrong, in ms.
+def wall_time():
+    """Seconds since the Unix epoch, as finely as the system gives it.
 
-    The server's time was taken somewhere between the question leaving and the answer arriving,
-    so the answer is off by at most half of the time the exchange took, less the time the server
-    held it. None if the server did not answer.
+    Python's own clock on Windows moves in steps of about 15 ms before 3.13, which is more than
+    the error being measured; the call the app itself uses (it is what Rust's `SystemTime` is)
+    gives 100 ns.
+    """
+    if sys.platform == "win32":
+        import ctypes
+
+        ticks = ctypes.c_ulonglong()
+        ctypes.windll.kernel32.GetSystemTimePreciseAsFileTime(ctypes.byref(ticks))
+        return ticks.value / 1e7 - 11644473600
+    return time.time()
+
+
+def sntp_ask(host):
+    """One SNTP question: (answer, why not).
+
+    The answer is how far this clock is ahead of the server's and the most that can be wrong,
+    in ms. The server's time was taken somewhere between the question leaving and the answer
+    arriving, so the answer is off by at most half of the time the exchange took, less the time
+    the server held it. `answer` is None, with the reason, if there is none.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(1.0)
     try:
         sock.sendto(b"\x1b" + 47 * b"\0", (host, 123))
-        sent = time.time()
+        sent = wall_time()
         data, _ = sock.recvfrom(512)
-        got = time.time()
-    except OSError:
-        return None
+        got = wall_time()
+    except OSError as error:
+        return None, type(error).__name__
     finally:
         sock.close()
     if len(data) < 48:
-        return None
+        return None, "short answer"
 
     def seconds(at):
         whole, fraction = struct.unpack("!II", data[at:at + 8])
@@ -698,17 +715,26 @@ def sntp_ask(host):
 
     received, replied = seconds(32), seconds(40)
     if received <= 0 or replied <= 0:
-        return None
+        return None, "no time in the answer"
     server_ahead = ((received - sent) + (replied - got)) / 2
     exchange = (got - sent) - (replied - received)
-    return {"offset_ms": -server_ahead * 1000, "error_ms": max(exchange, 0.0) / 2 * 1000}
+    if exchange <= 0:
+        return None, "exchange took no time"
+    return {"offset_ms": -server_ahead * 1000, "error_ms": exchange / 2 * 1000}, None
 
 
 def sntp_clock():
     """The clock against public time servers: the answer with the least error of a few asks."""
-    answers = [a for host in NTP_SERVERS for a in (sntp_ask(host) for _ in range(NTP_ASKS)) if a]
+    answers, reasons = [], {}
+    for host in NTP_SERVERS:
+        for _ in range(NTP_ASKS):
+            answer, why = sntp_ask(host)
+            if answer:
+                answers.append(answer)
+            else:
+                reasons[why] = reasons.get(why, 0) + 1
     if not answers:
-        return None
+        return {"source": None, "error_ms": None, "failed": reasons}
     best = min(answers, key=lambda a: a["error_ms"])
     return {"source": "sntp", "samples": len(answers), **best}
 
@@ -720,7 +746,7 @@ def probe_clock():
     this is what it is corrected by and given its error from. `error_ms` is None when neither
     way found one, and the participants of the runner then have their round trips only.
     """
-    return chrony_clock() or sntp_clock() or {"source": None, "error_ms": None}
+    return chrony_clock() or sntp_clock()
 
 
 def clock_state(runner_facts):
