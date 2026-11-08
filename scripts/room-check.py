@@ -775,7 +775,8 @@ def one_way_between(link, own_facts, peer_facts, same_runner):
     error twice) to within twice that. The participants of one runner share a clock, so there
     is nothing to correct and no error. `asymmetry_known` is true only when the difference is
     larger than its error: below that the ways may be the same, or the other way round.
-    Returns None when the link measured no ways.
+    Returns None when the link measured no ways, or when the clock of either runner is not
+    known: the round trip is all such a link has.
     """
     spread = link.get("one_way_spread_ms") or {}
     up = (spread.get("up") or {}).get("median")
@@ -786,7 +787,9 @@ def one_way_between(link, own_facts, peer_facts, same_runner):
     if not same_runner:
         own, peer = clock_state(own_facts), clock_state(peer_facts)
         if own is None or peer is None:
-            return {"up_ms": up, "down_ms": down, "error_ms": None, "difference_ms": up - down, "asymmetry_known": False}
+            # Uncorrected, the gap between two clocks that were never compared can be larger than the delay
+            # itself (some macOS runners are a second off, and cannot ask a time server), so there is no number.
+            return None
         gap = peer[0] - own[0]
         up, down, error = up - gap, down + gap, own[1] + peer[1]
     difference = up - down
@@ -1242,8 +1245,7 @@ def one_way_by_runner_pair(results):
 
     Maps `(first, second)` (runner numbers, first < second) to the median way from first to
     second (`forward_ms`) and back (`back_ms`), the error they are given with (`error_ms`, the
-    worst of the links', None if a link had none) and whether the difference between the ways
-    is known (`asymmetry_known`). Each link tells both ways, so a pair has them from the
+    worst of the links') and whether the difference between the ways is known (`asymmetry_known`). Each link tells both ways, so a pair has them from the
     participants of both runners.
     """
     by_id = {result["id"]: result for result in results}
@@ -1264,13 +1266,13 @@ def one_way_by_runner_pair(results):
             entry["errors"].append(way["error_ms"])
     pairs = {}
     for pair, entry in gathered.items():
-        error = None if None in entry["errors"] else max(entry["errors"])
+        error = max(entry["errors"])
         forward, back = statistics.median(entry["forward"]), statistics.median(entry["back"])
         pairs[pair] = {
             "forward_ms": forward,
             "back_ms": back,
             "error_ms": error,
-            "asymmetry_known": error is not None and abs(forward - back) > 2 * error,
+            "asymmetry_known": abs(forward - back) > 2 * error,
         }
     return pairs
 
@@ -1362,11 +1364,10 @@ def summary(args):
         lines.append("")
         lines.append("One way between runners (first to second / second to first; the clocks of both are accounted for):")
         for (a, b), way in sorted(ways.items()):
-            error = f"+-{way['error_ms']:.1f} ms" if way["error_ms"] is not None else "clocks not known"
             known = "" if way["asymmetry_known"] else ", difference unknown"
             lines.append(
                 f"  runner {a} {systems.get(a)} -> runner {b} {systems.get(b)}: "
-                f"{way['forward_ms']:.1f} / {way['back_ms']:.1f} ms ({error}{known})"
+                f"{way['forward_ms']:.1f} / {way['back_ms']:.1f} ms (+-{way['error_ms']:.1f} ms{known})"
             )
     if blocked:
         pairs = len({tuple(sorted((a, b))) for a, b in ((by_id[i]["runner"], by_id[j]["runner"]) for i, j, _ in blocked)})
