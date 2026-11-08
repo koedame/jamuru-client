@@ -39,8 +39,8 @@ pub use bandwidth::{
 };
 pub use clock::{clock_offset_secs, CLOCK_SKEW_NOTICE_SECS};
 pub use connection::{
-    AudioEncodingConfig, Connection, ConnectionState, ConnectionStats, PeerLatencyInfo,
-    PunchSchedule, ReconnectConfig,
+    AudioEncodingConfig, Connection, ConnectionState, ConnectionStats, OneWayDelays,
+    PeerLatencyInfo, PunchSchedule, ReconnectConfig,
 };
 pub use device_identity::{
     device_id_from_public_key, signed_payload, DeviceIdentity, DEVICE_ID_LEN,

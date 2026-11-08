@@ -9,12 +9,12 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 368 |
+| 要求 総数 | 371 |
 | うち must | 330 |
-| うち should | 38 |
-| 検証済み | 342 |
+| うち should | 41 |
+| 検証済み | 344 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
-| 未検証（should のみ許容） | 3 |
+| 未検証（should のみ許容） | 4 |
 
 ## 対応表
 
@@ -100,6 +100,7 @@
 | REQ-CLI-013 | should | `--report-json` は相手ごとに、つながりの経路の種類（同じ機械 / 内側のネットワーク / 公開アドレス）とアドレスの種類（IPv4 / IPv6）、つながるまでの時間と経路が切り替わった回数、受信バッファの量、回線の往復と端から端の往復の最小・中央値・p95・最大・標準偏差、自分の system を書く。アドレスそのものは書かない | `docs-spec/requirements.md` | `src/main.rs`::a_link_is_reported_by_the_kind_of_its_address_and_how_it_came_up<br/>`src/main.rs`::the_spread_of_the_samples_gives_the_minimum_the_median_the_95th_percentile_and_the_maximum<br/>`src/main.rs`::when_nothing_was_sampled_the_spread_of_a_link_is_null<br/>`tests/cli_test.rs`::a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts |
 | REQ-CLI-014 | should | 環境変数 `JAMJAM_CONFIG_DIR` に設定ディレクトリを指定でき、指定すると端末の識別（`device_identity.json`）と設定がそこに置かれる。1 台のマシンで端末の識別を分けて複数のインスタンスを動かすため（Windows では `HOME` で動かせない） | `docs-spec/requirements.md` | `src/config.rs`::when_a_config_directory_is_named_it_is_the_one_used<br/>`src/config.rs`::when_no_config_directory_is_named_the_systems_own_is_used |
 | REQ-CLI-015 | should | `--report-json` は相手ごとに、経路を選んだ理由（答えた / 候補が 1 つ / 答えが無く公開アドレス / 答えが無く最初の候補 / 受信を追って移った）、最初に送った時刻と最初に受けた時刻（Unix エポックからのミリ秒）、相手が出した候補の種類ごとの数（私的 / それ以外）、使っている以外のアドレスへ送った数、無音のあと送り直した回数とその最後で先に送ったか、を書く。アドレスそのものは書かない | `docs-spec/requirements.md` | `src/main.rs`::a_link_is_reported_with_why_it_runs_there_and_when_the_first_packets_went |
+| REQ-CLI-016 | should | `--report-json` は相手ごとに、上り（自分→相手）と下り（相手→自分）の片道の遅れの最小・中央値・p95・最大・標準偏差を書く（`one_way_spread_ms`。REQ-LAT-133）。2 台の時計のずれを含む値で、ずれは別に測って添える（ADR-120） | `docs-spec/requirements.md` | **未検証** |
 | REQ-CON-020 | must | 1 ルームあたりの最大参加者数が 16 名である | `docs-spec/requirements.md` | `src/audio/peer_mix.rs`::a_full_room_has_a_place_for_each_of_the_fifteen_others_and_no_more<br/>`src/network/roster.rs`::fifteen_others_are_in_a_full_room_opens_a_link_to_each_of_them<br/>`src/network/roster.rs`::more_than_fifteen_others_are_listed_links_the_first_fifteen_and_the_next_when_one_of_them_leaves<br/>`tests/link_test.rs`::when_the_mix_has_no_place_left_the_link_is_refused<br/>`tests/mesh_connection_test.rs`::a_full_room_of_sixteen_has_fifteen_links_per_participant_and_all_of_them_carry_audio |
 | REQ-CON-021 | must | 招待コードは 9 文字の英数字であり、生成値が形式判定を通る。9 文字でないもの（6 文字の旧コードを含む）は形式判定を通らず、招待コードの型にできない | `docs-spec/requirements.md` | `src/network/signaling.rs`::test_an_invite_code_of_six_characters_does_not_parse<br/>`src/network/signaling.rs`::test_generate_invite_code_length |
 | REQ-CON-022 | must | 再接続の検知閾値は keep-alive 間隔の2倍以上に正規化され、健全な回線でフラップしない | `docs-spec/requirements.md` | `src/network/connection.rs`::reconnect_config_cannot_be_configured_to_flap |
@@ -269,6 +270,8 @@
 | REQ-LAT-129 | must | 帯域不足の警告は複数区間続けて確認してから表示する | `docs-spec/behavior/latency.feature` | `src/network/bandwidth.rs`::verdict_passes_no_signal_through_unconfirmed_and_resets_the_streak<br/>`src/network/bandwidth.rs`::verdict_requires_consecutive_confirmation_before_reporting_insufficient |
 | REQ-LAT-130 | must | RTTを測定するまで接続品質を判定しない | `docs-spec/behavior/latency.feature` | `src/network/connection.rs`::connection_stats_quality_waits_for_the_first_rtt_sample<br/>`src/network/connection.rs`::rtt_measurement_starts_unmeasured_and_records_the_first_sample<br/>`ui/src/components/PeerLinkDetail/PeerLinkDetail.test.tsx`::往復をまだ測っていないとき、往復を測定中と出すこと<br/>`ui/src/components/SessionStats.test.tsx`::shows a measuring state rather than 0ms before the first RTT sample<br/>`ui/src/lib/links.test.ts`::a link with no round trip measured yet has no latency to show |
 | REQ-LAT-131 | must | 相手が音声を送っていない間は帯域不足にしない | `docs-spec/behavior/latency.feature` | `src/network/bandwidth.rs`::a_peer_that_sends_no_audio_is_not_a_narrow_link |
+| REQ-LAT-132 | should | 往復の測定のパケットに時計の時刻を載せる | `docs-spec/behavior/latency.feature` | `src/protocol/packet.rs`::when_a_ping_carries_its_clock_time_an_older_reader_still_reads_the_fixed_part<br/>`src/protocol/packet.rs`::when_a_ping_or_pong_has_no_clock_times_they_are_none_and_the_rest_is_read<br/>`src/protocol/packet.rs`::when_a_pong_is_cut_short_inside_its_clock_times_it_has_none_of_them |
+| REQ-LAT-133 | should | 上り（自分→相手）と下り（相手→自分）の片道の遅れを測る | `docs-spec/behavior/latency.feature` | `src/network/connection.rs`::when_a_pong_carries_clock_times_each_way_of_the_round_trip_is_timed<br/>`src/network/connection.rs`::when_a_pong_carries_no_clock_times_the_ways_stay_unmeasured<br/>`src/network/connection.rs`::when_a_pong_carries_times_at_the_ends_of_the_range_the_ways_are_still_computed<br/>`src/network/connection.rs`::when_the_peers_clock_is_ahead_the_two_ways_are_off_by_the_gap_and_still_add_up<br/>`tests/one_way_delay_test.rs`::when_two_ends_share_a_clock_the_two_ways_add_up_to_the_round_trip |
 | REQ-MNU-001 | must | メニューバーを macOS・Windows・Linux に出す。アプリが作る項目（ルーム・設定・終了・ヘルプ類）は、どの OS のメニューにもちょうど 1 回ずつある（macOS の「終了」は OS 標準の項目）。Windows / Linux のメニューには、その OS が持たない OS 標準の項目（フルスクリーン・やり直し・ウィンドウ一覧など）を入れない | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::on_macos_every_entry_but_quit_is_in_the_menu_once<br/>`src-tauri/src/menu.rs`::on_windows_and_linux_every_entry_is_in_the_menu_once<br/>`src-tauri/src/menu.rs`::on_windows_and_linux_the_menu_holds_only_what_those_systems_provide |
 | REQ-MNU-002 | should | 構成は OS の作法に合わせる。macOS はアプリ名のメニューを先頭に、ヘルプを末尾に置き、ウィンドウメニューに「すべてを手前に移動」を持つ。Windows / Linux は設定をファイルメニューに、「jamuru について」をヘルプメニューに置く | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::on_macos_the_app_name_menu_comes_first_and_help_comes_last<br/>`src-tauri/src/menu.rs`::on_windows_and_linux_settings_is_in_file_and_about_is_in_help |
 | REQ-MNU-003 | should | ヘルプメニューから、使い方・うまくいかないとき・システム診断・ログフォルダ・問題を報告・利用規約・プライバシーとセキュリティ・ライセンス・お知らせに届く | `docs-spec/requirements.md` | `src-tauri/src/menu.rs`::the_help_menu_reaches_the_guide_the_support_tools_and_the_notices |
@@ -396,6 +399,7 @@
 
 | 要求 ID | 内容 | 定義元 |
 |---------|------|--------|
+| REQ-CLI-016 | `--report-json` は相手ごとに、上り（自分→相手）と下り（相手→自分）の片道の遅れの最小・中央値・p95・最大・標準偏差を書く（`one_way_spread_ms`。REQ-LAT-133）。2 台の時計のずれを含む値で、ずれは別に測って添える（ADR-120） | `docs-spec/requirements.md` |
 | REQ-CORE-004 | 日本国内光回線（RTT 20ms）で総片道遅延が 12ms 以下になる | `docs-spec/requirements.md` |
 | REQ-LAT-123 | ASIO使用時の低遅延 | `docs-spec/behavior/latency.feature` |
 | REQ-MNU-008 | メニューの項目には、このアプリ独自のキーボードショートカットを割り当てない（アプリ全体のショートカットを決めるときにまとめて決める）。OS 標準の項目が持つ OS 標準のキーは残る | `docs-spec/requirements.md` |

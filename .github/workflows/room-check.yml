@@ -25,6 +25,9 @@ run-name: ${{ inputs.source && format('Room check [{0}]', inputs.source) || 'Roo
 # measured because of the environment; a pair that does and still fails is the
 # app's failure (ADR-118).
 #
+# The result also has, per link, the time each way of the round trip takes (up and down), and
+# per runner how well its clock keeps time, which is what a one-way time is given with (ADR-120).
+#
 # The runners' CPUs are shared, so this says nothing about performance.
 
 on:

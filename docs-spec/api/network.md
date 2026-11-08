@@ -527,6 +527,9 @@ sequenceDiagram
     Note over A: α = 0.125
 ```
 
+片道は、上りが `ping_received_wall_us - original_sent_wall_us`、下りが「pong を受けた自分の時刻 - `sent_wall_us`」。
+どちらも 2 台の時計のずれを含む（上りはずれの分だけ大きく、下りは小さく出る。和は往復になる）。
+
 ### 10.3 パケット構造
 
 ```rust
@@ -538,6 +541,9 @@ pub struct LatencyPing {
     pub sent_time_us: u64,
     /// シーケンス番号
     pub ping_sequence: u32,
+    /// 送った側の時計（Unix 時間、マイクロ秒）。固定部分（12 バイト）のあとに 8 バイトで付く。
+    /// 載せない相手では `None`（REQ-LAT-132）
+    pub sent_wall_us: Option<u64>,
 }
 
 /// RTT計測レスポンス
@@ -548,6 +554,20 @@ pub struct LatencyPong {
     pub original_sent_time_us: u64,
     /// リクエストのシーケンス番号
     pub ping_sequence: u32,
+    /// 片道を測る時計の時刻。固定部分（12 バイト）のあとに 24 バイトで付く。ping に時刻が
+    /// なかったときは `None`（REQ-LAT-132）
+    pub wall: Option<PongWall>,
+}
+
+/// pong が載せる時計の時刻（Unix 時間、マイクロ秒）
+#[derive(Debug, Clone)]
+pub struct PongWall {
+    /// ping の `sent_wall_us`（そのまま返す）。ping を送った側の時計
+    pub original_sent_wall_us: u64,
+    /// ping を受けた時刻。返す側の時計
+    pub ping_received_wall_us: u64,
+    /// pong を送る時刻。返す側の時計
+    pub sent_wall_us: u64,
 }
 
 /// レイテンシ設定情報
