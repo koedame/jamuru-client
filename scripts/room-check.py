@@ -1015,6 +1015,14 @@ def analyze(work, index, room):
             "connect_ms": facts.get("connect_ms"),
             "first_audio_ms": facts.get("first_audio_ms"),
             "route_moves": facts.get("route_moves"),
+            "route_reason": facts.get("route_reason"),
+            "first_sent_unix_ms": facts.get("first_sent_unix_ms"),
+            "first_heard_unix_ms": facts.get("first_heard_unix_ms"),
+            "candidates_lan": facts.get("candidates_lan"),
+            "candidates_public": facts.get("candidates_public"),
+            "sent_to_other": facts.get("sent_to_other"),
+            "punch_tries": facts.get("punch_tries"),
+            "punched_first": facts.get("punched_first"),
             "connected_after_seconds": peer.get("connected_after_seconds"),
             "buffer_ms": peer.get("buffer_ms"),
             "delay_frames": playout.get("delay_frames"),
@@ -1062,6 +1070,49 @@ def udp_status(udp, first, second):
         if peer["flows_received"] < flows or peer.get("during_flows_received", flows) < flows:
             return "impaired"
     return "open"
+
+
+def first_packet_lines(results, min_heard):
+    """Per pair of participants on different runners: which end sent its first packet first, and how it ended.
+
+    The gap is the first packet of the lower-numbered end minus that of the higher-numbered one, so a
+    negative gap is the lower one first. A pair that was not heard, or that had to send again after
+    a quiet while, is listed; the others are counted.
+    """
+    by_id = {result["id"]: result for result in results}
+    rows = []
+    total = 0
+    for result in results:
+        for link in result["links"]:
+            other = by_id.get(participant_of(link["peer"]))
+            if other is None or other["runner"] == result["runner"] or result["id"] > other["id"]:
+                continue
+            back = next((l for l in other["links"] if participant_of(l["peer"]) == result["id"]), None)
+            if back is None:
+                continue
+            total += 1
+            sent_here, sent_there = link.get("first_sent_unix_ms"), back.get("first_sent_unix_ms")
+            gap = sent_here - sent_there if sent_here is not None and sent_there is not None else None
+            heard_here = result["heard"].get(str(other["id"]), 0.0)
+            heard_there = other["heard"].get(str(result["id"]), 0.0)
+            tries = (link.get("punch_tries") or 0) + (back.get("punch_tries") or 0)
+            if min(heard_here, heard_there) < min_heard or tries:
+                rows.append((result, other, link, back, gap, heard_here, heard_there, tries))
+    if not total:
+        return []
+    out = [f"First packets between participants on different runners: {total} pairs, {len(rows)} listed (not heard, or sent again after a quiet)."]
+    for result, other, link, back, gap, heard_here, heard_there, tries in rows:
+        gap_text = f"{gap:+d} ms" if gap is not None else "unknown"
+        out.append(
+            f"  {name_of(result['id'])} {result.get('os') or '?'} - {name_of(other['id'])} {other.get('os') or '?'}: "
+            f"first packet gap {gap_text}, heard {heard_here:.2f} / {heard_there:.2f}, "
+            f"routes {link.get('route')} ({link.get('route_reason')}) / {back.get('route')} ({back.get('route_reason')}), "
+            f"candidates {link.get('candidates_lan')}+{link.get('candidates_public')} / {back.get('candidates_lan')}+{back.get('candidates_public')}, "
+            f"sent to other addresses {link.get('sent_to_other')} / {back.get('sent_to_other')}, "
+            f"sent again {link.get('punch_tries')} / {back.get('punch_tries')}, "
+            f"connected after {link.get('connected_after_seconds')} / {back.get('connected_after_seconds')} s"
+        )
+    return out
 
 
 def summary(args):
@@ -1146,6 +1197,10 @@ def summary(args):
 
             counts = f" (flows that came: {came(peer_a)} and {came(peer_b)})" if status else ""
             lines.append(f"  runner {a} {systems.get(a)} - runner {b} {systems.get(b)}: {status or 'not checked'}{counts}")
+    order = first_packet_lines(results, args.min_heard)
+    if order:
+        lines.append("")
+        lines.extend(order)
     if blocked:
         pairs = len({tuple(sorted((a, b))) for a, b in ((by_id[i]["runner"], by_id[j]["runner"]) for i, j, _ in blocked)})
         lines.append(
