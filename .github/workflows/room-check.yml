@@ -16,6 +16,11 @@ name: Room check
 # not at a time fixed beforehand: a runner can wait minutes for a machine (macOS
 # ones are capped at 5 at a time), and the others wait for it in the room.
 #
+# Before the turns the runners also send UDP packets to each other without the
+# app. A pair of runners that do not reach each other that way is reported as not
+# measured because of the environment; a pair that does and still fails is the
+# app's failure (ADR-118).
+#
 # The runners' CPUs are shared, so this says nothing about performance.
 
 on:
@@ -208,6 +213,29 @@ jobs:
       - name: Find the room
         if: matrix.runner != 0
         run: ${{ matrix.python }} scripts/room-check.py fetch --work "$WORK"
+
+      # Before anyone enters the room, the runners check whether packets pass between
+      # them at all: an app-free exchange of UDP packets between every two runners.
+      # Some runners on shared hosts cannot be reached from outside whatever the app
+      # does, and a pair that failed there is told apart from one the app failed.
+      # None of these three steps can fail the job: what they cannot tell is
+      # reported as "not checked".
+      - name: Open a UDP port and write where it is
+        continue-on-error: true
+        run: ${{ matrix.python }} scripts/room-check.py udp-start --work "$WORK" --runner "${{ matrix.runner }}"
+
+      - name: Publish the UDP address
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: room-udp-${{ matrix.runner }}-${{ github.run_attempt }}
+          path: ${{ env.WORK }}/udp/udp.enc
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Check direct UDP between the runners
+        continue-on-error: true
+        run: ${{ matrix.python }} scripts/room-check.py udp-wait --work "$WORK"
 
       # The others enter the room in their own step, and runner 0 then waits
       # until all of them have, and says when the turns start.
