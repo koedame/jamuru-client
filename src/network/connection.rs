@@ -2395,7 +2395,7 @@ impl Connection {
                     attempt + 1
                 );
                 let mut carry_on = wait(schedule.quiet).await;
-                let first = (attempt % 2 == 0) == sorts_first;
+                let first = attempt.is_multiple_of(2) == sorts_first;
                 if carry_on && !first {
                     carry_on = wait(schedule.second_waits).await;
                 }
