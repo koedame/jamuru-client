@@ -23,6 +23,16 @@ pub(super) fn now_unix_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// Current Unix time in microseconds: what a ping and its answer carry so that each way of the
+/// round trip can be timed (REQ-LAT-132). Wall-clock time, so it is only as right as this
+/// computer's clock; the measurement says so by being read next to the clock's own state.
+pub(super) fn now_unix_us() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0)
+}
+
 /// How far this computer's clock is ahead of the server's, in seconds
 /// (negative when it is behind), from the `Date` header of one of the
 /// server's answers. `None` when the header is not a date.

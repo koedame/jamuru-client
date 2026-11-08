@@ -297,26 +297,38 @@ impl Packet {
 
 /// Latency ping payload for RTT measurement
 ///
-/// Binary format (12 bytes):
+/// Binary format (12 bytes, 20 with the wall-clock time):
 /// - sent_time_us: 8 bytes (big-endian, microseconds since arbitrary epoch)
 /// - ping_sequence: 4 bytes (big-endian)
+/// - sent_wall_us: 8 bytes (big-endian, microseconds since the Unix epoch on the
+///   sender's clock), appended after the fixed fields so a peer that does not know
+///   it still reads the rest and ignores the trailing bytes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LatencyPing {
     /// Monotonic timestamp when ping was sent (microseconds)
     pub sent_time_us: u64,
     /// Sequence number for this ping
     pub ping_sequence: u32,
+    /// The sender's clock when the ping was sent, `None` from a peer that does not send it
+    /// (REQ-LAT-132)
+    pub sent_wall_us: Option<u64>,
 }
 
 impl LatencyPing {
-    /// Size of serialized LatencyPing in bytes
+    /// Size of the fixed part of a serialized LatencyPing in bytes
     pub const SIZE: usize = 12;
+
+    /// Size with the wall-clock time
+    pub const SIZE_WITH_WALL: usize = Self::SIZE + 8;
 
     /// Serialize to bytes
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(Self::SIZE);
+        let mut buf = Vec::with_capacity(Self::SIZE_WITH_WALL);
         buf.extend_from_slice(&self.sent_time_us.to_be_bytes());
         buf.extend_from_slice(&self.ping_sequence.to_be_bytes());
+        if let Some(wall) = self.sent_wall_us {
+            buf.extend_from_slice(&wall.to_be_bytes());
+        }
         buf
     }
 
@@ -330,32 +342,72 @@ impl LatencyPing {
                 data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
             ]),
             ping_sequence: u32::from_be_bytes([data[8], data[9], data[10], data[11]]),
+            sent_wall_us: be_u64_at(data, Self::SIZE),
         })
     }
 }
 
+/// The 8 bytes at `offset` as a big-endian number, `None` when `data` ends before them
+fn be_u64_at(data: &[u8], offset: usize) -> Option<u64> {
+    let bytes: [u8; 8] = data.get(offset..offset + 8)?.try_into().ok()?;
+    Some(u64::from_be_bytes(bytes))
+}
+
 /// Latency pong payload for RTT measurement
 ///
-/// Binary format (12 bytes):
+/// Binary format (12 bytes, 36 with the wall-clock times):
 /// - original_sent_time_us: 8 bytes (big-endian)
 /// - ping_sequence: 4 bytes (big-endian)
+/// - original_sent_wall_us: 8 bytes, the ping's `sent_wall_us` echoed back
+/// - ping_received_wall_us: 8 bytes, the answerer's clock when the ping arrived
+/// - sent_wall_us: 8 bytes, the answerer's clock when the pong was sent
+///
+/// The three clock times are all or nothing, and sit after the fixed fields for the
+/// same reason as the ping's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LatencyPong {
     /// Original sent timestamp from ping
     pub original_sent_time_us: u64,
     /// Ping sequence number (echoed back)
     pub ping_sequence: u32,
+    /// The clock times that give the two ways of the round trip, `None` when the ping
+    /// did not carry its time (REQ-LAT-132)
+    pub wall: Option<PongWall>,
+}
+
+/// Wall-clock times a pong carries so that the pinger can time each way of the round trip
+/// by itself
+///
+/// Each is microseconds since the Unix epoch. The ping's way is
+/// `ping_received_wall_us - original_sent_wall_us` and the pong's way is the pinger's own
+/// clock on arrival minus `sent_wall_us`; each is right only as far as the two clocks agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PongWall {
+    /// The ping's `sent_wall_us`, on the pinger's clock
+    pub original_sent_wall_us: u64,
+    /// When the ping arrived, on the answerer's clock
+    pub ping_received_wall_us: u64,
+    /// When the pong was sent, on the answerer's clock
+    pub sent_wall_us: u64,
 }
 
 impl LatencyPong {
-    /// Size of serialized LatencyPong in bytes
+    /// Size of the fixed part of a serialized LatencyPong in bytes
     pub const SIZE: usize = 12;
+
+    /// Size with the wall-clock times
+    pub const SIZE_WITH_WALL: usize = Self::SIZE + 24;
 
     /// Serialize to bytes
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(Self::SIZE);
+        let mut buf = Vec::with_capacity(Self::SIZE_WITH_WALL);
         buf.extend_from_slice(&self.original_sent_time_us.to_be_bytes());
         buf.extend_from_slice(&self.ping_sequence.to_be_bytes());
+        if let Some(wall) = self.wall {
+            buf.extend_from_slice(&wall.original_sent_wall_us.to_be_bytes());
+            buf.extend_from_slice(&wall.ping_received_wall_us.to_be_bytes());
+            buf.extend_from_slice(&wall.sent_wall_us.to_be_bytes());
+        }
         buf
     }
 
@@ -364,11 +416,17 @@ impl LatencyPong {
         if data.len() < Self::SIZE {
             return None;
         }
+        let wall = (data.len() >= Self::SIZE_WITH_WALL).then(|| PongWall {
+            original_sent_wall_us: be_u64_at(data, Self::SIZE).unwrap_or(0),
+            ping_received_wall_us: be_u64_at(data, Self::SIZE + 8).unwrap_or(0),
+            sent_wall_us: be_u64_at(data, Self::SIZE + 16).unwrap_or(0),
+        });
         Some(Self {
             original_sent_time_us: u64::from_be_bytes([
                 data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
             ]),
             ping_sequence: u32::from_be_bytes([data[8], data[9], data[10], data[11]]),
+            wall,
         })
     }
 }
@@ -547,6 +605,7 @@ mod tests {
         let ping = LatencyPing {
             sent_time_us: 1234567890123,
             ping_sequence: 42,
+            sent_wall_us: Some(1_790_444_697_123_456),
         };
         let bytes = ping.to_bytes();
         let decoded = LatencyPing::from_bytes(&bytes).expect("Failed to decode");
@@ -558,10 +617,76 @@ mod tests {
         let pong = LatencyPong {
             original_sent_time_us: 1234567890123,
             ping_sequence: 42,
+            wall: Some(PongWall {
+                original_sent_wall_us: 1_790_444_697_123_456,
+                ping_received_wall_us: 1_790_444_697_131_000,
+                sent_wall_us: 1_790_444_697_131_050,
+            }),
         };
         let bytes = pong.to_bytes();
         let decoded = LatencyPong::from_bytes(&bytes).expect("Failed to decode");
         assert_eq!(decoded, pong);
+    }
+
+    /// A peer that predates the clock times sends the 12 fixed bytes; they read as no time
+    /// rather than as a refused packet, and a newer peer's trailing bytes are ignored by an
+    /// older one (it reads only the fixed part).
+    ///
+    /// Verifies: REQ-LAT-132
+    #[test]
+    fn when_a_ping_or_pong_has_no_clock_times_they_are_none_and_the_rest_is_read() {
+        let ping = LatencyPing {
+            sent_time_us: 7,
+            ping_sequence: 3,
+            sent_wall_us: None,
+        };
+        let bytes = ping.to_bytes();
+        assert_eq!(bytes.len(), LatencyPing::SIZE);
+        assert_eq!(LatencyPing::from_bytes(&bytes), Some(ping));
+
+        let pong = LatencyPong {
+            original_sent_time_us: 7,
+            ping_sequence: 3,
+            wall: None,
+        };
+        let bytes = pong.to_bytes();
+        assert_eq!(bytes.len(), LatencyPong::SIZE);
+        assert_eq!(LatencyPong::from_bytes(&bytes), Some(pong));
+    }
+
+    /// Verifies: REQ-LAT-132
+    #[test]
+    fn when_a_ping_carries_its_clock_time_an_older_reader_still_reads_the_fixed_part() {
+        let ping = LatencyPing {
+            sent_time_us: 99,
+            ping_sequence: 5,
+            sent_wall_us: Some(1_790_444_697_000_000),
+        };
+        let bytes = ping.to_bytes();
+        assert_eq!(bytes.len(), LatencyPing::SIZE_WITH_WALL);
+        // What a reader that knows only the 12 fixed bytes sees
+        let older = LatencyPing::from_bytes(&bytes[..LatencyPing::SIZE]).unwrap();
+        assert_eq!((older.sent_time_us, older.ping_sequence), (99, 5));
+        assert_eq!(older.sent_wall_us, None);
+    }
+
+    /// A pong cut short in the middle of the clock times has none of them, not half
+    ///
+    /// Verifies: REQ-LAT-132
+    #[test]
+    fn when_a_pong_is_cut_short_inside_its_clock_times_it_has_none_of_them() {
+        let pong = LatencyPong {
+            original_sent_time_us: 1,
+            ping_sequence: 2,
+            wall: Some(PongWall {
+                original_sent_wall_us: 10,
+                ping_received_wall_us: 20,
+                sent_wall_us: 30,
+            }),
+        };
+        let bytes = pong.to_bytes();
+        let cut = LatencyPong::from_bytes(&bytes[..bytes.len() - 1]).unwrap();
+        assert_eq!(cut.wall, None);
     }
 
     #[test]
@@ -636,6 +761,7 @@ mod tests {
         let ping = LatencyPing {
             sent_time_us: 1000000,
             ping_sequence: 1,
+            sent_wall_us: None,
         };
         let packet = Packet::latency_ping(100, &ping);
         assert_eq!(packet.packet_type, PacketType::LatencyPing);

@@ -74,6 +74,8 @@ pub struct LinkReport {
     pub playout: RwLock<PlayoutStats>,
     /// The play-out delay in force, after any adaptation, in frames
     pub delay_frames: AtomicU32,
+    /// How this link came up, once the connection exists
+    pub link_facts: RwLock<Option<Arc<LinkFacts>>>,
 }
 
 impl LinkReport {

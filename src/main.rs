@@ -24,8 +24,9 @@ use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, 
 use jamjam::network::{
     bind_audio_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate,
     ConnectionStats, EnterError, EnterRequest, Entered, Gathered, LatencyBreakdown, LinkHealth,
-    LinkIdentity, LocalLatencyInfo, NetworkError, PeerLatencyInfo, PortMapping, RoomEntry,
-    RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
+    LinkIdentity, LinkSnapshot, LocalLatencyInfo, NetworkError, PeerLatencyInfo, PortMapping,
+    RoomEntry, RoomInfo, SignalingClient, SignalingConnection, SignalingMessage,
+    CLOCK_SKEW_NOTICE_SECS,
 };
 use uuid::Uuid;
 
@@ -504,6 +505,12 @@ fn print_session_stats(
         Some(rtt_ms) => println!("   RTT:          {:>7.2} ms", rtt_ms),
         None => println!("   RTT:          measuring..."),
     }
+    if let Some(one_way) = stats.one_way {
+        println!(
+            "   One way:      {:>7.2} ms up / {:.2} ms down (each is off by the gap between the two clocks)",
+            one_way.up_ms, one_way.down_ms
+        );
+    }
     println!("   Jitter:       {:>7.2} ms", stats.jitter_ms);
     println!("   Packet Loss:  {:>7.1} %", stats.packet_loss_rate * 100.0);
     println!("   Uptime:       {:>7} sec", stats.uptime_seconds);
@@ -644,6 +651,73 @@ fn playout_json(playout: &PlayoutStats, delay_frames: u32) -> serde_json::Value 
     })
 }
 
+/// The most samples kept of one link's round trips: one a second is an hour
+const MAX_SAMPLES_PER_LINK: usize = 3600;
+
+/// What was seen of one link while the session ran, a sample a second
+#[derive(Default)]
+struct LinkSeries {
+    /// The round trip of the link itself (ping and answer), in milliseconds
+    rtt_ms: Vec<f32>,
+    /// The way from this computer to the peer, timed by the clocks of both ends
+    /// ([`jamjam::network::OneWayDelays`]); off by the gap between them (REQ-CLI-016)
+    up_ms: Vec<f32>,
+    /// The way from the peer to this computer, off by the same gap in the other direction
+    down_ms: Vec<f32>,
+    /// Capture to play-out and back, with the buffers and processing of both ends
+    /// ([`LatencyBreakdown::roundtrip_total_ms`])
+    end_to_end_ms: Vec<f32>,
+}
+
+/// What the session saw as it ran, by the name the room knows each participant by
+#[derive(Default)]
+struct Observed {
+    links: HashMap<String, LinkSeries>,
+    /// Seconds from entering the room to the link coming up
+    connected_after: HashMap<String, f64>,
+}
+
+/// Minimum, median, 95th percentile, maximum and standard deviation of `values`, or `null`
+/// when there are none
+fn spread_json(values: &[f32]) -> serde_json::Value {
+    if values.is_empty() {
+        return serde_json::Value::Null;
+    }
+    let mut sorted: Vec<f64> = values.iter().map(|value| f64::from(*value)).collect();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let at = |share: f64| sorted[((sorted.len() - 1) as f64 * share).round() as usize];
+    let mean = sorted.iter().sum::<f64>() / sorted.len() as f64;
+    let variance = sorted.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / sorted.len() as f64;
+    serde_json::json!({
+        "samples": sorted.len(),
+        "min": rounded(sorted[0]),
+        "median": rounded(at(0.5)),
+        "p95": rounded(at(0.95)),
+        "max": rounded(sorted[sorted.len() - 1]),
+        "stdev": rounded(variance.sqrt()),
+    })
+}
+
+/// The kind of address the link runs on and what it took to come up, never the address
+fn route_json(link: &LinkSummary) -> serde_json::Value {
+    serde_json::json!({
+        "route": link.facts.route,
+        "route_confirmed": link.facts.route_confirmed,
+        "family": link.addr.map(|addr| if addr.is_ipv6() { "ipv6" } else { "ipv4" }),
+        "connect_ms": link.facts.connect_ms,
+        "first_audio_ms": link.facts.first_audio_ms,
+        "route_moves": link.facts.route_moves,
+        "route_reason": link.facts.route_reason,
+        "first_sent_unix_ms": link.facts.first_sent_unix_ms,
+        "first_heard_unix_ms": link.facts.first_heard_unix_ms,
+        "candidates_lan": link.facts.candidates_lan,
+        "candidates_public": link.facts.candidates_public,
+        "sent_to_other": link.facts.sent_to_other,
+        "punch_tries": link.facts.punch_tries,
+        "punched_first": link.facts.punched_first,
+    })
+}
+
 /// What a room session measured, as one JSON object.
 ///
 /// `peer`, `network` and `playout` are those of the first peer that was linked, which is the
@@ -654,6 +728,7 @@ fn session_report(
     links: &[LinkSummary],
     connected_for: Duration,
     round_trip: Option<(u64, &RoundTripReport)>,
+    observed: &Observed,
 ) -> serde_json::Value {
     let first = links
         .iter()
@@ -688,16 +763,34 @@ fn session_report(
             "sample_rate": settings.sample_rate,
             "frame_size": settings.frame_size,
         },
+        "os": std::env::consts::OS,
         "network": network_json(&stats),
         "playout": playout_json(&playout, delay_frames),
         "peers": links
             .iter()
             .map(|link| {
+                let series = observed.links.get(&link.name);
+                let breakdown = link
+                    .peer_info
+                    .is_some()
+                    .then(|| breakdown_of(link, settings));
                 serde_json::json!({
                     "name": link.name,
                     "addr": link.addr.map(|addr| addr.to_string()),
                     "network": network_json(&link.stats),
                     "playout": playout_json(&link.playout, link.delay_frames),
+                    "link": route_json(link),
+                    "connected_after_seconds": observed.connected_after.get(&link.name).map(|s| rounded(*s)),
+                    "buffer_ms": rounded(f64::from(link.jitter_buffer_delay_us) / 1000.0),
+                    "end_to_end_ms": breakdown.map(|b| rounded(f64::from(b.roundtrip_total_ms))),
+                    "rtt_spread_ms": series.map_or(serde_json::Value::Null, |s| spread_json(&s.rtt_ms)),
+                    "one_way_spread_ms": series.map_or(serde_json::Value::Null, |s| {
+                        serde_json::json!({
+                            "up": spread_json(&s.up_ms),
+                            "down": spread_json(&s.down_ms),
+                        })
+                    }),
+                    "end_to_end_spread_ms": series.map_or(serde_json::Value::Null, |s| spread_json(&s.end_to_end_ms)),
                 })
             })
             .collect::<Vec<_>>(),
@@ -872,6 +965,8 @@ async fn run_room_session(
         RoomEntry::Join { room_id } => driver.join(room_id).await,
     }
     .map_err(anyhow::Error::msg)?;
+    let entered_at = Instant::now();
+    let mut observed = Observed::default();
 
     // Non-interactive: say one thing, wait for a reply, leave. Used by scripts
     // and smoke tests.
@@ -891,6 +986,8 @@ async fn run_room_session(
     let mut connected_at: Option<Instant> = None;
     let mut announce = tokio::time::interval(Duration::from_millis(100));
     announce.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut sample = tokio::time::interval(Duration::from_secs(1));
+    sample.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut stdin_open = true;
     loop {
         let session_ends = connected_at
@@ -913,9 +1010,17 @@ async fn run_room_session(
                 if let Some(session) = backend.audio().as_mut() {
                     for name in session.newly_connected() {
                         connected_at.get_or_insert_with(Instant::now);
+                        observed
+                            .connected_after
+                            .insert(name.clone(), entered_at.elapsed().as_secs_f64());
                         println!("\nConnected to {}. Audio is flowing.\n", name);
                         print_prompt();
                     }
+                }
+            }
+            _ = sample.tick(), if !chat_only && run.report_json.is_some() => {
+                if let Some(session) = backend.audio().as_ref() {
+                    session.sample_links(&mut observed);
                 }
             }
             line_result = stdin_reader.next_line(), if stdin_open => {
@@ -972,6 +1077,7 @@ async fn run_room_session(
                 round_trip
                     .as_ref()
                     .map(|report| (run.echo_delay_ms, report)),
+                &observed,
             );
             std::fs::write(path, format!("{}\n", report))
                 .with_context(|| format!("cannot write {}", path.display()))?;
@@ -1363,6 +1469,8 @@ struct LinkSummary {
     delay_frames: u32,
     /// The delay their play-out buffer holds, in microseconds
     jitter_buffer_delay_us: u32,
+    /// How the link came up
+    facts: LinkSnapshot,
 }
 
 impl LinkSummary {
@@ -1388,6 +1496,12 @@ impl LinkSummary {
                 .unwrap_or_default(),
             delay_frames: report.delay_frames.load(Ordering::SeqCst),
             jitter_buffer_delay_us: report.jitter_buffer_delay_us.load(Ordering::SeqCst),
+            facts: report
+                .link_facts
+                .read()
+                .ok()
+                .and_then(|facts| facts.as_ref().map(|facts| facts.snapshot()))
+                .unwrap_or_default(),
         }
     }
 }
@@ -1579,6 +1693,28 @@ impl AudioSession {
         }
     }
 
+    /// Adds what every link looks like now to what the session has seen
+    fn sample_links(&self, observed: &mut Observed) {
+        for report in summaries(&self.names, self.controls.shared.link_reports()) {
+            let series = observed.links.entry(report.name.clone()).or_default();
+            if series.rtt_ms.len() >= MAX_SAMPLES_PER_LINK {
+                continue;
+            }
+            if let Some(one_way) = report.stats.one_way {
+                series.up_ms.push(one_way.up_ms);
+                series.down_ms.push(one_way.down_ms);
+            }
+            if let Some(rtt) = report.stats.rtt_ms {
+                series.rtt_ms.push(rtt);
+                if report.peer_info.is_some() {
+                    series
+                        .end_to_end_ms
+                        .push(breakdown_of(&report, &self.settings).roundtrip_total_ms);
+                }
+            }
+        }
+    }
+
     /// Stops the audio, closes every link and prints what each looked like.
     async fn finish(self) -> Vec<LinkSummary> {
         let Self {
@@ -1619,12 +1755,28 @@ fn summaries(
         .collect()
 }
 
-fn print_link_stats(report: &LinkSummary, settings: &AudioSettings) {
+/// What this end holds of the link: the buffers and processing of the audio session on it
+fn local_info_of(report: &LinkSummary, settings: &AudioSettings) -> LocalLatencyInfo {
     let mut local_info =
         LocalLatencyInfo::from_audio_config(settings.frame_size, settings.sample_rate, "pcm");
     local_info.set_jitter_buffer_ms(report.jitter_buffer_delay_us as f32 / 1000.0);
     let (input_us, output_us) = jamjam::audio::opened_ways().periods_us();
     local_info.set_os_periods_us(input_us, output_us);
+    local_info
+}
+
+/// Where the time of the round trip over `report`'s link goes, as the stats print it
+fn breakdown_of(report: &LinkSummary, settings: &AudioSettings) -> LatencyBreakdown {
+    LatencyBreakdown::calculate(
+        &local_info_of(report, settings),
+        report.peer_info.as_ref(),
+        report.stats.rtt_ms.unwrap_or(0.0),
+        report.stats.jitter_ms,
+    )
+}
+
+fn print_link_stats(report: &LinkSummary, settings: &AudioSettings) {
+    let local_info = local_info_of(report, settings);
     print_session_stats(
         &report.stats,
         &local_info,
@@ -1905,6 +2057,7 @@ mod tests {
             },
             delay_frames: 3,
             jitter_buffer_delay_us: 0,
+            facts: LinkSnapshot::default(),
         }
     }
 
@@ -1921,7 +2074,13 @@ mod tests {
             link("cho", Some("192.0.2.3:6000"), 200, 190),
         ];
 
-        let report = session_report(&settings(), &links, Duration::from_secs(5), None);
+        let report = session_report(
+            &settings(),
+            &links,
+            Duration::from_secs(5),
+            None,
+            &Observed::default(),
+        );
 
         assert_eq!(report["peer"], "192.0.2.2:5000");
         assert_eq!(report["network"]["packets_received"], 100);
@@ -1937,10 +2096,134 @@ mod tests {
         assert_eq!(peers[0]["addr"], serde_json::Value::Null);
     }
 
+    /// What the report says of a link is the kind of address, never the address: the report
+    /// leaves the machine in CI, and the participants are not to be found by it.
+    ///
+    /// Verifies: REQ-CLI-013
+    #[test]
+    fn a_link_is_reported_by_the_kind_of_its_address_and_how_it_came_up() {
+        let mut linked = link("ben", Some("[2001:db8::2]:5000"), 100, 90);
+        linked.facts = LinkSnapshot {
+            route: Some(jamjam::network::LinkRoute::Public),
+            route_confirmed: Some(true),
+            connect_ms: Some(840),
+            first_audio_ms: Some(30),
+            route_moves: 2,
+            ..LinkSnapshot::default()
+        };
+        linked.jitter_buffer_delay_us = 5_333;
+        let mut observed = Observed::default();
+        observed.connected_after.insert("ben".to_string(), 2.5);
+        observed.links.insert(
+            "ben".to_string(),
+            LinkSeries {
+                rtt_ms: vec![10.0, 12.0, 11.0],
+                up_ms: vec![6.0, 7.0, 6.5],
+                down_ms: vec![4.0, 5.0, 4.5],
+                end_to_end_ms: vec![30.0, 32.0],
+            },
+        );
+
+        let report = session_report(&settings(), &[linked], Duration::ZERO, None, &observed);
+
+        let peer = &report["peers"][0];
+        assert_eq!(peer["link"]["route"], "public");
+        assert_eq!(peer["link"]["route_confirmed"], true);
+        assert_eq!(peer["link"]["family"], "ipv6");
+        assert_eq!(peer["link"]["connect_ms"], 840);
+        assert_eq!(peer["link"]["route_moves"], 2);
+        assert_eq!(peer["connected_after_seconds"], 2.5);
+        assert_eq!(peer["buffer_ms"], 5.333);
+        assert_eq!(peer["rtt_spread_ms"]["min"], 10.0);
+        assert_eq!(peer["rtt_spread_ms"]["median"], 11.0);
+        assert_eq!(peer["rtt_spread_ms"]["max"], 12.0);
+        assert_eq!(peer["end_to_end_spread_ms"]["samples"], 2);
+        assert_eq!(peer["one_way_spread_ms"]["up"]["median"], 6.5);
+        assert_eq!(peer["one_way_spread_ms"]["down"]["median"], 4.5);
+        assert!(
+            !peer["link"].to_string().contains("2001:db8"),
+            "the address is not in what is said of the link: {}",
+            peer["link"]
+        );
+    }
+
+    /// Verifies: REQ-CLI-015
+    #[test]
+    fn a_link_is_reported_with_why_it_runs_there_and_when_the_first_packets_went() {
+        let mut linked = link("ben", Some("203.0.113.7:5000"), 100, 90);
+        linked.facts = LinkSnapshot {
+            route: Some(jamjam::network::LinkRoute::Public),
+            route_confirmed: Some(false),
+            route_reason: Some(jamjam::network::RouteReason::NoAnswerPublic),
+            first_sent_unix_ms: Some(1_700_000_000_120),
+            first_heard_unix_ms: Some(1_700_000_000_480),
+            candidates_lan: 1,
+            candidates_public: 2,
+            sent_to_other: 14,
+            punch_tries: 2,
+            punched_first: Some(false),
+            ..LinkSnapshot::default()
+        };
+
+        let report = session_report(
+            &settings(),
+            &[linked],
+            Duration::ZERO,
+            None,
+            &Observed::default(),
+        );
+
+        let facts = &report["peers"][0]["link"];
+        assert_eq!(facts["route_reason"], "no_answer_public");
+        assert_eq!(facts["first_sent_unix_ms"], 1_700_000_000_120_u64);
+        assert_eq!(facts["first_heard_unix_ms"], 1_700_000_000_480_u64);
+        assert_eq!(facts["candidates_lan"], 1);
+        assert_eq!(facts["candidates_public"], 2);
+        assert_eq!(facts["sent_to_other"], 14);
+        assert_eq!(facts["punch_tries"], 2);
+        assert_eq!(facts["punched_first"], false);
+        assert!(
+            !facts.to_string().contains("203.0.113"),
+            "the address is not in what is said of the link: {facts}"
+        );
+    }
+
+    /// Verifies: REQ-CLI-013
+    #[test]
+    fn when_nothing_was_sampled_the_spread_of_a_link_is_null() {
+        let report = session_report(
+            &settings(),
+            &[link("ben", Some("192.0.2.2:5000"), 1, 1)],
+            Duration::ZERO,
+            None,
+            &Observed::default(),
+        );
+
+        assert_eq!(report["peers"][0]["rtt_spread_ms"], serde_json::Value::Null);
+        assert_eq!(report["peers"][0]["link"]["family"], "ipv4");
+        assert_eq!(report["peers"][0]["link"]["route"], serde_json::Value::Null);
+    }
+
+    /// Verifies: REQ-CLI-013
+    #[test]
+    fn the_spread_of_the_samples_gives_the_minimum_the_median_the_95th_percentile_and_the_maximum()
+    {
+        let samples: Vec<f32> = (1..=100).map(|n| n as f32).collect();
+
+        let spread = spread_json(&samples);
+
+        assert_eq!(spread["samples"], 100);
+        assert_eq!(spread["min"], 1.0);
+        assert_eq!(spread["max"], 100.0);
+        assert_eq!(spread["median"], 51.0);
+        assert_eq!(spread["p95"], 95.0);
+        assert!((spread["stdev"].as_f64().unwrap() - 28.866).abs() < 0.01);
+    }
+
     /// Verifies: REQ-CLI-007
     #[test]
     fn a_session_nobody_linked_to_reports_no_peer_and_empty_counters() {
-        let report = session_report(&settings(), &[], Duration::ZERO, None);
+        let report = session_report(&settings(), &[], Duration::ZERO, None, &Observed::default());
 
         assert_eq!(report["peer"], serde_json::Value::Null);
         assert_eq!(report["network"]["packets_received"], 0);

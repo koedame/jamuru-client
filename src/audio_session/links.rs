@@ -103,6 +103,9 @@ impl LinkSetup<'_> {
         let reconnect_count = self.shared.reconnect_count.clone();
         let silence_giveups = self.shared.silence_giveups.clone();
         let link_facts = connection.link_facts();
+        if let Ok(mut own) = report.link_facts.write() {
+            *own = Some(link_facts.clone());
+        }
         if let Ok(mut shared) = self.shared.link_facts.write() {
             shared.get_or_insert_with(|| link_facts.clone());
         }
