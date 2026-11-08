@@ -73,7 +73,8 @@ pub struct PunchSchedule {
     /// How long after the check found nothing the first quiet begins
     pub settle: Duration,
     /// How long both ends send nothing, so that what the peer's packets left in a NAT runs out
-    /// (a Linux NAT keeps a flow nobody answered for 30 seconds)
+    /// (a Linux NAT keeps a flow nobody answered for 30 seconds, and removes it within a minute
+    /// after that; until it does, a new flow from the same port gets the port the old one had)
     pub quiet: Duration,
     /// How long the end that is second waits after the quiet: longer than the two ends can be
     /// apart in starting, so that the first is first
@@ -86,7 +87,7 @@ impl Default for PunchSchedule {
     fn default() -> Self {
         Self {
             settle: Duration::from_secs(5),
-            quiet: Duration::from_secs(35),
+            quiet: Duration::from_secs(100),
             second_waits: Duration::from_secs(2),
             window: Duration::from_secs(6),
         }

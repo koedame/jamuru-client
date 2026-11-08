@@ -2102,6 +2102,47 @@ mod tests {
         );
     }
 
+    /// Verifies: REQ-CLI-015
+    #[test]
+    fn a_link_is_reported_with_why_it_runs_there_and_when_the_first_packets_went() {
+        let mut linked = link("ben", Some("203.0.113.7:5000"), 100, 90);
+        linked.facts = LinkSnapshot {
+            route: Some(jamjam::network::LinkRoute::Public),
+            route_confirmed: Some(false),
+            route_reason: Some(jamjam::network::RouteReason::NoAnswerPublic),
+            first_sent_unix_ms: Some(1_700_000_000_120),
+            first_heard_unix_ms: Some(1_700_000_000_480),
+            candidates_lan: 1,
+            candidates_public: 2,
+            sent_to_other: 14,
+            punch_tries: 2,
+            punched_first: Some(false),
+            ..LinkSnapshot::default()
+        };
+
+        let report = session_report(
+            &settings(),
+            &[linked],
+            Duration::ZERO,
+            None,
+            &Observed::default(),
+        );
+
+        let facts = &report["peers"][0]["link"];
+        assert_eq!(facts["route_reason"], "no_answer_public");
+        assert_eq!(facts["first_sent_unix_ms"], 1_700_000_000_120_u64);
+        assert_eq!(facts["first_heard_unix_ms"], 1_700_000_000_480_u64);
+        assert_eq!(facts["candidates_lan"], 1);
+        assert_eq!(facts["candidates_public"], 2);
+        assert_eq!(facts["sent_to_other"], 14);
+        assert_eq!(facts["punch_tries"], 2);
+        assert_eq!(facts["punched_first"], false);
+        assert!(
+            !facts.to_string().contains("203.0.113"),
+            "the address is not in what is said of the link: {facts}"
+        );
+    }
+
     /// Verifies: REQ-CLI-013
     #[test]
     fn when_nothing_was_sampled_the_spread_of_a_link_is_null() {

@@ -533,6 +533,7 @@ mod tests {
         assert_eq!(snapshot.first_audio_ms, None);
     }
 
+    /// Verifies: REQ-CON-174
     #[test]
     fn when_the_check_sends_and_hears_the_first_times_and_the_candidate_kinds_are_kept() {
         let facts = LinkFacts::new();
@@ -567,6 +568,7 @@ mod tests {
         assert_eq!(snapshot.sent_to_other, 2);
     }
 
+    /// Verifies: REQ-CON-174
     #[test]
     fn when_the_sending_starts_over_the_tries_and_the_order_are_kept() {
         let facts = LinkFacts::new();
@@ -581,6 +583,7 @@ mod tests {
         assert_eq!(snapshot.punched_first, Some(false));
     }
 
+    /// Verifies: REQ-CON-174
     #[test]
     fn when_the_route_is_chosen_the_reason_is_kept_and_a_move_says_followed() {
         let facts = LinkFacts::new();

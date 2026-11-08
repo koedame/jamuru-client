@@ -77,12 +77,21 @@ start_client() { # start_client <a|b> <peer args...>; connect_at_a / connect_at_
     sh -c "ip route replace default via 10.78.$net.2 && exec /peer --name $side --peer $other --dir /lab --stun $stun_arg --settle-secs $settle --audio-secs $audio $connect_arg ${NAT_LAB_PEER_ARGS:-} \"\$@\"" sh "$@" >/dev/null
 }
 
-# run_case <name> <a mode> <b mode> <gap> <expected: heard|silent> [skew ms] [records: a|b|ab]
+# run_case <name> <a mode> <b mode> <gap> <expected: heard|silent> [skew ms] [records: a|b|ab] [patient]
 # skew: how many ms after B's first packet A's goes out (negative: before); empty leaves the two to
 # start when each has the other's offer. record=1: a router keeps the packets nobody had sent for
 # (the app's first packet to that address is then given another port). Which routers: a, b or ab
+# patient: the peers go quiet for long enough for the router to forget what it kept (the flows
+# time out after 8 s here, and the kernel removes them within a minute of that), and take turns
+# sending first. The default is 30 s and 100 s, which takes minutes more per case.
 run_case() {
-  local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5 skew=${6:--} record=${7:--}
+  local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5 skew=${6:--} record=${7:--} patient=${8:--}
+  local settle=$settle saved_timeout=${NAT_LAB_UDP_TIMEOUT:-} saved_args=${NAT_LAB_PEER_ARGS:-}
+  if [ "$patient" != - ]; then
+    settle=280
+    NAT_LAB_UDP_TIMEOUT=8
+    NAT_LAB_PEER_ARGS="--punch-settle-ms 3000 --punch-quiet-ms 75000 --punch-second-ms 1500 --punch-window-ms 5000"
+  fi
   cleanup
   work=$work_root/$suffix-$name
   rm -rf "$work"; mkdir -p "$work"
@@ -129,6 +138,7 @@ run_case() {
     echo "--- A:"; echo "$log_a"; echo "--- B:"; echo "$log_b"
   fi
   echo "${results[-1]}"
+  NAT_LAB_UDP_TIMEOUT=$saved_timeout NAT_LAB_PEER_ARGS=$saved_args
   grep -h "^GATHER_MS\|^AUDIO" <<<"$log_a" | sed "s/^/    a: /"
   grep -h "^GATHER_MS\|^AUDIO" <<<"$log_b" | sed "s/^/    b: /"
 }
@@ -149,11 +159,15 @@ cases=(
   "record-a-a-first      cone       cone       0  heard  -1000 a"
   "record-a-b-first      cone       cone       0  silent 1000  a"
   "record-both-a-first   cone       cone       0  silent -1000 ab"
+  "patient-b-a-first     cone       cone       0  heard  -1000 b  1"
+  "patient-b-same-time   cone       cone       0  heard  0     b  1"
+  "patient-a-b-first     cone       cone       0  heard  1000  a  1"
+  "patient-both-a-first  cone       cone       0  silent -1000 ab 1"
 )
 for line in "${cases[@]}"; do
-  read -r name mode_a mode_b gap expected skew record <<<"$line"
+  read -r name mode_a mode_b gap expected skew record patient <<<"$line"
   if [ "$#" -gt 0 ] && ! printf '%s\n' "$@" | grep -qx "$name"; then continue; fi
-  run_case "$name" "$mode_a" "$mode_b" "$gap" "$expected" "${skew:--}" "${record:--}"
+  run_case "$name" "$mode_a" "$mode_b" "$gap" "$expected" "${skew:--}" "${record:--}" "${patient:--}"
 done
 
 echo
