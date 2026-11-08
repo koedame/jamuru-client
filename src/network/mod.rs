@@ -40,7 +40,7 @@ pub use bandwidth::{
 pub use clock::{clock_offset_secs, CLOCK_SKEW_NOTICE_SECS};
 pub use connection::{
     AudioEncodingConfig, Connection, ConnectionState, ConnectionStats, PeerLatencyInfo,
-    ReconnectConfig,
+    PunchSchedule, ReconnectConfig,
 };
 pub use device_identity::{
     device_id_from_public_key, signed_payload, DeviceIdentity, DEVICE_ID_LEN,
@@ -56,7 +56,7 @@ pub use latency::{
     longer_of_buffer_and_period, DownstreamLatency, LatencyBreakdown, LocalLatencyInfo,
     NetworkLatencyInfo, UpstreamLatency,
 };
-pub use link_facts::{LinkFacts, LinkRoute, LinkSnapshot};
+pub use link_facts::{LinkFacts, LinkRoute, LinkSnapshot, RouteReason};
 pub use port_mapping::PortMapping;
 pub use priority::mark_voice;
 pub use quality::{ConnectionQuality, QualityChange, QualityMonitor};

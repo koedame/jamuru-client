@@ -6,7 +6,8 @@
 //!
 //! ```text
 //! nat_lab_peer --name a --peer b --dir /lab --stun ip:port,ip:port,ip:port
-//!              [--wait-secs N] [--settle-secs N] [--audio-secs N]
+//!              [--wait-secs N] [--settle-secs N] [--audio-secs N] [--connect-at-ms EPOCH_MS]
+//!              [--punch-settle-ms N] [--punch-quiet-ms N] [--punch-second-ms N] [--punch-window-ms N]
 //! ```
 
 use std::net::SocketAddr;
@@ -15,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use jamjam::network::{
-    bind_audio_std, gather_candidates_using, CandidateType, Connection, LinkIdentity,
+    bind_audio_std, gather_candidates_using, CandidateType, Connection, LinkIdentity, PunchSchedule,
 };
 
 fn arg(name: &str) -> Option<String> {
@@ -82,6 +83,17 @@ async fn main() {
         println!("CANDIDATE {kind} {}", candidate.address);
     }
 
+    let mut schedule = PunchSchedule::default();
+    let millis = |name: &str| {
+        arg(name)
+            .and_then(|v| v.parse().ok())
+            .map(Duration::from_millis)
+    };
+    schedule.settle = millis("--punch-settle-ms").unwrap_or(schedule.settle);
+    schedule.quiet = millis("--punch-quiet-ms").unwrap_or(schedule.quiet);
+    schedule.second_waits = millis("--punch-second-ms").unwrap_or(schedule.second_waits);
+    schedule.window = millis("--punch-window-ms").unwrap_or(schedule.window);
+
     let identity = LinkIdentity::generate();
     let mut offer = format!("KEY {}\n", identity.public_key());
     for candidate in &gathered {
@@ -121,6 +133,25 @@ async fn main() {
             .push(now.wrapping_sub(timestamp) as f32 / 10.0);
     });
     conn.verify_peer(&identity, &key).expect("peer key");
+    conn.set_punch_schedule(schedule);
+    // Waits for a wall-clock moment (the lab's containers share a clock), so the two sides'
+    // first packets can be set a known time apart
+    if let Some(at) = arg("--connect-at-ms").and_then(|v| v.parse::<u128>().ok()) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        if at > now {
+            tokio::time::sleep(Duration::from_millis((at - now) as u64)).await;
+        }
+    }
+    println!(
+        "START_MS {}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
     let started = Instant::now();
     match tokio::time::timeout(wait, conn.connect_with_candidates(&candidates)).await {
         Ok(Ok(())) => println!("CONNECTED ms={}", started.elapsed().as_millis()),
@@ -177,5 +208,6 @@ async fn main() {
         "STATS sent={} received={}",
         stats.packets_sent, stats.packets_received
     );
+    println!("FACTS {:?}", conn.link_facts().snapshot());
     println!("DONE");
 }

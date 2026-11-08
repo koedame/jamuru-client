@@ -57,6 +57,9 @@ on:
       min_heard:
         description: Share of its turn in which every speaker must be heard
         default: '0.9'
+      join_seconds:
+        description: Seconds from the last participant entering the room to the first turn (a link that found nothing sends again only after 100 to 220 seconds)
+        default: '40'
 
 permissions:
   contents: read
@@ -70,6 +73,7 @@ env:
   MACOS_PER_RUNNER: ${{ inputs.macos_per_runner || '1' }}
   SLOT_SECONDS: ${{ inputs.slot_seconds || '3' }}
   MIN_HEARD: ${{ inputs.min_heard || '0.9' }}
+  JOIN_SECONDS: ${{ inputs.join_seconds || '40' }}
 
 jobs:
   plan:
