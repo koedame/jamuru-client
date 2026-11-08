@@ -501,6 +501,10 @@ def measure(args):
         except (OSError, ValueError):
             pass
 
+    # The clock again: how far it moved while the turns went on is part of how far to trust a
+    # one-way delay measured through them.
+    runner["clock_end"] = probe_clock()
+
     results = work / "results"
     results.mkdir(exist_ok=True)
     for index in own:
@@ -520,6 +524,11 @@ STUN_SERVERS = (("stun.l.google.com", 19302), ("stun.cloudflare.com", 3478))
 STUN_COOKIE = 0x2112A442
 # Azure's own metadata about the machine it runs on; answers only from inside it.
 CLOUD_METADATA = "http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01&format=json"
+# Public time servers the runner's clock is compared with where the system keeps no account of its
+# own (macOS, Windows), and how many times each is asked.
+NTP_SERVERS = ("time.cloudflare.com", "pool.ntp.org")
+NTP_ASKS = 4
+NTP_EPOCH = 2208988800
 
 
 def hashed(text):
@@ -628,6 +637,142 @@ def cloud_facts():
     return {name: value for name, value in found.items() if value is not None}
 
 
+def parse_chrony_tracking(text):
+    """How well chrony says the clock is kept, from the output of `chronyc tracking`, or None.
+
+    `offset_ms` is how far the clock is ahead of the time chrony follows (negative: behind).
+    `error_ms` is what chrony allows for that time itself: the root dispersion and half the
+    root delay, the maximum error of chrony's own documentation. Both in milliseconds.
+    """
+    numbers = {}
+    for line in text.splitlines():
+        label, _, rest = line.partition(":")
+        match = re.match(r"\s*([0-9.eE+-]+) seconds( (fast|slow))?", rest)
+        if match:
+            value = float(match.group(1))
+            if match.group(3) == "slow":
+                value = -value
+            numbers[label.strip().lower()] = value
+    needed = ("system time", "root delay", "root dispersion")
+    if not all(key in numbers for key in needed):
+        return None
+    return {
+        "source": "chrony",
+        "offset_ms": numbers["system time"] * 1000,
+        "error_ms": (numbers["root dispersion"] + numbers["root delay"] / 2) * 1000,
+    }
+
+
+def chrony_clock():
+    try:
+        done = subprocess.run(["chronyc", "tracking"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_chrony_tracking(done.stdout) if done.returncode == 0 else None
+
+
+def sntp_ask(host):
+    """One SNTP question: how far this clock is ahead of the server's, and the most that can be wrong, in ms.
+
+    The server's time was taken somewhere between the question leaving and the answer arriving,
+    so the answer is off by at most half of the time the exchange took, less the time the server
+    held it. None if the server did not answer.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(1.0)
+    try:
+        sock.sendto(b"\x1b" + 47 * b"\0", (host, 123))
+        sent = time.time()
+        data, _ = sock.recvfrom(512)
+        got = time.time()
+    except OSError:
+        return None
+    finally:
+        sock.close()
+    if len(data) < 48:
+        return None
+
+    def seconds(at):
+        whole, fraction = struct.unpack("!II", data[at:at + 8])
+        return whole - NTP_EPOCH + fraction / 2**32
+
+    received, replied = seconds(32), seconds(40)
+    if received <= 0 or replied <= 0:
+        return None
+    server_ahead = ((received - sent) + (replied - got)) / 2
+    exchange = (got - sent) - (replied - received)
+    return {"offset_ms": -server_ahead * 1000, "error_ms": max(exchange, 0.0) / 2 * 1000}
+
+
+def sntp_clock():
+    """The clock against public time servers: the answer with the least error of a few asks."""
+    answers = [a for host in NTP_SERVERS for a in (sntp_ask(host) for _ in range(NTP_ASKS)) if a]
+    if not answers:
+        return None
+    best = min(answers, key=lambda a: a["error_ms"])
+    return {"source": "sntp", "samples": len(answers), **best}
+
+
+def probe_clock():
+    """How far this runner's clock is from true time: chrony's account where there is one, else a measurement.
+
+    A one-way delay is the difference of two clocks, so it is right only as far as they agree;
+    this is what it is corrected by and given its error from. `error_ms` is None when neither
+    way found one, and the participants of the runner then have their round trips only.
+    """
+    return chrony_clock() or sntp_clock() or {"source": None, "error_ms": None}
+
+
+def clock_state(runner_facts):
+    """(offset_ms, error_ms) of a runner's clock over the run, or None when it was not known.
+
+    The offset is how far the clock was ahead of true time (the mean of the start and the end),
+    the error how far that can be wrong: the larger of the two answers' errors, and half of how
+    much the offset moved between them.
+    """
+    clocks = [(runner_facts or {}).get(key) or {} for key in ("clock", "clock_end")]
+    if any(clock.get("error_ms") is None or clock.get("offset_ms") is None for clock in clocks):
+        return None
+    offsets = [clock["offset_ms"] for clock in clocks]
+    moved = abs(offsets[1] - offsets[0]) / 2
+    return sum(offsets) / 2, max(clock["error_ms"] for clock in clocks) + moved
+
+
+def one_way_between(link, own_facts, peer_facts, same_runner):
+    """What a link says of the two ways between its owner and its peer, and how far to trust it.
+
+    `up` is owner to peer, `down` peer to owner, each the median over the run. Each is the
+    difference of two clocks, so the gap between them is in it: up too large and down too
+    small by the peer's clock offset less the owner's. The ways are corrected by the gap the
+    two runners found for their clocks, and are then right to within `error_ms`, the sum of
+    what the two clocks' offsets can be off by; their difference (`up - down`, which has the
+    error twice) to within twice that. The participants of one runner share a clock, so there
+    is nothing to correct and no error. `asymmetry_known` is true only when the difference is
+    larger than its error: below that the ways may be the same, or the other way round.
+    Returns None when the link measured no ways.
+    """
+    spread = link.get("one_way_spread_ms") or {}
+    up = (spread.get("up") or {}).get("median")
+    down = (spread.get("down") or {}).get("median")
+    if up is None or down is None:
+        return None
+    error = 0.0
+    if not same_runner:
+        own, peer = clock_state(own_facts), clock_state(peer_facts)
+        if own is None or peer is None:
+            return {"up_ms": up, "down_ms": down, "error_ms": None, "difference_ms": up - down, "asymmetry_known": False}
+        gap = peer[0] - own[0]
+        up, down, error = up - gap, down + gap, own[1] + peer[1]
+    difference = up - down
+    return {
+        "up_ms": up,
+        "down_ms": down,
+        "error_ms": error,
+        "difference_ms": difference,
+        "asymmetry_known": abs(difference) > 2 * error,
+    }
+
+
 def probe_runner():
     """What this runner is: system, size, where, and how it reaches the Internet."""
     found = {
@@ -636,6 +781,7 @@ def probe_runner():
         "image": os.environ.get("ImageVersion", ""),
         "cpus": os.cpu_count(),
         "cloud": cloud_facts(),
+        "clock": probe_clock(),
         "inner_network_hash": local_network_hash(socket.AF_INET, "192.0.2.1"),
         "nat": nat_probe(socket.AF_INET),
     }
@@ -1020,6 +1166,7 @@ def analyze(work, index, room):
             "delay_frames": playout.get("delay_frames"),
             "end_to_end_ms": peer.get("end_to_end_ms"),
             "rtt_spread_ms": peer.get("rtt_spread_ms"),
+            "one_way_spread_ms": peer.get("one_way_spread_ms"),
             "end_to_end_spread_ms": peer.get("end_to_end_spread_ms"),
             "address_hash": hashed(address.rsplit(":", 1)[0].strip("[]")) if address else None,
         })
@@ -1062,6 +1209,44 @@ def udp_status(udp, first, second):
         if peer["flows_received"] < flows or peer.get("during_flows_received", flows) < flows:
             return "impaired"
     return "open"
+
+
+def one_way_by_runner_pair(results):
+    """The two ways between every two runners, from the links between their participants.
+
+    Maps `(first, second)` (runner numbers, first < second) to the median way from first to
+    second (`forward_ms`) and back (`back_ms`), the error they are given with (`error_ms`, the
+    worst of the links', None if a link had none) and whether the difference between the ways
+    is known (`asymmetry_known`). Each link tells both ways, so a pair has them from the
+    participants of both runners.
+    """
+    by_id = {result["id"]: result for result in results}
+    gathered = {}
+    for result in results:
+        for link in result["links"]:
+            peer = by_id.get(link["peer"])
+            if peer is None or peer["runner"] == result["runner"]:
+                continue
+            way = one_way_between(link, result.get("runner_facts"), peer.get("runner_facts"), False)
+            if way is None:
+                continue
+            first, second = sorted((result["runner"], peer["runner"]))
+            forward, back = (way["up_ms"], way["down_ms"]) if result["runner"] == first else (way["down_ms"], way["up_ms"])
+            entry = gathered.setdefault((first, second), {"forward": [], "back": [], "errors": []})
+            entry["forward"].append(forward)
+            entry["back"].append(back)
+            entry["errors"].append(way["error_ms"])
+    pairs = {}
+    for pair, entry in gathered.items():
+        error = None if None in entry["errors"] else max(entry["errors"])
+        forward, back = statistics.median(entry["forward"]), statistics.median(entry["back"])
+        pairs[pair] = {
+            "forward_ms": forward,
+            "back_ms": back,
+            "error_ms": error,
+            "asymmetry_known": error is not None and abs(forward - back) > 2 * error,
+        }
+    return pairs
 
 
 def summary(args):
@@ -1146,6 +1331,17 @@ def summary(args):
 
             counts = f" (flows that came: {came(peer_a)} and {came(peer_b)})" if status else ""
             lines.append(f"  runner {a} {systems.get(a)} - runner {b} {systems.get(b)}: {status or 'not checked'}{counts}")
+    ways = one_way_by_runner_pair(results)
+    if ways:
+        lines.append("")
+        lines.append("One way between runners (first to second / second to first; the clocks of both are accounted for):")
+        for (a, b), way in sorted(ways.items()):
+            error = f"+-{way['error_ms']:.1f} ms" if way["error_ms"] is not None else "clocks not known"
+            known = "" if way["asymmetry_known"] else ", difference unknown"
+            lines.append(
+                f"  runner {a} {systems.get(a)} -> runner {b} {systems.get(b)}: "
+                f"{way['forward_ms']:.1f} / {way['back_ms']:.1f} ms ({error}{known})"
+            )
     if blocked:
         pairs = len({tuple(sorted((a, b))) for a, b in ((by_id[i]["runner"], by_id[j]["runner"]) for i, j, _ in blocked)})
         lines.append(

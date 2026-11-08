@@ -505,6 +505,12 @@ fn print_session_stats(
         Some(rtt_ms) => println!("   RTT:          {:>7.2} ms", rtt_ms),
         None => println!("   RTT:          measuring..."),
     }
+    if let Some(one_way) = stats.one_way {
+        println!(
+            "   One way:      {:>7.2} ms up / {:.2} ms down (each is off by the gap between the two clocks)",
+            one_way.up_ms, one_way.down_ms
+        );
+    }
     println!("   Jitter:       {:>7.2} ms", stats.jitter_ms);
     println!("   Packet Loss:  {:>7.1} %", stats.packet_loss_rate * 100.0);
     println!("   Uptime:       {:>7} sec", stats.uptime_seconds);
@@ -653,6 +659,11 @@ const MAX_SAMPLES_PER_LINK: usize = 3600;
 struct LinkSeries {
     /// The round trip of the link itself (ping and answer), in milliseconds
     rtt_ms: Vec<f32>,
+    /// The way from this computer to the peer, timed by the clocks of both ends
+    /// ([`jamjam::network::OneWayDelays`]); off by the gap between them (REQ-CLI-016)
+    up_ms: Vec<f32>,
+    /// The way from the peer to this computer, off by the same gap in the other direction
+    down_ms: Vec<f32>,
     /// Capture to play-out and back, with the buffers and processing of both ends
     /// ([`LatencyBreakdown::roundtrip_total_ms`])
     end_to_end_ms: Vec<f32>,
@@ -765,6 +776,12 @@ fn session_report(
                     "buffer_ms": rounded(f64::from(link.jitter_buffer_delay_us) / 1000.0),
                     "end_to_end_ms": breakdown.map(|b| rounded(f64::from(b.roundtrip_total_ms))),
                     "rtt_spread_ms": series.map_or(serde_json::Value::Null, |s| spread_json(&s.rtt_ms)),
+                    "one_way_spread_ms": series.map_or(serde_json::Value::Null, |s| {
+                        serde_json::json!({
+                            "up": spread_json(&s.up_ms),
+                            "down": spread_json(&s.down_ms),
+                        })
+                    }),
                     "end_to_end_spread_ms": series.map_or(serde_json::Value::Null, |s| spread_json(&s.end_to_end_ms)),
                 })
             })
@@ -1655,6 +1672,10 @@ impl AudioSession {
             if series.rtt_ms.len() >= MAX_SAMPLES_PER_LINK {
                 continue;
             }
+            if let Some(one_way) = report.stats.one_way {
+                series.up_ms.push(one_way.up_ms);
+                series.down_ms.push(one_way.down_ms);
+            }
             if let Some(rtt) = report.stats.rtt_ms {
                 series.rtt_ms.push(rtt);
                 if report.peer_info.is_some() {
@@ -2068,6 +2089,8 @@ mod tests {
             "ben".to_string(),
             LinkSeries {
                 rtt_ms: vec![10.0, 12.0, 11.0],
+                up_ms: vec![6.0, 7.0, 6.5],
+                down_ms: vec![4.0, 5.0, 4.5],
                 end_to_end_ms: vec![30.0, 32.0],
             },
         );
@@ -2086,6 +2109,8 @@ mod tests {
         assert_eq!(peer["rtt_spread_ms"]["median"], 11.0);
         assert_eq!(peer["rtt_spread_ms"]["max"], 12.0);
         assert_eq!(peer["end_to_end_spread_ms"]["samples"], 2);
+        assert_eq!(peer["one_way_spread_ms"]["up"]["median"], 6.5);
+        assert_eq!(peer["one_way_spread_ms"]["down"]["median"], 4.5);
         assert!(
             !peer["link"].to_string().contains("2001:db8"),
             "the address is not in what is said of the link: {}",

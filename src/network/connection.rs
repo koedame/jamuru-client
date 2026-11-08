@@ -12,10 +12,11 @@ use tracing::{debug, info, trace, warn};
 
 use crate::audio::{create_codec, AudioCodec, CodecConfig, CodecType, PcmCodec};
 use crate::protocol::{
-    LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, HEADER_SIZE,
+    LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, PongWall, HEADER_SIZE,
 };
 
 use super::bandwidth::{samples_per_audio_packet, UDP_IP_OVERHEAD_BYTES};
+use super::clock::now_unix_us;
 use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket, RecoveredPacket};
@@ -72,6 +73,21 @@ const UNANSWERED_PING_CAP: Duration = Duration::from_millis(2500);
 /// How often our key is sent while the peer has not shown it has it
 const KEY_EXCHANGE_INTERVAL: Duration = Duration::from_millis(250);
 
+/// How long a packet takes in each direction, from the sender's clock to the receiver's
+///
+/// Each is the difference of two clocks, so each carries the gap between them: `up_ms` is too
+/// large by it and `down_ms` too small by it. Their sum is the round trip whatever the gap,
+/// and their difference is the real difference plus twice the gap, so it is known only as far
+/// as the clocks are known to agree. Either can come out negative when the receiver's clock is
+/// behind.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct OneWayDelays {
+    /// This computer to the peer
+    pub up_ms: f32,
+    /// The peer to this computer
+    pub down_ms: f32,
+}
+
 /// Connection statistics
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionStats {
@@ -79,6 +95,9 @@ pub struct ConnectionStats {
     /// arrives (REQ-LAT-130). `0.0` is a real measurement, not a placeholder,
     /// so it cannot double as "unmeasured".
     pub rtt_ms: Option<f32>,
+    /// The two ways of the round trip timed by the clocks of both ends, or `None` before the
+    /// first answer that carried them (REQ-LAT-133)
+    pub one_way: Option<OneWayDelays>,
     /// Packet loss rate (0.0 - 1.0)
     pub packet_loss_rate: f32,
     /// Jitter in milliseconds (RTT variation)
@@ -506,6 +525,8 @@ struct RttMeasurement {
     rtt_ms: Option<f32>,
     /// RTT jitter / variation (ms)
     jitter_ms: f32,
+    /// Smoothed time of each way, from the clocks of both ends
+    one_way: Option<OneWayDelays>,
     /// Pending ping sequences with sent timestamps (monotonic instant)
     pending_pings: HashMap<u32, Instant>,
     /// When the newest ping that came back was sent: pings sent before it that did not come
@@ -527,6 +548,7 @@ impl Default for RttMeasurement {
         Self {
             rtt_ms: None,
             jitter_ms: 0.0,
+            one_way: None,
             pending_pings: HashMap::new(),
             last_answered_sent_at: None,
             rtt_samples: VecDeque::with_capacity(RTT_SAMPLE_COUNT),
@@ -585,11 +607,13 @@ impl RttMeasurement {
         LatencyPing {
             sent_time_us: self.now_us(),
             ping_sequence: seq,
+            sent_wall_us: Some(now_unix_us()),
         }
     }
 
-    /// Process a pong response and update RTT statistics
-    fn process_pong(&mut self, pong: &LatencyPong) {
+    /// Process a pong response, which arrived at `received_wall_us` by this computer's clock,
+    /// and update RTT statistics
+    fn process_pong(&mut self, pong: &LatencyPong, received_wall_us: u64) {
         if let Some(sent_time) = self.pending_pings.remove(&pong.ping_sequence) {
             let rtt = sent_time.elapsed().as_secs_f32() * 1000.0; // Convert to ms
             if self
@@ -613,6 +637,10 @@ impl RttMeasurement {
             };
             self.rtt_ms = Some(smoothed);
 
+            if let Some(wall) = pong.wall {
+                self.note_one_way(&wall, received_wall_us);
+            }
+
             // Calculate jitter (RTT variation)
             let beta = 0.25;
             let diff = (rtt - smoothed).abs();
@@ -625,6 +653,26 @@ impl RttMeasurement {
                 rtt
             );
         }
+    }
+}
+
+impl RttMeasurement {
+    /// Smooth into the estimate the two ways of a round trip, from the clock times its ping
+    /// and pong carried and the time the pong arrived
+    fn note_one_way(&mut self, wall: &PongWall, received_wall_us: u64) {
+        let ms = |later: u64, earlier: u64| (later as i64 - earlier as i64) as f32 / 1000.0;
+        let sample = OneWayDelays {
+            up_ms: ms(wall.ping_received_wall_us, wall.original_sent_wall_us),
+            down_ms: ms(received_wall_us, wall.sent_wall_us),
+        };
+        let alpha = 0.125;
+        self.one_way = Some(match self.one_way {
+            None => sample,
+            Some(current) => OneWayDelays {
+                up_ms: (1.0 - alpha) * current.up_ms + alpha * sample.up_ms,
+                down_ms: (1.0 - alpha) * current.down_ms + alpha * sample.down_ms,
+            },
+        });
     }
 }
 
@@ -1716,6 +1764,7 @@ impl Connection {
 
         ConnectionStats {
             rtt_ms: rtt.rtt_ms,
+            one_way: rtt.one_way,
             packet_loss_rate,
             jitter_ms: rtt.jitter_ms,
             bytes_sent: self.bytes_sent.load(Ordering::Relaxed),
@@ -2017,10 +2066,16 @@ impl Connection {
                     }
                     PacketType::LatencyPing => {
                         // Respond with pong
+                        let ping_received_wall_us = now_unix_us();
                         if let Some(ping) = LatencyPing::from_bytes(&packet.payload) {
                             let pong = LatencyPong {
                                 original_sent_time_us: ping.sent_time_us,
                                 ping_sequence: ping.ping_sequence,
+                                wall: ping.sent_wall_us.map(|original_sent_wall_us| PongWall {
+                                    original_sent_wall_us,
+                                    ping_received_wall_us,
+                                    sent_wall_us: now_unix_us(),
+                                }),
                             };
                             let pong_packet = Packet::latency_pong(
                                 sequence.fetch_add(1, Ordering::Relaxed),
@@ -2038,9 +2093,12 @@ impl Connection {
                     }
                     PacketType::LatencyPong => {
                         route.lock().answered();
+                        let received_wall_us = now_unix_us();
                         // Update RTT measurement
                         if let Some(pong) = LatencyPong::from_bytes(&packet.payload) {
-                            rtt_measurement.write().process_pong(&pong);
+                            rtt_measurement
+                                .write()
+                                .process_pong(&pong, received_wall_us);
                         }
                     }
                     PacketType::LatencyInfo => {
@@ -3882,10 +3940,14 @@ mod tests {
         let answered = rtt.create_ping();
         rtt.pending_pings
             .insert(lost.ping_sequence, Instant::now() - Duration::from_secs(5));
-        rtt.process_pong(&LatencyPong {
-            original_sent_time_us: answered.sent_time_us,
-            ping_sequence: answered.ping_sequence,
-        });
+        rtt.process_pong(
+            &LatencyPong {
+                original_sent_time_us: answered.sent_time_us,
+                ping_sequence: answered.ping_sequence,
+                wall: None,
+            },
+            0,
+        );
 
         let slowest = rtt.slowest_recent().unwrap();
 
@@ -3976,15 +4038,100 @@ mod tests {
         );
 
         let ping = measurement.create_ping();
-        measurement.process_pong(&LatencyPong {
-            original_sent_time_us: ping.sent_time_us,
-            ping_sequence: ping.ping_sequence,
-        });
+        measurement.process_pong(
+            &LatencyPong {
+                original_sent_time_us: ping.sent_time_us,
+                ping_sequence: ping.ping_sequence,
+                wall: None,
+            },
+            0,
+        );
 
         assert!(
             measurement.rtt_ms.is_some(),
             "the first pong must record a sample instead of leaving None"
         );
+    }
+
+    /// Each way of the round trip is timed by the clock of the end that sends and the clock of
+    /// the end that receives: the ping's way is how long it took to arrive by the answerer's
+    /// clock, the pong's way how long by the pinger's.
+    ///
+    /// Verifies: REQ-LAT-133
+    #[test]
+    fn when_a_pong_carries_clock_times_each_way_of_the_round_trip_is_timed() {
+        let mut measurement = RttMeasurement::default();
+        let ping = measurement.create_ping();
+
+        measurement.process_pong(
+            &LatencyPong {
+                original_sent_time_us: ping.sent_time_us,
+                ping_sequence: ping.ping_sequence,
+                wall: Some(PongWall {
+                    original_sent_wall_us: 1_000_000,
+                    ping_received_wall_us: 1_031_000,
+                    sent_wall_us: 1_031_500,
+                }),
+            },
+            1_059_500,
+        );
+
+        let one_way = measurement
+            .one_way
+            .expect("the pong carried the clock times");
+        assert!((one_way.up_ms - 31.0).abs() < 1e-3, "{one_way:?}");
+        assert!((one_way.down_ms - 28.0).abs() < 1e-3, "{one_way:?}");
+    }
+
+    /// When the answerer's clock is ahead, the ways come out off by the gap in opposite
+    /// directions and still add up to the round trip.
+    ///
+    /// Verifies: REQ-LAT-133
+    #[test]
+    fn when_the_peers_clock_is_ahead_the_two_ways_are_off_by_the_gap_and_still_add_up() {
+        let mut measurement = RttMeasurement::default();
+        let ping = measurement.create_ping();
+        let gap_us = 10_000;
+
+        measurement.process_pong(
+            &LatencyPong {
+                original_sent_time_us: ping.sent_time_us,
+                ping_sequence: ping.ping_sequence,
+                wall: Some(PongWall {
+                    original_sent_wall_us: 1_000_000,
+                    ping_received_wall_us: 1_020_000 + gap_us,
+                    sent_wall_us: 1_020_000 + gap_us,
+                }),
+            },
+            1_040_000,
+        );
+
+        let one_way = measurement.one_way.unwrap();
+        assert!((one_way.up_ms - 30.0).abs() < 1e-3, "{one_way:?}");
+        assert!((one_way.down_ms - 10.0).abs() < 1e-3, "{one_way:?}");
+        assert!((one_way.up_ms + one_way.down_ms - 40.0).abs() < 1e-3);
+    }
+
+    /// A pong from a peer that sends no clock times leaves the round trip measured and the
+    /// ways unknown.
+    ///
+    /// Verifies: REQ-LAT-133
+    #[test]
+    fn when_a_pong_carries_no_clock_times_the_ways_stay_unmeasured() {
+        let mut measurement = RttMeasurement::default();
+        let ping = measurement.create_ping();
+
+        measurement.process_pong(
+            &LatencyPong {
+                original_sent_time_us: ping.sent_time_us,
+                ping_sequence: ping.ping_sequence,
+                wall: None,
+            },
+            5,
+        );
+
+        assert!(measurement.rtt_ms.is_some());
+        assert_eq!(measurement.one_way, None);
     }
 
     /// What the link carried counts the UDP and IP headers of every packet, or

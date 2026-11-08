@@ -391,6 +391,7 @@ async fn when_the_peer_cannot_encrypt_nothing_is_played_and_nothing_plain_is_sen
     let ping = jamjam::protocol::LatencyPing {
         sent_time_us: 1,
         ping_sequence: 1,
+        sent_wall_us: None,
     };
     old_app
         .send_to(&Packet::latency_ping(1, &ping).to_bytes(), to)
