@@ -100,6 +100,8 @@ JOINED_WAIT_SECONDS = 1200
 # of whether the runners reach each other directly, and how long they then send to each other.
 UDP_WAIT_SECONDS = 600
 UDP_PROBE_SECONDS = 25
+# The longest the check goes on sending after that, if nothing tells it to stop.
+UDP_KEEP_SECONDS = 3000
 # How long a participant waits for the host to say when the turns start.
 START_WAIT_SECONDS = JOINED_WAIT_SECONDS + 300
 JOINED_PATTERN = re.compile(r"📥 (\S+) joined the room")
@@ -485,6 +487,17 @@ def measure(args):
         while pid_alive(pid) and time.time() < end_at + 30:
             time.sleep(1)
 
+    folder = udp_folder(work)
+    if folder.exists():
+        (folder / "stop").write_text("done")
+        stopped = time.time() + 15
+        while time.time() < stopped and not (folder / "final.json").exists():
+            time.sleep(0.5)
+        try:
+            runner["udp"] = json.loads((folder / "final.json").read_text())
+        except (OSError, ValueError):
+            pass
+
     results = work / "results"
     results.mkdir(exist_ok=True)
     for index in own:
@@ -732,10 +745,34 @@ def udp_serve(args):
                 if other in got:
                     got[other] += 1
                     first.setdefault(other, int(1000 * (time.time() - probing)))
-    sock.close()
     for other in targets:
         result["peers"][str(other)] = {"sent": sent[other], "received": got[other], "first_ms": first.get(other)}
     (folder / "result.json").write_text(json.dumps(result))
+
+    # Go on at one packet a second until the measuring is over: a runner whose network lets
+    # packets through at first and not later (or the other way round) is told by the two parts.
+    for other in targets:
+        result["peers"][str(other)].update(during_sent=0, during_received=0)
+    end = time.time() + UDP_KEEP_SECONDS
+    while not (folder / "stop").exists() and time.time() < end:
+        for other, target in targets.items():
+            try:
+                sock.sendto(token + str(args.runner).encode(), target)
+                result["peers"][str(other)]["during_sent"] += 1
+            except OSError:
+                pass
+        until = time.time() + 1.0
+        while time.time() < until:
+            try:
+                data, _ = sock.recvfrom(2048)
+            except OSError:
+                continue
+            if data.startswith(token) and data[len(token):].isdigit():
+                other = str(int(data[len(token):]))
+                if other in result["peers"]:
+                    result["peers"][other]["during_received"] += 1
+    sock.close()
+    (folder / "final.json").write_text(json.dumps(result))
 
 
 def udp_start(args):
@@ -977,7 +1014,7 @@ def describe(result):
 
 
 def udp_status(udp, first, second):
-    """Whether packets passed both ways between two runners before the turns.
+    """Whether packets passed both ways between two runners, before the turns and while they went on.
 
     `udp` maps a runner to what it found. "open" and "closed" are told only when
     both sent to the other and counted what came; otherwise it is None.
@@ -987,7 +1024,8 @@ def udp_status(udp, first, second):
         peer = ((udp.get(here) or {}).get("peers") or {}).get(str(there))
         if peer is None:
             return None
-        seen.append(peer["received"])
+        # Before the turns, and (when it was kept up) while they went on: both have to have come.
+        seen += [peer["received"], peer.get("during_received", 1)]
     return "open" if all(seen) else "closed"
 
 
@@ -1070,7 +1108,10 @@ def summary(args):
         for (a, b), status in verdicts.items():
             peer_a = ((udp.get(a) or {}).get("peers") or {}).get(str(b)) or {}
             peer_b = ((udp.get(b) or {}).get("peers") or {}).get(str(a)) or {}
-            counts = f" ({peer_a.get('received')} and {peer_b.get('received')} packets came)" if status else ""
+            counts = (
+                f" (before the turns {peer_a.get('received')} and {peer_b.get('received')} packets came, "
+                f"during them {peer_a.get('during_received')} and {peer_b.get('during_received')})"
+            ) if status else ""
             lines.append(f"  runner {a} {systems.get(a)} - runner {b} {systems.get(b)}: {status or 'not checked'}{counts}")
     if blocked:
         pairs = len({tuple(sorted((a, b))) for a, b in ((by_id[i]["runner"], by_id[j]["runner"]) for i, j, _ in blocked)})
