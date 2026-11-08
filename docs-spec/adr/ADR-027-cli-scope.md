@@ -76,6 +76,14 @@ CLI で `preset use` / `devices set` を実行すると、GUI が次に起動し
 コマンドラインのフラグ > --preset の値 > 保存された設定 > 既定値
 ```
 
+### 4b. 入室のときにサーバーへ知らせる内容も GUI と共有する
+
+ルームを作る・入るときの `client_info`（版・OS・機材・設定の値）の組み立てと、音声デバイスを含める条件
+（利用状況の送信がオンのときだけ）は、コアの `jamjam::telemetry::client_info` にある。GUI（`src-tauri/src/usage.rs`）と
+CLI（`src/main.rs`）が同じ関数を呼ぶ。CLI は組み立てを持たない（当初は組み立てが GUI 側にあり、
+CLI は `client_info` を送っていなかったため、サーバーの入室の記録に CLI の参加者の版・OS が残らなかった。REQ-CON-171）。
+残る差は、GUI だけが WebView の版を足すことと、CLI は利用状況の送信の設定を保存された設定から読むこと。
+
 ### 5. 対象外とするもの
 
 | 機能 | 理由 |

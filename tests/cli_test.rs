@@ -284,7 +284,7 @@ fn tone_frequency(samples: &[f32], sample_rate: u32) -> f32 {
 }
 
 /// The server's record of who entered has the CLI's version and OS, as it has the app's, and
-/// not what is the person's: the display name, an audio device, a setting.
+/// not what is the person's: the display name, or an audio device while usage reporting is off.
 ///
 /// Verifies: REQ-CON-171
 #[test]
@@ -360,11 +360,49 @@ fn a_cli_entering_a_room_tells_the_server_its_version_and_os_but_not_its_display
             info.get("input_id").is_none() && info.get("output_id").is_none(),
             "{text}"
         );
-        assert!(
-            info["settings"].as_object().is_some_and(|s| s.is_empty()),
-            "{text}"
-        );
+        assert!(info["settings"].is_object(), "{text}");
     }
+}
+
+/// With usage reporting turned on in the saved settings, the CLI tells the server the devices it
+/// uses as the app does.
+///
+/// Verifies: REQ-CON-171
+#[test]
+fn a_cli_with_usage_reporting_on_tells_the_server_the_audio_device_it_uses() {
+    let _alone = one_audio_session_at_a_time();
+    let server = FakeSignaling::start();
+    let home = tempfile::tempdir().expect("temp HOME");
+    let config = config_path(home.path());
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(
+        &config,
+        "usage_reporting = true\ninput_device_id = \"test:mic\"\n",
+    )
+    .unwrap();
+    let out = home.path().join("played.f32");
+    let cli = Running::start(
+        home.path(),
+        &[
+            "create-room",
+            "--server",
+            server.url(),
+            "--sample-rate",
+            "48000",
+            "--input-tone",
+            "440",
+            "--output-file",
+            out.to_str().expect("utf-8 path"),
+        ],
+    );
+    cli.wait_for("Invite code:")
+        .expect("the room should be created");
+
+    let entering = server.entering_messages();
+    drop(cli);
+
+    assert_eq!(entering.len(), 1, "{entering:?}");
+    assert_eq!(entering[0]["client_info"]["input_id"], "test:mic");
 }
 
 /// Two CLIs in one room each hear the other's tone - at the pitch and
