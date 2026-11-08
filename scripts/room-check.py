@@ -299,7 +299,17 @@ def supervise(args):
     Path(args.out + ".time").write_text(text)
 
 
-def encrypt(plain, destination, key):
+def rendezvous_key():
+    """The key of what the runners tell each other through artifacts: the check's own secret."""
+    key = os.environ.get("ROOM_CHECK_KEY", "")
+    if not key:
+        print("ROOM_CHECK_KEY is not set")
+        sys.exit(1)
+    return key
+
+
+def encrypt(plain, destination):
+    key = rendezvous_key()
     subprocess.run(
         ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-md", "sha256", "-salt", "-pass", "env:ROOM_CHECK_KEY",
          "-out", str(destination)],
@@ -309,7 +319,8 @@ def encrypt(plain, destination, key):
     )
 
 
-def decrypt(source, key):
+def decrypt(source):
+    key = rendezvous_key()
     done = subprocess.run(
         ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-md", "sha256", "-pass", "env:ROOM_CHECK_KEY",
          "-in", str(source)],
@@ -349,7 +360,7 @@ def start_host(args):
     (work / "room.json").write_text(json.dumps(room))
     published = work / "rendezvous"
     published.mkdir(exist_ok=True)
-    encrypt(json.dumps(room), published / "room.enc", server)
+    encrypt(json.dumps(room), published / "room.enc")
     print("host: room created")
 
 
@@ -386,14 +397,13 @@ def fetch_artifact(work, name, member, timeout):
 
 def fetch(args):
     """Waits for the host's file in this workflow run and reads it."""
-    server = server_url(args.server_env)
     work = Path(args.work)
     work.mkdir(parents=True, exist_ok=True)
     attempt = os.environ["GITHUB_RUN_ATTEMPT"]
     if not fetch_artifact(work, f"room-rendezvous-{attempt}", "room.enc", args.timeout):
         print("fetch: the host published nothing in time")
         sys.exit(1)
-    (work / "room.json").write_text(decrypt(work / "room.enc", server))
+    (work / "room.json").write_text(decrypt(work / "room.enc"))
     print("fetch: got the room")
 
 
@@ -536,12 +546,12 @@ NTP_EPOCH = 2208988800
 def hashed(text):
     """Stands for `text` where two things are compared: keyed with this run's own key.
 
-    The key is made of the server address (a secret) and the number of the run, so
-    the same address has the same hash on every runner of the run - and in no
-    other run, nor for anyone who does not have the secret.
+    The key is made of the check's own secret (`ROOM_CHECK_KEY`) and the number of
+    the run, so the same address has the same hash on every runner of the run - and
+    in no other run, nor for anyone who does not have the secret.
     """
-    server = os.environ.get("JAMJAM_SERVER_URL_BETA", "")
-    key = f"{server}|{os.environ.get('GITHUB_RUN_ID', 'local')}".encode()
+    secret = os.environ.get("ROOM_CHECK_KEY", "")
+    key = f"{secret}|{os.environ.get('GITHUB_RUN_ID', 'local')}".encode()
     return hmac.new(key, str(text).encode(), hashlib.sha256).hexdigest()[:12]
 
 
@@ -843,7 +853,6 @@ def udp_serve(args):
     for a while, and go on at a lower rate until the measuring is over. Only how many
     packets came is kept, never an address.
     """
-    server = server_url(args.server_env)
     folder = udp_folder(args.work)
     folder.mkdir(parents=True, exist_ok=True)
     room = json.loads((Path(args.work) / "room.json").read_text())
@@ -874,7 +883,7 @@ def udp_serve(args):
     mine = {"runner": args.runner}
     if len(socks) == UDP_FLOWS:
         mine["endpoints"] = [list(found) for found in mapped_to]
-    encrypt(json.dumps(mine), folder / "udp.enc", server)
+    encrypt(json.dumps(mine), folder / "udp.enc")
     result = {"checked": True, "endpoint": "endpoints" in mine, "flows": UDP_FLOWS, "peers": {}, "unknown": []}
     if "endpoints" not in mine:
         # Without addresses of its own nothing can be told about this runner.
@@ -899,7 +908,7 @@ def udp_serve(args):
             where = folder / f"from-{other}"
             if fetch_artifact(where, f"room-udp-{other}-{attempt}", "udp.enc", 0):
                 answered.add(other)
-                told = json.loads(decrypt(where / "udp.enc", server))
+                told = json.loads(decrypt(where / "udp.enc"))
                 if len(told.get("endpoints") or []) == UDP_FLOWS:
                     targets[other] = [tuple(endpoint) for endpoint in told["endpoints"]]
         if time.time() - last_keepalive > 10 and stun_target:
