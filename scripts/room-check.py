@@ -92,8 +92,10 @@ DEFAULT_MIN_HEARD = 0.9
 ROOM_NAME = "room check"
 INVITE_PREFIX = "Invite code:"
 # The first turn starts this long after the last participant has entered the
-# room, which is when the connections between them are made.
-JOIN_SECONDS = 40
+# room, which is when the connections between them are made. A link that found nothing
+# sends again only after a quiet of 100 seconds or two, so a run that is to show whether
+# such links come up in the end sets it longer (`join_seconds` of the workflow).
+JOIN_SECONDS = int(os.environ.get("JOIN_SECONDS") or 40)
 # How long the host waits for every participant to enter the room. A runner
 # can wait a long time for a machine (macOS ones are capped at 5 at a time).
 JOINED_WAIT_SECONDS = 1200
