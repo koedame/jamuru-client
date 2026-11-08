@@ -534,6 +534,69 @@ mod tests {
     }
 
     #[test]
+    fn when_the_check_sends_and_hears_the_first_times_and_the_candidate_kinds_are_kept() {
+        let facts = LinkFacts::new();
+        facts.candidates_offered(&[
+            addr("192.168.1.20:5000"),
+            addr("203.0.113.7:5000"),
+            addr("203.0.113.7:5001"),
+        ]);
+        facts.sent_first();
+        let first_sent = facts.snapshot().first_sent_unix_ms;
+        facts.sent_first();
+        facts.heard();
+        let first_heard = facts.snapshot().first_heard_unix_ms;
+        facts.heard();
+        facts.sent_to_other();
+        facts.sent_to_other();
+
+        let snapshot = facts.snapshot();
+        assert_eq!(
+            (snapshot.candidates_lan, snapshot.candidates_public),
+            (1, 2)
+        );
+        assert!(first_sent.is_some() && first_heard.is_some());
+        assert_eq!(
+            snapshot.first_sent_unix_ms, first_sent,
+            "only the first counts"
+        );
+        assert_eq!(
+            snapshot.first_heard_unix_ms, first_heard,
+            "only the first counts"
+        );
+        assert_eq!(snapshot.sent_to_other, 2);
+    }
+
+    #[test]
+    fn when_the_sending_starts_over_the_tries_and_the_order_are_kept() {
+        let facts = LinkFacts::new();
+        assert_eq!(facts.snapshot().punched_first, None);
+
+        facts.punched_again(true);
+        assert_eq!(facts.snapshot().punched_first, Some(true));
+        facts.punched_again(false);
+
+        let snapshot = facts.snapshot();
+        assert_eq!(snapshot.punch_tries, 2);
+        assert_eq!(snapshot.punched_first, Some(false));
+    }
+
+    #[test]
+    fn when_the_route_is_chosen_the_reason_is_kept_and_a_move_says_followed() {
+        let facts = LinkFacts::new();
+        facts.link_up(addr("203.0.113.7:5000"), false, Instant::now());
+        facts.chosen_because(RouteReason::NoAnswerPublic);
+        assert_eq!(
+            facts.snapshot().route_reason,
+            Some(RouteReason::NoAnswerPublic)
+        );
+
+        facts.route_moved(addr("203.0.113.8:5000"));
+
+        assert_eq!(facts.snapshot().route_reason, Some(RouteReason::Followed));
+    }
+
+    #[test]
     fn when_the_route_moves_the_route_changes_and_connect_time_stays() {
         let facts = LinkFacts::new();
         facts.link_up(addr("192.168.1.20:5000"), true, Instant::now());

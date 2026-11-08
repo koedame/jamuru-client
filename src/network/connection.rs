@@ -3026,6 +3026,30 @@ mod tests {
         assert_eq!(route.others, vec![(vpn, false)]);
     }
 
+    /// Verifies: REQ-CON-172
+    #[test]
+    fn when_no_candidate_answered_the_link_goes_to_the_public_address_before_a_private_one() {
+        let private: SocketAddr = "192.168.1.20:5000".parse().unwrap();
+        let public: SocketAddr = "203.0.113.7:5000".parse().unwrap();
+        let other_public: SocketAddr = "198.51.100.9:6000".parse().unwrap();
+
+        assert_eq!(
+            fallback_candidate(&[private, public, other_public], |_| true),
+            public
+        );
+        assert_eq!(
+            fallback_candidate(&[private, public, other_public], |i| i != 1),
+            other_public,
+            "an address that cannot be sent to is not chosen"
+        );
+        assert_eq!(
+            fallback_candidate(&[private, public], |i| i == 0),
+            private,
+            "with no public address to send to, the private one is what is left"
+        );
+        assert_eq!(fallback_candidate(&[private, public], |_| false), private);
+    }
+
     /// Verifies: REQ-CON-144
     #[test]
     fn when_the_peer_stays_silent_the_other_addresses_are_left_alone_after_a_while() {
