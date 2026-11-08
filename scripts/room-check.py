@@ -1086,10 +1086,10 @@ def first_packet_lines(results, min_heard):
     total = 0
     for result in results:
         for link in result["links"]:
-            other = by_id.get(participant_of(link["peer"]))
+            other = by_id.get(link["peer"])
             if other is None or other["runner"] == result["runner"] or result["id"] > other["id"]:
                 continue
-            back = next((l for l in other["links"] if participant_of(l["peer"]) == result["id"]), None)
+            back = next((l for l in other["links"] if l["peer"] == result["id"]), None)
             if back is None:
                 continue
             total += 1
