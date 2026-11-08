@@ -1451,8 +1451,8 @@ mod tests {
     }
 
     /// The app's own information goes in the entering message beside the other
-    /// fields as a flat object, and an app with nothing to tell (the CLI) sends
-    /// no such field.
+    /// fields as a flat object, and a message without it (one from an app that
+    /// predates it) carries no such field.
     ///
     /// Verifies: REQ-CON-032
     #[test]

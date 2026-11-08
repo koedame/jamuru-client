@@ -27,6 +27,7 @@ use jamjam::network::{
     LinkIdentity, LocalLatencyInfo, NetworkError, PeerLatencyInfo, PortMapping, RoomEntry,
     RoomInfo, SignalingClient, SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
 };
+use jamjam::telemetry::{AppStart, AudioEnv};
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -716,6 +717,30 @@ fn print_audio_settings(settings: &AudioSettings) {
 
 /// A signaling client for `server`, proving this installation's device
 /// identity - the one the GUI on this machine uses too.
+/// What the CLI tells the server about itself when it enters a room: its version, the OS and
+/// the CPU architecture, and the OS version and core count where the platform tells them.
+///
+/// The CLI has no usage reporting, so no audio device (a name can carry a person's name) and
+/// no setting goes with it, and neither does the display name.
+fn client_info() -> jamjam::network::ClientInfo {
+    jamjam::network::ClientInfo::new(
+        env!("CARGO_PKG_VERSION"),
+        AppStart {
+            os_version: jamjam::environment::os_version(),
+            cpu_cores: std::thread::available_parallelism()
+                .ok()
+                .and_then(|cores| u32::try_from(cores.get()).ok()),
+            ..AppStart::default()
+        },
+        AudioEnv {
+            input: None,
+            output: None,
+            input_id: None,
+            output_id: None,
+        },
+    )
+}
+
 fn signaling_client(server: &str) -> SignalingClient {
     let identity = jamjam::identity_store::load_installation_identity();
     SignalingClient::new(server, Arc::new(identity))
@@ -1073,7 +1098,7 @@ impl CliBackend {
                 link_key: self.identity.public_key(),
                 // The CLI takes no peer messages, so it announces no features.
                 features: vec![],
-                client_info: None,
+                client_info: Some(client_info()),
             })
             .await
             .map_err(|e| match e {

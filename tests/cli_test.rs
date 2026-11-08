@@ -283,6 +283,90 @@ fn tone_frequency(samples: &[f32], sample_rate: u32) -> f32 {
     sample_rate as f32 / periods[periods.len() / 2] as f32
 }
 
+/// The server's record of who entered has the CLI's version and OS, as it has the app's, and
+/// not what is the person's: the display name, an audio device, a setting.
+///
+/// Verifies: REQ-CON-171
+#[test]
+fn a_cli_entering_a_room_tells_the_server_its_version_and_os_but_not_its_display_name() {
+    let _alone = one_audio_session_at_a_time();
+    let server = FakeSignaling::start();
+    let creator_home = tempfile::tempdir().expect("temp HOME");
+    let creator_out = creator_home.path().join("played.f32");
+    let creator = Running::start(
+        creator_home.path(),
+        &[
+            "create-room",
+            "--server",
+            server.url(),
+            "--name",
+            "Taro's secret display name",
+            "--sample-rate",
+            "48000",
+            "--input-tone",
+            "440",
+            "--output-file",
+            creator_out.to_str().expect("utf-8 path"),
+        ],
+    );
+    let invite_code = creator
+        .wait_for("Invite code:")
+        .expect("the room should be created")
+        .split_whitespace()
+        .last()
+        .expect("the invite code follows its label")
+        .to_string();
+    let joiner_home = tempfile::tempdir().expect("temp HOME");
+    let joiner_out = joiner_home.path().join("played.f32");
+    let joiner = Running::start(
+        joiner_home.path(),
+        &[
+            "join-room",
+            "--server",
+            server.url(),
+            "--room",
+            &invite_code,
+            "--sample-rate",
+            "48000",
+            "--input-tone",
+            "660",
+            "--output-file",
+            joiner_out.to_str().expect("utf-8 path"),
+        ],
+    );
+    joiner
+        .wait_for("Joined room:")
+        .expect("the joining CLI should enter");
+
+    let entering = server.entering_messages();
+    drop(joiner);
+    drop(creator);
+
+    assert_eq!(entering.len(), 2, "{entering:?}");
+    for data in &entering {
+        let info = &data["client_info"];
+        assert_eq!(info["app_version"], env!("CARGO_PKG_VERSION"), "{data}");
+        assert_eq!(info["os"], std::env::consts::OS, "{data}");
+        assert_eq!(info["arch"], std::env::consts::ARCH, "{data}");
+        assert!(info["cpu_cores"].as_u64().is_some_and(|n| n > 0), "{data}");
+        let text = info.to_string();
+        assert!(!text.contains("Taro"), "{text}");
+        assert!(!text.contains("peer_name"), "{text}");
+        assert!(
+            info["input"].is_null() && info["output"].is_null(),
+            "{text}"
+        );
+        assert!(
+            info.get("input_id").is_none() && info.get("output_id").is_none(),
+            "{text}"
+        );
+        assert!(
+            info["settings"].as_object().is_some_and(|s| s.is_empty()),
+            "{text}"
+        );
+    }
+}
+
 /// Two CLIs in one room each hear the other's tone - at the pitch and
 /// level it was sent, in both channels - after it has gone through the
 /// play-out path the app uses (a buffered preset, so FEC and the play-out
