@@ -336,6 +336,15 @@ impl SecureLink {
         }
     }
 
+    /// Whether our key sorts before the peer's: the one thing both ends can tell the same way
+    /// about the pair, without asking anyone. It is how two ends that must not start together
+    /// agree who starts. `None` for a link that does not know its peer.
+    pub fn sorts_before_peer(&self) -> Option<bool> {
+        self.peer
+            .as_ref()
+            .map(|check| check.ours.verifying_key().as_bytes() < check.theirs.as_bytes())
+    }
+
     /// Whether the keys of this link are bound to the peer's identity from the server. A link
     /// that is not (an answering one, or one that is for nobody yet) is not one an app talks to.
     pub fn checks_peer(&self) -> bool {

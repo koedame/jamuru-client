@@ -57,7 +57,7 @@ cargo test -- --nocapture
 
 - `cargo test --lib port_prediction` と `cargo test --lib network::connection`: ポートの並びごとの予測・送る量の上限・応答だけを受け入れること・NAT の模型（ループバック）で経路が相手の実際のポートへ移ること。毎回回ります。
 - `cargo test --test port_prediction_test`: 宛先ごとにポートを変える NAT が候補に複数のポートを並べ、1 つのポートを使う NAT は並べないこと。毎回回ります。
-- `tests/nat/run.sh [ケース名 ...]`: 2 つのルーター（カーネルの iptables）の内側のアプリが、STUN サーバーを介して接続できるかを、NAT の組み合わせごとに確かめます（cone・random・宛先アドレスごとに順に割り当てる sequential・ポートセットの portset）。`NAT_LAB_AUDIO_SECS=10` を付けると、経路が決まったあとに音声を送り、遅延と欠落も出します。`NAT_LAB_PEER=<バイナリ>` で別の版のアプリと比べられます。docker と、コンテナに `NET_ADMIN` を渡せる権限が要ります。CI では回しません。
+- `tests/nat/run.sh [ケース名 ...]`: 2 つのルーター（カーネルの iptables）の内側のアプリが、STUN サーバーを介して接続できるかを、NAT の組み合わせごとに確かめます（cone・random・宛先アドレスごとに順に割り当てる sequential・ポートセットの portset）。`NAT_LAB_AUDIO_SECS=10` を付けると、経路が決まったあとに音声を送り、遅延と欠落も出します。`NAT_LAB_PEER=<バイナリ>` で別の版のアプリと比べられます。ルーターが「こちらが送るより前に届いた相手のパケット」を覚える組（`record-*`）と、両端が黙って順番に先に送り直して抜ける組（`patient-*`、1 ケース 5 分前後。ADR-119）もあります。docker と、コンテナに `NET_ADMIN` を渡せる権限が要ります。CI では回しません。
 
 ## ルームの人数
 
