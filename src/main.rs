@@ -707,6 +707,14 @@ fn route_json(link: &LinkSummary) -> serde_json::Value {
         "connect_ms": link.facts.connect_ms,
         "first_audio_ms": link.facts.first_audio_ms,
         "route_moves": link.facts.route_moves,
+        "route_reason": link.facts.route_reason,
+        "first_sent_unix_ms": link.facts.first_sent_unix_ms,
+        "first_heard_unix_ms": link.facts.first_heard_unix_ms,
+        "candidates_lan": link.facts.candidates_lan,
+        "candidates_public": link.facts.candidates_public,
+        "sent_to_other": link.facts.sent_to_other,
+        "punch_tries": link.facts.punch_tries,
+        "punched_first": link.facts.punched_first,
     })
 }
 
@@ -2081,6 +2089,7 @@ mod tests {
             connect_ms: Some(840),
             first_audio_ms: Some(30),
             route_moves: 2,
+            ..LinkSnapshot::default()
         };
         linked.jitter_buffer_delay_us = 5_333;
         let mut observed = Observed::default();
@@ -2115,6 +2124,47 @@ mod tests {
             !peer["link"].to_string().contains("2001:db8"),
             "the address is not in what is said of the link: {}",
             peer["link"]
+        );
+    }
+
+    /// Verifies: REQ-CLI-015
+    #[test]
+    fn a_link_is_reported_with_why_it_runs_there_and_when_the_first_packets_went() {
+        let mut linked = link("ben", Some("203.0.113.7:5000"), 100, 90);
+        linked.facts = LinkSnapshot {
+            route: Some(jamjam::network::LinkRoute::Public),
+            route_confirmed: Some(false),
+            route_reason: Some(jamjam::network::RouteReason::NoAnswerPublic),
+            first_sent_unix_ms: Some(1_700_000_000_120),
+            first_heard_unix_ms: Some(1_700_000_000_480),
+            candidates_lan: 1,
+            candidates_public: 2,
+            sent_to_other: 14,
+            punch_tries: 2,
+            punched_first: Some(false),
+            ..LinkSnapshot::default()
+        };
+
+        let report = session_report(
+            &settings(),
+            &[linked],
+            Duration::ZERO,
+            None,
+            &Observed::default(),
+        );
+
+        let facts = &report["peers"][0]["link"];
+        assert_eq!(facts["route_reason"], "no_answer_public");
+        assert_eq!(facts["first_sent_unix_ms"], 1_700_000_000_120_u64);
+        assert_eq!(facts["first_heard_unix_ms"], 1_700_000_000_480_u64);
+        assert_eq!(facts["candidates_lan"], 1);
+        assert_eq!(facts["candidates_public"], 2);
+        assert_eq!(facts["sent_to_other"], 14);
+        assert_eq!(facts["punch_tries"], 2);
+        assert_eq!(facts["punched_first"], false);
+        assert!(
+            !facts.to_string().contains("203.0.113"),
+            "the address is not in what is said of the link: {facts}"
         );
     }
 

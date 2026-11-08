@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -20,7 +20,9 @@ use super::clock::now_unix_us;
 use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket, RecoveredPacket};
-use super::link_facts::{route_handicap, route_preference, LinkFacts, RouteOverride};
+use super::link_facts::{
+    route_handicap, route_preference, LinkFacts, LinkRoute, RouteOverride, RouteReason,
+};
 use super::port_prediction::PortPrediction;
 use super::quality::ConnectionQuality;
 use super::sequence_tracker::SequenceTracker;
@@ -57,6 +59,41 @@ const SEND_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 /// unheard long enough to doubt the one in use. An address the peer published is not
 /// proof it is the peer's, so the probing cannot go on for as long as the silence does.
 const PROBE_OTHERS_FOR: Duration = Duration::from_secs(30);
+
+/// When a link whose peer has not been heard at all sends again, and in which order
+///
+/// A NAT that keeps what reaches it before its own side has sent anything to that address (a
+/// router that accepts what is addressed to itself, and records it as a flow) gives the first
+/// packet its side then sends to that address another port than the one the peer was told. The
+/// peer keeps sending to the old port, which keeps the record alive, so sending on does not
+/// help: nothing gets through, however long both ends go on. It does when both ends stop for
+/// the time such a record lasts, and the end behind that NAT then sends first. Which end that
+/// is cannot be told, so the two take turns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PunchSchedule {
+    /// How long after the check found nothing the first quiet begins
+    pub settle: Duration,
+    /// How long both ends send nothing, so that what the peer's packets left in a NAT runs out
+    /// (a Linux NAT keeps a flow nobody answered for 30 seconds, and removes it within a minute
+    /// after that; until it does, a new flow from the same port gets the port the old one had)
+    pub quiet: Duration,
+    /// How long the end that is second waits after the quiet: longer than the two ends can be
+    /// apart in starting, so that the first is first
+    pub second_waits: Duration,
+    /// How long the packets go to every address of the peer after that, before the next quiet
+    pub window: Duration,
+}
+
+impl Default for PunchSchedule {
+    fn default() -> Self {
+        Self {
+            settle: Duration::from_secs(5),
+            quiet: Duration::from_secs(100),
+            second_waits: Duration::from_secs(2),
+            window: Duration::from_secs(6),
+        }
+    }
+}
 
 /// Number of RTT samples to keep for averaging
 const RTT_SAMPLE_COUNT: usize = 10;
@@ -172,12 +209,32 @@ struct Route {
     /// that gives each destination a port of its own (ADR-115). What comes from one of them is
     /// the peer's, and the route follows an answer from there.
     predicted: Option<PortPrediction>,
+    /// Until when the keep-alive goes to the peer's other addresses whatever the silence, while
+    /// the sending starts over after a quiet ([`PunchSchedule`])
+    reprobe_until: Option<Instant>,
 }
 
 /// Whether the keep-alive goes to the peer's other addresses too, when the peer has
 /// not answered for `silent_for` and is doubted after `after`
 fn probes_others(silent_for: Duration, after: Duration) -> bool {
     silent_for >= after && silent_for < after + PROBE_OTHERS_FOR
+}
+
+/// Where a link goes when no candidate answered the check: the first public address, else the
+/// first one that could be sent to
+///
+/// A private address answers at once when the peer is on the same network, so one that did not
+/// answer is not the way to the peer; going to it leaves a peer on another network unheard.
+fn fallback_candidate(candidates: &[SocketAddr], sendable: impl Fn(usize) -> bool) -> SocketAddr {
+    let pick = |wanted: &dyn Fn(SocketAddr) -> bool| {
+        candidates
+            .iter()
+            .enumerate()
+            .find_map(|(i, &addr)| (sendable(i) && wanted(addr)).then_some(addr))
+    };
+    pick(&|addr| LinkRoute::of(addr) == LinkRoute::Public)
+        .or_else(|| pick(&|_| true))
+        .unwrap_or(candidates[0])
 }
 
 impl Route {
@@ -187,7 +244,14 @@ impl Route {
             others,
             answered_at: Instant::now(),
             predicted: None,
+            reprobe_until: None,
         }
+    }
+
+    /// Whether the sending that starts over after a quiet is still on
+    fn reprobing(&self) -> bool {
+        self.reprobe_until
+            .is_some_and(|until| Instant::now() < until)
     }
 
     /// Whether `addr` is one of the peer's addresses
@@ -999,6 +1063,15 @@ pub struct Connection {
     secure_link_handle: Option<tokio::task::JoinHandle<()>>,
     /// Sends to the ports guessed for a peer behind a NAT that changes its port per destination
     prediction_handle: Option<tokio::task::JoinHandle<()>>,
+    /// While set, nothing is sent to the peer that it has not asked for: a quiet of the
+    /// [`PunchSchedule`]
+    sending_paused: Arc<AtomicBool>,
+    /// Datagrams from the peer that the link let through, the key exchange too. It counts what
+    /// shows the way to the peer works, which `packets_received` does not before the keys.
+    heard_any: Arc<AtomicU64>,
+    punch_schedule: PunchSchedule,
+    /// Starts the sending over while the peer has not been heard
+    repunch_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Sends `packet` as the link allows: encrypted when the keys are agreed, and not at all
@@ -1086,6 +1159,10 @@ impl Connection {
             pending_latency_info: Arc::new(Mutex::new(None)),
             secure_link_handle: None,
             prediction_handle: None,
+            sending_paused: Arc::new(AtomicBool::new(false)),
+            heard_any: Arc::new(AtomicU64::new(0)),
+            punch_schedule: PunchSchedule::default(),
+            repunch_handle: None,
         })
     }
 
@@ -1101,6 +1178,12 @@ impl Connection {
         let link = SecureLink::for_peer(ours, peer_key).ok_or(NetworkError::PeerKeyMissing)?;
         self.secure_link = Arc::new(link);
         Ok(())
+    }
+
+    /// When and in which order a link whose peer is not heard sends again. Called before
+    /// connecting.
+    pub fn set_punch_schedule(&mut self, schedule: PunchSchedule) {
+        self.punch_schedule = schedule;
     }
 
     /// Whether the keys of the link are bound to the peer's key from the server
@@ -1150,6 +1233,7 @@ impl Connection {
         // Send initial keep-alive to establish connection
         let packet = Packet::keep_alive(self.next_sequence());
         send_sealed(&self.transport, &self.secure_link, packet, remote_addr).await?;
+        self.link_facts.sent_first();
 
         // Record connection start time
         if let Ok(mut start) = self.connection_start.lock() {
@@ -1158,6 +1242,7 @@ impl Connection {
         self.start_silence_count();
 
         self.link_facts.link_up(remote_addr, false, started);
+        self.link_facts.chosen_because(RouteReason::OnlyCandidate);
         self.set_state(ConnectionState::Connected);
         self.start_receive_loop();
         self.start_keepalive_loop();
@@ -1219,6 +1304,7 @@ impl Connection {
 
         let started = Instant::now();
         self.transport.expect_peer_at(candidates);
+        self.link_facts.candidates_offered(candidates);
         self.set_state(ConnectionState::CheckingConnectivity);
         info!("Checking connectivity with {} candidates", candidates.len());
 
@@ -1250,6 +1336,7 @@ impl Connection {
                 continue;
             }
             probing.sent(i, round, Instant::now());
+            self.link_facts.sent_first();
             debug!(
                 "Sent connectivity probe {} to candidate {} ({})",
                 round, i, addr
@@ -1338,6 +1425,7 @@ impl Connection {
                 self.start_silence_count();
 
                 self.link_facts.link_up(selected_addr, true, started);
+                self.link_facts.chosen_because(RouteReason::Answered);
                 self.set_state(ConnectionState::Connected);
                 self.discard_audio_queued_while_probing();
                 self.start_receive_loop();
@@ -1351,11 +1439,7 @@ impl Connection {
                 // Timeout - fall back to the first candidate we could send to
                 warn!("No candidate responded in time, falling back to first candidate");
                 self.set_state(ConnectionState::Connecting);
-                let fallback = candidates
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, &addr)| probing.sendable(i).then_some(addr))
-                    .unwrap_or(candidates[0]);
+                let fallback = fallback_candidate(candidates, |i| probing.sendable(i));
                 let mut route = Route::new(fallback, other_candidates(fallback));
                 // Nothing answered. A peer that offered the same public address with several
                 // ports is behind a NAT that gives each destination a port of its own, and
@@ -1375,6 +1459,12 @@ impl Connection {
                 self.start_silence_count();
 
                 self.link_facts.link_up(fallback, false, started);
+                self.link_facts
+                    .chosen_because(if LinkRoute::of(fallback) == LinkRoute::Public {
+                        RouteReason::NoAnswerPublic
+                    } else {
+                        RouteReason::NoAnswerFirst
+                    });
                 self.set_state(ConnectionState::Connected);
                 self.discard_audio_queued_while_probing();
                 self.start_receive_loop();
@@ -1388,6 +1478,7 @@ impl Connection {
                     );
                     self.start_port_prediction(prediction);
                 }
+                self.start_repunch(candidates.to_vec());
 
                 Ok(())
             }
@@ -1412,6 +1503,9 @@ impl Connection {
             handle.abort();
         }
         if let Some(handle) = self.prediction_handle.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.repunch_handle.take() {
             handle.abort();
         }
 
@@ -1873,6 +1967,7 @@ impl Connection {
         let secure_link = self.secure_link.clone();
         let pending_latency_info = self.pending_latency_info.clone();
         let reconnect_config = self.reconnect_config;
+        let heard_any = self.heard_any.clone();
         let sequence = Arc::new(AtomicU32::new(1_000_000)); // Separate sequence for pong responses
 
         let handle = tokio::spawn(async move {
@@ -1905,6 +2000,8 @@ impl Connection {
                     debug!("Dropped a packet from {}: {}", addr, reason);
                     continue;
                 }
+                heard_any.fetch_add(1, Ordering::Relaxed);
+                link_facts.heard();
 
                 // The peer is heard from an address other than the one we send
                 // to, and has not answered us there: send to where it is heard.
@@ -2236,6 +2333,8 @@ impl Connection {
         let secure_link = self.secure_link.clone();
         let keep_alive_interval = self.reconnect_config.keep_alive_interval;
         let reconnect_config = self.reconnect_config;
+        let paused = self.sending_paused.clone();
+        let link_facts = self.link_facts.clone();
 
         let handle = tokio::spawn(async move {
             let mut interval = interval(keep_alive_interval);
@@ -2247,6 +2346,9 @@ impl Connection {
                 let current_state = ConnectionState::from_u8(state.load(Ordering::SeqCst));
                 if current_state == ConnectionState::Disconnected {
                     break;
+                }
+                if paused.load(Ordering::Relaxed) {
+                    continue;
                 }
 
                 let remote_addr = route.lock().current;
@@ -2277,7 +2379,9 @@ impl Connection {
                     reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
                 let others = {
                     let route = route.lock();
-                    if probes_others(route.answered_at.elapsed(), probe_others_after) {
+                    if route.reprobing()
+                        || probes_others(route.answered_at.elapsed(), probe_others_after)
+                    {
                         route.others.iter().map(|&(addr, _)| addr).collect()
                     } else {
                         Vec::new()
@@ -2288,12 +2392,110 @@ impl Connection {
                     let sent = send_sealed(&transport, &secure_link, packet, addr)
                         .await
                         .is_ok();
+                    if sent {
+                        link_facts.sent_to_other();
+                    }
                     route.lock().note_send(addr, sent);
                 }
             }
         });
 
         self.keepalive_handle = Some(handle);
+    }
+
+    /// Starts the sending over, in turns, for as long as the peer is not heard at all
+    /// ([`PunchSchedule`]): both ends send nothing for the quiet, then the end that is first this
+    /// time sends to every address of the peer, and the other end does after it has waited. The
+    /// first end of the pair is the one whose key sorts first, and the ends swap each time.
+    fn start_repunch(&mut self, candidates: Vec<SocketAddr>) {
+        if let Some(handle) = self.repunch_handle.take() {
+            handle.abort();
+        }
+        let schedule = self.punch_schedule;
+        let sorts_first = self.secure_link.sorts_before_peer().unwrap_or(true);
+        let transport = self.transport.clone();
+        let state = self.state.clone();
+        let route = self.route.clone();
+        let secure_link = self.secure_link.clone();
+        let paused = self.sending_paused.clone();
+        let heard_any = self.heard_any.clone();
+        let link_facts = self.link_facts.clone();
+
+        let handle = tokio::spawn(async move {
+            let heard_before = heard_any.load(Ordering::Relaxed);
+            // Waits for `time`; false when the peer was heard or the link ended meanwhile
+            let wait = |time: Duration| {
+                let state = state.clone();
+                let heard_any = heard_any.clone();
+                async move {
+                    let until = Instant::now() + time;
+                    while Instant::now() < until {
+                        if heard_any.load(Ordering::Relaxed) > heard_before
+                            || ConnectionState::from_u8(state.load(Ordering::SeqCst))
+                                == ConnectionState::Disconnected
+                        {
+                            return false;
+                        }
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                    true
+                }
+            };
+            let sequence = AtomicU32::new(4_000_000);
+            if !wait(schedule.settle).await {
+                return;
+            }
+            let mut attempt: u32 = 0;
+            loop {
+                paused.store(true, Ordering::Relaxed);
+                info!(
+                    "The peer has not been heard: sending nothing for {:?}, then trying again (try {})",
+                    schedule.quiet,
+                    attempt + 1
+                );
+                let mut carry_on = wait(schedule.quiet).await;
+                let first = attempt.is_multiple_of(2) == sorts_first;
+                if carry_on && !first {
+                    carry_on = wait(schedule.second_waits).await;
+                }
+                paused.store(false, Ordering::Relaxed);
+                if !carry_on {
+                    return;
+                }
+                link_facts.punched_again(first);
+                // The end that did not wait sends on for as long as the wait, so that both
+                // ends' tries last the same and the next one starts as far apart as this one
+                let window = if first {
+                    schedule.window + schedule.second_waits
+                } else {
+                    schedule.window
+                };
+                route.lock().reprobe_until = Some(Instant::now() + window);
+                for round in 0..PROBE_ROUNDS {
+                    for &addr in &candidates {
+                        let packet = Packet::route_probe(
+                            sequence.fetch_add(1, Ordering::Relaxed),
+                            0xF000_0000 | (round as u32) << 8 | attempt.min(255),
+                        );
+                        if send_sealed(&transport, &secure_link, packet, addr)
+                            .await
+                            .is_ok()
+                        {
+                            link_facts.sent_to_other();
+                        }
+                    }
+                    if !wait(ROUND_INTERVAL).await {
+                        return;
+                    }
+                }
+                if !wait(window).await {
+                    return;
+                }
+                attempt += 1;
+            }
+        });
+
+        self.repunch_handle = Some(handle);
     }
 
     /// Sends to the ports guessed for a peer behind a NAT that changes its port per
@@ -2316,6 +2518,7 @@ impl Connection {
         let packets_received = self.packets_received.clone();
         let last_received = self.last_received.clone();
         let silent_after = self.reconnect_config.detect_after;
+        let paused = self.sending_paused.clone();
 
         let handle = tokio::spawn(async move {
             let sequence = AtomicU32::new(3_000_000);
@@ -2342,6 +2545,11 @@ impl Connection {
                 if now_heard > heard {
                     retry = 0;
                     heard = now_heard;
+                }
+                // A quiet of the punch schedule sends nothing, the guesses included
+                if paused.load(Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    continue;
                 }
                 // A peer that is heard has no port to guess. The first try is not held back:
                 // the check that found nothing has just ended.
@@ -2415,6 +2623,7 @@ impl Connection {
         let state = self.state.clone();
         let route = self.route.clone();
         let secure_link = self.secure_link.clone();
+        let paused = self.sending_paused.clone();
         let sequence = AtomicU32::new(2_000_000);
 
         let handle = tokio::spawn(async move {
@@ -2426,6 +2635,9 @@ impl Connection {
                 let current_state = ConnectionState::from_u8(state.load(Ordering::SeqCst));
                 if current_state == ConnectionState::Disconnected {
                     break;
+                }
+                if paused.load(Ordering::Relaxed) {
+                    continue;
                 }
                 let remote_addr = route.lock().current;
 
@@ -2872,6 +3084,30 @@ mod tests {
         route.learn_roamed(lan, Duration::ZERO);
 
         assert_eq!(route.others, vec![(vpn, false)]);
+    }
+
+    /// Verifies: REQ-CON-172
+    #[test]
+    fn when_no_candidate_answered_the_link_goes_to_the_public_address_before_a_private_one() {
+        let private: SocketAddr = "192.168.1.20:5000".parse().unwrap();
+        let public: SocketAddr = "203.0.113.7:5000".parse().unwrap();
+        let other_public: SocketAddr = "198.51.100.9:6000".parse().unwrap();
+
+        assert_eq!(
+            fallback_candidate(&[private, public, other_public], |_| true),
+            public
+        );
+        assert_eq!(
+            fallback_candidate(&[private, public, other_public], |i| i != 1),
+            other_public,
+            "an address that cannot be sent to is not chosen"
+        );
+        assert_eq!(
+            fallback_candidate(&[private, public], |i| i == 0),
+            private,
+            "with no public address to send to, the private one is what is left"
+        );
+        assert_eq!(fallback_candidate(&[private, public], |_| false), private);
     }
 
     /// Verifies: REQ-CON-144

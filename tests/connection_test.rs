@@ -813,3 +813,111 @@ async fn when_a_peer_publishes_many_candidates_only_the_first_ones_are_sent_to()
         .collect();
     assert_eq!(reached, expected);
 }
+
+const QUICK_KEEP_ALIVES: jamjam::network::ReconnectConfig = jamjam::network::ReconnectConfig {
+    keep_alive_interval: std::time::Duration::from_millis(100),
+    detect_after: std::time::Duration::from_millis(300),
+    give_up_after: std::time::Duration::from_secs(60),
+    check_interval: std::time::Duration::from_millis(50),
+};
+
+/// Verifies: REQ-CON-173
+#[tokio::test]
+async fn when_the_peer_is_not_heard_both_ends_go_quiet_and_then_send_to_every_address_again() {
+    use jamjam::network::PunchSchedule;
+    use std::time::{Duration, Instant};
+
+    let silent: Vec<std::net::UdpSocket> = (0..2)
+        .map(|_| {
+            let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            socket.set_nonblocking(true).unwrap();
+            socket
+        })
+        .collect();
+    let candidates: Vec<std::net::SocketAddr> =
+        silent.iter().map(|s| s.local_addr().unwrap()).collect();
+    let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
+    common::trust_unseen_peer(&mut conn);
+    conn.set_reconnect_config(QUICK_KEEP_ALIVES);
+    conn.set_punch_schedule(PunchSchedule {
+        settle: Duration::from_millis(300),
+        quiet: Duration::from_millis(1500),
+        second_waits: Duration::from_millis(200),
+        window: Duration::from_millis(500),
+    });
+    conn.connect_with_candidates(&candidates).await.unwrap();
+
+    // What each of the peer's addresses receives, with the time
+    let begin = Instant::now();
+    let mut arrivals: Vec<Vec<Duration>> = vec![Vec::new(); silent.len()];
+    let mut buf = [0u8; 2048];
+    while begin.elapsed() < Duration::from_millis(4500) {
+        for (i, socket) in silent.iter().enumerate() {
+            while socket.recv_from(&mut buf).is_ok() {
+                arrivals[i].push(begin.elapsed());
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let tries = conn.link_facts().snapshot().punch_tries;
+    conn.disconnect();
+
+    for (i, times) in arrivals.iter().enumerate() {
+        let longest_gap = times
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .max()
+            .unwrap_or_default();
+        assert!(
+            longest_gap >= Duration::from_millis(1400),
+            "address {i} was sent to without a quiet: {times:?}"
+        );
+        let last = *times.last().unwrap();
+        assert!(
+            last > Duration::from_millis(2500),
+            "address {i} was not sent to again after the quiet: {times:?}"
+        );
+    }
+    assert!(tries >= 1, "the sending started over {tries} times");
+}
+
+/// Verifies: REQ-CON-173
+#[tokio::test]
+async fn when_the_peer_is_heard_the_sending_does_not_go_quiet() {
+    use jamjam::network::PunchSchedule;
+    use std::time::Duration;
+
+    let mut a = Connection::new("127.0.0.1:0").await.unwrap();
+    let mut b = Connection::new("127.0.0.1:0").await.unwrap();
+    common::trust_each_other(&mut a, &mut b);
+    a.set_reconnect_config(QUICK_KEEP_ALIVES);
+    b.set_reconnect_config(QUICK_KEEP_ALIVES);
+    a.set_punch_schedule(PunchSchedule {
+        settle: Duration::from_millis(1800),
+        quiet: Duration::from_millis(500),
+        second_waits: Duration::from_millis(100),
+        window: Duration::from_millis(300),
+    });
+    let (to_a, to_b) = ([a.local_addr()], [b.local_addr()]);
+
+    // `a` finds nothing at first, because `b` joins only after `a`'s check has ended; it falls
+    // back to `b`'s address and hears `b` before the first quiet is due.
+    let a_connects = a.connect_with_candidates(&to_b);
+    let b_connects = async {
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        b.connect_with_candidates(&to_a).await
+    };
+    let (ra, rb) = tokio::join!(a_connects, b_connects);
+    ra.unwrap();
+    rb.unwrap();
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+
+    assert!(a.stats().packets_received > 0, "a heard b");
+    assert_eq!(
+        a.link_facts().snapshot().punch_tries,
+        0,
+        "a link that hears its peer sends on without a quiet"
+    );
+    a.disconnect();
+    b.disconnect();
+}
