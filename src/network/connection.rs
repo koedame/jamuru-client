@@ -660,7 +660,8 @@ impl RttMeasurement {
     /// Smooth into the estimate the two ways of a round trip, from the clock times its ping
     /// and pong carried and the time the pong arrived
     fn note_one_way(&mut self, wall: &PongWall, received_wall_us: u64) {
-        let ms = |later: u64, earlier: u64| (later as i64 - earlier as i64) as f32 / 1000.0;
+        let ms =
+            |later: u64, earlier: u64| (i128::from(later) - i128::from(earlier)) as f32 / 1000.0;
         let sample = OneWayDelays {
             up_ms: ms(wall.ping_received_wall_us, wall.original_sent_wall_us),
             down_ms: ms(received_wall_us, wall.sent_wall_us),
@@ -4110,6 +4111,32 @@ mod tests {
         assert!((one_way.up_ms - 30.0).abs() < 1e-3, "{one_way:?}");
         assert!((one_way.down_ms - 10.0).abs() < 1e-3, "{one_way:?}");
         assert!((one_way.up_ms + one_way.down_ms - 40.0).abs() < 1e-3);
+    }
+
+    /// A peer can put any clock time in its pong; times at the ends of the range are
+    /// smoothed in like any other and never stop the receiver.
+    ///
+    /// Verifies: REQ-LAT-133
+    #[test]
+    fn when_a_pong_carries_times_at_the_ends_of_the_range_the_ways_are_still_computed() {
+        let mut measurement = RttMeasurement::default();
+        let ping = measurement.create_ping();
+
+        measurement.process_pong(
+            &LatencyPong {
+                original_sent_time_us: ping.sent_time_us,
+                ping_sequence: ping.ping_sequence,
+                wall: Some(PongWall {
+                    original_sent_wall_us: u64::MAX,
+                    ping_received_wall_us: 0,
+                    sent_wall_us: 0,
+                }),
+            },
+            u64::MAX,
+        );
+
+        let one_way = measurement.one_way.unwrap();
+        assert!(one_way.up_ms < 0.0 && one_way.down_ms > 0.0, "{one_way:?}");
     }
 
     /// A pong from a peer that sends no clock times leaves the round trip measured and the
