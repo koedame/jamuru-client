@@ -61,6 +61,11 @@ const FADE_MAX_MS: f32 = 120.0;
 const FILL_MIN_CORRELATION: f32 = 0.6;
 /// The fill is scaled to the level of what was played, but not by more than this either way.
 const FILL_MAX_GAIN: f32 = 4.0;
+/// Nothing concealment makes is louder than the loudest sample of what was played (and never
+/// beyond full scale): scaling a copy to the level of the past, the step that joins it to the
+/// past and a prediction that overshoots could each put it above that, and what is made is
+/// played and then heard again as the past of the next fill.
+const FULL_SCALE: f32 = 1.0;
 
 /// Share of the reads missing above which extrapolation stops (the output would be mostly
 /// predicted sound), and the share it has to fall below, for `RESUME_AFTER_SECS`, to start
@@ -178,6 +183,16 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     sum
 }
 
+fn peak(x: &[f32]) -> f32 {
+    x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+}
+
+fn limit(x: &mut [f32], ceiling: f32) {
+    for v in x {
+        *v = v.clamp(-ceiling, ceiling);
+    }
+}
+
 /// What was played, per channel, kept contiguous so it can be searched as a slice. Appending
 /// is amortised: the buffer is twice what is needed and the newest part moves to the front
 /// when it is full.
@@ -229,6 +244,14 @@ impl History {
 
     fn channel(&self, c: usize) -> &[f32] {
         &self.channels[c][..self.len]
+    }
+
+    /// The loudest sample played, in any channel, but not beyond full scale.
+    fn ceiling(&self) -> f32 {
+        (0..self.channels.len())
+            .map(|c| peak(self.channel(c)))
+            .fold(0.0f32, f32::max)
+            .min(FULL_SCALE)
     }
 }
 
@@ -655,6 +678,7 @@ impl Concealer {
             }
         };
         let join = l.join.min(self.tail[0].len());
+        let ceiling = self.history.ceiling();
 
         for c in 0..ch {
             let h = self.history.channel(c);
@@ -664,8 +688,15 @@ impl Concealer {
                 dot(&h[start - span..start], &h[start - span..start]),
                 dot(&h[available - span..], &h[available - span..]),
             );
+            // The stretch that is copied (and repeated, when the fill is longer than the lag)
+            // lies between `start` and the end of the history. Its loudest sample, scaled,
+            // is not above the loudest that was played.
+            let copied_peak = peak(&h[start..]);
             let gain = if e_cand > 1e-20 {
-                (e_tgt / e_cand).sqrt().min(FILL_MAX_GAIN)
+                (e_tgt / e_cand)
+                    .sqrt()
+                    .min(FILL_MAX_GAIN)
+                    .min(ceiling / copied_peak.max(1e-20))
             } else {
                 0.0
             } * sign;
@@ -677,12 +708,13 @@ impl Concealer {
                 if i < onset {
                     v += step * (1.0 - i as f32 / onset as f32);
                 }
-                out[i * ch + c] = v * level(fill_run + i);
+                out[i * ch + c] = (v * level(fill_run + i)).clamp(-ceiling, ceiling);
             }
             for j in 0..join {
                 self.tail[c][j] =
                     h[start + wrap(hole + j, lag)] * gain * level(fill_run + hole + j);
             }
+            limit(&mut self.tail[c][..join], ceiling);
         }
         self.tail_pos = 0;
         self.tail_len = join;
@@ -726,6 +758,7 @@ impl Concealer {
     /// and needs no cross-fade into it.
     fn use_prediction(&mut self, out: &mut [f32]) {
         out.copy_from_slice(&self.scratch.interp[..out.len()]);
+        limit(out, self.history.ceiling());
         self.tail_len = 0;
         self.tail_pos = 0;
     }
@@ -758,6 +791,7 @@ impl Concealer {
         if fresh {
             self.meet_last_played(out);
         }
+        limit(out, self.history.ceiling());
         if !audible {
             self.synth.state = SynthState::Done;
         }
@@ -793,6 +827,10 @@ impl Concealer {
                 * self.synth.periodicity.clamp(0.0, 1.0);
         let span = (span as usize).min(self.tail[0].len());
         self.generate(None, span);
+        let ceiling = self.history.ceiling();
+        for c in 0..self.channels {
+            limit(&mut self.tail[c][..span], ceiling);
+        }
         self.tail_pos = 0;
         self.tail_len = span;
     }
