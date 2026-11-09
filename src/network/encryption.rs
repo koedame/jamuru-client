@@ -601,11 +601,13 @@ impl SecureLink {
             if !shared.was_contributory() {
                 return Opened::Dropped("key exchange with a weak key");
             }
-            *state = State::Encrypted(Box::new(derive_keys(
-                shared.as_bytes(),
-                &self.public,
-                &peer_public,
-            )));
+            let mut keys = derive_keys(shared.as_bytes(), &self.public, &peer_public);
+            // Our half stays the same, so going back to a peer key heard before makes the
+            // same send key again: the counter goes on from where it was, never back to 0
+            if let State::Encrypted(before) = &*state {
+                keys.next_counter = before.next_counter;
+            }
+            *state = State::Encrypted(Box::new(keys));
             if let Some(answering) = &self.answering {
                 let text = answer_signed_text(
                     answering.ours.verifying_key().as_bytes(),
@@ -897,6 +899,34 @@ mod tests {
             .claim_payload(&LinkIdentity::generate(), Uuid::from_u128(12))
             .is_none());
         assert!(b.read_claim(&[0; CLAIM_LEN]).is_none());
+    }
+
+    #[test]
+    fn when_the_peer_key_changes_back_and_forth_before_the_link_is_confirmed_no_counter_is_sealed_twice(
+    ) {
+        let (ours, theirs) = (LinkIdentity::generate(), LinkIdentity::generate());
+        let us = SecureLink::for_peer(&ours, &theirs.public_key()).expect("a link key");
+        let earlier = SecureLink::for_peer(&theirs, &ours.public_key()).expect("a link key");
+        let later = SecureLink::for_peer(&theirs, &ours.public_key()).expect("a link key");
+        let mut counters = Vec::new();
+
+        for peer in [&earlier, &later, &earlier, &later] {
+            assert!(matches!(
+                us.open(half(peer)),
+                Opened::KeyExchange { answer: true }
+            ));
+            let sealed = us.seal(Packet::keep_alive(7)).unwrap();
+            counters.push(sealed.payload[..COUNTER_SIZE].to_vec());
+        }
+
+        let mut distinct = counters.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            counters.len(),
+            "counters sealed: {counters:?}"
+        );
     }
 
     /// Verifies: REQ-SEC-001

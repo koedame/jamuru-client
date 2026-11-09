@@ -187,6 +187,7 @@ jobs:
     env:
       WORK: ${{ github.workspace }}/room-work
       JAMJAM_SERVER_URL_BETA: ${{ secrets.JAMJAM_SERVER_URL_BETA }}
+      ROOM_CHECK_KEY: ${{ secrets.ROOM_CHECK_KEY }}
       GH_TOKEN: ${{ github.token }}
       PYTHONIOENCODING: utf-8
     steps:
@@ -208,7 +209,7 @@ jobs:
 
       # Runner 0 (always a Linux one) creates the room. Its first participant
       # stays in it while the next steps run, and the invite code reaches the
-      # other runners in a file encrypted with the server address, so the
+      # other runners in a file encrypted with the check's own secret, so the
       # artifact reveals nothing.
       - name: Create the room
         if: matrix.runner == 0
