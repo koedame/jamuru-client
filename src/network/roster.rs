@@ -123,10 +123,9 @@ impl Link {
     /// say nothing of who is at the far end of the link. Nor is the id alone: it is listed for
     /// everyone too, while the key's private half is only its participant's.
     fn is_said_to_be(&self, peer: &PeerInfo) -> bool {
-        self.claimed
-            .as_ref()
-            .is_some_and(|claim| claim.id() == peer.id && claim.is_signed_by(peer.link_key.as_deref()))
-            && self.is_at(peer)
+        self.claimed.as_ref().is_some_and(|claim| {
+            claim.id() == peer.id && claim.is_signed_by(peer.link_key.as_deref())
+        }) && self.is_at(peer)
     }
 }
 
@@ -306,7 +305,11 @@ impl Roster {
             .links
             .iter()
             .filter_map(|link| {
-                let to = link.claimed.as_ref().map(LinkClaim::id).filter(|to| *to != link.peer)?;
+                let to = link
+                    .claimed
+                    .as_ref()
+                    .map(LinkClaim::id)
+                    .filter(|to| *to != link.peer)?;
                 self.peers
                     .iter()
                     .any(|p| p.id == to && link.is_said_to_be(p))

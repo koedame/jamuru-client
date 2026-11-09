@@ -15,9 +15,9 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
+use super::encryption::LinkClaim;
 use super::room_entry::Entered;
 use super::room_session::{Reconnect, Snapshot, State};
-use super::encryption::LinkClaim;
 use super::roster::{Audio, LinkHealth};
 use super::signaling::{PeerInfo, RoomInfo};
 use super::NetworkError;
@@ -769,8 +769,8 @@ mod tests {
 
     use super::*;
     use crate::network::room_session::Phase;
-    use crate::network::LinkIdentity;
     use crate::network::signaling::InviteCode;
+    use crate::network::LinkIdentity;
 
     /// A server that lets everyone in, and what it was asked, in order
     #[derive(Default)]

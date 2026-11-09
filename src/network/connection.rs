@@ -3914,10 +3914,7 @@ mod tests {
         let mallory = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
 
         mallory
-            .send_to(
-                &Packet::peer_id(1, vec![66; 80]).to_bytes(),
-                b_at,
-            )
+            .send_to(&Packet::peer_id(1, vec![66; 80]).to_bytes(), b_at)
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_millis(200)).await;

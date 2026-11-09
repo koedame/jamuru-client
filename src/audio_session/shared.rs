@@ -17,8 +17,8 @@ use crate::audio::{
     RoomRecorder,
 };
 use crate::network::{
-    BandwidthStatus, ConnectionStats, LinkClaim, LinkFacts, LinkHealth, LinkIdentity, PeerLatencyInfo,
-    MAX_PEERS_PER_ROOM,
+    BandwidthStatus, ConnectionStats, LinkClaim, LinkFacts, LinkHealth, LinkIdentity,
+    PeerLatencyInfo, MAX_PEERS_PER_ROOM,
 };
 
 /// How many audio links a session holds at most: one to each of the others in a full room.
@@ -317,7 +317,11 @@ impl Shared {
         self.link_reports()
             .into_iter()
             .filter_map(|(peer, report)| {
-                let claim = report.peer_claim.read().ok().and_then(|claim| claim.clone())?;
+                let claim = report
+                    .peer_claim
+                    .read()
+                    .ok()
+                    .and_then(|claim| claim.clone())?;
                 Some((peer, claim))
             })
             .collect()
