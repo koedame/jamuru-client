@@ -212,7 +212,32 @@ struct Route {
     /// Until when the keep-alive goes to the peer's other addresses whatever the silence, while
     /// the sending starts over after a quiet ([`PunchSchedule`])
     reprobe_until: Option<Instant>,
+    /// The checks sent to addresses the peer was heard from that it did not offer. The route
+    /// moves to one only when the answer to its check comes back from there ([`PathCheck`]).
+    checks: Vec<PathCheck>,
 }
+
+/// A check sent to an address a packet came from that is not one of the peer's
+///
+/// The source address of a datagram proves nothing: a packet the peer sent can be sent again
+/// from anywhere. So the route moves to a new address only after a sealed probe carrying a
+/// token nobody could have guessed was sent there and the sealed answer to it came back from
+/// there (the way a QUIC endpoint validates a new path). Only the peer holds the keys that
+/// seal the answer, and the token ties the answer to this check.
+#[derive(Debug)]
+struct PathCheck {
+    addr: SocketAddr,
+    token: u32,
+    sent_at: Instant,
+}
+
+/// How many checks may be out at once. A packet from an address that would be the
+/// fifth is not checked until one has been answered or has expired.
+const MAX_PATH_CHECKS: usize = 4;
+/// How long after a check went out to an address it is sent there again, if it was not answered
+const PATH_CHECK_RETRY: Duration = Duration::from_secs(1);
+/// How long an unanswered check stays valid: the answer must come back within this
+const PATH_CHECK_LIFETIME: Duration = Duration::from_secs(5);
 
 /// Whether the keep-alive goes to the peer's other addresses too, when the peer has
 /// not answered for `silent_for` and is doubted after `after`
@@ -245,6 +270,7 @@ impl Route {
             answered_at: Instant::now(),
             predicted: None,
             reprobe_until: None,
+            checks: Vec::new(),
         }
     }
 
@@ -311,16 +337,57 @@ impl Route {
         Some(left)
     }
 
-    /// Takes `from` up as one of the peer's addresses when the peer has not answered for
-    /// `after`, so that [`Route::follow`] can move to it
+    /// The token of a check to send to `from`, when a packet opened by an encrypted link came
+    /// from an address that is not one of the peer's offered ones and the peer has not answered
+    /// for `after`. `None` when no check is due.
     ///
-    /// This is for a network that changes the port or address the peer is seen from after
-    /// it offered its addresses. The caller must only pass an address a packet was opened
-    /// from by an encrypted link, which a forged or repeated packet does not get through.
-    fn learn_roamed(&mut self, from: SocketAddr, after: Duration) {
-        if !self.knows(from) && self.answered_at.elapsed() >= after {
+    /// This is for a network that changes the port or address the peer is seen from after it
+    /// offered its addresses. The address is not taken up here: a packet that got through the
+    /// link may be one the peer sent earlier, sent again from an address of someone else's, so
+    /// the route moves only once the answer to the check comes from there
+    /// ([`Route::check_answered`]).
+    fn start_check(&mut self, from: SocketAddr, after: Duration) -> Option<u32> {
+        if from == self.current
+            || self.others.iter().any(|&(other, _)| other == from)
+            || self.answered_at.elapsed() < after
+        {
+            return None;
+        }
+        self.checks
+            .retain(|check| check.sent_at.elapsed() < PATH_CHECK_LIFETIME);
+        let token = rand::random::<u32>();
+        let check = PathCheck {
+            addr: from,
+            token,
+            sent_at: Instant::now(),
+        };
+        match self.checks.iter().position(|check| check.addr == from) {
+            Some(i) if self.checks[i].sent_at.elapsed() < PATH_CHECK_RETRY => return None,
+            Some(i) => self.checks[i] = check,
+            None if self.checks.len() >= MAX_PATH_CHECKS => return None,
+            None => self.checks.push(check),
+        }
+        Some(token)
+    }
+
+    /// Whether `token` answers the check sent to `from`. An answer counts once, and the
+    /// address becomes one of the peer's, so that [`Route::follow`] can move to it.
+    fn check_answered(&mut self, token: u32, from: SocketAddr) -> bool {
+        let Some(index) = self
+            .checks
+            .iter()
+            .position(|check| check.addr == from && check.token == token)
+        else {
+            return false;
+        };
+        let check = self.checks.swap_remove(index);
+        if check.sent_at.elapsed() >= PATH_CHECK_LIFETIME {
+            return false;
+        }
+        if !self.knows(from) {
             self.others.push((from, true));
         }
+        true
     }
 
     /// Notes whether the last send to `addr` went out
@@ -2010,28 +2077,39 @@ impl Connection {
                 // is there.
                 let mut follow_after =
                     reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
-                // A packet opened by an encrypted link comes from the peer whatever its address
+                // A packet opened by an encrypted link was sealed by the peer, but not
+                // necessarily sent from where it came from: the peer's packet can be sent again
+                // from any address. So the address it came from is no proof of where the peer is.
                 let encrypted = matches!(opened, Opened::Packet(_))
                     && secure_link.security() == LinkSecurity::Encrypted;
-                // An answer to a probe sent to a guessed port, from that port, shows the guess
-                // was right and that what we send there reaches the peer: no need to wait. A
-                // port that is only guessed at is not moved to on anything less.
-                let mut proven = encrypted;
+                // The peer is where an answer comes from: the answer to a probe sent to a
+                // guessed port, from that port, shows the guess was right and that what we send
+                // there reaches the peer, so there is no need to wait; the answer to a check sent
+                // to an address the peer was heard from shows the peer is there. Nothing less
+                // moves the route to an address that was not offered.
+                let mut proven = false;
                 if let Opened::Packet(packet) = &opened {
                     if let Some((true, token)) = packet.route_probe_token() {
                         if route.lock().is_answer_from_guessed(token, addr) {
                             follow_after = Duration::ZERO;
                             proven = true;
+                        } else if encrypted && route.lock().check_answered(token, addr) {
+                            proven = true;
                         }
                     }
                 }
                 // The network may have changed the address the peer is seen from since it
-                // was offered, so an encrypted packet may be answered where it came from.
-                // Without keys the source address could be anyone's.
-                if encrypted {
-                    route.lock().learn_roamed(addr, follow_after);
-                    if !from_a_peer_address {
+                // was offered. Ask there, sealed, before sending anything else there.
+                if encrypted && !proven {
+                    let check = route.lock().start_check(addr, follow_after);
+                    if let Some(token) = check {
                         transport.also_expect_peer_at(addr);
+                        let probe =
+                            Packet::route_probe(sequence.fetch_add(1, Ordering::Relaxed), token);
+                        debug!("Checking the address {} the peer was heard from", addr);
+                        if let Err(e) = send_sealed(&transport, &secure_link, probe, addr).await {
+                            debug!("Failed to check {}: {}", addr, e);
+                        }
                     }
                 }
                 let followed = route.lock().follow(addr, follow_after, proven);
@@ -3047,26 +3125,112 @@ mod tests {
 
     /// Verifies: REQ-CON-136
     #[test]
-    fn when_the_peer_has_not_answered_a_packet_from_an_unoffered_address_moves_the_route_there() {
+    fn when_the_answer_to_the_check_of_an_unoffered_address_comes_from_there_the_route_moves_there()
+    {
         let lan = addr("192.168.1.10:5000");
         let moved = addr("192.168.1.10:6000");
         let mut route = Route::new(lan, Vec::new());
 
-        route.learn_roamed(moved, Duration::ZERO);
+        let token = route.start_check(moved, Duration::ZERO).unwrap();
+        assert_eq!(
+            route.follow(moved, Duration::ZERO, false),
+            None,
+            "a packet from the address is not enough"
+        );
+        assert!(route.check_answered(token, moved));
 
         assert_eq!(route.follow(moved, Duration::ZERO, true), Some(lan));
         assert_eq!(route.current, moved);
     }
 
+    /// Verifies: REQ-CON-175
+    #[test]
+    fn when_the_answer_to_a_check_comes_from_another_address_or_with_another_token_it_is_not_taken()
+    {
+        let lan = addr("192.168.1.10:5000");
+        let moved = addr("192.168.1.10:6000");
+        let other = addr("203.0.113.9:6000");
+        let mut route = Route::new(lan, Vec::new());
+        let token = route.start_check(moved, Duration::ZERO).unwrap();
+
+        assert!(!route.check_answered(token, other));
+        assert!(!route.check_answered(token ^ 1, moved));
+        assert!(!route.knows(moved));
+        assert_eq!(route.follow(moved, Duration::ZERO, false), None);
+        assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-175
+    #[test]
+    fn when_a_check_was_answered_the_same_answer_is_not_taken_again() {
+        let lan = addr("192.168.1.10:5000");
+        let moved = addr("192.168.1.10:6000");
+        let mut route = Route::new(lan, Vec::new());
+        let token = route.start_check(moved, Duration::ZERO).unwrap();
+
+        assert!(route.check_answered(token, moved));
+        assert!(!route.check_answered(token, moved));
+    }
+
+    /// Verifies: REQ-CON-175
+    #[test]
+    fn when_a_check_went_out_a_moment_ago_the_address_is_not_checked_again_until_the_retry() {
+        let lan = addr("192.168.1.10:5000");
+        let moved = addr("192.168.1.10:6000");
+        let mut route = Route::new(lan, Vec::new());
+        let first = route.start_check(moved, Duration::ZERO).unwrap();
+
+        assert_eq!(route.start_check(moved, Duration::ZERO), None);
+        route.checks[0].sent_at -= PATH_CHECK_RETRY;
+        let second = route.start_check(moved, Duration::ZERO).unwrap();
+
+        assert!(!route.check_answered(first, moved), "the old token is gone");
+        assert!(route.check_answered(second, moved));
+    }
+
+    /// Verifies: REQ-CON-175
+    #[test]
+    fn when_many_addresses_are_heard_from_only_a_few_checks_are_out_at_once() {
+        let lan = addr("192.168.1.10:5000");
+        let mut route = Route::new(lan, Vec::new());
+
+        let sent = (0..20u16)
+            .filter(|i| {
+                route
+                    .start_check(addr(&format!("198.51.100.1:{}", 7000 + i)), Duration::ZERO)
+                    .is_some()
+            })
+            .count();
+
+        assert_eq!(sent, MAX_PATH_CHECKS);
+        route.checks[0].sent_at -= PATH_CHECK_LIFETIME;
+        assert!(route
+            .start_check(addr("198.51.100.1:9000"), Duration::ZERO)
+            .is_some());
+    }
+
+    /// Verifies: REQ-CON-175
+    #[test]
+    fn when_the_answer_to_a_check_comes_after_it_expired_it_is_not_taken() {
+        let lan = addr("192.168.1.10:5000");
+        let moved = addr("192.168.1.10:6000");
+        let mut route = Route::new(lan, Vec::new());
+        let token = route.start_check(moved, Duration::ZERO).unwrap();
+        route.checks[0].sent_at -= PATH_CHECK_LIFETIME;
+
+        assert!(!route.check_answered(token, moved));
+        assert!(!route.knows(moved));
+    }
+
     /// Verifies: REQ-CON-136
     #[test]
-    fn when_the_peer_answered_recently_an_unoffered_address_is_not_taken_up() {
+    fn when_the_peer_answered_recently_an_unoffered_address_is_not_checked() {
         let lan = addr("192.168.1.10:5000");
         let moved = addr("192.168.1.10:6000");
         let mut route = Route::new(lan, Vec::new());
         route.answered();
 
-        route.learn_roamed(moved, Duration::from_secs(60));
+        assert_eq!(route.start_check(moved, Duration::from_secs(60)), None);
 
         assert!(!route.knows(moved));
         assert_eq!(route.follow(moved, Duration::from_secs(60), true), None);
@@ -3075,13 +3239,13 @@ mod tests {
 
     /// Verifies: REQ-CON-136
     #[test]
-    fn when_the_address_is_already_known_learning_it_changes_nothing() {
+    fn when_the_address_is_already_known_it_is_not_checked() {
         let lan = addr("192.168.1.10:5000");
         let vpn = addr("100.64.0.2:5000");
         let mut route = Route::new(lan, vec![(vpn, false)]);
 
-        route.learn_roamed(vpn, Duration::ZERO);
-        route.learn_roamed(lan, Duration::ZERO);
+        assert_eq!(route.start_check(vpn, Duration::ZERO), None);
+        assert_eq!(route.start_check(lan, Duration::ZERO), None);
 
         assert_eq!(route.others, vec![(vpn, false)]);
     }
