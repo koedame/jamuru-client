@@ -630,13 +630,42 @@ fn deliver_recovered(
     }
 }
 
-/// Store the peer's latency info and tell the callback about it.
+/// The sample rates a peer may say it runs at: those of audio devices. The rate sets how
+/// the peer's audio is converted to ours, so one far outside them is not followed.
+const TOLD_SAMPLE_RATES: std::ops::RangeInclusive<u32> = 8_000..=192_000;
+
+/// The frame sizes (samples) a peer may say it sends
+const TOLD_FRAME_SIZES: std::ops::RangeInclusive<u32> = 1..=4_096;
+
+/// Whether the values in a peer's latency info are ones an app can have
+fn told_plausibly(info: &LatencyInfoMessage) -> bool {
+    let durations = [
+        info.capture_buffer_ms,
+        info.playback_buffer_ms,
+        info.encode_ms,
+        info.decode_ms,
+        info.jitter_buffer_ms,
+    ];
+    TOLD_SAMPLE_RATES.contains(&info.sample_rate)
+        && TOLD_FRAME_SIZES.contains(&info.frame_size)
+        && durations.iter().all(|ms| ms.is_finite() && *ms >= 0.0)
+}
+
+/// Store the peer's latency info and tell the callback about it. Info with values no app
+/// has is ignored, and what was told before stands.
 fn note_peer_latency_info(
     payload: &[u8],
     callback: &Option<Arc<LatencyInfoCallback>>,
     store: &RwLock<Option<PeerLatencyInfo>>,
 ) {
     if let Some(info) = LatencyInfoMessage::from_bytes(payload) {
+        if !told_plausibly(&info) {
+            debug!(
+                "Ignored peer latency info: rate={}Hz, frame={}",
+                info.sample_rate, info.frame_size
+            );
+            return;
+        }
         let peer_info: PeerLatencyInfo = info.into();
         debug!(
             "Received peer latency info: capture={:.2}ms, playback={:.2}ms, jitter={:.2}ms",
@@ -2752,6 +2781,62 @@ impl Drop for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn latency_info(
+        sample_rate: u32,
+        frame_size: u32,
+        jitter_buffer_ms: f32,
+    ) -> LatencyInfoMessage {
+        LatencyInfoMessage {
+            capture_buffer_ms: 1.0,
+            playback_buffer_ms: 2.0,
+            encode_ms: 0.0,
+            decode_ms: 0.0,
+            jitter_buffer_ms,
+            frame_size,
+            sample_rate,
+            codec: "pcm".to_string(),
+            channel_count: 1,
+        }
+    }
+
+    #[test]
+    fn when_a_peer_tells_values_no_app_has_its_latency_info_is_ignored_and_what_it_told_before_stands(
+    ) {
+        let store = RwLock::new(None);
+        let told = Arc::new(AtomicU64::new(0));
+        let counted = told.clone();
+        let callback: Option<Arc<LatencyInfoCallback>> = Some(Arc::new(Box::new(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        })));
+        note_peer_latency_info(&latency_info(48_000, 64, 3.0).to_bytes(), &callback, &store);
+
+        for unlikely in [
+            latency_info(1, 64, 3.0),
+            latency_info(0, 64, 3.0),
+            latency_info(u32::MAX, 64, 3.0),
+            latency_info(48_000, 0, 3.0),
+            latency_info(48_000, u32::MAX, 3.0),
+            latency_info(48_000, 64, f32::NAN),
+            latency_info(48_000, 64, f32::INFINITY),
+            latency_info(48_000, 64, -1.0),
+        ] {
+            note_peer_latency_info(&unlikely.to_bytes(), &callback, &store);
+        }
+
+        assert_eq!(told.load(Ordering::SeqCst), 1);
+        let kept = store.read().clone().expect("the info told first");
+        assert_eq!((kept.sample_rate, kept.frame_size), (48_000, 64));
+    }
+
+    #[test]
+    fn when_a_peer_tells_a_device_sample_rate_its_latency_info_is_taken() {
+        let store = RwLock::new(None);
+        for rate in [8_000, 44_100, 48_000, 96_000, 192_000] {
+            note_peer_latency_info(&latency_info(rate, 128, 3.0).to_bytes(), &None, &store);
+            assert_eq!(store.read().as_ref().map(|i| i.sample_rate), Some(rate));
+        }
+    }
 
     /// A connection that has been told whose key to check its peer by, as every connection is
     /// before it connects. Nobody holds that key, so it agrees keys with nobody unless
