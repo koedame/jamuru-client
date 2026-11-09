@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted。送り元をそのまま宛先に加える部分は [ADR-121](./ADR-121-confirm-the-new-address-before-moving-the-route.md) が置き換えた（確認の答えが返ってから移す）。
 
 ## Context
 
