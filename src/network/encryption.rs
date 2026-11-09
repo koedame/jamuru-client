@@ -54,6 +54,7 @@ use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
 use rand::TryRng;
 use sha2::Sha256;
+use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::protocol::{Packet, PacketType};
@@ -76,6 +77,12 @@ const SIGNATURE_DOMAIN: &[u8] = b"jamjam-link-key-exchange-v1:";
 
 /// As [`SIGNATURE_DOMAIN`], for a half signed for the ephemeral key it answers
 const ANSWER_SIGNATURE_DOMAIN: &[u8] = b"jamjam-link-key-exchange-answer-v1:";
+
+/// Mixed into the text a participant signs to say which id the room knows it by
+const CLAIM_SIGNATURE_DOMAIN: &[u8] = b"jamjam-link-peer-id-v1:";
+
+/// Bytes of a claim of an id: the id, then the signature
+pub const CLAIM_LEN: usize = 16 + SIGNATURE_LEN;
 
 /// Bytes of counter at the front of a sealed payload
 const COUNTER_SIZE: usize = 8;
@@ -115,9 +122,71 @@ impl LinkIdentity {
         }
     }
 
+    /// The identity made from `seed`, the same every time: tests give a participant a key that
+    /// they and the room's listing of them agree on
+    #[cfg(test)]
+    pub fn from_seed(seed: u8) -> Self {
+        Self {
+            signing_key: SigningKey::from_bytes(&[seed; 32]),
+        }
+    }
+
     /// The public key as the signaling messages carry it: base64 of the 32 bytes
     pub fn public_key(&self) -> String {
         BASE64.encode(self.signing_key.verifying_key().as_bytes())
+    }
+}
+
+/// What a participant signs to claim, over one link, that the room knows it by `id`: the id and
+/// the ephemeral keys of the two ends. The keys are made for the one link, so the signature
+/// cannot be used for any other.
+fn claim_text(id: &Uuid, sender: &[u8; 32], recipient: &[u8; 32]) -> Vec<u8> {
+    let mut text = Vec::with_capacity(CLAIM_SIGNATURE_DOMAIN.len() + 80);
+    text.extend_from_slice(CLAIM_SIGNATURE_DOMAIN);
+    text.extend_from_slice(id.as_bytes());
+    text.extend_from_slice(sender);
+    text.extend_from_slice(recipient);
+    text
+}
+
+/// What the far end of a link said, over the link, about the id the room knows it by: the id,
+/// and a signature that only the holder of the key the room lists for that id can have made.
+///
+/// The link is sealed, so the claim came from the end the link is to. Whether that end is the
+/// participant the room lists under `id` is for [`LinkClaim::is_signed_by`] to say, with the
+/// key the server gave for them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkClaim {
+    id: Uuid,
+    text: Vec<u8>,
+    signature: Signature,
+}
+
+impl LinkClaim {
+    /// The id the far end says the room knows it by
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    /// Whether the claim was signed with the private half of `link_key` (a participant's
+    /// [`LinkIdentity::public_key`], as the server gives it). A claim for an id whose listed
+    /// key is another one, or for which no key is listed, is not.
+    pub fn is_signed_by(&self, link_key: Option<&str>) -> bool {
+        link_key
+            .and_then(parse_link_key)
+            .is_some_and(|key| key.verify(&self.text, &self.signature).is_ok())
+    }
+
+    /// A claim of `id` by `identity`, as if made over a link between ends with these ephemeral keys
+    #[cfg(test)]
+    pub fn made_by(identity: &LinkIdentity, id: Uuid) -> Self {
+        let text = claim_text(&id, &[1; 32], &[2; 32]);
+        let signature = identity.signing_key.sign(&text);
+        Self {
+            id,
+            text,
+            signature,
+        }
     }
 }
 
@@ -343,6 +412,38 @@ impl SecureLink {
         self.peer
             .as_ref()
             .map(|check| check.ours.verifying_key().as_bytes() < check.theirs.as_bytes())
+    }
+
+    /// What to send the far end to claim, over this link, that the room knows us by `id`: the id
+    /// and a signature by `identity`, the key the room lists for us, over the id and the keys of
+    /// this link. `None` until the keys are agreed.
+    pub fn claim_payload(&self, identity: &LinkIdentity, id: Uuid) -> Option<Vec<u8>> {
+        let State::Encrypted(keys) = &*self.state.lock() else {
+            return None;
+        };
+        let text = claim_text(&id, &self.public, &keys.peer_public);
+        let mut payload = id.as_bytes().to_vec();
+        payload.extend_from_slice(&identity.signing_key.sign(&text).to_bytes());
+        Some(payload)
+    }
+
+    /// The claim in the payload of a packet the far end sent over this link, `None` if it is not
+    /// one or the keys are not agreed. Whose it is, is not looked at here (see [`LinkClaim`]).
+    pub fn read_claim(&self, payload: &[u8]) -> Option<LinkClaim> {
+        if payload.len() != CLAIM_LEN {
+            return None;
+        }
+        let id = Uuid::from_slice(&payload[..16]).ok()?;
+        let signature = Signature::from_slice(&payload[16..]).ok()?;
+        let State::Encrypted(keys) = &*self.state.lock() else {
+            return None;
+        };
+        let text = claim_text(&id, &keys.peer_public, &self.public);
+        Some(LinkClaim {
+            id,
+            text,
+            signature,
+        })
     }
 
     /// Whether the keys of this link are bound to the peer's identity from the server. A link
@@ -722,6 +823,80 @@ mod tests {
             Opened::Packet(packet) => Some(packet),
             _ => None,
         }
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn when_a_claim_is_signed_by_the_key_of_the_id_it_names_the_other_end_takes_it_as_theirs() {
+        let (a, b) = agreed();
+        let new_key = LinkIdentity::generate();
+        let id = Uuid::from_u128(12);
+
+        let claim = b
+            .read_claim(&a.claim_payload(&new_key, id).unwrap())
+            .unwrap();
+
+        assert_eq!(claim.id(), id);
+        assert!(claim.is_signed_by(Some(&new_key.public_key())));
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn when_a_claim_names_an_id_whose_listed_key_is_another_one_it_is_not_taken_as_theirs() {
+        let (a, b) = agreed();
+        let (eve, ben) = (LinkIdentity::generate(), LinkIdentity::generate());
+        let id = Uuid::from_u128(12);
+
+        // Eve names Ben's id, which the room lists for everyone with Ben's key
+        let claim = b.read_claim(&a.claim_payload(&eve, id).unwrap()).unwrap();
+
+        assert!(!claim.is_signed_by(Some(&ben.public_key())));
+        assert!(!claim.is_signed_by(None), "no key is listed for the id");
+        assert!(!claim.is_signed_by(Some("not a key")));
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn when_a_claim_made_over_one_link_is_passed_over_another_it_is_not_taken_as_theirs() {
+        let (a, b) = agreed();
+        let (a2, b2) = agreed();
+        let ben = LinkIdentity::generate();
+        let id = Uuid::from_u128(12);
+        let over_the_first = a.claim_payload(&ben, id).unwrap();
+
+        // Whoever got Ben's claim on one link says it on another
+        let claim = b2.read_claim(&over_the_first).unwrap();
+
+        assert!(!claim.is_signed_by(Some(&ben.public_key())));
+        assert!(b
+            .read_claim(&over_the_first)
+            .unwrap()
+            .is_signed_by(Some(&ben.public_key())));
+        let _ = a2;
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn when_a_claim_is_not_exactly_an_id_and_a_signature_none_is_read() {
+        let (a, b) = agreed();
+        let payload = a
+            .claim_payload(&LinkIdentity::generate(), Uuid::from_u128(12))
+            .unwrap();
+
+        assert!(b.read_claim(&payload[..CLAIM_LEN - 1]).is_none());
+        assert!(b.read_claim(&[payload.clone(), vec![0]].concat()).is_none());
+        assert!(b.read_claim(&[]).is_none());
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn when_the_keys_are_not_agreed_there_is_no_claim_to_send_or_read() {
+        let (_, _, a, b) = verified_links();
+
+        assert!(a
+            .claim_payload(&LinkIdentity::generate(), Uuid::from_u128(12))
+            .is_none());
+        assert!(b.read_claim(&[0; CLAIM_LEN]).is_none());
     }
 
     /// Verifies: REQ-SEC-001

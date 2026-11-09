@@ -20,7 +20,8 @@ pub use jamjam::audio_session::LinkTarget;
 use jamjam::audio_session::{self, BandwidthSnapshot, LinkReport, Params, Shared};
 use jamjam::network::dropout::{Heard, Side, Standing};
 use jamjam::network::{
-    status_label, ConnectionStats, LatencyBreakdown, LinkHealth, LinkSnapshot, LocalLatencyInfo,
+    status_label, ConnectionStats, LatencyBreakdown, LinkClaim, LinkHealth, LinkIdentity,
+    LinkSnapshot, LocalLatencyInfo,
 };
 
 pub(crate) use jamjam::audio_session::Command as StreamingCommand;
@@ -386,12 +387,12 @@ impl StreamingState {
     }
 
     /// The room knows this app by `id` now: the links tell their far ends
-    pub fn set_own_id(&self, id: Uuid) {
-        self.shared.set_own_id(id);
+    pub fn set_own_id(&self, id: Uuid, identity: LinkIdentity) {
+        self.shared.set_own_id(id, identity);
     }
 
-    /// The ids the far ends of the links said, over the links, the room knows them by
-    pub fn link_claims(&self) -> Vec<(Uuid, Uuid)> {
+    /// What the far ends of the links claimed, over the links, about the ids the room knows them by
+    pub fn link_claims(&self) -> Vec<(Uuid, LinkClaim)> {
         self.shared.link_claims()
     }
 

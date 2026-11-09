@@ -13,6 +13,7 @@
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::encryption::LinkClaim;
 use super::room_entry::Entered;
 use super::roster::{Audio, LinkHealth, Roster};
 use super::signaling::{PeerInfo, RoomInfo};
@@ -445,16 +446,16 @@ impl State {
             .collect()
     }
 
-    /// The far ends of the audio links have said, over the links, which ids the room knows them
-    /// by (`claims`: the participant a link goes to, and the id its far end says it is). Returns
+    /// The far ends of the audio links have claimed, over the links, which ids the room knows
+    /// them by (`claims`: the participant a link goes to, and what its far end claims). Returns
     /// the audio steps that follow.
-    pub fn links_claimed(&mut self, conn: u32, claims: Vec<(Uuid, Uuid)>) -> Vec<Audio> {
+    pub fn links_claimed(&mut self, conn: u32, claims: Vec<(Uuid, LinkClaim)>) -> Vec<Audio> {
         if !self.is_the_room_of(conn) {
             return Vec::new();
         }
         claims
             .into_iter()
-            .flat_map(|(link, id)| self.roster.claimed(link, id))
+            .flat_map(|(link, claim)| self.roster.claimed(link, claim))
             .collect()
     }
 

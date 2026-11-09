@@ -14,7 +14,8 @@ use crate::audio::{
 use crate::link::{LinkSpec, Opened};
 use crate::network::{
     audio_packet_duration_ms, AudioEncodingConfig, BandwidthEstimator, BandwidthStatus,
-    BandwidthVerdict, Connection, ConnectionState, PeerLatencyInfo, QualityMonitor, UdpMux,
+    BandwidthVerdict, Connection, ConnectionState, LinkIdentity, PeerLatencyInfo, QualityMonitor,
+    UdpMux,
 };
 
 /// Where setting up the link to a participant has got
@@ -268,7 +269,7 @@ impl Link {
         preset: &AudioPreset,
         required_bps: f64,
         sample_rate: u32,
-        own_id: Option<Uuid>,
+        own_id: Option<(Uuid, LinkIdentity)>,
     ) {
         let Some(connection) = self.connection().cloned() else {
             return;
@@ -278,11 +279,11 @@ impl Link {
         };
         // The log keeps the start of an id, which tells the links apart
         let peer = self.peer;
-        if let Some(id) = own_id {
-            conn.set_own_id(id);
+        if let Some((id, identity)) = own_id {
+            conn.set_own_id(id, identity);
         }
-        if let Ok(mut said) = self.report.peer_said_id.write() {
-            *said = conn.peer_said_id();
+        if let Ok(mut said) = self.report.peer_claim.write() {
+            *said = conn.peer_claim();
         }
         let conn_stats = conn.stats();
 

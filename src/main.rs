@@ -24,7 +24,7 @@ use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, 
 use jamjam::network::{
     bind_audio_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate,
     ConnectionStats, EnterError, EnterRequest, Entered, Gathered, LatencyBreakdown, LinkHealth,
-    LinkIdentity, LinkSnapshot, LocalLatencyInfo, NetworkError, PeerLatencyInfo, PortMapping,
+    LinkClaim, LinkIdentity, LinkSnapshot, LocalLatencyInfo, NetworkError, PeerLatencyInfo, PortMapping,
     RoomEntry, RoomInfo, SignalingClient, SignalingConnection, SignalingMessage,
     CLOCK_SKEW_NOTICE_SECS,
 };
@@ -1401,11 +1401,14 @@ impl Backend for CliBackend {
 
     fn entered_as(&self, id: Uuid) {
         if let Some(session) = self.audio().as_ref() {
-            session.controls.shared.set_own_id(id);
+            session
+                .controls
+                .shared
+                .set_own_id(id, self.identity.clone());
         }
     }
 
-    fn link_claims(&self) -> Vec<(Uuid, Uuid)> {
+    fn link_claims(&self) -> Vec<(Uuid, LinkClaim)> {
         match self.audio().as_ref() {
             Some(session) => session.controls.shared.link_claims(),
             None => Vec::new(),

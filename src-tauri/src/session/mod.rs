@@ -20,7 +20,7 @@ use jamjam::network::room_session::Snapshot;
 use jamjam::network::roster::LinkHealth;
 use jamjam::network::settings_help::HelpEvent;
 use jamjam::network::{
-    server_clock_offset_secs, Entered, NetworkError, RoomInfo, CLOCK_SKEW_NOTICE_SECS,
+    server_clock_offset_secs, Entered, LinkClaim, NetworkError, RoomInfo, CLOCK_SKEW_NOTICE_SECS,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use uuid::Uuid;
@@ -305,10 +305,14 @@ impl<R: Runtime> Backend for AppBackend<R> {
     }
 
     fn entered_as(&self, id: Uuid) {
-        self.app.state::<streaming::StreamingState>().set_own_id(id);
+        if let Some(identity) = self.app.state::<SignalingState>().link_identity() {
+            self.app
+                .state::<streaming::StreamingState>()
+                .set_own_id(id, identity);
+        }
     }
 
-    fn link_claims(&self) -> Vec<(Uuid, Uuid)> {
+    fn link_claims(&self) -> Vec<(Uuid, LinkClaim)> {
         self.app.state::<streaming::StreamingState>().link_claims()
     }
 

@@ -8,7 +8,6 @@
 //! - flags: 2 bytes
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Protocol version
 ///
@@ -246,26 +245,19 @@ impl Packet {
         }
     }
 
-    /// A packet saying the room knows the sender by `id`. The server gives whoever enters a new
-    /// id, and a link outlives the sender's entry: what the other end is told over the link
-    /// itself is what shows the link's far end is that participant.
-    pub fn peer_id(sequence: u32, id: Uuid) -> Self {
+    /// A packet claiming the id the room knows the sender by. The server gives whoever enters a
+    /// new id, and a link outlives the sender's entry: what the other end is told over the link
+    /// itself, signed with the key the room lists for that id (`claim`, see
+    /// `SecureLink::claim_payload`), is what shows the link's far end is that participant.
+    pub fn peer_id(sequence: u32, claim: Vec<u8>) -> Self {
         Self {
             version: PROTOCOL_VERSION,
             packet_type: PacketType::PeerId,
             sequence,
             timestamp: 0,
             flags: PacketFlags::default(),
-            payload: id.as_bytes().to_vec(),
+            payload: claim,
         }
-    }
-
-    /// The id a [`Self::peer_id`] packet says, `None` for any other packet or a malformed one
-    pub fn peer_id_said(&self) -> Option<Uuid> {
-        if self.packet_type != PacketType::PeerId {
-            return None;
-        }
-        Uuid::from_slice(&self.payload).ok()
     }
 
     /// The header as it goes on the wire
@@ -574,25 +566,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn when_a_peer_id_packet_goes_over_the_wire_the_same_id_is_read_back() {
-        let id = Uuid::from_u128(0x1234_5678_9abc_def0);
-
-        let wire = Packet::peer_id(7, id).to_bytes();
+    fn when_a_peer_id_packet_goes_over_the_wire_the_same_claim_is_read_back() {
+        let wire = Packet::peer_id(7, vec![9; 80]).to_bytes();
         let read = Packet::from_bytes(&wire).unwrap();
 
         assert_eq!(read.packet_type, PacketType::PeerId);
-        assert_eq!(read.peer_id_said(), Some(id));
-    }
-
-    #[test]
-    fn when_a_peer_id_packet_does_not_hold_exactly_an_id_no_id_is_read() {
-        for payload in [vec![], vec![1u8; 15], vec![1u8; 17]] {
-            let mut packet = Packet::peer_id(1, Uuid::nil());
-            packet.payload = payload;
-
-            assert_eq!(packet.peer_id_said(), None);
-        }
-        assert_eq!(Packet::keep_alive(1).peer_id_said(), None);
+        assert_eq!(read.payload, vec![9; 80]);
     }
 
     #[test]

@@ -11,6 +11,7 @@ use std::net::SocketAddr;
 
 use uuid::Uuid;
 
+use super::encryption::LinkClaim;
 use super::{ConnectionState, PeerInfo, MAX_PEERS_PER_ROOM};
 
 /// How the audio link to one participant is doing, as far as deciding what to
@@ -102,9 +103,10 @@ struct Link {
     /// their audio still arrives. The link is kept for as long as it is heard: it goes on as
     /// the link to whoever their far end says it is now, and ends when their audio stops.
     departed: bool,
-    /// The id the participant at the far end said, over the link, that the room knows them by.
-    /// It came sealed with the link's keys, so only they can have said it.
-    claimed: Option<Uuid>,
+    /// What the participant at the far end claimed, over the link, about the id the room knows
+    /// them by. It came sealed with the link's keys, so it is from the end the link goes to, and
+    /// it is signed with the key the room lists for that id, so it is from that participant.
+    claimed: Option<LinkClaim>,
 }
 
 impl Link {
@@ -115,11 +117,16 @@ impl Link {
         !candidates.is_empty() && peer.name == self.name && candidates == self.started_with
     }
 
-    /// Whether the far end of this link said it is `peer`, and `peer` is at the place and under
-    /// the name the link was started with. A name and addresses alone are not enough: the room
-    /// hands both to everyone, so they say nothing of who is at the far end of the link.
+    /// Whether the far end of this link claimed to be `peer`, with a signature by the key the
+    /// room lists for `peer`, and `peer` is at the place and under the name the link was started
+    /// with. A name and addresses alone are not enough: the room hands both to everyone, so they
+    /// say nothing of who is at the far end of the link. Nor is the id alone: it is listed for
+    /// everyone too, while the key's private half is only its participant's.
     fn is_said_to_be(&self, peer: &PeerInfo) -> bool {
-        self.claimed == Some(peer.id) && self.is_at(peer)
+        self.claimed
+            .as_ref()
+            .is_some_and(|claim| claim.id() == peer.id && claim.is_signed_by(peer.link_key.as_deref()))
+            && self.is_at(peer)
     }
 }
 
@@ -282,9 +289,9 @@ impl Roster {
     /// whoever enters a new id). Said over the link itself, so it is theirs to say; the link goes
     /// on as the link to `id` once the room lists someone of that name at the addresses the
     /// link was started with, which may be already.
-    pub fn claimed(&mut self, link: Uuid, id: Uuid) -> Vec<Audio> {
+    pub fn claimed(&mut self, link: Uuid, claim: LinkClaim) -> Vec<Audio> {
         if let Some(link) = self.links.iter_mut().find(|l| l.peer == link) {
-            link.claimed = Some(id);
+            link.claimed = Some(claim);
         }
         self.carry_over()
     }
@@ -299,7 +306,7 @@ impl Roster {
             .links
             .iter()
             .filter_map(|link| {
-                let to = link.claimed.filter(|to| *to != link.peer)?;
+                let to = link.claimed.as_ref().map(LinkClaim::id).filter(|to| *to != link.peer)?;
                 self.peers
                     .iter()
                     .any(|p| p.id == to && link.is_said_to_be(p))
@@ -515,7 +522,7 @@ impl Roster {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::network::AddressCandidate;
+    use crate::network::{AddressCandidate, LinkIdentity};
 
     fn me() -> Uuid {
         Uuid::from_u128(1)
@@ -523,6 +530,16 @@ mod tests {
 
     fn id(id: u128) -> Uuid {
         Uuid::from_u128(id)
+    }
+
+    /// The key the room lists for the participant `id`
+    fn key(id: u128) -> String {
+        LinkIdentity::from_seed(id as u8).public_key()
+    }
+
+    /// What the far end of a link claims when it is the participant `id`: signed by `id`'s key
+    fn says(id: u128) -> LinkClaim {
+        LinkClaim::made_by(&LinkIdentity::from_seed(id as u8), Uuid::from_u128(id))
     }
 
     fn peer(id: u128, addr: Option<&str>) -> PeerInfo {
@@ -540,7 +557,7 @@ mod tests {
             local_addr: None,
             joined_at: 0,
             features: vec![],
-            link_key: None,
+            link_key: Some(key(id)),
         }
     }
 
@@ -548,7 +565,7 @@ mod tests {
         Audio::Start {
             peer: Uuid::from_u128(id),
             candidates: vec![addr.parse().unwrap()],
-            link_key: None,
+            link_key: Some(key(id)),
         }
     }
 
@@ -1241,7 +1258,7 @@ mod tests {
     ) {
         let mut roster = hearing(&[2]);
         roster.left(id(2));
-        roster.claimed(id(2), id(12));
+        roster.claimed(id(2), says(12));
         let again = named(12, "peer-2", Some("192.0.2.2:5000"));
 
         roster.joined(again.clone());
@@ -1272,7 +1289,7 @@ mod tests {
         roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
         roster.link_is(id(2), LinkHealth::Heard);
         roster.left(id(2));
-        assert_eq!(roster.claimed(id(2), id(12)), vec![]);
+        assert_eq!(roster.claimed(id(2), says(12)), vec![]);
         roster.joined(named(12, "Ben", None));
 
         let audio = roster.updated(named(12, "Ben", Some("192.0.2.2:5000")));
@@ -1341,7 +1358,7 @@ mod tests {
     ) {
         let mut roster = Roster::default();
         roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
-        roster.claimed(id(2), id(12));
+        roster.claimed(id(2), says(12));
 
         let audio = roster.entered_again(
             id(11),
@@ -1410,7 +1427,7 @@ mod tests {
     ) {
         let mut roster = Roster::default();
         roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
-        roster.claimed(id(2), id(12));
+        roster.claimed(id(2), says(12));
         let audio = roster.entered_again(
             id(11),
             vec![named(12, "Ben", None)],
@@ -1489,6 +1506,71 @@ mod tests {
 
     /// Verifies: REQ-CON-150
     #[test]
+    fn a_peer_left_while_heard_and_a_participant_already_linked_to_publishes_their_name_and_addresses_keeps_both_links(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(
+            me(),
+            vec![
+                named(2, "Ben", Some("192.0.2.2:5000")),
+                named(3, "Cleo", Some("198.51.100.3:6000")),
+            ],
+        );
+        roster.link_is(id(2), LinkHealth::Heard);
+        roster.link_is(id(3), LinkHealth::Heard);
+        roster.left(id(2));
+
+        let audio = roster.updated(named(3, "Ben", Some("192.0.2.2:5000")));
+
+        assert_eq!(audio, vec![]);
+        assert_eq!(roster.linked(), vec![id(3)]);
+        assert_eq!(roster.departed(), vec![(id(2), "Ben".to_string())]);
+    }
+
+    /// The id is listed for everyone, so naming it proves nothing: the claim has to be signed by
+    /// the key the room lists for that id.
+    ///
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_and_the_link_names_an_entry_with_their_name_and_addresses_signed_by_another_key_starts_a_link_to_the_entry_and_keeps_the_departed_one(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+        roster.link_is(id(2), LinkHealth::Heard);
+        roster.left(id(2));
+        roster.joined(named(66, "Ben", None));
+        roster.updated(named(66, "Ben", Some("192.0.2.2:5000")));
+        let eve = LinkIdentity::from_seed(99);
+
+        let audio = roster.claimed(id(2), LinkClaim::made_by(&eve, id(66)));
+
+        assert_eq!(audio, vec![]);
+        assert_eq!(roster.linked(), vec![id(66)]);
+        assert_eq!(roster.departed(), vec![(id(2), "Ben".to_string())]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
+    fn a_peer_left_while_heard_and_the_link_names_an_entry_the_room_lists_no_key_for_keeps_the_departed_link(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![named(2, "Ben", Some("192.0.2.2:5000"))]);
+        roster.link_is(id(2), LinkHealth::Heard);
+        roster.left(id(2));
+        let mut keyless = named(12, "Ben", None);
+        keyless.link_key = None;
+        roster.joined(keyless.clone());
+        keyless.candidates = named(12, "Ben", Some("192.0.2.2:5000")).candidates;
+        roster.updated(keyless);
+
+        let audio = roster.claimed(id(2), says(12));
+
+        assert_eq!(audio, vec![]);
+        assert_eq!(roster.departed(), vec![(id(2), "Ben".to_string())]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[test]
     fn a_peer_left_while_heard_and_two_entries_have_their_name_and_addresses_goes_on_with_the_link_as_the_one_the_link_says_it_is(
     ) {
         let mut roster = Roster::default();
@@ -1500,7 +1582,7 @@ mod tests {
         roster.joined(named(12, "Ben", None));
         roster.updated(named(12, "Ben", Some("192.0.2.2:5000")));
 
-        let audio = roster.claimed(id(2), id(12));
+        let audio = roster.claimed(id(2), says(12));
 
         assert_eq!(
             audio,
@@ -1533,7 +1615,7 @@ mod tests {
             vec![start(12, "192.0.2.2:5000")]
         );
 
-        let audio = roster.claimed(id(2), id(12));
+        let audio = roster.claimed(id(2), says(12));
 
         assert_eq!(
             audio,
@@ -1562,7 +1644,7 @@ mod tests {
         roster.link_is(id(2), LinkHealth::Heard);
         roster.link_is(id(12), LinkHealth::Heard);
 
-        let audio = roster.claimed(id(2), id(12));
+        let audio = roster.claimed(id(2), says(12));
 
         assert_eq!(audio, vec![end(2)]);
         assert_eq!(roster.linked(), vec![id(12)]);
@@ -1582,7 +1664,7 @@ mod tests {
         roster.updated(named(12, "Ben", Some("192.0.2.2:5000")));
         roster.link_is(id(12), LinkHealth::Heard);
 
-        let audio = roster.claimed(id(2), id(12));
+        let audio = roster.claimed(id(2), says(12));
         let later = roster.left(id(2));
 
         assert_eq!(audio, vec![end(2)]);
@@ -1599,7 +1681,7 @@ mod tests {
             roster.link_is(id(2), LinkHealth::Heard);
             roster.left(id(2));
             roster.joined(named(12, name, None));
-            roster.claimed(id(2), id(12));
+            roster.claimed(id(2), says(12));
 
             let audio = roster.updated(named(12, name, Some(addr)));
 
