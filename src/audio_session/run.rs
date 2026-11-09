@@ -1021,7 +1021,12 @@ pub(super) async fn run(
         if std::time::Instant::now() >= next_stats_at {
             next_stats_at = std::time::Instant::now() + STATS_INTERVAL;
             for link in &mut links {
-                link.refresh(&preset, bandwidth_required_bps, sample_rate);
+                link.refresh(
+                    &preset,
+                    bandwidth_required_bps,
+                    sample_rate,
+                    shared.own_id(),
+                );
                 // Whatever moved the delay - a preset switch, an adaptation,
                 // a reconnect, the peer saying how long its packets are - the
                 // display follows (ADR-031)

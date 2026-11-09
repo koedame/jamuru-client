@@ -17,7 +17,7 @@ use crate::protocol::{
 
 use super::bandwidth::{samples_per_audio_packet, UDP_IP_OVERHEAD_BYTES};
 use super::clock::now_unix_us;
-use super::encryption::{LinkIdentity, LinkSecurity, Opened, SecureLink};
+use super::encryption::{LinkClaim, LinkIdentity, LinkSecurity, Opened, SecureLink};
 use super::error::NetworkError;
 use super::fec::{FecDecoder, FecEncoder, FecPacket, RecoveredPacket};
 use super::link_facts::{
@@ -1146,6 +1146,11 @@ pub struct Connection {
     peer_latency_info: Arc<RwLock<Option<PeerLatencyInfo>>>,
     /// Callback for when peer latency info is received
     latency_info_callback: Option<Arc<LatencyInfoCallback>>,
+    /// The id the room knows this app by, and the key it signed in with under that id: told to
+    /// the peer over the link with every keep-alive
+    own_id: Arc<Mutex<Option<(uuid::Uuid, LinkIdentity)>>>,
+    /// What the peer last claimed, over the link, about the id the room knows them by
+    peer_claim: Arc<RwLock<Option<LinkClaim>>>,
     /// Connection start time for uptime tracking
     connection_start: Arc<std::sync::Mutex<Option<Instant>>>,
     /// How the link came up, for the usage log
@@ -1249,6 +1254,8 @@ impl Connection {
             rtt_measurement: Arc::new(RwLock::new(RttMeasurement::default())),
             peer_latency_info: Arc::new(RwLock::new(None)),
             latency_info_callback: None,
+            own_id: Arc::new(Mutex::new(None)),
+            peer_claim: Arc::new(RwLock::new(None)),
             connection_start: Arc::new(std::sync::Mutex::new(None)),
             link_facts: Arc::new(LinkFacts::new()),
             secure_link: Arc::new(SecureLink::unbound()),
@@ -1823,6 +1830,22 @@ impl Connection {
         Ok(())
     }
 
+    /// Tells the peer, over the link from now on, that the room knows this app by `id`, signed
+    /// with `identity`, the key the room lists for `id`.
+    ///
+    /// The server gives whoever enters a new id while a link goes on. The room's listing, which
+    /// gives the same name and addresses to everyone, does not tell the peer which entry is
+    /// the one this link goes to; this does, sealed with the link's keys and signed by the key
+    /// only that entry's participant has.
+    pub fn set_own_id(&self, id: uuid::Uuid, identity: LinkIdentity) {
+        *self.own_id.lock() = Some((id, identity));
+    }
+
+    /// What the peer claimed, over the encrypted link, about the id the room knows them by
+    pub fn peer_claim(&self) -> Option<LinkClaim> {
+        self.peer_claim.read().clone()
+    }
+
     /// Get the current RTT estimate in milliseconds, or `None` before the
     /// first sample arrives (REQ-LAT-130)
     pub fn rtt_ms(&self) -> Option<f32> {
@@ -2057,6 +2080,7 @@ impl Connection {
         let sequence_tracker = self.sequence_tracker.clone();
         let rtt_measurement = self.rtt_measurement.clone();
         let peer_latency_info = self.peer_latency_info.clone();
+        let peer_claim = self.peer_claim.clone();
         let latency_info_callback = self.latency_info_callback.clone();
         let link_facts = self.link_facts.clone();
         let route = self.route.clone();
@@ -2313,6 +2337,12 @@ impl Connection {
                             &peer_latency_info,
                         );
                     }
+                    // What a link that is not encrypted carries is not the peer's to say
+                    PacketType::PeerId if secure_link.security() == LinkSecurity::Encrypted => {
+                        if let Some(claim) = secure_link.read_claim(&packet.payload) {
+                            *peer_claim.write() = Some(claim);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -2442,6 +2472,7 @@ impl Connection {
         let reconnect_config = self.reconnect_config;
         let paused = self.sending_paused.clone();
         let link_facts = self.link_facts.clone();
+        let own_id = self.own_id.clone();
 
         let handle = tokio::spawn(async move {
             let mut interval = interval(keep_alive_interval);
@@ -2464,6 +2495,20 @@ impl Connection {
                 let packet = Packet::keep_alive(sequence.fetch_add(1, Ordering::Relaxed));
                 if let Err(e) = send_sealed(&transport, &secure_link, packet, remote_addr).await {
                     warn!("Failed to send keep-alive: {}", e);
+                }
+
+                // Say who the room knows us as, once the keys allow it. Sent every time: a
+                // datagram may be lost, and the peer holds the latest it heard.
+                let claim = own_id
+                    .lock()
+                    .as_ref()
+                    .and_then(|(id, identity)| secure_link.claim_payload(identity, *id));
+                if let (Some(claim), true) = (claim, secure_link.can_send_media()) {
+                    let packet = Packet::peer_id(sequence.fetch_add(1, Ordering::Relaxed), claim);
+                    if let Err(e) = send_sealed(&transport, &secure_link, packet, remote_addr).await
+                    {
+                        warn!("Failed to send our id: {}", e);
+                    }
                 }
 
                 // Send latency ping for RTT measurement, once the keys allow it
@@ -4069,6 +4114,61 @@ mod tests {
         assert!(a.prediction_handle.is_none());
         assert!(b.prediction_handle.is_none());
         assert_eq!(a.route.lock().predicted, None);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[tokio::test]
+    async fn when_one_end_sets_the_id_the_room_knows_it_by_the_other_end_hears_the_claim_over_the_link_signed_by_its_key(
+    ) {
+        let mut a = conn().await;
+        let mut b = conn().await;
+        trust_each_other(&mut a, &mut b);
+        let (a_at, b_at) = (a.local_addr(), b.local_addr());
+        let (from_a, from_b) = tokio::join!(a.connect(b_at), b.connect(a_at));
+        from_a.unwrap();
+        from_b.unwrap();
+        assert_eq!(b.peer_claim(), None, "nothing is said before it is set");
+
+        let ben = uuid::Uuid::from_u128(12);
+        let bens_key = LinkIdentity::generate();
+        a.set_own_id(ben, bens_key.clone());
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while b.peer_claim().is_none() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the id is said with the next keep-alive");
+        let claim = b.peer_claim().unwrap();
+        assert_eq!(claim.id(), ben);
+        assert!(claim.is_signed_by(Some(&bens_key.public_key())));
+        assert!(
+            !claim.is_signed_by(Some(&LinkIdentity::generate().public_key())),
+            "another key did not sign it"
+        );
+        assert_eq!(a.peer_claim(), None, "the end that said it hears nothing");
+    }
+
+    /// Verifies: REQ-CON-150
+    #[tokio::test]
+    async fn when_an_id_arrives_in_the_clear_on_an_encrypted_link_it_is_not_taken() {
+        let mut a = conn().await;
+        let mut b = conn().await;
+        trust_each_other(&mut a, &mut b);
+        let (a_at, b_at) = (a.local_addr(), b.local_addr());
+        let (from_a, from_b) = tokio::join!(a.connect(b_at), b.connect(a_at));
+        from_a.unwrap();
+        from_b.unwrap();
+        let mallory = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        mallory
+            .send_to(&Packet::peer_id(1, vec![66; 80]).to_bytes(), b_at)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        assert_eq!(b.peer_claim(), None);
     }
 
     /// Verifies: REQ-CON-115

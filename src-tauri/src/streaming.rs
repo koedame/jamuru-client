@@ -20,7 +20,8 @@ pub use jamjam::audio_session::LinkTarget;
 use jamjam::audio_session::{self, BandwidthSnapshot, LinkReport, Params, Shared};
 use jamjam::network::dropout::{Heard, Side, Standing};
 use jamjam::network::{
-    status_label, ConnectionStats, LatencyBreakdown, LinkHealth, LinkSnapshot, LocalLatencyInfo,
+    status_label, ConnectionStats, LatencyBreakdown, LinkClaim, LinkHealth, LinkIdentity,
+    LinkSnapshot, LocalLatencyInfo,
 };
 
 pub(crate) use jamjam::audio_session::Command as StreamingCommand;
@@ -383,6 +384,16 @@ impl StreamingState {
     /// links were opened.
     pub fn link_healths(&self) -> Vec<(Uuid, LinkHealth)> {
         self.shared.link_healths()
+    }
+
+    /// The room knows this app by `id` now: the links tell their far ends
+    pub fn set_own_id(&self, id: Uuid, identity: LinkIdentity) {
+        self.shared.set_own_id(id, identity);
+    }
+
+    /// What the far ends of the links claimed, over the links, about the ids the room knows them by
+    pub fn link_claims(&self) -> Vec<(Uuid, LinkClaim)> {
+        self.shared.link_claims()
     }
 
     /// When each audio link last received anything, in the order the links were opened

@@ -48,6 +48,8 @@ pub enum PacketType {
     LatencyPong = 0x06,
     /// Latency configuration info exchange
     LatencyInfo = 0x07,
+    /// The id the room knows the sender by, sealed with the link's keys
+    PeerId = 0x08,
 }
 
 impl TryFrom<u8> for PacketType {
@@ -62,6 +64,7 @@ impl TryFrom<u8> for PacketType {
             0x05 => Ok(PacketType::LatencyPing),
             0x06 => Ok(PacketType::LatencyPong),
             0x07 => Ok(PacketType::LatencyInfo),
+            0x08 => Ok(PacketType::PeerId),
             _ => Err(()),
         }
     }
@@ -239,6 +242,21 @@ impl Packet {
             timestamp: 0,
             flags: PacketFlags::default(),
             payload: info.to_bytes(),
+        }
+    }
+
+    /// A packet claiming the id the room knows the sender by. The server gives whoever enters a
+    /// new id, and a link outlives the sender's entry: what the other end is told over the link
+    /// itself, signed with the key the room lists for that id (`claim`, see
+    /// `SecureLink::claim_payload`), is what shows the link's far end is that participant.
+    pub fn peer_id(sequence: u32, claim: Vec<u8>) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            packet_type: PacketType::PeerId,
+            sequence,
+            timestamp: 0,
+            flags: PacketFlags::default(),
+            payload: claim,
         }
     }
 
@@ -546,6 +564,15 @@ impl LatencyInfoMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn when_a_peer_id_packet_goes_over_the_wire_the_same_claim_is_read_back() {
+        let wire = Packet::peer_id(7, vec![9; 80]).to_bytes();
+        let read = Packet::from_bytes(&wire).unwrap();
+
+        assert_eq!(read.packet_type, PacketType::PeerId);
+        assert_eq!(read.payload, vec![9; 80]);
+    }
 
     #[test]
     fn when_a_route_probe_is_sent_the_peer_reads_its_token_and_that_it_is_a_request() {

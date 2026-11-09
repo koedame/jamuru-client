@@ -17,7 +17,8 @@ use crate::audio::{
     RoomRecorder,
 };
 use crate::network::{
-    BandwidthStatus, ConnectionStats, LinkFacts, LinkHealth, PeerLatencyInfo, MAX_PEERS_PER_ROOM,
+    BandwidthStatus, ConnectionStats, LinkClaim, LinkFacts, LinkHealth, LinkIdentity,
+    PeerLatencyInfo, MAX_PEERS_PER_ROOM,
 };
 
 /// How many audio links a session holds at most: one to each of the others in a full room.
@@ -76,6 +77,8 @@ pub struct LinkReport {
     pub delay_frames: AtomicU32,
     /// How this link came up, once the connection exists
     pub link_facts: RwLock<Option<Arc<LinkFacts>>>,
+    /// What their app claimed, over the encrypted link, about the id the room knows them by
+    pub peer_claim: RwLock<Option<LinkClaim>>,
 }
 
 impl LinkReport {
@@ -165,6 +168,9 @@ pub struct Shared {
     /// Records the room to files. It outlives a session: the session's callbacks are wired to it
     /// as they start, and the session's end ends the recording.
     pub recorder: RoomRecorder,
+    /// The id the room knows this app by, and the key it entered with under that id. Each link
+    /// tells it to the participant at its far end.
+    pub own_id: Arc<RwLock<Option<(Uuid, LinkIdentity)>>>,
 }
 
 impl Default for Shared {
@@ -200,6 +206,7 @@ impl Shared {
             local_volume: Arc::new(AtomicU32::new(100)),  // 100 = unity gain
             local_pan: Arc::new(AtomicI32::new(0)),       // 0 = centre
             recorder: RoomRecorder::new(),
+            own_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -289,6 +296,35 @@ impl Shared {
             .read()
             .map(|links| links.clone())
             .unwrap_or_default()
+    }
+
+    /// The room knows this app by `id`, under the key `identity` (it entered, or entered again
+    /// as someone new): every link goes on to tell its far end so
+    pub fn set_own_id(&self, id: Uuid, identity: LinkIdentity) {
+        if let Ok(mut own) = self.own_id.write() {
+            *own = Some((id, identity));
+        }
+    }
+
+    /// The id the room knows this app by and the key it entered with, once it has entered
+    pub fn own_id(&self) -> Option<(Uuid, LinkIdentity)> {
+        self.own_id.read().ok().and_then(|own| own.clone())
+    }
+
+    /// For each link, by the participant it goes to, what their app claimed over the link about
+    /// the id the room knows them by now. Links whose far end has not claimed are left out.
+    pub fn link_claims(&self) -> Vec<(Uuid, LinkClaim)> {
+        self.link_reports()
+            .into_iter()
+            .filter_map(|(peer, report)| {
+                let claim = report
+                    .peer_claim
+                    .read()
+                    .ok()
+                    .and_then(|claim| claim.clone())?;
+                Some((peer, claim))
+            })
+            .collect()
     }
 
     /// How the audio link to each participant is doing, in the order the links were opened.
