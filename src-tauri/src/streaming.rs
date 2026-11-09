@@ -385,6 +385,16 @@ impl StreamingState {
         self.shared.link_healths()
     }
 
+    /// The room knows this app by `id` now: the links tell their far ends
+    pub fn set_own_id(&self, id: Uuid) {
+        self.shared.set_own_id(id);
+    }
+
+    /// The ids the far ends of the links said, over the links, the room knows them by
+    pub fn link_claims(&self) -> Vec<(Uuid, Uuid)> {
+        self.shared.link_claims()
+    }
+
     /// When each audio link last received anything, in the order the links were opened
     pub fn link_last_heard(&self) -> Vec<Heard> {
         self.link_reports()

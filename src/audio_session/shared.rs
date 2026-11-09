@@ -76,6 +76,8 @@ pub struct LinkReport {
     pub delay_frames: AtomicU32,
     /// How this link came up, once the connection exists
     pub link_facts: RwLock<Option<Arc<LinkFacts>>>,
+    /// The id their app told us, over the encrypted link, that the room knows them by
+    pub peer_said_id: RwLock<Option<Uuid>>,
 }
 
 impl LinkReport {
@@ -165,6 +167,8 @@ pub struct Shared {
     /// Records the room to files. It outlives a session: the session's callbacks are wired to it
     /// as they start, and the session's end ends the recording.
     pub recorder: RoomRecorder,
+    /// The id the room knows this app by. Each link tells it to the participant at its far end.
+    pub own_id: Arc<RwLock<Option<Uuid>>>,
 }
 
 impl Default for Shared {
@@ -200,6 +204,7 @@ impl Shared {
             local_volume: Arc::new(AtomicU32::new(100)),  // 100 = unity gain
             local_pan: Arc::new(AtomicI32::new(0)),       // 0 = centre
             recorder: RoomRecorder::new(),
+            own_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -289,6 +294,31 @@ impl Shared {
             .read()
             .map(|links| links.clone())
             .unwrap_or_default()
+    }
+
+    /// The room knows this app by `id` (it entered, or entered again as someone new): every link
+    /// goes on to tell its far end so
+    pub fn set_own_id(&self, id: Uuid) {
+        if let Ok(mut own) = self.own_id.write() {
+            *own = Some(id);
+        }
+    }
+
+    /// The id the room knows this app by, once it has entered
+    pub fn own_id(&self) -> Option<Uuid> {
+        self.own_id.read().ok().and_then(|own| *own)
+    }
+
+    /// For each link, by the participant it goes to, the id their app told us over the link that
+    /// the room knows them by now. Links whose far end has not told are left out.
+    pub fn link_claims(&self) -> Vec<(Uuid, Uuid)> {
+        self.link_reports()
+            .into_iter()
+            .filter_map(|(peer, report)| {
+                let said = report.peer_said_id.read().ok().and_then(|said| *said)?;
+                Some((peer, said))
+            })
+            .collect()
     }
 
     /// How the audio link to each participant is doing, in the order the links were opened.

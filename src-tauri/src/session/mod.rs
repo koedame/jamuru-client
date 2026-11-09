@@ -304,6 +304,14 @@ impl<R: Runtime> Backend for AppBackend<R> {
         (audio.is_active(), audio.link_healths())
     }
 
+    fn entered_as(&self, id: Uuid) {
+        self.app.state::<streaming::StreamingState>().set_own_id(id);
+    }
+
+    fn link_claims(&self) -> Vec<(Uuid, Uuid)> {
+        self.app.state::<streaming::StreamingState>().link_claims()
+    }
+
     async fn advertise(&self, conn: u32) -> Result<(), String> {
         let app = &self.app;
         // A session that runs is on its socket: preparing one would bind another, whose

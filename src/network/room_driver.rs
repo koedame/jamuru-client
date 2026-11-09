@@ -107,6 +107,12 @@ pub trait Backend: Send + Sync + 'static {
     fn stop_audio(&self) -> impl Future<Output = ()> + Send;
     /// Whether the audio session runs, and how each of its links is doing
     fn audio_state(&self) -> (bool, Vec<(Uuid, LinkHealth)>);
+    /// The room knows this participant by `id` now (it was just entered): the audio links tell
+    /// the other ends so, over the links
+    fn entered_as(&self, id: Uuid);
+    /// For each audio link, by the participant it goes to, the id their app told us over the
+    /// link that the room knows them by
+    fn link_claims(&self) -> Vec<(Uuid, Uuid)>;
     /// Tells the room where to send audio
     fn advertise(&self, conn: u32) -> impl Future<Output = Result<(), String>> + Send;
     /// Starts the audio session on the devices if none runs, with no link, so the microphone is
@@ -239,6 +245,7 @@ impl<B: Backend> Driver<B> {
             Ok(entered) => entered,
             Err(e) => return self.fail(e),
         };
+        self.backend().entered_as(entered.peer_id);
         let audio = self.change(|session| session.entered(conn, entered, name, ""));
         self.run_audio(conn, audio).await;
         Ok(self.snapshot())
@@ -255,6 +262,7 @@ impl<B: Backend> Driver<B> {
             Ok(entered) => entered,
             Err(e) => return self.fail(e),
         };
+        self.backend().entered_as(entered.peer_id);
         let audio = self.change(|session| session.entered(conn, entered, name, ""));
         self.run_audio(conn, audio).await;
         Ok(self.snapshot())
@@ -557,6 +565,7 @@ impl<B: Backend> Driver<B> {
                     Some(code) => {
                         let name = self.backend().peer_name();
                         let entered = self.backend().join_room(conn, code, &name).await?;
+                        self.backend().entered_as(entered.peer_id);
                         let (running, healths) = self.backend().audio_state();
                         let healths = if running { healths } else { Vec::new() };
                         let audio = self.change(|session| {
@@ -628,7 +637,12 @@ impl<B: Backend> Driver<B> {
         // Read once it is this step's turn: a step that was opening links while this one waited
         // has opened them by now.
         let (running, healths) = self.backend().audio_state();
-        let audio = self.change(|session| session.following_the_links(conn, running, healths));
+        let claims = self.backend().link_claims();
+        let audio = self.change(|session| {
+            let mut audio = session.following_the_links(conn, running, healths);
+            audio.extend(session.links_claimed(conn, claims));
+            audio
+        });
         self.run_audio(conn, audio).await;
     }
 
@@ -769,6 +783,10 @@ mod tests {
         peers: Mutex<Vec<PeerInfo>>,
         /// Whether audio runs, and how each link is doing
         audio: Mutex<(bool, Vec<(Uuid, LinkHealth)>)>,
+        /// The ids the far ends of the links say the room knows them by
+        claims: Mutex<Vec<(Uuid, Uuid)>>,
+        /// How many times the claims were read
+        claim_reads: std::sync::atomic::AtomicU32,
     }
 
     impl FakeBackend {
@@ -857,6 +875,14 @@ mod tests {
 
         async fn stop_audio(&self) {
             self.ask("stop_audio");
+        }
+
+        fn entered_as(&self, _id: Uuid) {}
+
+        fn link_claims(&self) -> Vec<(Uuid, Uuid)> {
+            self.claim_reads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.claims.lock().unwrap().clone()
         }
 
         fn audio_state(&self) -> (bool, Vec<(Uuid, LinkHealth)>) {
@@ -1088,10 +1114,20 @@ mod tests {
 
     /// Verifies: REQ-CON-150
     #[tokio::test]
-    async fn the_connection_is_lost_and_ben_is_listed_under_a_new_id_goes_on_with_the_audio_link_as_his_new_id(
+    async fn the_connection_is_lost_and_ben_is_listed_under_a_new_id_and_the_link_says_it_is_him_goes_on_with_the_audio_link_as_his_new_id(
     ) {
         let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
         *driver.backend().peers.lock().unwrap() = vec![at(3, "Ben", "192.0.2.2:5000")];
+        *driver.backend().claims.lock().unwrap() = vec![(id(2), id(3))];
+        // The link has said so before the connection is lost: the roster has heard it
+        let reads = || {
+            driver
+                .backend()
+                .claim_reads
+                .load(std::sync::atomic::Ordering::SeqCst)
+        };
+        let asked_at = reads();
+        until(&driver, |_| reads() >= asked_at + 2).await;
 
         lose_the_connection_and_get_it_back(&driver).await;
 
@@ -1106,6 +1142,27 @@ mod tests {
             )),
             1
         );
+        assert_eq!(driver.snapshot().streaming_peer_ids, [id_text(3)]);
+    }
+
+    /// Verifies: REQ-CON-150
+    #[tokio::test]
+    async fn the_connection_is_lost_and_someone_is_listed_with_ben_s_name_and_addresses_and_the_link_does_not_say_it_is_them_opens_a_link_to_them_and_keeps_bens(
+    ) {
+        let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
+        *driver.backend().peers.lock().unwrap() = vec![at(3, "Ben", "192.0.2.2:5000")];
+
+        lose_the_connection_and_get_it_back(&driver).await;
+
+        assert_eq!(driver.backend().asked("link"), 2);
+        assert!(!driver
+            .backend()
+            .asked
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|asked| asked.starts_with("relink")));
+        assert_eq!(driver.backend().asked("unlink"), 0);
         assert_eq!(driver.snapshot().streaming_peer_ids, [id_text(3)]);
     }
 

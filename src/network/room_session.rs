@@ -445,6 +445,19 @@ impl State {
             .collect()
     }
 
+    /// The far ends of the audio links have said, over the links, which ids the room knows them
+    /// by (`claims`: the participant a link goes to, and the id its far end says it is). Returns
+    /// the audio steps that follow.
+    pub fn links_claimed(&mut self, conn: u32, claims: Vec<(Uuid, Uuid)>) -> Vec<Audio> {
+        if !self.is_the_room_of(conn) {
+            return Vec::new();
+        }
+        claims
+            .into_iter()
+            .flat_map(|(link, id)| self.roster.claimed(link, id))
+            .collect()
+    }
+
     /// Whether the session is in a room over the connection `conn`.
     pub fn is_in_room_of(&self, conn: u32) -> bool {
         self.is_the_room_of(conn)

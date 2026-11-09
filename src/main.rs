@@ -1399,6 +1399,19 @@ impl Backend for CliBackend {
         }
     }
 
+    fn entered_as(&self, id: Uuid) {
+        if let Some(session) = self.audio().as_ref() {
+            session.controls.shared.set_own_id(id);
+        }
+    }
+
+    fn link_claims(&self) -> Vec<(Uuid, Uuid)> {
+        match self.audio().as_ref() {
+            Some(session) => session.controls.shared.link_claims(),
+            None => Vec::new(),
+        }
+    }
+
     /// Tells the room where to send audio. Done before any peer is known, because the peer needs
     /// an address to send to (ADR-026).
     async fn advertise(&self, conn: u32) -> Result<(), String> {

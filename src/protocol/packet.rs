@@ -8,6 +8,7 @@
 //! - flags: 2 bytes
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Protocol version
 ///
@@ -48,6 +49,8 @@ pub enum PacketType {
     LatencyPong = 0x06,
     /// Latency configuration info exchange
     LatencyInfo = 0x07,
+    /// The id the room knows the sender by, sealed with the link's keys
+    PeerId = 0x08,
 }
 
 impl TryFrom<u8> for PacketType {
@@ -62,6 +65,7 @@ impl TryFrom<u8> for PacketType {
             0x05 => Ok(PacketType::LatencyPing),
             0x06 => Ok(PacketType::LatencyPong),
             0x07 => Ok(PacketType::LatencyInfo),
+            0x08 => Ok(PacketType::PeerId),
             _ => Err(()),
         }
     }
@@ -240,6 +244,28 @@ impl Packet {
             flags: PacketFlags::default(),
             payload: info.to_bytes(),
         }
+    }
+
+    /// A packet saying the room knows the sender by `id`. The server gives whoever enters a new
+    /// id, and a link outlives the sender's entry: what the other end is told over the link
+    /// itself is what shows the link's far end is that participant.
+    pub fn peer_id(sequence: u32, id: Uuid) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            packet_type: PacketType::PeerId,
+            sequence,
+            timestamp: 0,
+            flags: PacketFlags::default(),
+            payload: id.as_bytes().to_vec(),
+        }
+    }
+
+    /// The id a [`Self::peer_id`] packet says, `None` for any other packet or a malformed one
+    pub fn peer_id_said(&self) -> Option<Uuid> {
+        if self.packet_type != PacketType::PeerId {
+            return None;
+        }
+        Uuid::from_slice(&self.payload).ok()
     }
 
     /// The header as it goes on the wire
@@ -546,6 +572,28 @@ impl LatencyInfoMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn when_a_peer_id_packet_goes_over_the_wire_the_same_id_is_read_back() {
+        let id = Uuid::from_u128(0x1234_5678_9abc_def0);
+
+        let wire = Packet::peer_id(7, id).to_bytes();
+        let read = Packet::from_bytes(&wire).unwrap();
+
+        assert_eq!(read.packet_type, PacketType::PeerId);
+        assert_eq!(read.peer_id_said(), Some(id));
+    }
+
+    #[test]
+    fn when_a_peer_id_packet_does_not_hold_exactly_an_id_no_id_is_read() {
+        for payload in [vec![], vec![1u8; 15], vec![1u8; 17]] {
+            let mut packet = Packet::peer_id(1, Uuid::nil());
+            packet.payload = payload;
+
+            assert_eq!(packet.peer_id_said(), None);
+        }
+        assert_eq!(Packet::keep_alive(1).peer_id_said(), None);
+    }
 
     #[test]
     fn when_a_route_probe_is_sent_the_peer_reads_its_token_and_that_it_is_a_request() {

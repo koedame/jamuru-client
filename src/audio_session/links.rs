@@ -263,7 +263,13 @@ impl Link {
     /// Publishes the link's statistics and what the peer told about its
     /// audio, and follows the peer's sample rate and channels. Does nothing
     /// while the link is not up, or while its connection is busy sending.
-    pub(super) fn refresh(&mut self, preset: &AudioPreset, required_bps: f64, sample_rate: u32) {
+    pub(super) fn refresh(
+        &mut self,
+        preset: &AudioPreset,
+        required_bps: f64,
+        sample_rate: u32,
+        own_id: Option<Uuid>,
+    ) {
         let Some(connection) = self.connection().cloned() else {
             return;
         };
@@ -272,6 +278,12 @@ impl Link {
         };
         // The log keeps the start of an id, which tells the links apart
         let peer = self.peer;
+        if let Some(id) = own_id {
+            conn.set_own_id(id);
+        }
+        if let Ok(mut said) = self.report.peer_said_id.write() {
+            *said = conn.peer_said_id();
+        }
         let conn_stats = conn.stats();
 
         // Log quality transitions once, on the edge (REQ-LAT-107). Held
