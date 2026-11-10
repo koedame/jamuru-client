@@ -122,13 +122,23 @@ jobs:
           git commit -m "Regenerate the third-party license notices"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
           sha=$(git rev-parse HEAD)
+          # GitHub can take several minutes to create the runs of a push made by
+          # the workflow's own token (4 minutes on 11/10), so wait up to 10
+          # minutes for the first one and sweep once more after it appears.
           approved=0
-          for _ in 1 2 3 4 5 6; do
+          for _ in $(seq 60); do
             sleep 10
             for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&event=pull_request&status=action_required" --jq '.workflow_runs[].id'); do
               gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"
               approved=$((approved + 1))
             done
+            if [ "$approved" -gt 0 ]; then
+              break
+            fi
+          done
+          sleep 20
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&event=pull_request&status=action_required" --jq '.workflow_runs[].id'); do
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"
           done
           if [ "$approved" -eq 0 ]; then
             echo "::error::No run of the new commit was waiting for approval."
