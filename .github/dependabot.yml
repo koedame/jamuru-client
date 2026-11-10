@@ -23,6 +23,11 @@ updates:
     schedule:
       interval: "weekly"
     groups:
+      # `init` and `analyze` must stay on the same version, so every
+      # codeql-action update (major included) goes into one PR. Groups match
+      # top to bottom, so this one has to come before the minor-patch group.
+      codeql-action:
+        patterns: ["github/codeql-action/*"]
       actions-minor-patch:
         update-types: ["minor", "patch"]
 
