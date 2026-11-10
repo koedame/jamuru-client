@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 /**
  * Error message conversion utility
  *
@@ -152,7 +154,7 @@ export function parseErrorMessage(errorMessage: string): ParsedError {
  */
 export function formatErrorForDisplay(
   errorMessage: string,
-  t: (key: string, options?: { amount: string }) => string,
+  t: TFunction,
   language?: string
 ): { title: string; message: string } {
   const parsed = parseErrorMessage(errorMessage);

@@ -152,7 +152,7 @@ function problemCodeKey(type: ProblemCode["type"]): string {
 function problemArgs(
   code: ProblemCode,
   t: TFunction
-): Record<string, string | number> | undefined {
+): Record<string, string | number> {
   switch (code.type) {
     case "HighJitter":
       return { jitter: code.data.jitter_ms.toFixed(1) };
@@ -172,7 +172,7 @@ function problemArgs(
     case "LowMemory":
       return { mb: code.data.available_mb };
     default:
-      return undefined;
+      return {};
   }
 }
 
