@@ -4,7 +4,7 @@
 
 ## Status
 
-Accepted
+Accepted。ただし、受信経路が再生の速さで量を保っているときは、窓の最小値の余りのうち 10 ms（480 サンプルフレーム）以内を捨てず速さで戻す。この部分は [ADR-122](./ADR-122-keep-receive-buffer-by-playback-rate.md) で置き換えた。10 ms を超える余りは、この ADR のとおり 1 回で捨てる。
 
 ## Context
 
@@ -59,6 +59,7 @@ Linux の 2 台（PipeWire の仮想デバイス。ホストが混んでいる�
 
 ## 関連
 
+- [ADR-122](./ADR-122-keep-receive-buffer-by-playback-rate.md) - 小さな余りは捨てずに、再生の速さをわずかに変えて戻す
 - [ADR-031](./ADR-031-live-playout-delay.md) - 段数を動かすときの保持量の動かし方（捨てる位置と仕組みを共有する）
 - [ADR-046](./ADR-046-audio-gaps-are-measured-not-guessed.md) - 深さが増える一方であることを見つけ、記録の仕組みを入れた
 - [ADR-026](./ADR-026-gui-audio-path.md) - 空読みは再生位置を進めずに待つ

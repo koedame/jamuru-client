@@ -186,3 +186,8 @@ all = "deny"
 [[bin]]
 name = "jamuru"
 path = "src/main.rs"
+
+# Tries the app on simulated bad lines and prints a table; takes condition names (ADR-124)
+[[test]]
+name = "line_trial"
+harness = false
