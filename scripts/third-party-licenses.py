@@ -20,8 +20,8 @@ What goes in:
 hash of everything they are built from; the check recomputes that hash and
 the hash of the output body, so it fails when an input changed without a
 regeneration and when a generated file was edited by hand.
-Regenerating needs cargo-about, network access for `cargo fetch`, and
-`npm ci` in ui/.
+Regenerating needs cargo-about (exactly the version in CARGO_ABOUT_VERSION),
+network access for `cargo fetch`, and `npm ci` in ui/.
 """
 
 import hashlib
@@ -50,6 +50,13 @@ INPUTS = [
 EXTRA_DIR = ROOT / "packaging/third-party"
 HEADER_KEY = "inputs-sha256"
 BODY_KEY = "body-sha256"
+
+# The text cargo-about picks differs between versions (0.9.3 adds per-file ISC
+# headers of ring and replaces the ISC text of aws-lc with a placeholder that has
+# no copyright holder), so every environment must use this one. Change it
+# together with `tool: cargo-about@...` in .github/workflows/dependabot-licenses.yml,
+# after reading the diff of the regenerated notices.
+CARGO_ABOUT_VERSION = "0.9.2"
 
 LINUX_NOTICE_ASSET = "jamuru-linux-bundled-libraries.txt"
 RELEASES_URL = "https://github.com/koedame/jamuru-client/releases"
@@ -128,8 +135,21 @@ def check_policy_sync() -> None:
             )
 
 
+def check_cargo_about_version() -> None:
+    out = subprocess.run(
+        ["cargo", "about", "--version"], capture_output=True, text=True, cwd=ROOT
+    ).stdout.split()
+    have = out[1] if len(out) == 2 and out[0] == "cargo-about" else None
+    if have != CARGO_ABOUT_VERSION:
+        sys.exit(
+            f"cargo-about {CARGO_ABOUT_VERSION} is required (found: {have or 'none'}); "
+            f"install it with `cargo install cargo-about --version {CARGO_ABOUT_VERSION} --locked`"
+        )
+
+
 def cargo_licenses() -> dict:
     """(license id, name, text) -> {(crate, version): repository}"""
+    check_cargo_about_version()
     groups: dict = {}
     for manifest in MANIFESTS:
         subprocess.run(

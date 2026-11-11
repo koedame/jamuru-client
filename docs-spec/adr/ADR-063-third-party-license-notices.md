@@ -34,6 +34,8 @@ MIT・Apache-2.0・BSD・MPL-2.0 は、配るときに著作権表示とライ�
 
 ## Consequences
 
+- cargo-about の版は固定する（スクリプトの `CARGO_ABOUT_VERSION` と、ワークフローの `tool: cargo-about@<版>`）。0.9.3 は ring のソースファイルの ISC ヘッダーを 5 件多く拾い、
+  aws-lc の ISC 本文を著作権者の無い汎用の文に置き換えたため、runner と手元で生成物が食い違った。版を上げるときは、作り直した生成物の差分を読んでから両方を同時に変える
 - 依存を上げるたびに `scripts/third-party-licenses.py` を回して生成物をコミットする（約 2 分。cargo-about が要る）。Dependabot の PR では自動で回る
 - Dependabot は他人が足したコミットのある PR を自動では rebase しなくなる。遅れたら `@dependabot recreate` で作り直す（ワークフローがまた生成物を足す）
 - 生成物は約 700KB で、インストーラーが同じ大きさだけ増える
