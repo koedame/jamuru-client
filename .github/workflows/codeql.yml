@@ -30,6 +30,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The Rust extractor builds every build script and procedural macro from
+      # scratch on each run (about two minutes of manifest loading). Pointing
+      # it at a directory that survives between runs skips almost all of that;
+      # what is analysed does not change. The directory is outside the
+      # checkout so none of its generated sources end up in the database.
+      - name: Point the Rust extractor at a persistent target directory
+        if: matrix.language == 'rust'
+        run: echo "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_TARGET_DIR=${RUNNER_TEMP}/codeql-rust-target" >> "${GITHUB_ENV}"
+
+      # Only pushes to develop (the default branch) and the weekly run save it;
+      # a pull request only restores, so it cannot replace what other runs read.
+      - name: Restore the Rust extractor target directory
+        id: cache-rust
+        if: matrix.language == 'rust'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/codeql-rust-target
+          key: codeql-rust-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            codeql-rust-target-
+
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ matrix.language }}
@@ -37,3 +58,14 @@ jobs:
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:${{ matrix.language }}
+
+      - name: Save the Rust extractor target directory
+        if: >-
+          matrix.language == 'rust'
+          && steps.cache-rust.outputs.cache-hit != 'true'
+          && (github.event_name == 'schedule'
+          || (github.event_name == 'push' && github.ref == 'refs/heads/develop'))
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/codeql-rust-target
+          key: codeql-rust-target-${{ hashFiles('**/Cargo.lock') }}
