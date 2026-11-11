@@ -25,6 +25,7 @@ use crate::streaming::StreamingState;
 use crate::usage::UsageState;
 pub mod buffer_asks;
 mod dropouts;
+pub(crate) use dropouts::tick_while_unconnected;
 
 use jamjam::network::buffer_request::{BufferEvent, BufferRequests, Policy};
 use jamjam::network::device_delay_notice::DeviceDelayNotice;
@@ -938,7 +939,7 @@ pub async fn signaling_poll_events(
     events.extend(buffer_asks::tick(conn, &state, &streaming).await);
     sync_delay_notice(conn, &state, conn_id).await;
     let in_room = state.room_state.lock().await.is_some();
-    dropouts::tick(conn, &state, &streaming, in_room).await;
+    dropouts::tick(Some(conn), &state, &streaming, in_room).await;
 
     // Poll with 50ms timeout to avoid blocking too long
     loop {
