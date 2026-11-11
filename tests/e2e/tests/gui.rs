@@ -2213,6 +2213,24 @@ fn the_operator_looks_at_the_screen_through_ui_methods() {
         .unwrap()
         .unwrap();
     assert_eq!(missing["performed"], false);
+
+    let scrolled = target
+        .call(4, "ui.scroll", serde_json::json!({ "selector": "body" }))
+        .unwrap()
+        .unwrap();
+    assert_eq!(scrolled["performed"], true);
+    assert!(scrolled["in_view"].is_boolean());
+
+    let nothing_to_scroll_to = target
+        .call(
+            5,
+            "ui.scroll",
+            serde_json::json!({ "selector": "#nothing-here" }),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(nothing_to_scroll_to["performed"], false);
+    assert_eq!(nothing_to_scroll_to["in_view"], false);
 }
 
 /// An app command called over the relay does what the same call from the screen
