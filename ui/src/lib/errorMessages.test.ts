@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, afterAll } from "vitest";
+import type { TFunction } from "i18next";
 import i18n from "../i18n";
 import {
   formatClockGap,
@@ -146,8 +147,8 @@ describe("clock skew", () => {
   });
 
   it("passes the size of the gap to the message so the person is told how far off the clock is", () => {
-    const t = (key: string, options?: { amount: string }) =>
-      options ? `${key}|${options.amount}` : key;
+    const t = ((key: string, options?: { amount: string }) =>
+      options ? `${key}|${options.amount}` : key) as unknown as TFunction;
 
     expect(formatErrorForDisplay(ahead, t, "en")).toEqual({
       title: "error.connection.clockSkew.title",
