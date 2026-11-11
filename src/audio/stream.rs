@@ -1469,8 +1469,8 @@ mod tests {
                 .collect()
         };
         let stall = |predict: Option<bool>| -> f32 {
-            let path = ReceivePath::new(CodecType::Pcm, 48000, FRAME, 2)
-                .expect("PCM is always available");
+            let path =
+                ReceivePath::new(CodecType::Pcm, 48000, FRAME, 2).expect("PCM is always available");
             if let Some(on) = predict {
                 path.set_starved_prediction(on);
             }
@@ -1494,7 +1494,10 @@ mod tests {
         let (default, on, off) = (stall(None), stall(Some(true)), stall(Some(false)));
         assert_eq!(default, on, "a new path does not predict in a stall");
         assert!(on > 0.1, "prediction made no sound: {on}");
-        assert!(off < on / 5.0, "switched off, a stall is not quiet: {off} against {on}");
+        assert!(
+            off < on / 5.0,
+            "switched off, a stall is not quiet: {off} against {on}"
+        );
     }
 
     /// Frames that piled up because the device did not read for a while are
