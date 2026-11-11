@@ -8,7 +8,7 @@
 
 use cpal::traits::{DeviceTrait, HostTrait};
 
-use crate::audio::{resolve_input_device, resolve_output_device, DeviceId};
+use crate::audio::{is_bluetooth, resolve_input_device, resolve_output_device, DeviceId};
 use crate::config::{AppConfig, DEFAULT_SERVER_URL, VALID_SAMPLE_RATES};
 use crate::environment;
 
@@ -72,6 +72,11 @@ fn describe(
         .and_then(|default| default.description().ok())
         .is_some_and(|default| default.name() == name);
 
+    let kind = kind_of(
+        description.device_type(),
+        description.interface_type(),
+        is_bluetooth(device, &name),
+    );
     let min_buffer_frames = match direction {
         Direction::Input => environment::min_input_buffer_frames(device),
         Direction::Output => environment::min_output_buffer_frames(device),
@@ -104,7 +109,7 @@ fn describe(
 
     Some(Device {
         name,
-        kind: kind_of(&description),
+        kind,
         channels: channels.max(1),
         sample_rates,
         min_buffer_frames,
@@ -124,14 +129,23 @@ fn audio_host_of(name: &str) -> AudioHost {
     }
 }
 
-fn kind_of(description: &cpal::DeviceDescription) -> DeviceKind {
-    if description.device_type() == cpal::DeviceType::Virtual {
+/// `bluetooth` is the answer of [`is_bluetooth`]: on macOS `cpal` leaves a
+/// Bluetooth headset's interface unknown, so the interface alone would not say
+/// so.
+fn kind_of(
+    device_type: cpal::DeviceType,
+    interface: cpal::InterfaceType,
+    bluetooth: bool,
+) -> DeviceKind {
+    if device_type == cpal::DeviceType::Virtual {
         return DeviceKind::Virtual;
     }
-    match description.interface_type() {
+    if bluetooth {
+        return DeviceKind::Bluetooth;
+    }
+    match interface {
         cpal::InterfaceType::Usb => DeviceKind::Usb,
         cpal::InterfaceType::BuiltIn => DeviceKind::Builtin,
-        cpal::InterfaceType::Bluetooth => DeviceKind::Bluetooth,
         _ => DeviceKind::Unknown,
     }
 }
@@ -151,6 +165,45 @@ mod tests {
             ("JACK", AudioHost::Jack),
         ] {
             assert_eq!(audio_host_of(reported), expected, "{reported}");
+        }
+    }
+
+    #[test]
+    fn when_the_device_is_bluetooth_but_cpal_leaves_the_interface_unknown_the_kind_is_bluetooth() {
+        assert_eq!(
+            kind_of(
+                cpal::DeviceType::Unknown,
+                cpal::InterfaceType::Unknown,
+                true
+            ),
+            DeviceKind::Bluetooth
+        );
+    }
+
+    #[test]
+    fn when_the_device_is_virtual_the_kind_is_virtual_even_if_it_looks_bluetooth() {
+        assert_eq!(
+            kind_of(
+                cpal::DeviceType::Virtual,
+                cpal::InterfaceType::Unknown,
+                true
+            ),
+            DeviceKind::Virtual
+        );
+    }
+
+    #[test]
+    fn when_the_device_is_not_bluetooth_the_kind_follows_the_interface() {
+        for (interface, expected) in [
+            (cpal::InterfaceType::Usb, DeviceKind::Usb),
+            (cpal::InterfaceType::BuiltIn, DeviceKind::Builtin),
+            (cpal::InterfaceType::Unknown, DeviceKind::Unknown),
+        ] {
+            assert_eq!(
+                kind_of(cpal::DeviceType::Unknown, interface, false),
+                expected,
+                "{interface:?}"
+            );
         }
     }
 

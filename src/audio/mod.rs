@@ -55,12 +55,12 @@ pub use codec::{
     OpusCodec, PcmCodec, PCM_BYTES_PER_SAMPLE,
 };
 pub use conceal::Concealer;
-pub(crate) use device::stable_device_id;
 pub use device::{
     choose_device, device_in_use, driver_name_of, find_device, is_asio_id, list_input_devices,
     list_output_devices, resolve_input_device, resolve_output_device, shared_asio_driver,
     AudioDevice, ChooseDeviceError, DeviceId,
 };
+pub(crate) use device::{is_bluetooth, stable_device_id};
 pub use driver::{bounded, LIST_TIMEOUT, OPEN_TIMEOUT};
 pub use engine::{
     AudioBuffer, AudioConfig, AudioEngine, AudioEvent, BitDepth, CaptureConfig, PlaybackConfig,
