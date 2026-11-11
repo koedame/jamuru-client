@@ -78,3 +78,7 @@ cargo tauri build
 
 - `cargo tauri dev/build`は必ずプロジェクトルートから実行すること
 - CI設定で`working-directory`を使用しないこと
+
+### Update
+
+`tauri:build` runs `npm ci` instead of `npm install`. `npm install` rewrites `ui/package-lock.json` to what the build machine's npm resolves, so the packages in the release UI bundle (and the lock file the third-party notices are checked against) depended on which runner image built it: the Ubuntu 22.04 runner installed 232 packages where the 26.04 one installed 227. `npm ci` installs exactly what the lock file says and fails if it disagrees with `ui/package.json`. `tauri:dev` keeps `npm install`.
