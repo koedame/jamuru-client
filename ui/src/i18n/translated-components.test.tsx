@@ -360,6 +360,29 @@ describe('components without hard-coded text', () => {
     }
   });
 
+  // Given the diagnosis found the microphone refused, and not decided yet
+  // When the result is shown in English or Japanese
+  // Then the refused one says to quit and reopen the app after switching it on
+  // (macOS keeps the old answer until then), and the undecided one points at
+  // the question on joining, not at the OS settings, where the app is not
+  // listed until it has asked
+  //
+  // Verifies: REQ-CON-176
+  it.each(languages)('マイクの許可の診断の案内が、%s で次にすることを正しく言うこと', async (language, bundle: Bundle) => {
+    const phrases: Record<string, { reopen: RegExp; osSettings: RegExp }> = {
+      en: { reopen: /quit jamuru and open it again/, osSettings: /OS settings/ },
+      ja: { reopen: /jamuru を終了してから開き直して/, osSettings: /OS の設定/ },
+    };
+    await i18n.changeLanguage(language);
+    render(<DiagnosticsTab state="complete" result={diagnosticsResult} />);
+    const codes = bundle.settings.diagnostics.problemCodes;
+
+    expect(screen.getByText(codes.microphoneRefused.suggestion)).toHaveTextContent(phrases[language].reopen);
+    const undecided = screen.getByText(codes.microphoneUndecided.suggestion);
+    expect(undecided).toBeInTheDocument();
+    expect(undecided).not.toHaveTextContent(phrases[language].osSettings);
+  });
+
   // Given the session statistics and a device selector
   // When the language is English or Japanese
   // Then their labels read in that language

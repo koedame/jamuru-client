@@ -381,9 +381,13 @@ impl AudioDiagnostics {
             });
         }
 
-        // Calculate overall grade
-        let overall_grade =
-            Self::calculate_overall_grade(&selected_input, &selected_output, &low_latency_support);
+        // Calculate overall grade. A refused microphone sends nothing however
+        // good the devices are, so it grades as having no input device does.
+        let overall_grade = if microphone == MicAccess::Refused {
+            DiagnosticGrade::C
+        } else {
+            Self::calculate_overall_grade(&selected_input, &selected_output, &low_latency_support)
+        };
 
         AudioDiagnosticsResult {
             input_devices,
@@ -787,6 +791,47 @@ mod tests {
             .iter()
             .any(|p| matches!(p.code, ProblemCode::MicrophoneUndecided)
                 && p.severity == ProblemSeverity::Info));
+    }
+
+    /// Given the system has refused the app the microphone, and the devices
+    /// themselves would grade best
+    /// When the audio is diagnosed
+    /// Then the audio grades C, as it does with no input device: no sound
+    /// can be sent
+    ///
+    /// Verifies: REQ-CON-176
+    #[tokio::test]
+    async fn when_the_microphone_is_refused_the_audio_grades_as_with_no_input_device() {
+        let (read, _release) = reader(None);
+        let result = AudioDiagnostics::run_with(
+            read,
+            Duration::from_secs(5),
+            MicAccess::Refused,
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(result.overall_grade, DiagnosticGrade::C);
+    }
+
+    /// Given the system has not been asked about the microphone yet
+    /// When the audio is diagnosed
+    /// Then the audio grade is what the devices give, as when it is allowed:
+    /// the question comes up on joining, and allowing it there is enough
+    ///
+    /// Verifies: REQ-CON-176
+    #[tokio::test]
+    async fn when_the_microphone_is_not_decided_the_audio_grade_is_not_lowered() {
+        let mut grades = Vec::new();
+        for access in [MicAccess::Granted, MicAccess::Undecided] {
+            let (read, _release) = reader(None);
+            let result =
+                AudioDiagnostics::run_with(read, Duration::from_secs(5), access, None, None).await;
+            grades.push(result.overall_grade);
+        }
+
+        assert_eq!(grades, vec![DiagnosticGrade::A, DiagnosticGrade::A]);
     }
 
     #[tokio::test]

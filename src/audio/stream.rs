@@ -390,6 +390,7 @@ impl ReceivePath {
             ring_delay_frames,
         );
         playout.enable_waveform_concealment(WIRE_CHANNELS, sample_rate);
+        playout.set_starved_prediction(true);
         playout.follow_depth_by_rate(WIRE_CHANNELS, sample_rate);
 
         Ok(Self {
@@ -689,7 +690,7 @@ impl ReceivePath {
     }
 
     /// Chooses whether a stall of the link, when nothing at all has arrived, is bridged with a
-    /// prediction of the sound (on) or with silence (off, the start).
+    /// prediction of the sound (on, the start) or with silence (off).
     pub fn set_starved_prediction(&self, on: bool) {
         if let Ok(mut buffer) = self.playout.lock() {
             buffer.set_starved_prediction(on);
@@ -1529,6 +1530,53 @@ mod tests {
         );
     }
 
+    /// A new receive path answers a stall of the link with sound that continues the tone
+    /// heard, and answers it with silence once prediction is switched off.
+    ///
+    /// Verifies: REQ-AUD-071
+    #[test]
+    fn when_the_link_stalls_a_new_path_continues_the_sound_until_prediction_is_switched_off() {
+        const FRAME: u32 = 64;
+        let tone = |n: u32| -> Vec<f32> {
+            (0..FRAME * 2)
+                .map(|i| {
+                    let t = (n * FRAME + i / 2) as f32 / 48_000.0;
+                    0.5 * (2.0 * std::f32::consts::PI * 220.0 * t).sin()
+                })
+                .collect()
+        };
+        let stall = |predict: Option<bool>| -> f32 {
+            let path =
+                ReceivePath::new(CodecType::Pcm, 48000, FRAME, 2).expect("PCM is always available");
+            if let Some(on) = predict {
+                path.set_starved_prediction(on);
+            }
+            let mut out = stereo_frame(FRAME, 0.0);
+            for n in 0..150 {
+                path.receive(n, &pcm(&tone(n)));
+                path.read_into(&mut out);
+            }
+            // Nothing arrives any more: once the frames held are played, reads find it empty.
+            let mut loudest = 0.0f32;
+            let mut starved = 0;
+            for _ in 0..8 {
+                if path.read_into(&mut out).result == PlayoutResult::Starved {
+                    starved += 1;
+                    loudest = out.iter().fold(loudest, |m, v| m.max(v.abs()));
+                }
+            }
+            assert!(starved >= 4, "the stall was not read as starved");
+            loudest
+        };
+        let (default, on, off) = (stall(None), stall(Some(true)), stall(Some(false)));
+        assert_eq!(default, on, "a new path does not predict in a stall");
+        assert!(on > 0.1, "prediction made no sound: {on}");
+        assert!(
+            off < on / 5.0,
+            "switched off, a stall is not quiet: {off} against {on}"
+        );
+    }
+
     /// Frames that piled up because the device did not read for a while are
     /// discarded once they have stayed for a whole stretch of reads, and the
     /// skip is recorded with how many frames it took.
@@ -1538,16 +1586,19 @@ mod tests {
     /// `a_pile_of_frames_too_big_to_play_off_is_skipped_and_a_small_one_is_played_off`).
     #[test]
     fn a_skip_that_gives_back_piled_up_frames_is_recorded_with_its_size() {
-        // A recorder whose time stands still: on a loaded machine the real clock
-        // would fill the ring with late arrivals and push the skip out of it
+        // On the real clock, how fast this loop runs decides how many read
+        // gaps and bursts get noted. On a busy machine they filled the ring
+        // and pushed out the skip this test looks for. One tick is one frame.
         let path = ReceivePath::with_flight(CodecType::Pcm, 48000, 4, 1, FlightRecorder::manual())
             .expect("PCM is always available");
         path.set_rate_following(false);
+        let tick_us = path.frame_us();
         let mut out = stereo_frame(4, 0.0);
 
         for sequence in 0..1_500 {
             // The device does not read for four ticks; the peer keeps sending.
             let stalled = (10..14).contains(&sequence);
+            path.flight().advance_us(tick_us);
             path.receive(sequence, &pcm(&stereo_frame(4, 0.5)));
             if !stalled {
                 path.read_into(&mut out);

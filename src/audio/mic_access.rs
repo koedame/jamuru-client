@@ -7,6 +7,12 @@
 //! for explicitly here, before any device is opened, so the screen can say
 //! what is being waited for.
 //!
+//! A running app keeps the answer it started with: switching the microphone
+//! on or off for it in System Settings reaches it only after it is quit and
+//! opened again (macOS says so when the switch is changed). That is why the
+//! screen, on a refusal, says to reopen the app rather than to join or check
+//! again.
+//!
 //! Only macOS has this question. Everywhere else the microphone is always
 //! available to the app.
 
