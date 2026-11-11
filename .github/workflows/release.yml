@@ -49,7 +49,7 @@ jobs:
   build:
     name: Build (${{ matrix.os }})
     needs: prepare
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner || matrix.os }}
     # The signing certificate and key are in this environment, which admits
     # `develop`, `main` and `v*` tags only (docs-spec/adr/ADR-091).
     environment: desktop-signing
@@ -58,7 +58,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The Linux build runs on a fixed old Ubuntu, not on whatever
+          # ubuntu-latest is: a binary asks for the glibc of the machine that built
+          # it (ubuntu-latest became 26.04 and the .deb stopped starting on 24.04).
+          # `os` stays ubuntu-latest so the job names and the conditions below hold.
           - os: ubuntu-latest
+            runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact_name: jamuru-linux-x64
           - os: macos-latest
@@ -264,6 +269,10 @@ jobs:
       - name: Check remote debugging is in a beta and only in a beta
         shell: bash
         run: scripts/check-debug-remote.sh "src-tauri/target/${{ matrix.target }}/release/jamuru-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}" ${{ contains(needs.prepare.outputs.tag, '-') && 'present' || 'absent' }}
+
+      - name: Check the Linux build runs on the oldest glibc we support
+        if: matrix.os == 'ubuntu-latest'
+        run: scripts/check-glibc-floor.sh "src-tauri/target/${{ matrix.target }}/release/jamuru-app" 2.35
 
       - name: Check the update drill cannot break a release
         shell: bash
