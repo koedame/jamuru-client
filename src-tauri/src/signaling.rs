@@ -162,6 +162,8 @@ pub struct SignalingState {
     peer_delays: std::sync::Mutex<HashMap<String, f64>>,
     /// Which links are quiet, and whose line it is (ADR-112). Never held across an await.
     dropouts: std::sync::Mutex<Dropouts>,
+    /// The side each quiet link was last logged with, so a change is logged once
+    dropouts_logged: std::sync::Mutex<HashMap<Uuid, jamjam::network::dropout::Side>>,
     /// When the dropout logic last put a message on the connection
     dropout_sent: std::sync::Mutex<VecDeque<Instant>>,
     /// What the system last said of the machine's network, and when
@@ -187,6 +189,7 @@ impl SignalingState {
             delay_told: std::sync::Mutex::new(None),
             peer_delays: std::sync::Mutex::new(HashMap::new()),
             dropouts: std::sync::Mutex::new(Dropouts::new()),
+            dropouts_logged: std::sync::Mutex::new(HashMap::new()),
             dropout_sent: std::sync::Mutex::new(VecDeque::new()),
             network: std::sync::Mutex::new(None),
         }

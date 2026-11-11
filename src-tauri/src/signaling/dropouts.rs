@@ -5,7 +5,7 @@
 //! the status the screen reads.
 
 use jamjam::network::dropout::{
-    Dropouts, Heard, Line, LinkView, Network, CONNECTION_DEAD_AFTER, DROPOUT_AFTER,
+    Dropouts, Heard, Line, LinkView, Network, Side, Standing, CONNECTION_DEAD_AFTER, DROPOUT_AFTER,
 };
 use jamjam::network::has_default_route;
 use jamjam::network::settings_help::PeerBody;
@@ -67,6 +67,29 @@ fn lock(state: &SignalingState) -> std::sync::MutexGuard<'_, Dropouts> {
     state.dropouts.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Logs a link going quiet, its side being decided or changing, and its being heard again: once
+/// each, so the log tells afterwards what the screen said while the connection to the device was
+/// out.
+fn log_standing(state: &SignalingState, standing: &HashMap<Uuid, Standing>) {
+    let now: HashMap<Uuid, Side> = standing
+        .iter()
+        .filter_map(|(peer, standing)| standing.dropout.map(|dropout| (*peer, dropout.side)))
+        .collect();
+    let mut logged = state
+        .dropouts_logged
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    for (peer, side) in &now {
+        if logged.get(peer) != Some(side) {
+            tracing::info!("Audio from {} stopped arriving, side: {:?}", peer, side);
+        }
+    }
+    for peer in logged.keys().filter(|peer| !now.contains_key(peer)) {
+        tracing::info!("Audio from {} is no longer reported as stopped", peer);
+    }
+    *logged = now;
+}
+
 /// Whether one more message may go out now.
 fn within_budget(state: &SignalingState, now: Instant) -> bool {
     let mut sent = state.dropout_sent.lock().unwrap_or_else(|e| e.into_inner());
@@ -124,6 +147,7 @@ pub(super) async fn tick(
     };
     if heard.is_empty() {
         *lock(state) = Dropouts::new();
+        log_standing(state, &HashMap::new());
         streaming.set_standing(HashMap::new());
         return;
     }
@@ -139,6 +163,7 @@ pub(super) async fn tick(
     };
     let line = line_of(conn.as_deref());
     let tick = lock(state).tick(now, &heard, line, network);
+    log_standing(state, &tick.standing);
     streaming.set_standing(tick.standing);
 
     // Without a connection there is nobody to tell or ask
@@ -210,5 +235,32 @@ mod tests {
     #[test]
     fn when_there_is_no_signaling_connection_the_line_is_down() {
         assert_eq!(line_of(None), Line::Down);
+    }
+
+    /// Verifies: REQ-CON-161
+    #[test]
+    fn when_a_link_is_reported_quiet_its_side_is_remembered_until_it_is_heard_again() {
+        use jamjam::network::dropout::Dropout;
+        let state = SignalingState::new();
+        let peer = Uuid::new_v4();
+        let quiet = HashMap::from([(
+            peer,
+            Standing {
+                dropout: Some(Dropout {
+                    silent_for: Duration::from_secs(3),
+                    side: Side::Mine,
+                }),
+                unstable: false,
+            },
+        )]);
+
+        log_standing(&state, &quiet);
+        assert_eq!(
+            state.dropouts_logged.lock().unwrap().get(&peer),
+            Some(&Side::Mine)
+        );
+
+        log_standing(&state, &HashMap::new());
+        assert!(state.dropouts_logged.lock().unwrap().is_empty());
     }
 }
