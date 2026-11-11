@@ -505,11 +505,11 @@
         },
         "microphoneRefused": {
           "message": "The OS does not let jamuru use the microphone",
-          "suggestion": "Allow jamuru under Microphone in the OS's Privacy settings, then run the check again."
+          "suggestion": "Turn on jamuru in System Settings → Privacy & Security → Microphone, then quit jamuru and open it again."
         },
         "microphoneUndecided": {
           "message": "The microphone has not been allowed yet",
-          "suggestion": "The OS asks when you join a room. You can also allow it in the OS settings first."
+          "suggestion": "The OS asks when you join a room. Choose Allow."
         },
         "unstableConnection": {
           "message": "Unstable network connection detected",
@@ -856,7 +856,7 @@
         "input": "Waiting for you to allow the microphone. Press Allow in the dialog that appeared"
       },
       "permission_refused": {
-        "input": "The microphone isn't allowed. Turn on jamuru in System Settings → Privacy & Security → Microphone, then join again"
+        "input": "The microphone isn't allowed. Turn on jamuru in System Settings → Privacy & Security → Microphone, then quit jamuru and open it again"
       }
     },
     "wasapiFallback": {

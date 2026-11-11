@@ -18,6 +18,7 @@ use super::playout::{
 };
 use super::preset::AudioPreset;
 use super::resampler::{create_resampler_with_channels, AudioResampler, ResamplerError};
+use super::stretch::{StretchStats, Stretcher};
 use crate::protocol::LatencyInfoMessage;
 
 /// Channels carried on the wire.
@@ -329,6 +330,9 @@ pub struct ReceivePath {
     /// Where the last frame handed to the device ended, so a cut in the
     /// signal can be joined (see [`Seam`]). Only the output callback uses it.
     seam: Arc<Mutex<Seam>>,
+    /// Plays a little faster or slower when the buffer holds too much or too
+    /// little (ADR-122). Only the output callback uses it.
+    stretcher: Arc<Mutex<Stretcher>>,
 }
 
 impl ReceivePath {
@@ -386,6 +390,8 @@ impl ReceivePath {
             ring_delay_frames,
         );
         playout.enable_waveform_concealment(WIRE_CHANNELS, sample_rate);
+        playout.set_starved_prediction(true);
+        playout.follow_depth_by_rate(WIRE_CHANNELS, sample_rate);
 
         Ok(Self {
             delay: Arc::new(AtomicU32::new(target_delay_frames)),
@@ -408,6 +414,10 @@ impl ReceivePath {
             started: Arc::new(AtomicBool::new(false)),
             last_read_us: Arc::new(AtomicU64::new(0)),
             seam: Arc::new(Mutex::new(Seam::default())),
+            stretcher: Arc::new(Mutex::new(Stretcher::new(
+                sample_rate,
+                widest_frame_samples(frame_samples),
+            ))),
         })
     }
 
@@ -498,10 +508,11 @@ impl ReceivePath {
     fn read_pausing(&self, out: &mut [f32], pause: impl FnMut()) -> PlayoutRead {
         self.flight.count_read();
         self.note_read_time();
-        let (read, trimmed, filled) = match self.lock_playout(pause) {
+        let (read, trimmed, filled, ppm) = match self.lock_playout(pause) {
             Some(mut buffer) => {
                 let before = buffer.stats();
                 let read = buffer.read_into(out);
+                let ppm = buffer.rate_ppm();
                 let after = buffer.stats();
                 let trimmed = after.frames_trimmed - before.frames_trimmed;
                 if trimmed > 0 {
@@ -511,21 +522,23 @@ impl ReceivePath {
                     read,
                     trimmed > 0,
                     after.frames_filled > before.frames_filled,
+                    ppm,
                 )
             }
             None => {
                 self.flight.note(Kind::Busy, 0);
                 let samples = self.frame_samples().min(out.len());
                 out[..samples].fill(0.0);
-                return self.joined(
+                let (read, cut) = self.stretched(
                     out,
                     PlayoutRead {
                         result: PlayoutResult::Priming,
                         samples,
                     },
-                    false,
+                    0.0,
                     false,
                 );
+                return self.joined(out, read, cut, false);
             }
         };
         match read.result {
@@ -538,7 +551,31 @@ impl ReceivePath {
             }
             PlayoutResult::Priming => {}
         }
-        self.joined(out, read, trimmed, filled)
+        // What is played continues the audio before it when the frame was
+        // played as it came and nothing was skipped before it
+        let continuous = matches!(read.result, PlayoutResult::Played { .. }) && !trimmed;
+        let (read, cut) = self.stretched(out, read, ppm, continuous);
+        self.joined(out, read, trimmed || cut, filled)
+    }
+
+    /// Plays `read` a little faster or slower as `ppm` asks, by taking a
+    /// sample frame out of it or putting one in (ADR-122). A read that is not a
+    /// whole frame played as it came (silence, concealment) ends what was going
+    /// on instead. The read is let through as it is if the stretcher is held.
+    fn stretched(
+        &self,
+        out: &mut [f32],
+        read: PlayoutRead,
+        ppm: f32,
+        continuous: bool,
+    ) -> (PlayoutRead, bool) {
+        let Ok(mut stretcher) = self.stretcher.try_lock() else {
+            return (read, false);
+        };
+        let before = stretcher.stats().cut_short;
+        let samples = stretcher.process(out, read.samples, ppm, continuous);
+        let cut = stretcher.stats().cut_short > before;
+        (PlayoutRead { samples, ..read }, cut)
     }
 
     /// Takes the play-out lock without blocking, trying again while it is only
@@ -597,6 +634,47 @@ impl ReceivePath {
         if let Ok(mut seam) = self.seam.lock() {
             *seam = Seam::restarted();
         }
+        if let Ok(mut stretcher) = self.stretcher.lock() {
+            stretcher.reset();
+        }
+    }
+
+    /// Chooses whether the buffer is kept at its target by playing a little
+    /// faster or slower (on, from the start) or by skipping and waiting, as
+    /// before (off), to compare the two (ADR-122).
+    pub fn set_rate_following(&self, on: bool) {
+        if let Ok(mut buffer) = self.playout.lock() {
+            if on {
+                buffer.follow_depth_by_rate(WIRE_CHANNELS, self.sample_rate);
+            } else {
+                buffer.stop_following_depth_by_rate();
+            }
+        }
+    }
+
+    /// Frames waiting in the buffer now, the one about to be played included
+    pub fn held_frames(&self) -> usize {
+        self.playout
+            .lock()
+            .map(|buffer| buffer.ready_frames())
+            .unwrap_or_default()
+    }
+
+    /// How the buffer has been played faster or slower so far
+    pub fn stretch_stats(&self) -> StretchStats {
+        self.stretcher
+            .lock()
+            .map(|stretcher| stretcher.stats())
+            .unwrap_or_default()
+    }
+
+    /// How much faster (positive) or slower (negative) than it was sent the
+    /// audio is asked to be played now, in parts per million
+    pub fn rate_ppm(&self) -> f32 {
+        self.playout
+            .lock()
+            .map(|buffer| buffer.rate_ppm())
+            .unwrap_or_default()
     }
 
     /// Switches filling gaps with sound that continues what was heard on or off (ADR-105).
@@ -612,7 +690,7 @@ impl ReceivePath {
     }
 
     /// Chooses whether a stall of the link, when nothing at all has arrived, is bridged with a
-    /// prediction of the sound (on) or with silence (off, the start).
+    /// prediction of the sound (on, the start) or with silence (off).
     pub fn set_starved_prediction(&self, on: bool) {
         if let Ok(mut buffer) = self.playout.lock() {
             buffer.set_starved_prediction(on);
@@ -1452,17 +1530,75 @@ mod tests {
         );
     }
 
+    /// A new receive path answers a stall of the link with sound that continues the tone
+    /// heard, and answers it with silence once prediction is switched off.
+    ///
+    /// Verifies: REQ-AUD-071
+    #[test]
+    fn when_the_link_stalls_a_new_path_continues_the_sound_until_prediction_is_switched_off() {
+        const FRAME: u32 = 64;
+        let tone = |n: u32| -> Vec<f32> {
+            (0..FRAME * 2)
+                .map(|i| {
+                    let t = (n * FRAME + i / 2) as f32 / 48_000.0;
+                    0.5 * (2.0 * std::f32::consts::PI * 220.0 * t).sin()
+                })
+                .collect()
+        };
+        let stall = |predict: Option<bool>| -> f32 {
+            let path =
+                ReceivePath::new(CodecType::Pcm, 48000, FRAME, 2).expect("PCM is always available");
+            if let Some(on) = predict {
+                path.set_starved_prediction(on);
+            }
+            let mut out = stereo_frame(FRAME, 0.0);
+            for n in 0..150 {
+                path.receive(n, &pcm(&tone(n)));
+                path.read_into(&mut out);
+            }
+            // Nothing arrives any more: once the frames held are played, reads find it empty.
+            let mut loudest = 0.0f32;
+            let mut starved = 0;
+            for _ in 0..8 {
+                if path.read_into(&mut out).result == PlayoutResult::Starved {
+                    starved += 1;
+                    loudest = out.iter().fold(loudest, |m, v| m.max(v.abs()));
+                }
+            }
+            assert!(starved >= 4, "the stall was not read as starved");
+            loudest
+        };
+        let (default, on, off) = (stall(None), stall(Some(true)), stall(Some(false)));
+        assert_eq!(default, on, "a new path does not predict in a stall");
+        assert!(on > 0.1, "prediction made no sound: {on}");
+        assert!(
+            off < on / 5.0,
+            "switched off, a stall is not quiet: {off} against {on}"
+        );
+    }
+
     /// Frames that piled up because the device did not read for a while are
     /// discarded once they have stayed for a whole stretch of reads, and the
     /// skip is recorded with how many frames it took.
+    ///
+    /// With the buffer kept at its target by playing faster or slower, that is the
+    /// way back only when the frames are to be given back (see
+    /// `a_pile_of_frames_too_big_to_play_off_is_skipped_and_a_small_one_is_played_off`).
     #[test]
     fn a_skip_that_gives_back_piled_up_frames_is_recorded_with_its_size() {
-        let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 1).expect("PCM is always available");
+        // On the real clock, how fast this loop runs decides how many read
+        // gaps and bursts get noted. On a busy machine they filled the ring
+        // and pushed out the skip this test looks for. One tick is one frame.
+        let path = ReceivePath::with_flight(CodecType::Pcm, 48000, 4, 1, FlightRecorder::manual())
+            .expect("PCM is always available");
+        path.set_rate_following(false);
+        let tick_us = path.frame_us();
         let mut out = stereo_frame(4, 0.0);
 
         for sequence in 0..1_500 {
             // The device does not read for four ticks; the peer keeps sending.
             let stalled = (10..14).contains(&sequence);
+            path.flight().advance_us(tick_us);
             path.receive(sequence, &pcm(&stereo_frame(4, 0.5)));
             if !stalled {
                 path.read_into(&mut out);
@@ -1474,6 +1610,32 @@ mod tests {
         let event = report.events.iter().find(|e| e.kind == Kind::Trimmed);
         assert_eq!(event.map(|e| e.value_us), Some(4), "the four that piled up");
         assert_eq!(path.flight().count(Kind::Resynced), 0);
+    }
+
+    /// While the buffer is kept at its target by playing faster, frames that
+    /// piled up are skipped only when there are more than ten milliseconds of
+    /// them; fewer are played off, so nothing is skipped.
+    ///
+    /// Verifies: REQ-LAT-134
+    #[test]
+    fn a_pile_of_frames_too_big_to_play_off_is_skipped_and_a_small_one_is_played_off() {
+        for (piled, skipped) in [(4, 0), (12, 1)] {
+            let path =
+                ReceivePath::new(CodecType::Pcm, 48000, 64, 1).expect("PCM is always available");
+            let mut out = stereo_frame(64, 0.0);
+            for sequence in 0..1_500 {
+                let stalled = (10..10 + piled).contains(&sequence);
+                path.receive(sequence, &pcm(&stereo_frame(64, 0.5)));
+                if !stalled {
+                    path.read_into(&mut out);
+                }
+            }
+            assert_eq!(
+                path.flight().count(Kind::Trimmed),
+                skipped,
+                "{piled} frames piled up"
+            );
+        }
     }
 
     /// Silence before the first frame plays, and after a reconnect, is the
