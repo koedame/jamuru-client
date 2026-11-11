@@ -576,6 +576,20 @@ fn loudest(frames: &[[f32; 3]], tone: usize) -> f32 {
     frames.iter().fold(0.0f32, |top, f| top.max(f[tone]))
 }
 
+/// How loud `tone` stays over a stretch of [`SUSTAINED_FRAMES`] frames in a row, at the most.
+/// A tone that is played is there frame after frame; a gap in another's tone that does not
+/// start or end where a frame does leaks into the others for a frame or two at its edges.
+fn loudest_sustained(frames: &[[f32; 3]], tone: usize) -> f32 {
+    frames
+        .windows(SUSTAINED_FRAMES)
+        .fold(0.0f32, |top, window| {
+            top.max(window.iter().fold(f32::MAX, |low, f| low.min(f[tone])))
+        })
+}
+
+/// How many frames in a row make a tone heard rather than the edge of a gap in another
+const SUSTAINED_FRAMES: usize = 8;
+
 /// The loudest the quieter of two tones is in one frame: the most that both were played at the
 /// same time
 fn loudest_together(frames: &[[f32; 3]], a: usize, b: usize) -> f32 {
@@ -700,7 +714,7 @@ fn three_clis_in_a_room_each_hear_both_of_the_others() {
             "CLI {me} should hear the tones of CLI {a} and CLI {b} at once at about 0.35 each, \
              the quieter was {together} at best"
         );
-        let itself = loudest(&heard.0, me);
+        let itself = loudest_sustained(&heard.0, me);
         assert!(
             itself < NOT_HEARD,
             "CLI {me} should not hear its own tone, it was {itself} at most"
@@ -739,7 +753,7 @@ fn a_cli_leaves_a_room_of_three_the_other_two_go_on_hearing_each_other() {
             HEARD_AT.contains(&still),
             "CLI {me} should still hear the tone of CLI {stays} at about 0.35, it was {still} at best"
         );
-        let gone = loudest(later, 2);
+        let gone = loudest_sustained(later, 2);
         assert!(
             gone < NOT_HEARD,
             "CLI {me} should no longer hear the tone of the one who left, it was {gone} at most"
