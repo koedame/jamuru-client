@@ -1457,12 +1457,18 @@ mod tests {
     /// skip is recorded with how many frames it took.
     #[test]
     fn a_skip_that_gives_back_piled_up_frames_is_recorded_with_its_size() {
-        let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 1).expect("PCM is always available");
+        // On the real clock, how fast this loop runs decides how many read
+        // gaps and bursts get noted. On a busy machine they filled the ring
+        // and pushed out the skip this test looks for. One tick is one frame.
+        let path = ReceivePath::with_flight(CodecType::Pcm, 48000, 4, 1, FlightRecorder::manual())
+            .expect("PCM is always available");
+        let tick_us = path.frame_us();
         let mut out = stereo_frame(4, 0.0);
 
         for sequence in 0..1_500 {
             // The device does not read for four ticks; the peer keeps sending.
             let stalled = (10..14).contains(&sequence);
+            path.flight().advance_us(tick_us);
             path.receive(sequence, &pcm(&stereo_frame(4, 0.5)));
             if !stalled {
                 path.read_into(&mut out);
