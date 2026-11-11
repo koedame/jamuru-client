@@ -951,8 +951,11 @@ describe('MainScreen のデバイスの問題の表示', () => {
     expect(await screen.findByText(/Waiting for you to allow the microphone/)).toBeInTheDocument();
   });
 
-  /** Verifies: REQ-AUD-129 */
-  it('マイクが許可されていないとき、システム設定で許可して入り直すよう知らせること', async () => {
+  /**
+   * Verifies: REQ-AUD-129
+   * Verifies: REQ-CON-176
+   */
+  it('マイクが許可されていないとき、システム設定でオンにしてから jamuru を開き直すよう知らせること', async () => {
     current = inRoom();
     statusDeviceProblems = [{ side: 'input', trouble: 'permission_refused', device: null, sample_rate: 48000 }];
 
@@ -960,6 +963,8 @@ describe('MainScreen のデバイスの問題の表示', () => {
 
     const message = await screen.findByText(/The microphone isn't allowed/);
     expect(message).toHaveTextContent(/System Settings → Privacy & Security → Microphone/);
+    expect(message).toHaveTextContent(/quit jamuru and open it again/);
+    expect(message).not.toHaveTextContent(/join again/);
   });
 
   /** Verifies: REQ-AUD-123 */
