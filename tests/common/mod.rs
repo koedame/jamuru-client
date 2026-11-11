@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub mod fake_signaling;
+pub mod line;
 
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
@@ -113,6 +114,62 @@ impl Peer {
             assert!(Instant::now() < deadline, "the keys were not agreed");
             self.send_key_exchange(to);
             let _ = self.recv();
+        }
+    }
+}
+
+/// A peer that sends every packet straight back, except audio, which it holds for `hold`
+/// first - what a peer that replays what it hears does. It agrees keys with whoever talks to it,
+/// as an app does, and opens and seals what it carries. Runs until dropped.
+pub struct EchoPeer {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl EchoPeer {
+    pub fn start(peer: Peer, hold: Duration) -> Self {
+        use std::sync::atomic::Ordering;
+
+        peer.socket
+            .set_read_timeout(Some(Duration::from_millis(2)))
+            .expect("set a read timeout");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping = stop.clone();
+        let thread = std::thread::spawn(move || {
+            let mut held: std::collections::VecDeque<(
+                Instant,
+                std::net::SocketAddr,
+                jamjam::protocol::Packet,
+            )> = Default::default();
+            while !stopping.load(Ordering::SeqCst) {
+                if let Ok(Some((packet, from))) = peer.recv() {
+                    if packet.packet_type == jamjam::protocol::PacketType::Audio {
+                        held.push_back((Instant::now() + hold, from, packet));
+                    } else {
+                        peer.send(packet, from);
+                    }
+                }
+                while held
+                    .front()
+                    .is_some_and(|(due, _, _)| *due <= Instant::now())
+                {
+                    let (_, to, packet) = held.pop_front().expect("front was just seen");
+                    peer.send(packet, to);
+                }
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for EchoPeer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }

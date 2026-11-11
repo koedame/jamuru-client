@@ -11,6 +11,7 @@
 mod common;
 
 use common::fake_signaling::FakeSignaling;
+use common::EchoPeer;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -844,62 +845,6 @@ fn a_cli_without_monitoring_does_not_play_its_own_input() {
         left.iter().all(|s| s.abs() < 1e-6),
         "with monitoring off the output carries only the peers, and there are none"
     );
-}
-
-/// A peer that sends every packet straight back, except audio, which it holds for `hold`
-/// first - what a peer that replays what it hears does. It agrees keys with whoever talks to it,
-/// as an app does, and opens and seals what it carries. Runs until dropped.
-struct EchoPeer {
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl EchoPeer {
-    fn start(peer: common::Peer, hold: Duration) -> Self {
-        use std::sync::atomic::Ordering;
-
-        peer.socket
-            .set_read_timeout(Some(Duration::from_millis(2)))
-            .expect("set a read timeout");
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let stopping = stop.clone();
-        let thread = std::thread::spawn(move || {
-            let mut held: std::collections::VecDeque<(
-                Instant,
-                std::net::SocketAddr,
-                jamjam::protocol::Packet,
-            )> = Default::default();
-            while !stopping.load(Ordering::SeqCst) {
-                if let Ok(Some((packet, from))) = peer.recv() {
-                    if packet.packet_type == jamjam::protocol::PacketType::Audio {
-                        held.push_back((Instant::now() + hold, from, packet));
-                    } else {
-                        peer.send(packet, from);
-                    }
-                }
-                while held
-                    .front()
-                    .is_some_and(|(due, _, _)| *due <= Instant::now())
-                {
-                    let (_, to, packet) = held.pop_front().expect("front was just seen");
-                    peer.send(packet, to);
-                }
-            }
-        });
-        Self {
-            stop,
-            thread: Some(thread),
-        }
-    }
-}
-
-impl Drop for EchoPeer {
-    fn drop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
 }
 
 /// `join-room` into a room with a peer that echoes audio after a hold ends by
