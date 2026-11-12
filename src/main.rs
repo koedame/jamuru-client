@@ -80,6 +80,12 @@ struct AudioArgs {
     #[arg(long, conflicts_with_all = ["input_device", "input_tone"])]
     input_bursts: bool,
 
+    /// Send white noise instead of capturing from a device: audio that cannot
+    /// be packed tightly, as a dense instrument is, so a rate limit on the
+    /// line is in the way
+    #[arg(long, conflicts_with_all = ["input_device", "input_tone", "input_bursts"])]
+    input_noise: bool,
+
     /// Write what would be played to a file instead of an output device
     /// (raw 32-bit float, little-endian, stereo interleaved)
     #[arg(long, value_name = "PATH", conflicts_with = "output_device")]
@@ -268,6 +274,8 @@ struct AudioSettings {
     /// Stand-in for the input device: a tone burst every 500 ms, whose round
     /// trip is timed.
     input_bursts: bool,
+    /// Stand-in for the input device: white noise.
+    input_noise: bool,
     /// Stand-in for the output device: the file played audio is written to.
     output_file: Option<PathBuf>,
     /// Whether the session starts with local monitoring on.
@@ -339,6 +347,7 @@ impl AudioArgs {
             preset,
             input_tone: self.input_tone,
             input_bursts: self.input_bursts,
+            input_noise: self.input_noise,
             output_file: self.output_file.clone(),
             monitor: self.monitor,
             transmit_channels: config.transmit_channels,
@@ -1580,10 +1589,15 @@ impl AudioSession {
         shared
             .is_monitoring
             .store(settings.monitor, Ordering::SeqCst);
-        let input_signal = match (settings.input_tone, settings.input_bursts) {
-            (Some(frequency), _) => Some(InputSignal::Tone(frequency)),
-            (None, true) => Some(InputSignal::Bursts),
-            (None, false) => None,
+        let input_signal = match (
+            settings.input_tone,
+            settings.input_bursts,
+            settings.input_noise,
+        ) {
+            (Some(frequency), _, _) => Some(InputSignal::Tone(frequency)),
+            (None, true, _) => Some(InputSignal::Bursts),
+            (None, false, true) => Some(InputSignal::Noise),
+            (None, false, false) => None,
         };
         let Running {
             commands,
@@ -2040,6 +2054,7 @@ mod tests {
             preset: AudioPreset::Balanced,
             input_tone: None,
             input_bursts: false,
+            input_noise: false,
             output_file: None,
             monitor: false,
             transmit_channels: 1,

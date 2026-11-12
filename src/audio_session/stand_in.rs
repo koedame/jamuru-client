@@ -17,6 +17,9 @@ use crate::audio::{on_captured_frame, BurstSignal, CaptureRing, LocalMonitor};
 /// Peak level of a tone, below full scale so the centred stereo mix cannot clip.
 const TONE_AMPLITUDE: f32 = 0.5;
 
+/// Peak level of the noise, as for a tone.
+const NOISE_AMPLITUDE: f32 = 0.5;
+
 /// Fills a captured frame with a stand-in signal.
 type SignalGenerator = Box<dyn FnMut(&mut [f32]) + Send>;
 
@@ -35,6 +38,20 @@ fn generator(signal: &InputSignal, sample_rate: u32) -> SignalGenerator {
         InputSignal::Bursts => {
             let mut signal = BurstSignal::new(sample_rate);
             Box::new(move |frame: &mut [f32]| signal.fill(frame))
+        }
+        InputSignal::Noise => {
+            // xorshift64*, with a fixed start, so every run sends the same noise
+            let mut state = 0x9E37_79B9_7F4A_7C15u64;
+            Box::new(move |frame: &mut [f32]| {
+                for sample in frame.iter_mut() {
+                    state ^= state >> 12;
+                    state ^= state << 25;
+                    state ^= state >> 27;
+                    let bits = (state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 40) as f32;
+                    let unit = bits / (1u64 << 24) as f32;
+                    *sample = NOISE_AMPLITUDE * (2.0 * unit - 1.0);
+                }
+            })
         }
     }
 }
@@ -140,5 +157,42 @@ impl Drop for StandIns {
     /// A session that fails to start leaves no thread running
     fn drop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn noise(frames: usize) -> Vec<f32> {
+        let mut fill = generator(&InputSignal::Noise, 48_000);
+        let mut out = vec![0.0f32; 128 * frames];
+        for frame in out.chunks_mut(128) {
+            fill(frame);
+        }
+        out
+    }
+
+    #[test]
+    fn noise_is_the_same_every_run() {
+        assert_eq!(noise(4), noise(4));
+    }
+
+    #[test]
+    fn noise_stays_within_its_peak_level_and_has_no_bias() {
+        let samples = noise(400);
+        assert!(samples.iter().all(|s| s.abs() <= NOISE_AMPLITUDE));
+        let mean = samples.iter().sum::<f32>() / samples.len() as f32;
+        assert!(mean.abs() < 0.01, "mean {mean}");
+    }
+
+    #[test]
+    fn noise_fills_the_whole_range_and_changes_from_one_sample_to_the_next() {
+        let samples = noise(400);
+        let (low, high) = samples
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(l, h), s| (l.min(*s), h.max(*s)));
+        assert!(low < -0.45 && high > 0.45, "range {low}..{high}");
+        assert!(samples.windows(2).all(|w| w[0] != w[1]));
     }
 }

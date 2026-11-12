@@ -97,6 +97,7 @@ JAMJAM_CAPACITY_PEERS=2,3,4,5,6,7,8,9 cargo test --features gui --test gui -- --
 # 条件の名前を引数に取る。表が出て、終了コードは 0 = 全部測れた / 1 = 測れない条件があった / 2 = 引数が分からない
 cargo test --release --test line_trial -- 4g-busy burst-loss
 cargo test --release --test line_trial -- all --duration 30 --quality    # 全条件。--quality は 1 kHz の音も通して音の傷みを足す
+cargo test --release --test line_trial -- narrow queue-bloat --duration 30 --noise   # --noise は雑音も通して、帯域が効くかを足す
 cargo test --release --test line_trial -- --list                         # 条件の一覧
 cargo test --release --test line_trial -- all --app /path/to/jamuru-before --json before.json   # 別の版のアプリを測る
 ```
@@ -122,6 +123,8 @@ cargo test --release --test line_trial -- all --app /path/to/jamuru-before --jso
 表の読み方: `heard/expected` は返ってきた/返るはずだったバースト数（返るはずだった数は、往復が済む前に終わった直近のバーストを除く。ADR-039）。
 `buffer` は終了時の受信バッファの段数、`played`・`concealed`・`late` は再生・補った・遅れたフレーム数、`lost` は回線が落とした割合（欠け・待ち行列あふれ・全断の合計）、
 `sent` はアプリが回線に送った量。**`sent` が帯域の条件の上限に届いていなければ、その条件の帯域はアプリに効いていない**（下の注）。
+`--noise` は、詰めにくい入力（白色雑音。CLI の `--input-noise`）を 96 kHz・32 フレームで同じ回線に通し、`noise` の列に落とした割合・送った量・待ち行列の最大（上り/下り、ms）を足す。
+帯域の条件は、アプリが条件の帯域より多く送ったときだけ効く。バーストや 1 kHz の音は詰めて送られ（ADR-111）、48 kHz・128 フレームの雑音でも約 1.9 Mbit/s なので、4 Mbit/s の `queue-bloat` には届かない。96 kHz・32 フレームの雑音は約 4.9 Mbit/s 送る。
 `--quality` の `tone gone` は 1 kHz の音が消えていた 10 ms の窓の割合、`tone damaged` は音のある窓のうち音以外のエネルギーが 0.1 %（約 30 dB）以上の窓の割合。
 
 ### 今の develop での基準（理論値と検証済みを分ける）
@@ -134,7 +137,7 @@ cargo test --release --test line_trial -- all --app /path/to/jamuru-before --jso
 | 同じ種で同じ結果 | 同じ | 計算と、中継を 2 回立てて落ちたデータグラムを比べるテストで確認 | 毎回 |
 | 実際のカーネルの `netem` との一致 | 同じ数字 | **未検証**（この環境では docker の `NET_ADMIN` が使えない。実機の測定と並べる） | — |
 | 2 台のアプリを回線の両側に置く | 可能 | **未検証**。今は相手が受けた音を返す相手か `Connection`（`BadLine::start(Some(a), b, ..)`）で、偽のシグナリングが両方の候補を中継の口に向ける仕組みは無い | — |
-| 帯域の条件がアプリに効く | `narrow`（1 Mbit/s）・`queue-bloat`（4 Mbit/s） | `narrow` は 1 kHz の音では上り 17.7 % 落ちて効く。バーストでは効かない。`queue-bloat` はどちらでも効かない（下の注） | 11/12 |
+| 帯域の条件がアプリに効く | `narrow`（1 Mbit/s）・`queue-bloat`（4 Mbit/s）で、`--noise` の送る量が条件の帯域を超える | 雑音（96 kHz・32 フレーム、約 4.9 Mbit/s）で、`narrow` は上り 78.9 % 落ち（待ち行列 500 ms で満杯）、`queue-bloat` は上り 16.2 % 落ち（待ち行列 600 ms で満杯）。回線に制限の無い `fiber` は 0 %。バーストと 1 kHz の音では `narrow` が音でだけ効き、`queue-bloat` は効かない | 11/12、30 秒 |
 
 測った環境: 最適化ビルド、ホスト 16 スレッドで他の作業が走っていた（load average 4〜10）。1 条件あたりバースト 30 秒と音 33 秒、種 1、`balanced`・48 kHz。
 `fiber` の往復は、ホストが空いているとき 18.7 ms（中央値）、混んでいると 32 ms まで増える。**表の値は台の負荷で動くので、前後を比べるときは同じ台で続けて回す。**
@@ -158,8 +161,8 @@ cargo test --release --test line_trial -- all --app /path/to/jamuru-before --jso
 
 - `4g-busy`（揺れ 25 ms）は 1 kHz の音の 39 % が消え、バーストも 59 個中 31 個しか返らない。受信バッファは上限の 10 段（約 27 ms）で、再生が間に合わない
 - 欠けだけで揺れの小さい `loss-5`（揺れ 2 ms）でも、受信バッファは 10 段に張り付き、往復が回線の最短（40 ms）より約 27 ms 長い。揺れが大きいときの値と同じ上限に達している
-- **帯域の条件は、CLI の入力ではほとんど効かない。** バーストの回でアプリが送る量は約 530 kbit/s、1 kHz の音でも約 1.2 Mbit/s で、無音や単純な音は詰めて送られる（ADR-111）。`narrow`（1 Mbit/s）が音で効くだけで、`queue-bloat`（4 Mbit/s）は待ち行列が 5 ms しか溜まらない。
-  実際の楽器の音（約 4 Mbit/s 以上）で帯域の条件を効かせるには、詰めにくい入力（雑音など）が CLI に要る
+- **帯域の条件は、バーストと 1 kHz の音ではほとんど効かない。** バーストの回でアプリが送る量は約 530 kbit/s、1 kHz の音でも約 1.2 Mbit/s で、無音や単純な音は詰めて送られる（ADR-111）。`narrow`（1 Mbit/s）が音で効くだけで、`queue-bloat`（4 Mbit/s）は待ち行列が 5 ms しか溜まらない。
+  帯域の条件を見るときは `--noise` を付ける（雑音は詰められず、楽器の音が詰めにくいときの上限を送る）。表の `noise` の列の送った量が条件の帯域に届いていれば、その条件はアプリに効いている
 
 ## コード品質チェック
 
