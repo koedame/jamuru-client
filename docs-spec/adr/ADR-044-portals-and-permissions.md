@@ -85,7 +85,7 @@ flowchart LR
 | メソッド | 内容 |
 |----------|------|
 | `app.invoke` | アプリの任意のコマンドを、画面と同じ IPC で呼ぶ |
-| `ui.dom` / `ui.query` / `ui.click` / `ui.input` / `ui.windows` | 画面の観測と操作（E2E の制御チャネルと同じもの） |
+| `ui.dom` / `ui.query` / `ui.click` / `ui.input` / `ui.scroll` / `ui.windows` | 画面の観測と操作（`ui.scroll` は窓の中を動かし、窓の外にある表示を撮れるようにする）（E2E の制御チャネルと同じもの） |
 | `debug.info` | バージョン・ビルド・OS・音声デバイスの一覧（デバイス ID を含む）・設定・セッションの状態 |
 | `debug.logs` | 診断ログ（`jamjam.log`）の末尾または続き。1 回の返事は 256 KiB まで（`next_offset` から続きを読む） |
 | `debug.crashes` | 直近のクラッシュ記録（panic の場所）。ログにある panic の行も `debug.logs` で読める |
