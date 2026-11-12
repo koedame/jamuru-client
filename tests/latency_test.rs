@@ -141,17 +141,68 @@ fn run_periods(buffer: &mut PlayoutBuffer, next: &mut u32, count: u32, lossy: bo
     }
 }
 
+/// Like [`run_periods`] with the odd frames arriving six periods after their
+/// turn: late rather than lost.
+fn run_periods_late(buffer: &mut PlayoutBuffer, next: &mut u32, count: u32) {
+    let mut out = playout_frame(0.0);
+    let first = *next;
+    for _ in 0..count {
+        if *next % 2 == 0 {
+            buffer.write(*next, &playout_frame(*next as f32));
+        }
+        let _ = buffer.read_into(&mut out);
+        if let Some(due) = next
+            .checked_sub(6)
+            .filter(|due| *due >= first && due % 2 == 1)
+        {
+            buffer.write(due, &playout_frame(due as f32));
+        }
+        *next += 1;
+    }
+}
+
 /// Given the jitter buffer is in adaptive mode
-/// When packets start being lost
+/// When packets start arriving after their turn
 /// Then the buffer delay grows automatically
 ///
 /// The jitter buffer is the play-out buffer the output callback reads from
-/// (ADR-028); adaptive means its delay bounds leave room to move. The loss
-/// rate is judged over the stretch since the last decision (ADR-031).
+/// (ADR-028); adaptive means its delay bounds leave room to move. The rate of
+/// late frames is judged over the stretch since the last decision (ADR-031,
+/// ADR-125).
 ///
 /// Verifies: REQ-LAT-108
 #[test]
-fn adaptive_jitter_buffer_grows_when_packets_are_lost() {
+fn adaptive_jitter_buffer_grows_when_packets_arrive_late() {
+    const INITIAL_FRAMES: u32 = 2;
+    let mut buffer = playout(INITIAL_FRAMES, 1, 10);
+    let mut next = 0;
+    run_periods(&mut buffer, &mut next, INITIAL_FRAMES + 2, false);
+
+    run_periods_late(&mut buffer, &mut next, ADAPT_WINDOW_FRAMES);
+    assert!(
+        buffer.stats().frames_late > 0,
+        "the frames that come after their turn must be counted as late"
+    );
+
+    let grown = buffer.adapt();
+
+    assert_eq!(
+        grown,
+        Some(INITIAL_FRAMES + 1),
+        "buffer delay should grow past {} frames after late frames",
+        INITIAL_FRAMES
+    );
+    assert_eq!(buffer.target_delay_frames(), INITIAL_FRAMES + 1);
+}
+
+/// Given the jitter buffer is in adaptive mode
+/// When the line drops every other packet but none arrives late
+/// Then the buffer delay does not grow, because holding more would not bring a
+/// dropped packet back (ADR-125)
+///
+/// Verifies: REQ-LAT-108
+#[test]
+fn adaptive_jitter_buffer_does_not_grow_when_packets_are_only_lost() {
     const INITIAL_FRAMES: u32 = 2;
     let mut buffer = playout(INITIAL_FRAMES, 1, 10);
     let mut next = 0;
@@ -163,15 +214,8 @@ fn adaptive_jitter_buffer_grows_when_packets_are_lost() {
         "the gaps in the sequence must be treated as losses"
     );
 
-    let grown = buffer.adapt();
-
-    assert_eq!(
-        grown,
-        Some(INITIAL_FRAMES + 1),
-        "buffer delay should grow past {} frames after a loss",
-        INITIAL_FRAMES
-    );
-    assert_eq!(buffer.target_delay_frames(), INITIAL_FRAMES + 1);
+    assert_eq!(buffer.adapt(), None);
+    assert_eq!(buffer.target_delay_frames(), INITIAL_FRAMES);
 }
 
 /// Given a minimum jitter buffer size of 2 frames
@@ -239,7 +283,7 @@ fn fixed_jitter_buffer_keeps_a_constant_delay() {
         "the configured delay must actually be held"
     );
 
-    // Losses would push an adaptive buffer to grow; a fixed one must not move.
+    // Late frames would push an adaptive buffer to grow; a fixed one must not move.
     for _ in 0..3 {
         let _ = buffer.read_into(&mut out);
     }
@@ -248,7 +292,7 @@ fn fixed_jitter_buffer_keeps_a_constant_delay() {
         "a loss must have occurred"
     );
     let mut next = 5;
-    run_periods(&mut buffer, &mut next, ADAPT_WINDOW_FRAMES, true);
+    run_periods_late(&mut buffer, &mut next, ADAPT_WINDOW_FRAMES);
     for _ in 0..10 {
         assert_eq!(buffer.adapt(), None);
     }
