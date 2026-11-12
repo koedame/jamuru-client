@@ -39,6 +39,7 @@ API 層に結合テスト、アーキテクチャ層にシステム E2E（`tests
 | POST | `/e2e/query` | セレクタ指定の構造化クエリ |
 | POST | `/e2e/click` | クリック |
 | POST | `/e2e/input` | 入力（`<select>` の選択も含む） |
+| POST | `/e2e/scroll` | 要素が見える位置まで画面を動かす |
 
 詳細は [e2e-control.md](../api/e2e-control.md)。
 

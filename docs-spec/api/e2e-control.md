@@ -85,6 +85,7 @@ cargo test --features gui --test gui -- --ignored --test-threads=1 the_release_b
 | POST | `/e2e/query` | `{selector, window?}` | `QueryResult` |
 | POST | `/e2e/click` | `{selector, window?}` | `{performed}` |
 | POST | `/e2e/input` | `{selector, value, window?}` | `{performed}` |
+| POST | `/e2e/scroll` | `{selector, window?, block?, to?}` | `{performed, in_view}` |
 | POST | `/e2e/invoke` | `{command, args?, window?}` | `InvokeResult` |
 
 `<select>` にも `input` を使う。提供されていない値・無効化された項目の値を渡すと `performed: false` を返す（利用者が選べない項目は、テストも選べない）。
@@ -206,3 +207,5 @@ try/catch で包み例外を戻り値として返すため、スクリプトの�
 - [ADR-043: 遠隔操作の RPC と、相手の設定を手伝う機能](../adr/ADR-043-remote-operation-rpc.md)
 - [ADR-026: GUI 同士の音声経路](../adr/ADR-026-gui-audio-path.md) — この層が検出した欠陥
 - [ADR-024: 端末アイデンティティによる識別](../adr/ADR-024-device-identity-instead-of-accounts.md)
+
+`scroll` は画面の動かし方だけを変える（要素は押さない）。既定では最初の一致が見える位置まで、スクロールする祖先を全部動かす（`block` は `start` / `center`（既定） / `end` / `nearest`）。`to`（`top` / `bottom`）を付けると、一致した要素をスクロール領域として、その中身を端まで動かす。動きは即時で、直後に画面を撮っても動き終わっている。`in_view` は動かしたあと、要素が窓の中に全部収まっているか。
