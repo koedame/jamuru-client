@@ -42,6 +42,12 @@ const DEFAULT_SECONDS: u64 = 20;
 const SAMPLE_RATE: u32 = 48_000;
 const TONE_HZ: f64 = 1000.0;
 
+/// What `--noise` sends at. White noise cannot be packed, so the rate the app sends is the
+/// most it ever does: at 48 kHz and 128 frames that is about 1.9 Mbit/s, below the 4 Mbit/s of
+/// `queue-bloat`. 96 kHz and 32 frames (both settings a user can choose) reach about 5 Mbit/s.
+const NOISE_SAMPLE_RATE: u32 = 96_000;
+const NOISE_FRAME_SIZE: &str = "32";
+
 struct Options {
     app: PathBuf,
     seconds: u64,
@@ -49,6 +55,7 @@ struct Options {
     preset: String,
     json: Option<PathBuf>,
     quality: bool,
+    noise: bool,
     conditions: Vec<&'static Condition>,
 }
 
@@ -59,12 +66,12 @@ enum Parsed {
 }
 
 const USAGE: &str = "usage: line_trial [<condition>... | all] [--duration <seconds>] [--seed <n>] \
-[--preset <name>] [--app <jamuru binary>] [--json <path>] [--quality] [--list]";
+[--preset <name>] [--app <jamuru binary>] [--json <path>] [--quality] [--noise] [--list]";
 
 fn parse(args: &[String]) -> Result<Parsed, String> {
     let mut app = PathBuf::from(env!("CARGO_BIN_EXE_jamuru"));
     let (mut seconds, mut seed, mut preset) = (None, 1u64, "balanced".to_string());
-    let (mut json, mut quality) = (None, false);
+    let (mut json, mut quality, mut noise) = (None, false, false);
     let mut names: Vec<String> = Vec::new();
 
     let mut args = args.iter();
@@ -93,6 +100,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
             "--app" => app = PathBuf::from(value("--app")?),
             "--json" => json = Some(PathBuf::from(value("--json")?)),
             "--quality" => quality = true,
+            "--noise" => noise = true,
             // What `cargo test` and people pass to a test binary
             "--nocapture" | "--quiet" | "-q" | "--show-output" => {}
             flag if flag.starts_with("--test-threads") || flag.starts_with("--color") => {
@@ -130,6 +138,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         preset,
         json,
         quality,
+        noise,
         conditions,
     }))
 }
@@ -148,6 +157,7 @@ fn run_session(
     condition: &Condition,
     input: &[&str],
     extra_seconds: u64,
+    sample_rate: u32,
 ) -> Result<Session, String> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -174,7 +184,7 @@ fn run_session(
     let mut child = Command::new(&options.app)
         .args(["join-room", "--server", server.url(), "--room", "echo"])
         .args(["--preset", &options.preset, "--sample-rate"])
-        .arg(SAMPLE_RATE.to_string())
+        .arg(sample_rate.to_string())
         .args(input)
         .arg("--output-file")
         .arg(&played)
@@ -317,7 +327,7 @@ fn rate(session: &Session) -> String {
 
 /// The measurement of one condition, or why it could not be made
 fn measure(options: &Options, condition: &'static Condition) -> Result<Row, String> {
-    let session = run_session(options, condition, &["--input-bursts"], 0)?;
+    let session = run_session(options, condition, &["--input-bursts"], 0, SAMPLE_RATE)?;
     let report = &session.report;
     let round_trip = &report["round_trip"];
     let playout = &report["playout"];
@@ -378,7 +388,13 @@ fn measure(options: &Options, condition: &'static Condition) -> Result<Row, Stri
     });
 
     if options.quality {
-        let tone = run_session(options, condition, &["--input-tone", "1000"], 3)?;
+        let tone = run_session(
+            options,
+            condition,
+            &["--input-tone", "1000"],
+            3,
+            SAMPLE_RATE,
+        )?;
         let (gone, damaged) = tone_quality(&tone.played)
             .ok_or("the tone could not be measured: too little of it was played")?;
         cells.push(format!("{gone:.1}"));
@@ -396,6 +412,30 @@ fn measure(options: &Options, condition: &'static Condition) -> Result<Row, Stri
             "line": {
                 "up": counts_json(&tone.up),
                 "down": counts_json(&tone.down),
+            },
+        });
+    }
+    if options.noise {
+        let noise = run_session(
+            options,
+            condition,
+            &["--input-noise", "--frame-size", NOISE_FRAME_SIZE],
+            0,
+            NOISE_SAMPLE_RATE,
+        )?;
+        cells.push(format!(
+            "{} / {}; {}; {} / {}",
+            share(&noise.up),
+            share(&noise.down),
+            rate(&noise),
+            number(&json!(noise.up.longest_queue_ms), 0),
+            number(&json!(noise.down.longest_queue_ms), 0)
+        ));
+        json["noise"] = json!({
+            "playout": noise.report["playout"],
+            "line": {
+                "up": counts_json(&noise.up),
+                "down": counts_json(&noise.down),
             },
         });
     }
@@ -471,6 +511,9 @@ fn main() {
             "tone damaged (%)",
             "tone: lost up/down (%); sent up/down (kbit/s)",
         ]);
+    }
+    if options.noise {
+        header.push("noise (96 kHz, 32 frames): lost up/down (%); sent up/down (kbit/s); longest queue up/down (ms)");
     }
     print_table(&header, &rows);
     println!(

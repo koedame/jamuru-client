@@ -102,6 +102,9 @@ pub enum InputSignal {
     Tone(f32),
     /// A short tone burst every 500 ms, whose round trip a [`BurstProbe`] times
     Bursts,
+    /// White noise, which an encoder cannot pack tightly, so the app sends as much as a dense
+    /// instrument does (a line's rate limit is only in the way when the app sends that much)
+    Noise,
 }
 
 /// What a session is started with
