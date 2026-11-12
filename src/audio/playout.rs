@@ -1317,7 +1317,7 @@ mod tests {
         let mut out = frame(0.0);
         let first = *next;
         for _ in 0..count {
-            if *next % 2 == 0 {
+            if (*next).is_multiple_of(2) {
                 buffer.write(*next, &frame(*next as f32));
             }
             let _ = buffer.read_into(&mut out);

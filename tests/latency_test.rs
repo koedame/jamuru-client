@@ -147,7 +147,7 @@ fn run_periods_late(buffer: &mut PlayoutBuffer, next: &mut u32, count: u32) {
     let mut out = playout_frame(0.0);
     let first = *next;
     for _ in 0..count {
-        if *next % 2 == 0 {
+        if (*next).is_multiple_of(2) {
             buffer.write(*next, &playout_frame(*next as f32));
         }
         let _ = buffer.read_into(&mut out);
