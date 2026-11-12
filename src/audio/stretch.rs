@@ -80,8 +80,12 @@ struct Stretch {
 /// Weights of the interpolation for a read position `phase / PHASES` of the way
 /// between two sample frames: a sinc cut off by a Kaiser window and scaled to add
 /// up to one. At 0 it is the sample frame itself, exactly.
+///
+/// Built once for the process. `Stretcher::new` builds it, so the audio callback
+/// that calls `process` never has to.
+static TABLE: OnceLock<Vec<[f32; TAPS]>> = OnceLock::new();
+
 fn weights() -> &'static [[f32; TAPS]] {
-    static TABLE: OnceLock<Vec<[f32; TAPS]>> = OnceLock::new();
     TABLE.get_or_init(|| {
         let bessel = |x: f64| {
             let (mut sum, mut term, mut k) = (1.0f64, 1.0f64, 1.0f64);
@@ -143,6 +147,7 @@ impl Stretcher {
     /// `widest_block_samples` interleaved samples.
     pub fn new(sample_rate: u32, widest_block_samples: usize) -> Self {
         let span = ((f64::from(sample_rate) * SPAN_SECS).round() as usize).max(MIN_BLOCK_FRAMES);
+        weights();
         Self {
             span,
             owed: 0.0,
@@ -353,6 +358,16 @@ mod tests {
             played.extend_from_slice(&block[..len]);
         }
         (played, stretcher)
+    }
+
+    /// Verifies: REQ-LAT-134
+    #[test]
+    fn when_a_stretcher_is_made_the_interpolation_weights_are_already_built() {
+        let _stretcher = Stretcher::new(RATE, 4096);
+        assert!(
+            TABLE.get().is_some(),
+            "the weights were left to the first block that stretches, in the audio callback"
+        );
     }
 
     /// Verifies: REQ-LAT-134
