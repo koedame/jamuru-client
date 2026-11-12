@@ -5,7 +5,7 @@
 //! the status the screen reads.
 
 use jamjam::network::dropout::{
-    Dropouts, Heard, Line, LinkView, Network, CONNECTION_DEAD_AFTER, DROPOUT_AFTER,
+    Dropouts, Heard, Line, LinkView, Network, Side, Standing, CONNECTION_DEAD_AFTER, DROPOUT_AFTER,
 };
 use jamjam::network::has_default_route;
 use jamjam::network::settings_help::PeerBody;
@@ -28,8 +28,66 @@ pub(super) fn connection_is_dead(conn: &SignalingConnection) -> bool {
     conn.quiet_for() > CONNECTION_DEAD_AFTER
 }
 
+/// How this app's signaling connection stands: down when it is closed, not answering, or gone
+/// altogether (`None`).
+fn line_of(conn: Option<&SignalingConnection>) -> Line {
+    match conn {
+        Some(conn) if !connection_is_dead(conn) => Line::Up,
+        _ => Line::Down,
+    }
+}
+
+/// How often the links are looked at while there is no signaling connection to poll.
+const UNCONNECTED_TICK: Duration = Duration::from_millis(500);
+
+/// Looks at the links for as long as the app runs, while the app has no signaling connection.
+///
+/// The room's events, and with them [`tick`], are read from the connection. When the system
+/// closes it at once (the adapter is disabled, the Wi-Fi is switched off), the room driver
+/// drops it and tries to get it back, and nothing reads events until it has: the links go quiet
+/// with nobody to say so. This keeps looking meanwhile, with the line down.
+pub(crate) fn tick_while_unconnected(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(UNCONNECTED_TICK).await;
+            let state = app.state::<SignalingState>();
+            let streaming = app.state::<StreamingState>();
+            let unconnected = state
+                .connections
+                .try_lock()
+                .is_ok_and(|connections| connections.is_empty());
+            if unconnected {
+                tick(None, &state, &streaming, true).await;
+            }
+        }
+    });
+}
+
 fn lock(state: &SignalingState) -> std::sync::MutexGuard<'_, Dropouts> {
     state.dropouts.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Logs a link going quiet, its side being decided or changing, and its being heard again: once
+/// each, so the log tells afterwards what the screen said while the connection to the device was
+/// out.
+fn log_standing(state: &SignalingState, standing: &HashMap<Uuid, Standing>) {
+    let now: HashMap<Uuid, Side> = standing
+        .iter()
+        .filter_map(|(peer, standing)| standing.dropout.map(|dropout| (*peer, dropout.side)))
+        .collect();
+    let mut logged = state
+        .dropouts_logged
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    for (peer, side) in &now {
+        if logged.get(peer) != Some(side) {
+            tracing::info!("Audio from {} stopped arriving, side: {:?}", peer, side);
+        }
+    }
+    for peer in logged.keys().filter(|peer| !now.contains_key(peer)) {
+        tracing::info!("Audio from {} is no longer reported as stopped", peer);
+    }
+    *logged = now;
 }
 
 /// Whether one more message may go out now.
@@ -76,7 +134,7 @@ async fn network_now(state: &SignalingState, now: Instant) -> Network {
 /// the server what that calls for, and publishes the result for the status. Called on every poll
 /// of the connection of the room.
 pub(super) async fn tick(
-    conn: &mut SignalingConnection,
+    mut conn: Option<&mut SignalingConnection>,
     state: &SignalingState,
     streaming: &StreamingState,
     in_room: bool,
@@ -89,6 +147,7 @@ pub(super) async fn tick(
     };
     if heard.is_empty() {
         *lock(state) = Dropouts::new();
+        log_standing(state, &HashMap::new());
         streaming.set_standing(HashMap::new());
         return;
     }
@@ -102,14 +161,15 @@ pub(super) async fn tick(
     } else {
         Network::Unknown
     };
-    let line = if connection_is_dead(conn) {
-        Line::Down
-    } else {
-        Line::Up
-    };
+    let line = line_of(conn.as_deref());
     let tick = lock(state).tick(now, &heard, line, network);
+    log_standing(state, &tick.standing);
     streaming.set_standing(tick.standing);
 
+    // Without a connection there is nobody to tell or ask
+    let Some(conn) = conn.as_deref_mut() else {
+        return;
+    };
     if let Some(view) = tick.share {
         send_view(conn, state, view, now).await;
     }
@@ -165,4 +225,42 @@ pub(super) fn presence_received(state: &SignalingState, peers: Vec<jamjam::netwo
             .map(|peer| (peer.peer_id, peer.idle_ms.map(Duration::from_millis)))
             .collect(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies: REQ-CON-163
+    #[test]
+    fn when_there_is_no_signaling_connection_the_line_is_down() {
+        assert_eq!(line_of(None), Line::Down);
+    }
+
+    /// Verifies: REQ-CON-161
+    #[test]
+    fn when_a_link_is_reported_quiet_its_side_is_remembered_until_it_is_heard_again() {
+        use jamjam::network::dropout::Dropout;
+        let state = SignalingState::new();
+        let peer = Uuid::new_v4();
+        let quiet = HashMap::from([(
+            peer,
+            Standing {
+                dropout: Some(Dropout {
+                    silent_for: Duration::from_secs(3),
+                    side: Side::Mine,
+                }),
+                unstable: false,
+            },
+        )]);
+
+        log_standing(&state, &quiet);
+        assert_eq!(
+            state.dropouts_logged.lock().unwrap().get(&peer),
+            Some(&Side::Mine)
+        );
+
+        log_standing(&state, &HashMap::new());
+        assert!(state.dropouts_logged.lock().unwrap().is_empty());
+    }
 }

@@ -222,6 +222,7 @@ pub fn run() {
     // the network on its own starts (`terms::wait_accepted`).
     app.manage(terms::TermsState::new(startup_config.terms_accepted()));
     app.manage(StreamingState::new());
+    signaling::tick_while_unconnected(app.handle().clone());
     app.manage(SettingsState::new());
     let config_state = ConfigState::new();
     // Loads (or generates on first launch) this installation's device

@@ -25,6 +25,7 @@ use crate::streaming::StreamingState;
 use crate::usage::UsageState;
 pub mod buffer_asks;
 mod dropouts;
+pub(crate) use dropouts::tick_while_unconnected;
 
 use jamjam::network::buffer_request::{BufferEvent, BufferRequests, Policy};
 use jamjam::network::device_delay_notice::DeviceDelayNotice;
@@ -161,6 +162,8 @@ pub struct SignalingState {
     peer_delays: std::sync::Mutex<HashMap<String, f64>>,
     /// Which links are quiet, and whose line it is (ADR-112). Never held across an await.
     dropouts: std::sync::Mutex<Dropouts>,
+    /// The side each quiet link was last logged with, so a change is logged once
+    dropouts_logged: std::sync::Mutex<HashMap<Uuid, jamjam::network::dropout::Side>>,
     /// When the dropout logic last put a message on the connection
     dropout_sent: std::sync::Mutex<VecDeque<Instant>>,
     /// What the system last said of the machine's network, and when
@@ -186,6 +189,7 @@ impl SignalingState {
             delay_told: std::sync::Mutex::new(None),
             peer_delays: std::sync::Mutex::new(HashMap::new()),
             dropouts: std::sync::Mutex::new(Dropouts::new()),
+            dropouts_logged: std::sync::Mutex::new(HashMap::new()),
             dropout_sent: std::sync::Mutex::new(VecDeque::new()),
             network: std::sync::Mutex::new(None),
         }
@@ -938,7 +942,7 @@ pub async fn signaling_poll_events(
     events.extend(buffer_asks::tick(conn, &state, &streaming).await);
     sync_delay_notice(conn, &state, conn_id).await;
     let in_room = state.room_state.lock().await.is_some();
-    dropouts::tick(conn, &state, &streaming, in_room).await;
+    dropouts::tick(Some(conn), &state, &streaming, in_room).await;
 
     // Poll with 50ms timeout to avoid blocking too long
     loop {
