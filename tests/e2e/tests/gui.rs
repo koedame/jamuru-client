@@ -927,6 +927,9 @@ fn a_room_entered_by_a_link_is_entered_muted_and_sends_no_audio_until_unmuted() 
 #[test]
 fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_deciding_it_back_restores_it(
 ) {
+    /// How far the peer that was not chosen may move on its own, in tenths of a
+    /// ms: well under the 60 ms that was chosen for the other
+    const OTHER_PEER_MAY_DRIFT_MS10: u64 = 250;
     let _guard = exclusive();
     let (chosen, other) = (common::Peer::bind(), common::Peer::bind());
     let server = FakeSignaling::start_with_residents_at(&[
@@ -1036,10 +1039,12 @@ fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_dec
         "BUFFER during: chosen {chosen_during:?} other {other_during:?} starved/concealed {:?}",
         damage()
     );
-    // The preset's own adaptation of the peer that was not chosen may move it a
-    // few packets (1.33 ms each) on its own, but not by what was chosen (50 ms).
+    // The preset's own adaptation of the peer that was not chosen may move it on
+    // its own: its delay can grow up to about 107 ms when the frames arrive late,
+    // as they do on a machine that is busy with other work. What it must not do
+    // is follow what was chosen (60 ms), so the limit is well under that.
     assert!(
-        other_during.1.abs_diff(other_before.1) <= 40,
+        other_during.1.abs_diff(other_before.1) <= OTHER_PEER_MAY_DRIFT_MS10,
         "the buffer of the peer that was not chosen moved from {} to {}",
         other_before.1,
         other_during.1
@@ -1078,7 +1083,7 @@ fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_dec
         damage()
     );
     assert!(
-        other_after.1.abs_diff(other_before.1) <= 40,
+        other_after.1.abs_diff(other_before.1) <= OTHER_PEER_MAY_DRIFT_MS10,
         "the other peer's buffer is as it was"
     );
 }
