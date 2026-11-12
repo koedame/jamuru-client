@@ -45,6 +45,7 @@
 use std::time::Duration;
 
 use super::conceal::Concealer;
+use super::depth_rate::DepthRate;
 use super::plc::PcmPlc;
 
 /// Share of reads over an adaptation window that found their frame missing
@@ -78,6 +79,11 @@ const TRIM_WHEN_EXCESS_AT_LEAST: u32 = 2;
 /// adaptation does not count them, and the first frame after them starts the
 /// buffer again at the delay it had.
 const SILENT_AFTER_STARVED_READS: u32 = 375;
+/// How many sample frames beyond its target the buffer may hold before the extra
+/// is thrown away in one skip instead of being given back by playing faster
+/// (ADR-122). Ten milliseconds at 48 kHz: what playing at the fastest rate the
+/// receive path allows gives back in under ten seconds.
+const GIVE_BACK_BY_RATE_UP_TO_SAMPLE_FRAMES: usize = 480;
 
 /// Seconds without a missing frame after which an automatic grant gives a tenth
 /// of its delay back (ADR-097).
@@ -302,6 +308,12 @@ pub struct PlayoutBuffer {
     shrink_after_windows: u32,
     /// Windows since the last shrink, while a grow would still show it wrong.
     windows_since_shrink: Option<u32>,
+    /// How fast to play so the buffer holds its target, once switched on
+    /// ([`Self::follow_depth_by_rate`]), and the channels its frames are
+    /// interleaved in
+    depth_rate: Option<(DepthRate, usize)>,
+    /// The rate it asks for now, in parts per million
+    rate_ppm: f32,
     /// Fewest frames held at any read of the current depth window.
     depth_window_min: usize,
     /// Reads made in the current depth window.
@@ -384,6 +396,8 @@ impl PlayoutBuffer {
             clean_windows: 0,
             shrink_after_windows: CLEAN_WINDOWS_BEFORE_SHRINK,
             windows_since_shrink: None,
+            depth_rate: None,
+            rate_ppm: 0.0,
             depth_window_min: usize::MAX,
             depth_window_reads: 0,
             config,
@@ -415,6 +429,37 @@ impl PlayoutBuffer {
     /// to compare the two.
     pub fn disable_waveform_concealment(&mut self) {
         self.concealer = None;
+    }
+
+    /// Has the buffer ask, at every read, how much faster or slower than it was
+    /// sent the audio should be played to bring what it holds to its target
+    /// (ADR-122), for interleaved frames of `channels` channels at `sample_rate`.
+    /// The caller plays at that rate ([`Self::rate_ppm`]). Without it, a buffer
+    /// that holds too much gives the extra back in a skip, as before.
+    /// Allocates nothing.
+    pub fn follow_depth_by_rate(&mut self, channels: usize, sample_rate: u32) {
+        self.depth_rate = Some((DepthRate::new(sample_rate), channels.max(1)));
+        self.rate_ppm = 0.0;
+    }
+
+    /// Goes back to giving the extra back in a skip.
+    pub fn stop_following_depth_by_rate(&mut self) {
+        self.depth_rate = None;
+        self.rate_ppm = 0.0;
+    }
+
+    /// How much faster (positive) or slower (negative) than it was sent the
+    /// audio should be played now, in parts per million; 0 when the buffer is
+    /// not following its depth by rate.
+    pub fn rate_ppm(&self) -> f32 {
+        self.rate_ppm
+    }
+
+    /// The depth the rate is worked out from, smoothed, in frames
+    pub fn smoothed_depth(&self) -> Option<f32> {
+        self.depth_rate
+            .as_ref()
+            .and_then(|(rate, _)| rate.smoothed())
     }
 
     /// Hands a decoded frame to the buffer. Called from the network side.
@@ -523,6 +568,7 @@ impl PlayoutBuffer {
 
         let ready = self.ready_frames();
         self.watch_depth(ready);
+        self.follow_depth(ready);
 
         let sequence = match self.play_sequence {
             Some(sequence) => sequence,
@@ -644,7 +690,16 @@ impl PlayoutBuffer {
             .max(self.floor_frames)
             .min(self.ring_delay_frames);
         if self.playing {
-            self.pending_shift += frames as i32 - self.target_delay_frames as i32;
+            let change = frames as i32 - self.target_delay_frames as i32;
+            if change < 0 && self.pending_shift == 0 && self.rate_gives_back(-change as usize) {
+                // A small step down is made by playing faster, not by a skip
+                // (ADR-122)
+            } else {
+                self.pending_shift += change;
+            }
+            if let Some((rate, _)) = self.depth_rate.as_mut() {
+                rate.target_moved();
+            }
             self.restart_depth_window();
         }
         self.target_delay_frames = frames;
@@ -894,6 +949,10 @@ impl PlayoutBuffer {
         self.shrink_after_windows = CLEAN_WINDOWS_BEFORE_SHRINK;
         self.windows_since_shrink = None;
         self.restart_depth_window();
+        if let Some((rate, _)) = self.depth_rate.as_mut() {
+            rate.reset();
+        }
+        self.rate_ppm = 0.0;
     }
 
     /// How far a sequence may be from the one being played and still belong to
@@ -923,6 +982,10 @@ impl PlayoutBuffer {
         self.pending_shift = 0;
         self.starved_streak = 0;
         self.restart_depth_window();
+        if let Some((rate, _)) = self.depth_rate.as_mut() {
+            rate.depth_moved();
+        }
+        self.rate_ppm = 0.0;
         self.plc.reset();
         if let Some(concealer) = self.concealer.as_mut() {
             concealer.reset();
@@ -953,10 +1016,50 @@ impl PlayoutBuffer {
             .depth_window_min
             .saturating_sub(self.target_delay_frames as usize + 1);
         self.restart_depth_window();
-        if excess >= TRIM_WHEN_EXCESS_AT_LEAST as usize {
+        if excess >= self.skip_when_excess_at_least() {
             self.pending_shift = -(excess as i32);
             self.trim_excess();
+            if let Some((rate, _)) = self.depth_rate.as_mut() {
+                rate.depth_moved();
+            }
+            self.rate_ppm = 0.0;
         }
+    }
+
+    /// How many frames beyond the target the buffer must have stayed at its
+    /// shallowest before the extra is thrown away. When the audio is played
+    /// faster to give the extra back, only what that is too slow for is skipped.
+    fn skip_when_excess_at_least(&self) -> usize {
+        match self.depth_rate.as_ref() {
+            None => TRIM_WHEN_EXCESS_AT_LEAST as usize,
+            Some((_, channels)) => {
+                let frame = (self.last_len / channels).max(1);
+                (GIVE_BACK_BY_RATE_UP_TO_SAMPLE_FRAMES / frame + 1)
+                    .max(TRIM_WHEN_EXCESS_AT_LEAST as usize)
+            }
+        }
+    }
+
+    /// Whether `frames` too many can be given back by playing faster rather than
+    /// by a skip: it follows its depth by rate, and the extra is small.
+    fn rate_gives_back(&self, frames: usize) -> bool {
+        self.depth_rate.as_ref().is_some_and(|(_, channels)| {
+            frames * (self.last_len / channels).max(1) <= GIVE_BACK_BY_RATE_UP_TO_SAMPLE_FRAMES
+        })
+    }
+
+    /// Works out how fast to play from what the buffer holds at this read.
+    /// Nothing is learned from a read that found the buffer empty (the buffer's
+    /// own growth handles that), or from a sender that has gone silent.
+    fn follow_depth(&mut self, ready: usize) {
+        let Some((rate, channels)) = self.depth_rate.as_mut() else {
+            return;
+        };
+        if ready == 0 || self.starved_streak >= SILENT_AFTER_STARVED_READS {
+            return;
+        }
+        let sample_frames = (self.last_len / *channels).max(1);
+        self.rate_ppm = rate.update(ready, self.target_delay_frames, sample_frames);
     }
 
     /// Discards frames from the play position while the buffer holds more than

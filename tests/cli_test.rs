@@ -11,6 +11,7 @@
 mod common;
 
 use common::fake_signaling::FakeSignaling;
+use common::EchoPeer;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -576,6 +577,20 @@ fn loudest(frames: &[[f32; 3]], tone: usize) -> f32 {
     frames.iter().fold(0.0f32, |top, f| top.max(f[tone]))
 }
 
+/// How loud `tone` stays over a stretch of [`SUSTAINED_FRAMES`] frames in a row, at the most.
+/// A tone that is played is there frame after frame; a gap in another's tone that does not
+/// start or end where a frame does leaks into the others for a frame or two at its edges.
+fn loudest_sustained(frames: &[[f32; 3]], tone: usize) -> f32 {
+    frames
+        .windows(SUSTAINED_FRAMES)
+        .fold(0.0f32, |top, window| {
+            top.max(window.iter().fold(f32::MAX, |low, f| low.min(f[tone])))
+        })
+}
+
+/// How many frames in a row make a tone heard rather than the edge of a gap in another
+const SUSTAINED_FRAMES: usize = 8;
+
 /// The loudest the quieter of two tones is in one frame: the most that both were played at the
 /// same time
 fn loudest_together(frames: &[[f32; 3]], a: usize, b: usize) -> f32 {
@@ -700,7 +715,7 @@ fn three_clis_in_a_room_each_hear_both_of_the_others() {
             "CLI {me} should hear the tones of CLI {a} and CLI {b} at once at about 0.35 each, \
              the quieter was {together} at best"
         );
-        let itself = loudest(&heard.0, me);
+        let itself = loudest_sustained(&heard.0, me);
         assert!(
             itself < NOT_HEARD,
             "CLI {me} should not hear its own tone, it was {itself} at most"
@@ -739,7 +754,7 @@ fn a_cli_leaves_a_room_of_three_the_other_two_go_on_hearing_each_other() {
             HEARD_AT.contains(&still),
             "CLI {me} should still hear the tone of CLI {stays} at about 0.35, it was {still} at best"
         );
-        let gone = loudest(later, 2);
+        let gone = loudest_sustained(later, 2);
         assert!(
             gone < NOT_HEARD,
             "CLI {me} should no longer hear the tone of the one who left, it was {gone} at most"
@@ -830,62 +845,6 @@ fn a_cli_without_monitoring_does_not_play_its_own_input() {
         left.iter().all(|s| s.abs() < 1e-6),
         "with monitoring off the output carries only the peers, and there are none"
     );
-}
-
-/// A peer that sends every packet straight back, except audio, which it holds for `hold`
-/// first - what a peer that replays what it hears does. It agrees keys with whoever talks to it,
-/// as an app does, and opens and seals what it carries. Runs until dropped.
-struct EchoPeer {
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl EchoPeer {
-    fn start(peer: common::Peer, hold: Duration) -> Self {
-        use std::sync::atomic::Ordering;
-
-        peer.socket
-            .set_read_timeout(Some(Duration::from_millis(2)))
-            .expect("set a read timeout");
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let stopping = stop.clone();
-        let thread = std::thread::spawn(move || {
-            let mut held: std::collections::VecDeque<(
-                Instant,
-                std::net::SocketAddr,
-                jamjam::protocol::Packet,
-            )> = Default::default();
-            while !stopping.load(Ordering::SeqCst) {
-                if let Ok(Some((packet, from))) = peer.recv() {
-                    if packet.packet_type == jamjam::protocol::PacketType::Audio {
-                        held.push_back((Instant::now() + hold, from, packet));
-                    } else {
-                        peer.send(packet, from);
-                    }
-                }
-                while held
-                    .front()
-                    .is_some_and(|(due, _, _)| *due <= Instant::now())
-                {
-                    let (_, to, packet) = held.pop_front().expect("front was just seen");
-                    peer.send(packet, to);
-                }
-            }
-        });
-        Self {
-            stop,
-            thread: Some(thread),
-        }
-    }
-}
-
-impl Drop for EchoPeer {
-    fn drop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
 }
 
 /// `join-room` into a room with a peer that echoes audio after a hold ends by

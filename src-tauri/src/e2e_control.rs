@@ -107,6 +107,7 @@ fn build_router(app: AppHandle) -> Router {
         .route("/e2e/query", post(query))
         .route("/e2e/click", post(click))
         .route("/e2e/input", post(input))
+        .route("/e2e/scroll", post(scroll))
         .route("/e2e/invoke", post(invoke))
         .with_state(ControlState { app })
 }
@@ -193,6 +194,14 @@ async fn input(
     Json(request): Json<Value>,
 ) -> Result<Json<Value>, ControlError> {
     ui(&state, "ui.input", request).await
+}
+
+/// Moves the screen so the first match is in sight.
+async fn scroll(
+    State(state): State<ControlState>,
+    Json(request): Json<Value>,
+) -> Result<Json<Value>, ControlError> {
+    ui(&state, "ui.scroll", request).await
 }
 
 /// Calls an app command through the webview's IPC, exactly as the UI calls

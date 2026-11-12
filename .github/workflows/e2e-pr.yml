@@ -47,17 +47,6 @@ jobs:
           restore-keys: |
             cargo-git-
 
-      - name: Cache cargo target
-        uses: actions/cache@v6
-        with:
-          path: target
-          key: cargo-target-e2e-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-target-e2e-${{ runner.os }}-
-
-      - name: Build release binary
-        run: cargo build --release
-
       - name: Setup virtual audio
         run: |
           chmod +x tests/e2e/scripts/setup-virtual-audio-linux.sh
@@ -91,7 +80,50 @@ jobs:
     name: E2E Local Network Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: e2e-loopback
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libssl-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-
+
+      - name: Cache cargo git
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/git
+          key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-git-
+
+      - name: Run E2E network local tests
+        working-directory: tests/e2e
+        run: |
+          cargo test --features network-local -- --test-threads=1 --nocapture
+        env:
+          RUST_LOG: info
+          RUST_BACKTRACE: 1
+
+  # The E2E tests above never launch the release binary, so building it is a
+  # separate check: it confirms the LTO release profile still links, in
+  # parallel instead of ahead of the tests.
+  release-build:
+    name: Release build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -131,12 +163,3 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release
-
-      - name: Run E2E network local tests
-        working-directory: tests/e2e
-        run: |
-          cargo test --features network-local -- --test-threads=1 --nocapture
-        env:
-          RUST_LOG: info
-          RUST_BACKTRACE: 1
-

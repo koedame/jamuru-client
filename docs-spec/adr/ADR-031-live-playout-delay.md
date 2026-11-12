@@ -4,7 +4,7 @@
 
 ## Status
 
-Accepted
+Accepted。ただし「減らす（-k 段）」の再生位置から捨てる動作のうち、差が 10 ms 以内のものは [ADR-122](./ADR-122-keep-receive-buffer-by-playback-rate.md) で置き換えた（受信経路が再生の速さで戻す）。10 ms を超える差は、この ADR のとおり一度に捨てる。
 
 ## Context
 
@@ -102,6 +102,7 @@ ADR-028 の「セッション中の段数変更が、バッファ破棄による
 
 ## 関連
 
+- [ADR-122: 受信バッファの量を再生の速さで保つ](./ADR-122-keep-receive-buffer-by-playback-rate.md) - 小さな差は捨てずに速さで戻す
 - [ADR-048: 溜め込んだ余分を捨てる](./ADR-048-playout-gives-back-piled-up-frames.md) - 目標を下げなくても、目標より深く溜まり続けたら捨てる
 - [ADR-008: ゼロレイテンシモード](./ADR-008-zero-latency-mode.md) - パススルーを固定にする根拠
 - [ADR-020: ジッタバッファの配線](./ADR-020-jitter-buffer-wiring.md) - 「適応の有効化は別途判断する」と残した箇所

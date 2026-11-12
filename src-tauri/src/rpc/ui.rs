@@ -47,6 +47,12 @@ pub const METHODS: &[Method] = &[
         kind: Kind::Native,
         summary: "セレクタに合う最初の要素に入力する・選ぶ",
     },
+    Method {
+        name: "ui.scroll",
+        access: Access::TOOLS,
+        kind: Kind::Native,
+        summary: "セレクタに合う最初の要素が見える位置まで画面を動かす（要素の中身を端まで動かすこともできる）",
+    },
 ];
 
 /// Structured result of a `querySelectorAll`, reported for the first match.
@@ -117,6 +123,63 @@ struct InputParams {
     window: Option<String>,
 }
 
+/// Where in the view `ui.scroll` puts the element it brings into sight.
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ScrollBlock {
+    Start,
+    #[default]
+    Center,
+    End,
+    Nearest,
+}
+
+impl ScrollBlock {
+    fn as_js(self) -> &'static str {
+        match self {
+            ScrollBlock::Start => "start",
+            ScrollBlock::Center => "center",
+            ScrollBlock::End => "end",
+            ScrollBlock::Nearest => "nearest",
+        }
+    }
+}
+
+/// Which end of the element's own content `ui.scroll` moves to.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ScrollTo {
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScrollParams {
+    selector: String,
+    #[serde(default)]
+    window: Option<String>,
+    /// Where the element lands in the view when it is brought into sight.
+    #[serde(default)]
+    block: ScrollBlock,
+    /// When given, the matched element is itself the scroll area and its
+    /// content moves to this end, instead of the element being brought into
+    /// sight.
+    #[serde(default)]
+    to: Option<ScrollTo>,
+}
+
+/// Outcome of `ui.scroll`.
+#[derive(Debug, Serialize, Deserialize)]
+struct ScrollResult {
+    /// False when the selector matched nothing.
+    performed: bool,
+    /// Whether the element lies entirely inside the window after the move.
+    /// An element taller than the window, or in a window too small for it,
+    /// can't be, and the caller needs to know before it trusts a screenshot.
+    #[serde(default)]
+    in_view: bool,
+}
+
 /// Outcome of an operation that acts on a single element.
 #[derive(Debug, Serialize, Deserialize)]
 struct ActionResult {
@@ -157,6 +220,7 @@ pub async fn call<R: Runtime>(
         "ui.query" => query(app, params(&call)?).await,
         "ui.click" => click(app, params(&call)?).await,
         "ui.input" => input(app, params(&call)?).await,
+        "ui.scroll" => scroll(app, params(&call)?).await,
         other => Err(RpcError::new(
             Code::UnknownMethod,
             format!("no method named {:?}", other),
@@ -290,6 +354,46 @@ async fn input<R: Runtime>(app: &AppHandle<R>, params: InputParams) -> Result<Va
     result::<ActionResult>("input", value)
 }
 
+/// Moves the screen so the first match is in sight, as a user would by
+/// scrolling. Nothing in the page is activated; only the scroll position
+/// changes (every scrolling ancestor moves, so an element inside an inner
+/// scroll area is reached too). With `to`, the matched element is the scroll
+/// area and its own content goes to the top or the bottom.
+///
+/// The move is instant: a smooth one would still be running when a
+/// screenshot is taken right after.
+async fn scroll<R: Runtime>(app: &AppHandle<R>, params: ScrollParams) -> Result<Value, RpcError> {
+    let selector = js_string(&params.selector)?;
+    let block = params.block.as_js();
+    let to = match params.to {
+        Some(ScrollTo::Top) => "0",
+        Some(ScrollTo::Bottom) => "el.scrollHeight",
+        None => "null",
+    };
+
+    let js = format!(
+        r#"(function () {{
+            const el = document.querySelector({selector});
+            if (!el) return {{ performed: false, in_view: false }};
+            const top = {to};
+            if (top !== null) {{
+                el.scrollTo({{ top: top, behavior: "instant" }});
+            }} else {{
+                el.scrollIntoView({{ block: "{block}", inline: "nearest", behavior: "instant" }});
+            }}
+            const r = el.getBoundingClientRect();
+            return {{
+                performed: true,
+                in_view: r.top >= 0 && r.left >= 0
+                    && r.bottom <= window.innerHeight && r.right <= window.innerWidth,
+            }};
+        }})()"#
+    );
+
+    let value = eval_in(app, params.window.as_deref(), &js).await?;
+    result::<ScrollResult>("scroll", value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +414,30 @@ mod tests {
         assert_eq!(parsed.text.as_deref(), Some("jamuru へようこそ"));
         assert_eq!(parsed.value, None);
         assert!(parsed.visible);
+    }
+
+    /// Verifies: REQ-RMT-026
+    #[test]
+    fn test_scroll_params_default_to_bringing_the_element_to_the_center() {
+        let parsed: ScrollParams =
+            serde_json::from_value(serde_json::json!({ "selector": "#problems" })).unwrap();
+
+        assert!(matches!(parsed.block, ScrollBlock::Center));
+        assert!(parsed.to.is_none());
+        assert!(parsed.window.is_none());
+    }
+
+    /// Verifies: REQ-RMT-026
+    #[test]
+    fn test_scroll_params_reject_a_position_the_screen_has_no_meaning_for() {
+        let bad_block = serde_json::from_value::<ScrollParams>(
+            serde_json::json!({ "selector": "#a", "block": "middle" }),
+        );
+        let bad_end = serde_json::from_value::<ScrollParams>(
+            serde_json::json!({ "selector": "#a", "to": "left" }),
+        );
+
+        assert!(bad_block.is_err());
+        assert!(bad_end.is_err());
     }
 }
