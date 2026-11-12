@@ -85,6 +85,14 @@ const SILENT_AFTER_STARVED_READS: u32 = 375;
 /// receive path allows gives back in under ten seconds.
 const GIVE_BACK_BY_RATE_UP_TO_SAMPLE_FRAMES: usize = 480;
 
+/// The longest delay adaptation may choose, in samples per channel: 5120, 107 ms
+/// at 48 kHz. Adaptation only reaches it on a link whose frames keep arriving
+/// after their turn.
+const MAX_ADAPTIVE_DELAY_SAMPLES: usize = 5120;
+/// ... and in frames, so the slot ring stays within what a peer's packets can
+/// be told apart by (`peer_buffer::ring_frames` at 48 kHz).
+const MAX_ADAPTIVE_DELAY_FRAMES: usize = 128;
+
 /// Seconds without a missing frame after which an automatic grant gives a tenth
 /// of its delay back (ADR-097).
 const GRANT_CLEAN_SECS: f32 = 15.0;
@@ -135,8 +143,12 @@ impl PlayoutConfig {
     /// held here and nowhere else (ADR-028). Passthrough is fixed at zero:
     /// adaptation must not quietly give up the 0ms promise (ADR-031). Buffered
     /// delays keep at least one frame of protection and may grow to twice the
-    /// target plus two.
+    /// target plus two, or to [`MAX_ADAPTIVE_DELAY_SAMPLES`] when that is more
+    /// (about 107 ms at 48 kHz, so a link that jitters by 25 ms is covered).
     pub fn for_delay(frame_samples: usize, target_delay_frames: u32) -> Self {
+        let samples_per_channel = (frame_samples / super::stream::WIRE_CHANNELS).max(1);
+        let widest_in_time = (MAX_ADAPTIVE_DELAY_SAMPLES / samples_per_channel)
+            .min(MAX_ADAPTIVE_DELAY_FRAMES) as u32;
         Self {
             frame_samples,
             target_delay_frames,
@@ -144,7 +156,7 @@ impl PlayoutConfig {
             max_delay_frames: if target_delay_frames == 0 {
                 0
             } else {
-                target_delay_frames * 2 + 2
+                (target_delay_frames * 2 + 2).max(widest_in_time)
             },
         }
     }
@@ -296,6 +308,13 @@ pub struct PlayoutBuffer {
     adapt_seen: u64,
     /// Concealed and starved reads at the last adaptation window.
     adapt_missed: u64,
+    /// Reads that came too early for a frame that was on its way, at the last
+    /// adaptation window: the running total of `late_reads`.
+    adapt_late: u64,
+    /// Frames that arrived after their turn, plus reads that starved and then
+    /// got the very frame they had waited for. A longer delay would have
+    /// covered each of them; a frame the line dropped is not among them.
+    late_reads: u64,
     /// Starved reads in a row since a frame last played or was concealed.
     starved_streak: u32,
     /// Starved reads that adaptation leaves out because they were part of a
@@ -391,6 +410,8 @@ impl PlayoutBuffer {
             pending_shift: 0,
             adapt_seen: 0,
             adapt_missed: 0,
+            adapt_late: 0,
+            late_reads: 0,
             starved_streak: 0,
             silent_reads: 0,
             clean_windows: 0,
@@ -502,11 +523,21 @@ impl PlayoutBuffer {
                     return WriteOutcome::Resynced;
                 }
 
+                if distance == 0
+                    && self.playing
+                    && (1..SILENT_AFTER_STARVED_READS).contains(&self.starved_streak)
+                {
+                    // The frame the reads were waiting for: the gap they played
+                    // was lateness, not loss
+                    self.late_reads += u64::from(self.starved_streak);
+                }
+
                 if distance < 0 {
                     if self.playing {
                         // Its turn has passed. Dropping it is the only option:
                         // the listener has already heard that moment.
                         self.stats.frames_late += 1;
+                        self.late_reads += 1;
                         return WriteOutcome::Late;
                     }
                     // Still priming, so an older frame simply moves the start
@@ -852,10 +883,12 @@ impl PlayoutBuffer {
 
         let before = self.target_delay_frames;
         let own_before = self.own_target_frames;
-        let miss_rate = missed as f32 / window as f32;
+        let late = self.late_reads.saturating_sub(self.adapt_late);
+        self.adapt_late = self.late_reads;
+        let late_rate = late as f32 / window as f32;
         if self.pinned_frames.is_some() {
             // Not the buffer's to move
-        } else if miss_rate > GROW_ABOVE_MISS_RATE {
+        } else if late_rate > GROW_ABOVE_MISS_RATE {
             self.clean_windows = 0;
             if self
                 .windows_since_shrink
@@ -866,7 +899,7 @@ impl PlayoutBuffer {
             }
             self.windows_since_shrink = None;
             self.set_target_delay_frames(own_before + 1);
-        } else if miss_rate < SHRINK_BELOW_MISS_RATE {
+        } else if late_rate < SHRINK_BELOW_MISS_RATE {
             self.clean_windows += 1;
             if self.clean_windows >= self.shrink_after_windows {
                 self.clean_windows = 0;
@@ -943,6 +976,8 @@ impl PlayoutBuffer {
         self.pending_shift = 0;
         self.adapt_seen = 0;
         self.adapt_missed = 0;
+        self.adapt_late = 0;
+        self.late_reads = 0;
         self.starved_streak = 0;
         self.silent_reads = 0;
         self.clean_windows = 0;
@@ -1276,6 +1311,26 @@ mod tests {
         assert_eq!(out, frame(7.0));
     }
 
+    /// Like [`drive`] with the odd frames arriving six reads after their
+    /// turn, so they are late rather than lost.
+    fn drive_late(buffer: &mut PlayoutBuffer, next: &mut u32, count: u32) {
+        let mut out = frame(0.0);
+        let first = *next;
+        for _ in 0..count {
+            if *next % 2 == 0 {
+                buffer.write(*next, &frame(*next as f32));
+            }
+            let _ = buffer.read_into(&mut out);
+            if let Some(due) = next
+                .checked_sub(6)
+                .filter(|due| *due >= first && due % 2 == 1)
+            {
+                buffer.write(due, &frame(due as f32));
+            }
+            *next += 1;
+        }
+    }
+
     /// Feeds `count` periods to the buffer: each one delivers a frame (unless
     /// `lose_every_other` drops the odd ones) and takes one out. `next` is the
     /// sequence to deliver next and is advanced.
@@ -1330,7 +1385,7 @@ mod tests {
         )
     }
 
-    /// A delay the user chose is the delay held: a lossy stretch that would
+    /// A delay the user chose is the delay held: a stretch of late frames that would
     /// have grown it, and a clean one that would have given it back, leave it
     /// alone, and so does a switch of preset.
     ///
@@ -1343,7 +1398,7 @@ mod tests {
         drive(&mut buffer, &mut next, 20, false);
 
         drive(&mut buffer, &mut next, 40, true);
-        assert_eq!(buffer.adapt(), None, "a lossy stretch does not grow it");
+        assert_eq!(buffer.adapt(), None, "late frames do not grow it");
         for _ in 0..CLEAN_WINDOWS_BEFORE_SHRINK + 2 {
             drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             assert_eq!(buffer.adapt(), None, "a clean stretch does not shrink it");
@@ -1579,23 +1634,23 @@ mod tests {
         }
     }
 
-    /// A lossy stretch buys more delay, one frame per decision, and never past
+    /// A stretch of late frames buys more delay, one frame per decision, and never past
     /// the ceiling.
     ///
     /// Verifies: REQ-LAT-108
     #[test]
-    fn a_lossy_stretch_grows_the_delay_up_to_its_ceiling() {
+    fn a_stretch_of_late_frames_grows_the_delay_up_to_its_ceiling() {
         let mut buffer = adaptive(2, 1, 4);
         let mut next = 0;
         drive(&mut buffer, &mut next, 4, false);
 
-        drive(&mut buffer, &mut next, 40, true);
-        assert_eq!(buffer.adapt(), Some(3), "concealment should buy a frame");
+        drive_late(&mut buffer, &mut next, 40);
+        assert_eq!(buffer.adapt(), Some(3), "late frames should buy a frame");
 
-        drive(&mut buffer, &mut next, 40, true);
+        drive_late(&mut buffer, &mut next, 40);
         assert_eq!(buffer.adapt(), Some(4));
 
-        drive(&mut buffer, &mut next, 40, true);
+        drive_late(&mut buffer, &mut next, 40);
         assert_eq!(buffer.adapt(), None, "the ceiling holds");
         assert_eq!(buffer.target_delay_frames(), 4);
     }
@@ -1609,7 +1664,7 @@ mod tests {
         let mut buffer = adaptive(2, 1, 8);
         let mut next = 0;
         drive(&mut buffer, &mut next, 4, false);
-        drive(&mut buffer, &mut next, 40, true);
+        drive_late(&mut buffer, &mut next, 40);
         assert_eq!(buffer.adapt(), Some(3));
 
         // The link has been clean since. The cumulative rate is still high,
@@ -1629,16 +1684,82 @@ mod tests {
         let mut next = 0;
         drive(&mut buffer, &mut next, 4, false);
 
-        drive(&mut buffer, &mut next, 12, true);
+        drive_late(&mut buffer, &mut next, 12);
         assert_eq!(buffer.adapt(), None, "a handful of frames is not a rate");
         assert_eq!(buffer.adapt(), None, "asking again changes nothing");
 
-        drive(&mut buffer, &mut next, 20, true);
+        drive_late(&mut buffer, &mut next, 20);
         assert_eq!(
             buffer.adapt(),
             Some(3),
             "the earlier frames count once there are enough"
         );
+    }
+
+    /// A frame the line dropped is gone whatever the delay: holding more would
+    /// not bring it back, only add latency. The delay stays where it is.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn a_stretch_that_only_loses_frames_does_not_grow_the_delay() {
+        let mut buffer = adaptive(2, 1, 8);
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 4, false);
+
+        for _ in 0..(CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
+            drive(&mut buffer, &mut next, 100, true);
+            assert_eq!(buffer.adapt(), None, "dropped frames are not lateness");
+        }
+        assert_eq!(buffer.target_delay_frames(), 2);
+        assert!(buffer.stats().frames_concealed > 100, "the loss was heard");
+    }
+
+    /// Reads that found nothing and then got the frame they had waited for were
+    /// a delay too short, even though no frame was late enough to be dropped.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn reads_that_waited_for_a_frame_that_then_came_grow_the_delay() {
+        let mut buffer = adaptive(1, 1, 8);
+        let mut out = frame(0.0);
+        let mut next = 0;
+        drive(&mut buffer, &mut next, 4, false);
+
+        // Now and then the sender stalls for two frames more than the buffer
+        // holds, and then sends what it owes in order, so the buffer runs dry
+        // and nothing is ever late or lost
+        for _ in 0..40u32 {
+            let stall = buffer.ready_frames() as u32 + 2;
+            for _ in 0..stall {
+                let _ = buffer.read_into(&mut out);
+            }
+            for _ in 0..stall {
+                buffer.write(next, &frame(next as f32));
+                next += 1;
+            }
+            drive(&mut buffer, &mut next, 7, false);
+        }
+        assert_eq!(buffer.stats().frames_late, 0);
+        assert!(buffer.stats().frames_starved > 0);
+        assert_eq!(buffer.adapt(), Some(2));
+    }
+
+    /// The most a delay can grow to covers a link that jitters by tens of
+    /// milliseconds, whatever the frame size.
+    ///
+    /// Verifies: REQ-LAT-108
+    #[test]
+    fn the_ceiling_of_a_buffered_delay_covers_about_a_hundred_milliseconds() {
+        // 128 samples a channel at 48 kHz, two channels
+        let balanced = PlayoutConfig::for_delay(256, 4);
+        assert_eq!(balanced.max_delay_frames, 40);
+        // 256 samples a channel: the same time, fewer frames
+        assert_eq!(PlayoutConfig::for_delay(512, 8).max_delay_frames, 20);
+        // 32 samples a channel: more frames, still within the ring
+        assert_eq!(PlayoutConfig::for_delay(64, 1).max_delay_frames, 128);
+        assert_eq!(PlayoutConfig::for_delay(64, 0).max_delay_frames, 0);
+        // A tiny frame size does not make the ring huge
+        assert_eq!(PlayoutConfig::for_delay(4, 4).max_delay_frames, 128);
     }
 
     /// A long clean run gives a frame back, but never below the floor, and a
@@ -1665,12 +1786,12 @@ mod tests {
         assert_eq!(buffer.target_delay_frames(), 2);
     }
 
-    /// A lossy stretch in the middle of a clean run starts the count again, so
+    /// A stretch of late frames in the middle of a clean run starts the count again, so
     /// the delay does not flip back and forth.
     ///
     /// Verifies: REQ-LAT-108
     #[test]
-    fn a_lossy_stretch_restarts_the_count_towards_shrinking() {
+    fn a_stretch_of_late_frames_restarts_the_count_towards_shrinking() {
         let mut buffer = adaptive(3, 1, 8);
         let mut next = 0;
         drive(&mut buffer, &mut next, 6, false);
@@ -1679,7 +1800,7 @@ mod tests {
             drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             buffer.adapt();
         }
-        drive(&mut buffer, &mut next, 40, true);
+        drive_late(&mut buffer, &mut next, 40);
         assert_eq!(buffer.adapt(), Some(4));
 
         for _ in 0..(CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
@@ -1825,11 +1946,14 @@ mod tests {
         let mut next = 0;
         drive(&mut buffer, &mut next, 4, false);
 
-        // 750 reads a second at 64 samples, 15 of them concealed: 2%.
+        // 750 reads a second at 64 samples, 15 of them late: 2%.
         let mut out = frame(0.0);
         for period in 0..750u32 {
             if period % 50 != 25 {
                 buffer.write(next, &frame(next as f32));
+            }
+            if period % 50 == 31 {
+                buffer.write(next - 6, &frame((next - 6) as f32));
             }
             next += 1;
             let _ = buffer.read_into(&mut out);
@@ -1860,13 +1984,9 @@ mod tests {
             "ten clean windows give a frame back"
         );
 
-        drive(&mut buffer, &mut next, 40, true);
+        drive_late(&mut buffer, &mut next, 40);
         assert_eq!(buffer.adapt(), Some(3), "the frame was needed after all");
 
-        // The window right after a grow still carries the frame it left
-        // concealed, so the count of clean windows starts with the next.
-        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
-        buffer.adapt();
         for _ in 0..(2 * CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
             drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             assert_eq!(
@@ -1898,11 +2018,9 @@ mod tests {
             drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             buffer.adapt();
         }
-        drive(&mut buffer, &mut next, 40, true);
+        drive_late(&mut buffer, &mut next, 40);
         assert_eq!(buffer.adapt(), Some(4));
 
-        drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
-        buffer.adapt();
         for _ in 0..(CLEAN_WINDOWS_BEFORE_SHRINK - 1) {
             drive(&mut buffer, &mut next, CLEAN_WINDOW, false);
             assert_eq!(buffer.adapt(), None);
@@ -2013,7 +2131,7 @@ mod tests {
         let mut buffer = adaptive(2, 1, 4);
         buffer.set_target_delay_frames(0);
         assert_eq!(buffer.target_delay_frames(), 1);
-        buffer.set_target_delay_frames(99);
+        buffer.set_target_delay_frames(999);
         assert_eq!(buffer.target_delay_frames(), 4);
     }
 
@@ -2215,11 +2333,11 @@ mod tests {
         buffer.set_delay(0);
         let mut next = 0;
         drive(&mut buffer, &mut next, 3, false);
-        drive(&mut buffer, &mut next, 200, true);
+        drive_late(&mut buffer, &mut next, 200);
         assert_eq!(buffer.adapt(), None, "zero-latency stays at zero");
 
         buffer.set_delay(4);
-        buffer.set_target_delay_frames(99);
+        buffer.set_target_delay_frames(999);
         assert_eq!(
             buffer.target_delay_frames(),
             PlayoutConfig::for_delay(4, 4).max_delay_frames

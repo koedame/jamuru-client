@@ -1161,7 +1161,7 @@ mod tests {
     ///
     /// Verifies: REQ-LAT-108
     #[test]
-    fn adaptation_through_the_receive_path_grows_the_delay_on_loss() {
+    fn adaptation_through_the_receive_path_grows_the_delay_on_late_frames() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 2).expect("PCM is always available");
         let mut out = stereo_frame(4, 0.0);
 
@@ -1171,12 +1171,15 @@ mod tests {
         }
         assert_eq!(path.adapt(), None, "no stretch to judge yet");
 
-        // Every other frame goes missing.
+        // Every other frame arrives six reads after its turn.
         for sequence in 4..60u32 {
             if sequence % 2 == 0 {
                 path.receive(sequence, &pcm(&stereo_frame(4, 1.0)));
             }
             path.read_into(&mut out);
+            if sequence >= 10 && sequence % 2 == 1 {
+                path.receive(sequence - 6, &pcm(&stereo_frame(4, 1.0)));
+            }
         }
         assert_eq!(path.adapt(), Some(3));
         assert_eq!(path.delay_frames(), 3);
@@ -1743,13 +1746,16 @@ mod tests {
         path.set_delay_frames(4);
         assert_eq!(path.delay_frames(), 4, "a preset switch");
 
-        // A lossy stretch buys a frame.
+        // A stretch of late frames buys a frame.
         let mut out = stereo_frame(4, 0.0);
-        for sequence in 0..60u32 {
+        for sequence in 0..80u32 {
             if sequence % 2 == 0 {
                 path.receive(sequence, &pcm(&stereo_frame(4, 1.0)));
             }
             path.read_into(&mut out);
+            if sequence >= 12 && sequence % 2 == 1 {
+                path.receive(sequence - 8, &pcm(&stereo_frame(4, 1.0)));
+            }
         }
         assert_eq!(path.adapt(), Some(5));
         assert_eq!(path.delay_frames(), 5, "an adaptation");
