@@ -13,6 +13,7 @@ jamuruをインストールする方法を説明します。
 - Windows 10/11 (64-bit)
 - macOS 11.0 (Big Sur) 以降
 - Linux (Ubuntu 22.04, Fedora 38 等)
+- Linux の 64bit ARM（aarch64 / arm64。NanoPi R3S など）: x86_64 と同じアプリ（AppImage・deb）とコマンドラインの `jamuru` がある（後述の「64bit ARM の Linux」）
 - Linux の 32bit ARM（armv7 / armhf。NanoPi NEO など）: アプリの画面は動かず、コマンドラインの `jamuru` だけ（後述の「32bit ARM の Linux（コマンドラインのみ）」）
 
 ### ハードウェア要件
@@ -118,6 +119,15 @@ AppImage の場合、実行権限を付与してから起動:
 chmod +x jamuru_*.AppImage
 ./jamuru_*.AppImage
 ```
+
+#### 64bit ARM の Linux
+
+NanoPi R3S のような 64bit ARM（aarch64 / arm64）の Linux 向けには、x86_64 と同じ形のアプリと、画面のないコマンドラインの `jamuru` を配っています。メモリは 2GB 以上を目安にしてください（アプリの画面は WebKitGTK を使うため、コマンドラインより多く使います）。
+
+- アプリ: [GitHub Releases](https://github.com/koedame/jamuru-client/releases) の `jamuru_<版>_aarch64.AppImage`（自動更新する）または `jamuru_<版>_arm64.deb`（自動更新しない）。起動の手順は上の「Linux での起動方法」と同じです
+- コマンドライン: `jamuru-cli-linux-aarch64.tar.gz` と `jamuru-cli-linux-aarch64.tar.gz.sha256` をダウンロードし、同じフォルダで `sha256sum -c jamuru-cli-linux-aarch64.tar.gz.sha256` を確かめてから、`tar xzf jamuru-cli-linux-aarch64.tar.gz && ./jamuru-cli-linux-aarch64/jamuru --help` で動かします。署名はなく、自動更新もしません。新しい版が出たら、同じ手順で入れ直してください
+
+どちらも glibc 2.35 以降（Ubuntu 22.04・Debian 12 相当以降）が要ります。音は ALSA で扱うので、コマンドラインには `libasound2` が要ります（Debian・Ubuntu 系は `sudo apt install libasound2`）。R3S には HDMI も音声端子もないため、音を出し入れするには USB のオーディオインターフェースを使ってください。
 
 #### 32bit ARM の Linux（コマンドラインのみ）
 

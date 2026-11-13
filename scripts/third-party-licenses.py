@@ -59,6 +59,7 @@ BODY_KEY = "body-sha256"
 CARGO_ABOUT_VERSION = "0.9.2"
 
 LINUX_NOTICE_ASSET = "jamuru-linux-bundled-libraries.txt"
+LINUX_ARM64_NOTICE_ASSET = "jamuru-linux-arm64-bundled-libraries.txt"
 RELEASES_URL = "https://github.com/koedame/jamuru-client/releases"
 
 # Static: what is not derived from a lockfile.
@@ -323,7 +324,8 @@ def render(cargo: dict, npm: dict, extra: list, fmt: str) -> str:
         "them are under the LGPL. Which libraries they are depends on the build, so the\n"
         "list, the copyright file of each package, the license texts it refers to and\n"
         "where to get the source are generated from the AppImage itself and attached to\n"
-        f"the same release as the AppImage, as {LINUX_NOTICE_ASSET}:\n"
+        f"the same release as the AppImage, as {LINUX_NOTICE_ASSET} (for the 64-bit ARM\n"
+        f"AppImage: {LINUX_ARM64_NOTICE_ASSET}):\n"
         f"{RELEASES_URL}\n"
     )
     return "\n".join(out).rstrip("\n") + "\n"

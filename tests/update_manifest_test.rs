@@ -10,10 +10,14 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const BUNDLES: [(&str, &str); 5] = [
+const BUNDLES: [(&str, &str); 6] = [
     ("jamuru-macos-arm64/macos", "jamuru_aarch64.app.tar.gz"),
     ("jamuru-macos-x64/macos", "jamuru_x64.app.tar.gz"),
     ("jamuru-linux-x64/bundle/appimage", "jamuru_amd64.AppImage"),
+    (
+        "jamuru-linux-arm64/bundle/appimage",
+        "jamuru_aarch64.AppImage",
+    ),
     ("jamuru-windows-x64/bundle/nsis", "jamuru_x64-setup.exe"),
     ("jamuru-windows-x64/bundle/msi", "jamuru_x64_en-US.msi"),
 ];
@@ -83,7 +87,7 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// Verifies: REQ-UPD-009, REQ-UPD-026
+/// Verifies: REQ-UPD-009, REQ-UPD-026, REQ-DIST-011
 #[test]
 fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_all() {
     let version = built_version();
@@ -106,6 +110,7 @@ fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_a
         [
             "darwin-aarch64-app",
             "darwin-x86_64-app",
+            "linux-aarch64-appimage",
             "linux-x86_64-appimage",
             "windows-x86_64-msi",
             "windows-x86_64-nsis",
@@ -115,6 +120,12 @@ fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_a
         platforms["darwin-aarch64-app"]["url"],
         format!(
             "https://github.com/koedame/jamuru-client/releases/download/v{version}/jamuru_aarch64.app.tar.gz"
+        )
+    );
+    assert_eq!(
+        platforms["linux-aarch64-appimage"]["url"],
+        format!(
+            "https://github.com/koedame/jamuru-client/releases/download/v{version}/jamuru_aarch64.AppImage"
         )
     );
     // The apps decode this exact text, so it is the file's content, untouched.
@@ -183,6 +194,28 @@ fn when_a_beta_is_signed_for_the_release_version_no_manifest_is_written() {
     assert!(output.stdout.is_empty());
     assert!(
         stderr(&output).contains("was not signed for version"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+/// A release without the 64-bit ARM AppImage would leave every installed
+/// arm64 app failing its update check, so the manifest is not written.
+///
+/// Verifies: REQ-DIST-011
+#[test]
+fn when_the_arm64_appimage_is_missing_no_manifest_is_written() {
+    let version = built_version();
+    let dir = tempfile::tempdir().unwrap();
+    artifacts(dir.path(), &version);
+    std::fs::remove_dir_all(dir.path().join("jamuru-linux-arm64")).unwrap();
+
+    let output = run(&format!("v{version}"), dir.path());
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        stderr(&output).contains("linux-aarch64-appimage bundle"),
         "{}",
         stderr(&output)
     );

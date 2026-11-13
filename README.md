@@ -15,7 +15,7 @@ Low-latency peer-to-peer audio communication application for macOS, Windows, and
 
 ## Features
 
-- Cross-platform support (macOS, Windows, Linux; the command-line tool also for 32-bit ARM Linux, armv7 / armhf)
+- Cross-platform support (macOS, Windows, Linux including 64-bit ARM, arm64 / aarch64; the command-line tool also for 32-bit ARM Linux, armv7 / armhf)
 - Low-latency audio streaming
 - Peer-to-peer connection (no central server required for audio)
 - Multiple audio codec support (Opus, PCM)
