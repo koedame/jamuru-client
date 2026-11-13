@@ -285,11 +285,12 @@ class Builds:
                 platform_keys=("windows-x86_64-nsis", "windows-x86_64"),
             )
         update = one("appimage/*.AppImage", b)
+        arch = "aarch64" if os.uname().machine == "aarch64" else "x86_64"
         return Builds(
             a_package=one("appimage/*.AppImage", a),
             b_update=update,
             b_signature=Path(f"{update}.sig"),
-            platform_keys=("linux-x86_64-appimage", "linux-x86_64"),
+            platform_keys=(f"linux-{arch}-appimage", f"linux-{arch}"),
         )
 
 

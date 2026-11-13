@@ -276,10 +276,18 @@ async fn update_once(app: &AppHandle) -> Result<(), UpdateError> {
 
 /// The platform the update information is read for when the package has none
 /// of its own: the information carries one version for every platform, and
-/// only the AppImage has an entry on Linux (`scripts/make-update-manifest.sh`).
-/// Release builds exist for x86_64 only.
+/// only the AppImage has an entry on Linux (`scripts/make-update-manifest.sh`),
+/// one per architecture the release is built for (x86_64 and aarch64).
 fn notice_target() -> Option<&'static str> {
-    (std::env::consts::OS == "linux").then_some("linux-x86_64-appimage")
+    notice_target_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn notice_target_for(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
+        ("linux", "x86_64") => Some("linux-x86_64-appimage"),
+        ("linux", "aarch64") => Some("linux-aarch64-appimage"),
+        _ => None,
+    }
 }
 
 /// Looks for a release newer than the running one. Nothing is downloaded.
@@ -752,6 +760,22 @@ async fn wait_until_no_session(in_session: impl Fn() -> bool, poll: Duration) {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Verifies: REQ-DIST-011
+    #[test]
+    fn when_a_package_that_cannot_replace_itself_reads_the_notice_on_linux_it_reads_the_entry_of_its_architecture(
+    ) {
+        assert_eq!(
+            notice_target_for("linux", "x86_64"),
+            Some("linux-x86_64-appimage")
+        );
+        assert_eq!(
+            notice_target_for("linux", "aarch64"),
+            Some("linux-aarch64-appimage")
+        );
+        assert_eq!(notice_target_for("linux", "arm"), None);
+        assert_eq!(notice_target_for("macos", "aarch64"), None);
+    }
 
     /// Verifies: REQ-UPD-001
     #[test]

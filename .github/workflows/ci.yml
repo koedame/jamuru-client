@@ -329,3 +329,53 @@ jobs:
 
       - name: Check dependency licenses (core library)
         run: cargo deny --all-features check licenses
+
+  # The command-line tool for ARM Linux, 32-bit and 64-bit (ADR-126, ADR-127).
+  # Built on every change so a dependency that stops building there is caught
+  # here, not on the day of a release. (Not in build.yml: that workflow is
+  # switched off.)
+  build-cli:
+    name: Build CLI (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: armv7-unknown-linux-gnueabihf
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install the cross compiler and the armhf ALSA
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          scripts/install-armhf-cross-deps.sh
+          sudo apt-get install -y --no-install-recommends qemu-user
+
+      - name: Install the build dependencies
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config cmake
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Build the CLI
+        run: scripts/build-cli.sh ${{ matrix.target }} dist
+
+      - name: Check the CLI starts under qemu
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: scripts/check-cli-runs.sh target/${{ matrix.target }}/release/jamuru /usr/arm-linux-gnueabihf
+
+      - name: Check the CLI starts
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: scripts/check-cli-runs.sh target/${{ matrix.target }}/release/jamuru

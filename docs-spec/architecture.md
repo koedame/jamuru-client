@@ -718,6 +718,7 @@ TOML形式を使用する。
 | macOS | DMG、Homebrew Cask |
 | Linux | AppImage、deb、rpm |
 | Linux（32bit ARM。armv7 / armhf） | AppImage、deb（[ADR-128](./adr/ADR-128-armhf-app-in-the-release.md)）、CLI `jamuru` の tar.gz（[ADR-126](./adr/ADR-126-armhf-cli-in-the-release.md)） |
+| Linux（64bit ARM。aarch64 / arm64） | AppImage、deb、CLI `jamuru` の tar.gz（[ADR-127](./adr/ADR-127-arm64-linux-in-the-release.md)） |
 
 ---
 

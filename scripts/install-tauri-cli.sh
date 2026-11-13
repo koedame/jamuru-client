@@ -29,6 +29,11 @@ case "$(uname -s)-$(uname -m)" in
   MINGW*-x86_64 | MSYS*-x86_64 | CYGWIN*-x86_64)
     asset=cargo-tauri-x86_64-pc-windows-msvc.zip
     sha256=d3919ebe0bf7013dd98293862784dd37b8f76db2d650e13a3ec11c5dd799c519 ;;
+  Linux-aarch64)
+    # The Tauri project publishes no prebuilt CLI for arm64 Linux: compile it.
+    cargo install tauri-cli --version "${version}" --locked
+    "${CARGO_HOME:-$HOME/.cargo}/bin/cargo-tauri" tauri --version
+    exit 0 ;;
   *)
     echo "no prebuilt Tauri CLI for $(uname -s)-$(uname -m); use: cargo install tauri-cli --version ${version} --locked" >&2
     exit 1 ;;
