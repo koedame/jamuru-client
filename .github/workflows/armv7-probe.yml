@@ -9,79 +9,28 @@ permissions:
   contents: read
 
 jobs:
-  build-armv7-gui:
-    name: Build app (armv7-unknown-linux-gnueabihf)
+  quick:
+    name: Quick plugin probe
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-
-      # See the same step in release.yml for what each line is for.
-      - name: Install the cross compiler and the armhf libraries
-        run: |
-          scripts/install-armhf-cross-deps.sh gui
-          sudo apt-get install -y --no-install-recommends qemu-user-static binfmt-support
-          {
-            echo "PKG_CONFIG_ALLOW_CROSS=1"
-            echo "PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
-            echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc"
-            echo "CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc"
-            echo "NO_STRIP=true"
-            echo "APPIMAGE_EXTRACT_AND_RUN=1"
-          } >> "${GITHUB_ENV}"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: stable
-          targets: armv7-unknown-linux-gnueabihf
-
-      - name: Install Tauri CLI
-        run: scripts/install-tauri-cli.sh
-
-      - name: Build Tauri app
-        id: build
-        continue-on-error: true
-        env:
-          # The signaling server the app dials (ADR-030). Kept out of the source.
-          JAMJAM_SERVER_URL: https://example.invalid
-        run: cargo tauri build --target armv7-unknown-linux-gnueabihf --verbose
-
-      - name: Debug the plugin
-        if: steps.build.outcome == 'failure'
+      - name: Probe
         run: |
           set +e
-          P=$HOME/.cache/tauri/linuxdeploy-plugin-appimage.AppImage
-          ls -la $HOME/.cache/tauri/
-          file $P
-          ls -la /lib/ld-linux-armhf.so.3 /usr/arm-linux-gnueabihf/lib/ld-linux-armhf.so.3
-          head -3 /proc/sys/fs/binfmt_misc/qemu-arm
-          echo "--- env run"; APPIMAGE_EXTRACT_AND_RUN=1 $P --plugin-api-version; echo rc=$?
-          echo "--- flag run"; $P --appimage-extract-and-run --plugin-api-version; echo rc=$?
-          echo "--- plain run"; $P --plugin-api-version; echo rc=$?
-          mkdir -p /tmp/x && cd /tmp/x && $P --appimage-extract >/dev/null 2>&1; ls squashfs-root | head; file squashfs-root/AppRun squashfs-root/usr/bin/* | head
-          echo "--- AppRun"; squashfs-root/AppRun --plugin-api-version; echo rc=$?
-          exit 1
-
-      - name: Check the Linux build runs on the oldest glibc we support
-        env:
-          OBJDUMP: arm-linux-gnueabihf-objdump
-        run: scripts/check-glibc-floor.sh src-tauri/target/armv7-unknown-linux-gnueabihf/release/jamuru-app 2.35
-
-      - name: List the libraries bundled in the AppImage
-        env:
-          PACKAGE_ARCH: armhf
-        run: |
-          set -euo pipefail
-          dir=src-tauri/target/armv7-unknown-linux-gnueabihf/release/bundle/appimage
-          ls -la "${dir}" src-tauri/target/armv7-unknown-linux-gnueabihf/release/bundle/deb
-          python3 scripts/appimage-bundled-libraries.py "${dir}"/*.AppImage "${dir}/jamuru-linux-armv7-bundled-libraries.txt"
-          head -60 "${dir}/jamuru-linux-armv7-bundled-libraries.txt"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: jamuru-linux-armv7
-          path: |
-            src-tauri/target/armv7-unknown-linux-gnueabihf/release/bundle/appimage/*.AppImage
-            src-tauri/target/armv7-unknown-linux-gnueabihf/release/bundle/deb/*.deb
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y --no-install-recommends qemu-user-static binfmt-support >/dev/null
+          scripts/install-armhf-cross-deps.sh >/dev/null 2>&1
+          mkdir -p /tmp/p && cd /tmp/p
+          curl -sL -o plugin.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-armhf.AppImage
+          curl -sL -o ld.AppImage https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-armhf.AppImage
+          chmod +x *.AppImage
+          cat /proc/sys/fs/binfmt_misc/qemu-arm
+          readelf -h plugin.AppImage | head -12
+          readelf -h ld.AppImage | head -12
+          qemu-arm-static --version | head -1
+          echo "--- direct linuxdeploy"; ./ld.AppImage --appimage-extract-and-run --version; echo rc=$?
+          echo "--- direct plugin"; ./plugin.AppImage --plugin-api-version; echo rc=$?
+          echo "--- qemu-arm-static plugin"; qemu-arm-static ./plugin.AppImage --plugin-api-version; echo rc=$?
+          echo "--- qemu-arm-static plugin extract"; qemu-arm-static ./plugin.AppImage --appimage-extract >/dev/null; echo rc=$?; ls squashfs-root 2>&1 | head
+          echo "--- plugin extract-and-run"; qemu-arm-static ./plugin.AppImage --appimage-extract-and-run --plugin-api-version; echo rc=$?
