@@ -86,6 +86,18 @@ jobs:
           grep -c "^lib" "${dir}/jamuru-linux-armv7-bundled-libraries.txt"
           grep -q 'libwebkit2gtk-4.1\.so' "${dir}/jamuru-linux-armv7-bundled-libraries.txt"
 
+      - name: Smoke the AppImage
+        continue-on-error: true
+        run: |
+          set +e
+          sudo apt-get install -y --no-install-recommends xvfb >/dev/null
+          dir=$PWD/src-tauri/target/armv7-unknown-linux-gnueabihf/release/bundle/appimage
+          mkdir -p /tmp/sm && cd /tmp/sm && cp "${dir}"/*.AppImage a.AppImage && ./a.AppImage --appimage-extract >/dev/null
+          cd squashfs-root
+          echo "--- unresolved"; qemu-arm-static -E LD_LIBRARY_PATH="$PWD/usr/lib" /lib/ld-linux-armhf.so.3 --list usr/bin/jamuru-app | grep "not found"; echo "n=$(qemu-arm-static -E LD_LIBRARY_PATH="$PWD/usr/lib" /lib/ld-linux-armhf.so.3 --list usr/bin/jamuru-app | grep -c 'not found')"
+          echo "--- AppRun"; head -c 1500 AppRun
+          echo "--- start"; timeout 60 xvfb-run -a ./AppRun 2>&1 | tail -30; echo "rc=${PIPESTATUS[0]}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
