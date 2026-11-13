@@ -81,10 +81,7 @@ fn when_a_release_is_made_the_armhf_cli_is_built_and_published_with_its_checksum
 /// Verifies: REQ-DIST-010
 #[test]
 fn when_the_armhf_cli_is_built_the_job_reads_no_secret_and_holds_no_write_access() {
-    for file in [
-        ".github/workflows/release.yml",
-        ".github/workflows/build.yml",
-    ] {
+    for file in [".github/workflows/release.yml", ".github/workflows/ci.yml"] {
         let build = job(&read(file), "build-cli");
         assert!(
             !build.contains("secrets."),
@@ -110,7 +107,7 @@ fn when_the_armhf_cli_is_built_the_job_reads_no_secret_and_holds_no_write_access
 #[test]
 fn when_a_change_is_pushed_the_armhf_cli_is_built_so_a_dependency_that_stops_building_is_caught_early(
 ) {
-    let build = job(&read(".github/workflows/build.yml"), "build-cli");
+    let build = job(&read(".github/workflows/ci.yml"), "build-cli");
 
     assert!(build.contains("target: armv7-unknown-linux-gnueabihf"));
     assert!(build.contains("scripts/build-cli.sh ${{ matrix.target }}"));
@@ -232,7 +229,7 @@ fn when_the_app_is_built_for_two_architectures_each_has_its_own_notice_file_name
 #[test]
 fn when_a_change_is_pushed_the_arm64_cli_is_built_so_a_dependency_that_stops_building_is_caught_early(
 ) {
-    let build = job(&read(".github/workflows/build.yml"), "build-cli");
+    let build = job(&read(".github/workflows/ci.yml"), "build-cli");
 
     assert!(build.contains("runner: ubuntu-22.04-arm"));
     assert!(build.contains("target: aarch64-unknown-linux-gnu"));

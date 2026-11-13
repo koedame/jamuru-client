@@ -17,7 +17,7 @@ R3S のメモリは WebKitGTK を動かすのに足りる見込みなので、CL
 3. **CLI は `jamuru-cli-linux-aarch64.tar.gz` と `.sha256` を添える**（ADR-126 の armv7 と同じ形。中身は `jamuru`・`LICENSE`・`THIRD_PARTY_LICENSES.md`）。`build-cli` ジョブをマトリクスにし、aarch64 はネイティブでビルドして、そのまま `--version` と `--help` を動かしてから公開する。署名と自動更新は無い。秘密を読まず、書き込み権限も持たない（ADR-126 の 6 と同じ）。
 4. **CLI の機能は既定のまま（`opus-codec` を付けない）。** どのプリセットも Opus を使わず（ADR-021）、アプリも付けずに配っているので、CLI だけ増やさない。aarch64 は NEON が標準なので、armv7 のように libopus のビルドで落ちることはない（arm64 のランナーで `--features opus-codec` の release ビルドを作り、`--version` と `--help` が動くことを確かめた。実機の音は未確認）。付ける必要が生まれたら別の決定として扱う。
 5. **自動更新の情報（`latest.json`）に arm64 の AppImage を載せる（キーは `linux-aarch64-appimage`）。** 更新の署名は amd64 と同じ鍵で、Tauri のアップデーターは実行中の CPU の種類のキーを引く。載せないと、arm64 の AppImage が更新を確かめるたびに該当するキーが無くて失敗するので、載せる。載せる以上、更新が起動しなかったときに前の版へ戻る仕組み（ADR-089）も arm64 で確かめる: 更新ドリル（`update-drill.yml`）に arm64 の Linux（`ubuntu-22.04-arm`）を足し、リリースは arm64 でも通ってから公開する。更新の自動入れ替えに対応しない deb が新しい版を知らせる経路（`notice_target`）も、CPU の種類のキーを引くよう直す。arm64 の AppImage が欠けると `make-update-manifest.sh` が `latest.json` を書かずにリリースを止める。
-6. **変更のたびに回すのは CLI（`build.yml`）だけ。** アプリの arm64 のビルドは、`release.yml` の週次のリハーサル（develop）とリリースで回る。アプリのビルドは長く、arm64 のランナーを毎回占有するほどの頻度は要らないと見た。arm64 でアプリが作れなくなったら、次のリハーサルで落ちて分かる。
+6. **変更のたびに回すのは CLI（`ci.yml`）だけ。** CLI の `build-cli` ジョブ（armv7 と aarch64）は、手動で止められている `build.yml` ではなく、動いている `ci.yml` に置く（ADR-126 の「`build.yml` にも置く」は、そのワークフローが止まっていて一度も回っていなかったため、ここで `ci.yml` に移した）。 アプリの arm64 のビルドは、`release.yml` の週次のリハーサル（develop）とリリースで回る。アプリのビルドは長く、arm64 のランナーを毎回占有するほどの頻度は要らないと見た。arm64 でアプリが作れなくなったら、次のリハーサルで落ちて分かる。
 
 ## Consequences
 
