@@ -106,17 +106,6 @@ fn when_the_update_manifest_is_made_it_names_the_armv7_appimage() {
     ));
 }
 
-/// Verifies: REQ-DIST-012
-#[test]
-fn when_a_change_is_pushed_the_armv7_app_is_built_so_a_dependency_that_stops_building_is_caught_early(
-) {
-    let build = job(&read(".github/workflows/build.yml"), "build-armv7-gui");
-
-    assert!(build.contains("scripts/install-armhf-cross-deps.sh gui"));
-    assert!(build.contains("cargo tauri build --target armv7-unknown-linux-gnueabihf"));
-    assert!(build.contains("scripts/check-glibc-floor.sh"));
-}
-
 /// The two libraries notices (x64 and armv7) are both named in the notice that
 /// goes into the installers, or the armv7 one would be published unannounced.
 ///

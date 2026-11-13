@@ -22,7 +22,7 @@ Accepted。[ADR-126](./ADR-126-armhf-cli-in-the-release.md) の決定 1（GUI �
 3. **署名し、自動更新に載せる。** AppImage は x64 と同じ鍵で署名し、`latest.json` に `linux-armv7-appimage` として載せる（`tauri-plugin-updater` が armv7 の機器で引くキーが `linux-armv7-appimage`）。載せないと、armhf のアプリが入った機器は手で入れ直すまで更新されない。deb は手で入れる形（x64 と同じ）。
 4. **glibc の上限の検査と、成果物がそろっているかの検査に armv7 を足す。** glibc は armhf 用の `objdump`（`OBJDUMP`）で 2.35 まで。成果物の検査は、AppImage と deb の両方が無ければリリースを止める。更新の一覧（`make-update-manifest.sh`）も、armv7 の AppImage とその署名が無ければ書かない。
 5. **AppImage に同梱するライブラリの表示（REQ-DIST-008）は armhf の AppImage からも作る。** ビルドの機械は amd64 の同じパッケージも入れているので、`PACKAGE_ARCH=armhf` で armhf のパッケージだけを引く（そうしないと `dpkg-query` が 2 つの版を返して落ちる）。出力は `jamuru-linux-armv7-bundled-libraries.txt` で、x64 の `jamuru-linux-bundled-libraries.txt` と並べて同じリリースに置く。同梱する第三者ライセンスの文（`THIRD_PARTY_LICENSES.md`・`LICENSES.txt`）は両方の名前を書く。
-6. **変更のたびに armhf のアプリが作れるかを見る。** `build.yml` に `build-armv7-gui` ジョブを置く（AppImage と deb を作り、glibc を検査する。署名と遠隔デバッグの検査はリリースのジョブだけ）。
+6. **armhf のアプリが作れなくなったことは、毎週 develop で回るリリースの予行（`release.yml` の `schedule`）と、ベータ版のたびに分かる。** 変更のたびに回す検査は置かない（`build.yml` は手で無効にされていて動かない。armhf を毎回のプルリクエストで 10 分以上かけて作るほどの頻度の問題でもない）。ADR-126 が `build.yml` に置いた CLI の検査も、いま動いていない。
 7. **opus-codec は付けない**（アプリも CLI も同じ。ADR-126 の決定 3）。
 
 ## Consequences

@@ -399,7 +399,7 @@ REQ-DIST-009 の決定は [ADR-091](./adr/ADR-091-release-credentials-in-environ
 
 REQ-DIST-010 の決定は [ADR-126](./adr/ADR-126-armhf-cli-in-the-release.md)。`tests/cli_armhf_release_test.rs` が、`release.yml` がビルドを待ってから公開すること、成果物と checksum を載せること、このジョブが秘密も書き込み権限も持たないこと、スクリプトが誤った呼び出しを断ることを検証する。実際のクロスビルドと qemu での起動は `build-cli` ジョブが行う。実機の NEO で音が途切れないか（Cortex-A7 で小さいバッファが間に合うか）は検証範囲に入れない。
 
-REQ-DIST-012 の決定は [ADR-128](./adr/ADR-128-armhf-app-in-the-release.md)。`tests/gui_armhf_release_test.rs` が、`release.yml` の `build` が armv7 の行を持つこと、成果物と署名と同梱ライブラリの表示を載せ、欠けたら止まること、glibc を armhf の `objdump` で検査すること、`latest.json` に載せること、`build.yml` が変更のたびに作ることを検証する。`tests/appimage_bundled_libraries_test.rs` は 2 つのアーキテクチャのパッケージが入った機械で armhf だけを引くことを検証する。実際のクロスビルド・qemu 越しの AppImage の作成・署名は `build` ジョブが行う。実機のメモリで画面が動くか、音が途切れないかは検証範囲に入れない。
+REQ-DIST-012 の決定は [ADR-128](./adr/ADR-128-armhf-app-in-the-release.md)。`tests/gui_armhf_release_test.rs` が、`release.yml` の `build` が armv7 の行を持つこと、成果物と署名と同梱ライブラリの表示を載せ、欠けたら止まること、glibc を armhf の `objdump` で検査すること、`latest.json` に載せることを検証する。`tests/appimage_bundled_libraries_test.rs` は 2 つのアーキテクチャのパッケージが入った機械で armhf だけを引くことを検証する。実際のクロスビルド・qemu 越しの AppImage の作成・署名は `build` ジョブが行う。実機のメモリで画面が動くか、音が途切れないかは検証範囲に入れない。
 
 REQ-DIST-001 の宣言が実行時に効くこと（マイク許可ダイアログに説明が出て、プロセスが終了しないこと）は macOS 実機でしか確かめられない。本要求は宣言の存在までを検証範囲とする。
 
