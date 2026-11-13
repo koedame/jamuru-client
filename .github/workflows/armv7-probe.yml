@@ -19,9 +19,10 @@ jobs:
       # See the same step in release.yml for what each line is for.
       - name: Install the cross compiler and the armhf libraries
         run: |
-          scripts/install-armhf-cross-deps.sh gui
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-user-static binfmt-support
           scripts/register-armhf-binfmt.sh
+          scripts/install-armhf-cross-deps.sh gui
           {
             echo "PKG_CONFIG_ALLOW_CROSS=1"
             echo "PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
@@ -29,6 +30,8 @@ jobs:
             echo "CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc"
             echo "NO_STRIP=true"
             echo "APPIMAGE_EXTRACT_AND_RUN=1"
+            echo "LD_GTK_LIBRARY_PATH=/usr/lib/arm-linux-gnueabihf"
+            echo "DEB_HOST_ARCH=armhf"
           } >> "${GITHUB_ENV}"
 
       - name: Setup Rust
