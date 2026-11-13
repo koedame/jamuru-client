@@ -11,6 +11,9 @@ Low-latency P2P audio communication for musicians.
 | Windows | `jamuru_{VERSION}_x64-setup.exe` | Windows 10+ required |
 | Linux (AppImage) | `jamuru_{VERSION}_amd64.AppImage` | |
 | Linux (deb) | `jamuru_{VERSION}_amd64.deb` | Debian/Ubuntu |
+| Linux, 32-bit ARM (AppImage) | `jamuru_{VERSION}_armhf.AppImage` | armv7 / armhf |
+| Linux, 32-bit ARM (deb) | `jamuru_{VERSION}_armhf.deb` | armv7 / armhf |
+| Linux, 32-bit ARM (command line) | `jamuru-cli-linux-armv7.tar.gz` | no window; check it against the `.sha256` next to it |
 
 ## What's New
 
@@ -29,7 +32,7 @@ By downloading and using this software, you agree to the [LICENSE](https://githu
 
 ## Third-Party Licenses
 
-This application includes third-party components. See [THIRD_PARTY_LICENSES.md](https://github.com/koedame/jamuru-client/blob/HEAD/THIRD_PARTY_LICENSES.md) for details. The Linux AppImage also bundles system libraries (mostly LGPL); their notices and where to get their source are in `jamuru-linux-bundled-libraries.txt`, attached to this release.
+This application includes third-party components. See [THIRD_PARTY_LICENSES.md](https://github.com/koedame/jamuru-client/blob/HEAD/THIRD_PARTY_LICENSES.md) for details. The Linux AppImage also bundles system libraries (mostly LGPL); their notices and where to get their source are in `jamuru-linux-bundled-libraries.txt` (x86_64) and `jamuru-linux-armv7-bundled-libraries.txt` (32-bit ARM), attached to this release.
 
 ## Checksums
 
