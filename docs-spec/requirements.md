@@ -396,7 +396,7 @@ REQ-DIST-008 の表示は `scripts/appimage-bundled-libraries.py` が `release.y
 
 REQ-DIST-009 の決定は [ADR-091](./adr/ADR-091-release-credentials-in-environments.md)。`tests/distribution_config_test.rs` が、これらのシークレットを読むジョブが `release.yml` の中で environment を名指ししていることを検証する。environment の中身と、どの ref に開くかは GitHub 側の設定で、リポジトリの中のテストでは見られない。
 
-REQ-DIST-010 の決定は [ADR-126](./adr/ADR-126-armhf-cli-in-the-release.md)。`tests/cli_armhf_release_test.rs` が、`release.yml` がビルドを待ってから公開すること、成果物と checksum を載せること、このジョブが秘密を読まないこと、スクリプトが誤った呼び出しを断ることを検証する。実際のクロスビルドと qemu での起動は `build-cli` ジョブが行う。実機の NEO で音が途切れないか（Cortex-A7 で小さいバッファが間に合うか）は検証範囲に入れない。
+REQ-DIST-010 の決定は [ADR-126](./adr/ADR-126-armhf-cli-in-the-release.md)。`tests/cli_armhf_release_test.rs` が、`release.yml` がビルドを待ってから公開すること、成果物と checksum を載せること、このジョブが秘密も書き込み権限も持たないこと、スクリプトが誤った呼び出しを断ることを検証する。実際のクロスビルドと qemu での起動は `build-cli` ジョブが行う。実機の NEO で音が途切れないか（Cortex-A7 で小さいバッファが間に合うか）は検証範囲に入れない。
 
 REQ-DIST-001 の宣言が実行時に効くこと（マイク許可ダイアログに説明が出て、プロセスが終了しないこと）は macOS 実機でしか確かめられない。本要求は宣言の存在までを検証範囲とする。
 

@@ -77,7 +77,7 @@ fn when_a_release_is_made_the_armhf_cli_is_built_and_published_with_its_checksum
 ///
 /// Verifies: REQ-DIST-010
 #[test]
-fn when_the_armhf_cli_is_built_the_job_reads_no_secret_and_names_no_environment() {
+fn when_the_armhf_cli_is_built_the_job_reads_no_secret_and_holds_no_write_access() {
     for file in [
         ".github/workflows/release.yml",
         ".github/workflows/build.yml",
@@ -91,7 +91,16 @@ fn when_the_armhf_cli_is_built_the_job_reads_no_secret_and_names_no_environment(
             !build.contains("environment:"),
             "{file}: build-cli enters an environment"
         );
+        assert!(
+            build.contains("persist-credentials: false"),
+            "{file}: build-cli leaves the repository token in .git/config"
+        );
     }
+    let release = job(&read(".github/workflows/release.yml"), "build-cli");
+    assert!(
+        release.contains("permissions:\n      contents: read\n"),
+        "build-cli inherits the release workflow's write access"
+    );
 }
 
 /// Verifies: REQ-DIST-010

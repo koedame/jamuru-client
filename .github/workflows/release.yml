@@ -337,8 +337,14 @@ jobs:
     needs: prepare
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    # The workflow can write to the repository (the release job publishes); this
+    # job runs build scripts of dependencies and has no use for that.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install the cross compiler and the armhf ALSA
         run: |
