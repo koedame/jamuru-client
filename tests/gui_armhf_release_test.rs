@@ -53,8 +53,8 @@ fn when_a_release_is_made_the_armv7_app_goes_through_the_same_build_job_as_the_x
         "the armhf libraries of the window are not installed"
     );
     assert!(
-        build.contains("qemu-user-static"),
-        "the AppImage bundler cannot run armhf programs"
+        build.contains("qemu-user-static") && build.contains("scripts/register-armhf-binfmt.sh"),
+        "the AppImage bundler cannot run the armhf AppImage tools"
     );
     assert!(
         build.contains("OBJDUMP: ${{ matrix.cross == 'armhf' && 'arm-linux-gnueabihf-objdump'"),

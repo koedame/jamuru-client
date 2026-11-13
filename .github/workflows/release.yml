@@ -106,16 +106,19 @@ jobs:
 
       # The armhf libraries come from ports.ubuntu.com (the script sets that
       # up). The AppImage bundler runs armhf programs (linuxdeploy), which
-      # qemu-user-static does through binfmt. The environment lines are for
-      # every later step: pkg-config finds the armhf libraries only, the
-      # linker and the C compiler are the cross ones, and linuxdeploy neither
-      # strips the armhf libraries with the amd64 `strip` (it cannot read
-      # them) nor needs FUSE to start.
+      # qemu-user-static does through binfmt; the second script widens what it
+      # matches, because the AppImage tools carry a marker in their ELF header
+      # that the default match refuses. The environment lines are for every
+      # later step: pkg-config finds the armhf libraries only, the linker and
+      # the C compiler are the cross ones, and linuxdeploy neither strips the
+      # armhf libraries with the amd64 `strip` (it cannot read them) nor needs
+      # FUSE to start.
       - name: Install the cross compiler and the armhf libraries
         if: matrix.cross == 'armhf'
         run: |
           scripts/install-armhf-cross-deps.sh gui
           sudo apt-get install -y --no-install-recommends qemu-user-static binfmt-support
+          scripts/register-armhf-binfmt.sh
           {
             echo "PKG_CONFIG_ALLOW_CROSS=1"
             echo "PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
