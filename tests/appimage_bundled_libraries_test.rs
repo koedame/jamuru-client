@@ -15,6 +15,7 @@ case "$1" in
       "*/libfoo.so.1") echo "libfoo1:amd64: /usr/lib/x86_64-linux-gnu/libfoo.so.1" ;;
       "*/libbar.so.2") echo "libbar2:amd64: /usr/lib/x86_64-linux-gnu/libbar.so.2" ;;
       "*/libshared.so.3") echo "libfoo1:amd64, libbar2:amd64: /usr/lib/x86_64-linux-gnu/libshared.so.3" ;;
+      "*/libarm.so.1") printf '%s\n' "libarm1:armhf: /usr/lib/arm-linux-gnueabihf/libarm.so.1" "libarm1:amd64: /usr/lib/x86_64-linux-gnu/libarm.so.1" ;;
       "*/libstray.so") echo "stray:amd64: /opt/stray/libstray.so" ;;
       *) echo "dpkg-query: no path found matching pattern $2" >&2; exit 1 ;;
     esac ;;
@@ -22,6 +23,9 @@ case "$1" in
     case "$4" in
       libfoo1) printf '1.2-3\tfoo\t1.2-3' ;;
       libbar2) printf '4.5-6\tbar-src\t4.5-6build1' ;;
+      libarm1:armhf) printf '7.0-1\tarm-src\t7.0-1' ;;
+      libarm1:amd64) printf '7.0-2\tarm-src\t7.0-2' ;;
+      libarm1) printf '7.0-1\tarm-src\t7.0-1\n7.0-2\tarm-src\t7.0-2' ;;
       *) exit 1 ;;
     esac ;;
 esac
@@ -74,9 +78,17 @@ fn build_system(dir: &Path) -> PathBuf {
 }
 
 fn run(dir: &Path, root: &Path) -> (Output, String) {
+    run_for(dir, root, None)
+}
+
+fn run_for(dir: &Path, root: &Path, package_arch: Option<&str>) -> (Output, String) {
     build_system(dir);
     let out = dir.join("notice.txt");
-    let output = Command::new("python3")
+    let mut command = Command::new("python3");
+    if let Some(arch) = package_arch {
+        command.env("PACKAGE_ARCH", arch);
+    }
+    let output = command
         .arg("scripts/appimage-bundled-libraries.py")
         .arg(root)
         .arg(&out)
@@ -159,4 +171,28 @@ fn when_a_library_matches_no_package_the_script_fails_and_the_notice_says_so() {
     );
     assert!(notice.contains("this notice is incomplete"));
     assert!(notice.contains("libmissing.so.9"));
+}
+
+/// An AppImage cross-built for armhf on an amd64 machine finds each library
+/// under both architectures; the amd64 package is not in the AppImage, and
+/// asking dpkg about the bare name would answer for both.
+///
+/// Verifies: REQ-DIST-012
+#[test]
+fn when_the_build_machine_has_the_package_for_two_architectures_only_the_target_one_is_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = appimage(dir.path(), &["libarm.so.1"]);
+
+    let (output, notice) = run_for(dir.path(), &root, Some("armhf"));
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(notice.contains("libarm1 7.0-1"), "{notice}");
+    assert!(
+        !notice.contains("7.0-2"),
+        "the amd64 package is listed:\n{notice}"
+    );
 }

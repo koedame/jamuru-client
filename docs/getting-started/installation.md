@@ -13,7 +13,7 @@ jamuruをインストールする方法を説明します。
 - Windows 10/11 (64-bit)
 - macOS 11.0 (Big Sur) 以降
 - Linux (Ubuntu 22.04, Fedora 38 等)
-- Linux の 32bit ARM（armv7 / armhf。NanoPi NEO など）: アプリの画面は動かず、コマンドラインの `jamuru` だけ（後述の「32bit ARM の Linux（コマンドラインのみ）」）
+- Linux の 32bit ARM（armv7 / armhf。NanoPi NEO、32bit OS の Raspberry Pi など）: アプリ（AppImage・deb。メモリの大きい機器向け）と、画面のないコマンドラインの `jamuru` の両方（後述の「32bit ARM の Linux」）
 
 ### ハードウェア要件
 
@@ -119,15 +119,19 @@ chmod +x jamuru_*.AppImage
 ./jamuru_*.AppImage
 ```
 
-#### 32bit ARM の Linux（コマンドラインのみ）
+#### 32bit ARM の Linux
 
-NanoPi NEO のような 32bit ARM（armv7 / armhf）の Linux 向けには、画面のないコマンドラインの `jamuru` だけを配っています。アプリ本体（AppImage・deb）は、これらの機器のメモリでは動かないため含めていません。
+32bit ARM（armv7 / armhf。NanoPi NEO、32bit OS の Raspberry Pi など）の Linux 向けには、アプリ本体（AppImage・deb）と、画面のないコマンドラインの `jamuru` の両方を配っています。アプリの画面は WebKitGTK を使うので、メモリの小さい機器（NanoPi NEO の 256〜512MB など）では重くなる見込みです（実機では確かめていません）。重いときは、コマンドラインの `jamuru` を使ってください。
+
+アプリ本体は、[GitHub Releases](https://github.com/koedame/jamuru-client/releases) の `jamuru_*_armhf.AppImage` か `jamuru_*_armhf.deb` です（x86_64 の `amd64` と取り違えないでください）。入れ方は上の「Linux」と同じです。AppImage は自動で更新されます。
+
+コマンドラインの `jamuru` は次の手順で入れます。
 
 1. [GitHub Releases](https://github.com/koedame/jamuru-client/releases) から `jamuru-cli-linux-armv7.tar.gz` と `jamuru-cli-linux-armv7.tar.gz.sha256` をダウンロード
 2. 同じフォルダで checksum を確かめる: `sha256sum -c jamuru-cli-linux-armv7.tar.gz.sha256`
 3. 展開して実行: `tar xzf jamuru-cli-linux-armv7.tar.gz && ./jamuru-cli-linux-armv7/jamuru --help`
 
-音は ALSA で扱うので、`libasound2` が入っている必要があります（Debian・Ubuntu 系は `sudo apt install libasound2`）。glibc 2.35 以降（Ubuntu 22.04・Debian 12 相当以降）が要ります。署名はなく、自動更新もしません。新しい版が出たら、同じ手順で入れ直してください。
+コマンドラインの `jamuru` は、音を ALSA で扱うので、`libasound2` が入っている必要があります（Debian・Ubuntu 系は `sudo apt install libasound2`）。glibc 2.35 以降（Ubuntu 22.04・Debian 12 相当以降）が要ります。署名はなく、自動更新もしません。新しい版が出たら、同じ手順で入れ直してください。
 
 ## 次のステップ
 

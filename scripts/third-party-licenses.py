@@ -58,7 +58,8 @@ BODY_KEY = "body-sha256"
 # after reading the diff of the regenerated notices.
 CARGO_ABOUT_VERSION = "0.9.2"
 
-LINUX_NOTICE_ASSET = "jamuru-linux-bundled-libraries.txt"
+LINUX_NOTICE_ASSET_X64 = "jamuru-linux-bundled-libraries.txt"
+LINUX_NOTICE_ASSET_ARMV7 = "jamuru-linux-armv7-bundled-libraries.txt"
 RELEASES_URL = "https://github.com/koedame/jamuru-client/releases"
 
 # Static: what is not derived from a lockfile.
@@ -318,12 +319,14 @@ def render(cargo: dict, npm: dict, extra: list, fmt: str) -> str:
 
     h2("Linux AppImage: libraries bundled from the system")
     out.append(
-        "The Linux AppImage also carries shared libraries copied from the Ubuntu build\n"
-        "environment (GTK, WebKitGTK, GLib, GStreamer and what they depend on). Many of\n"
-        "them are under the LGPL. Which libraries they are depends on the build, so the\n"
-        "list, the copyright file of each package, the license texts it refers to and\n"
-        "where to get the source are generated from the AppImage itself and attached to\n"
-        f"the same release as the AppImage, as {LINUX_NOTICE_ASSET}:\n"
+        "The Linux AppImages (x86_64 and 32-bit ARM) also carry shared libraries copied\n"
+        "from the Ubuntu build environment (GTK, WebKitGTK, GLib, GStreamer and what\n"
+        "they depend on). Many of them are under the LGPL. Which libraries they are\n"
+        "depends on the build, so the list, the copyright file of each package, the\n"
+        "license texts it refers to and where to get the source are generated from the\n"
+        "AppImage itself and attached to the same release as the AppImages, as\n"
+        f"{LINUX_NOTICE_ASSET_X64} (x86_64) and\n"
+        f"{LINUX_NOTICE_ASSET_ARMV7} (32-bit ARM):\n"
         f"{RELEASES_URL}\n"
     )
     return "\n".join(out).rstrip("\n") + "\n"
