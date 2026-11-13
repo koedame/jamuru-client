@@ -6,7 +6,7 @@ Accepted。
 
 ## Context
 
-NanoPi R3S 2GB（RK3566、Cortex-A55 ×4、64bit ARM、メモリ 2GB）で jamuru を動かしたい。リリースの Linux 向け成果物は amd64 の AppImage と deb、32bit ARM の CLI（[ADR-126](./adr/ADR-126-armhf-cli-in-the-release.md)）だけで、arm64 では動かせない。
+NanoPi R3S 2GB（RK3566、Cortex-A55 ×4、64bit ARM、メモリ 2GB）で jamuru を動かしたい。リリースの Linux 向け成果物は amd64 の AppImage と deb、32bit ARM の CLI（[ADR-126](./ADR-126-armhf-cli-in-the-release.md)）だけで、arm64 では動かせない。
 
 R3S のメモリは WebKitGTK を動かすのに足りる見込みなので、CLI だけでなく画面を持つアプリも出す（メンテナーの指示、2026-11-13）。GUI を外す判断はしない。
 
