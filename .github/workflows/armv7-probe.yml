@@ -34,3 +34,13 @@ jobs:
           echo "--- qemu-arm-static plugin"; qemu-arm-static ./plugin.AppImage --plugin-api-version; echo rc=$?
           echo "--- qemu-arm-static plugin extract"; qemu-arm-static ./plugin.AppImage --appimage-extract >/dev/null; echo rc=$?; ls squashfs-root 2>&1 | head
           echo "--- plugin extract-and-run"; qemu-arm-static ./plugin.AppImage --appimage-extract-and-run --plugin-api-version; echo rc=$?
+          echo "=== re-register binfmt with ABI version ignored"
+          NAME=qemu-arm
+          # magic/mask as registered, but byte 8 (ABI version: 'A','I' = AppImage marker in bytes 8-9) is ignored
+          magic='\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00'
+          mask='\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\xfe\xff\xff\xff'
+          echo -1 | sudo tee /proc/sys/fs/binfmt_misc/qemu-arm >/dev/null
+          echo ":qemu-arm:M:0:${magic}:${mask}:/usr/libexec/qemu-binfmt/arm-binfmt-P:PF" | sudo tee /proc/sys/fs/binfmt_misc/register
+          cat /proc/sys/fs/binfmt_misc/qemu-arm
+          echo "--- direct plugin"; ./plugin.AppImage --appimage-extract-and-run --plugin-api-version; echo rc=$?
+          echo "--- direct linuxdeploy"; ./ld.AppImage --appimage-extract-and-run --version; echo rc=$?
