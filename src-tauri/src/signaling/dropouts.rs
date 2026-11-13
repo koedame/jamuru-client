@@ -134,7 +134,7 @@ async fn network_now(state: &SignalingState, now: Instant) -> Network {
 /// the server what that calls for, and publishes the result for the status. Called on every poll
 /// of the connection of the room.
 pub(super) async fn tick(
-    mut conn: Option<&mut SignalingConnection>,
+    conn: Option<&mut SignalingConnection>,
     state: &SignalingState,
     streaming: &StreamingState,
     in_room: bool,
@@ -167,7 +167,7 @@ pub(super) async fn tick(
     streaming.set_standing(tick.standing);
 
     // Without a connection there is nobody to tell or ask
-    let Some(conn) = conn.as_deref_mut() else {
+    let Some(conn) = conn else {
         return;
     };
     if let Some(view) = tick.share {
