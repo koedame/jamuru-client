@@ -15,7 +15,9 @@ Exits 1 when a library cannot be matched to a package: the notice would be
 missing it. The output is still written, with the unmatched files listed.
 
 DPKG_QUERY and SHARE_DIR stand in for `dpkg-query` and `/usr/share` (the tests
-use them).
+use them). PACKAGE_ARCH (e.g. `armhf`) is for an AppImage cross-built on a
+machine that also has the same packages for its own architecture: only the
+packages of that architecture are listed.
 """
 
 import os
@@ -27,6 +29,7 @@ from pathlib import Path
 
 DPKG_QUERY = os.environ.get("DPKG_QUERY", "dpkg-query")
 SHARE_DIR = Path(os.environ.get("SHARE_DIR", "/usr/share"))
+PACKAGE_ARCH = os.environ.get("PACKAGE_ARCH", "")
 SOURCE_URL = "https://launchpad.net/ubuntu/+source"
 SO_NAME = re.compile(r"\.so(\.|$)")
 COMMON_LICENSE = re.compile(r"/usr/share/common-licenses/([A-Za-z0-9.+-]*[A-Za-z0-9+-])")
@@ -53,13 +56,17 @@ def owners(name: str) -> list:
         owner, _, path = line.rpartition(": ")
         if not (path.startswith("/usr/lib/") or path.startswith("/lib/")):
             continue
-        pkgs += [p.split(":")[0] for p in owner.split(", ")]
+        for p in owner.split(", "):
+            name, _, arch = p.partition(":")
+            if not PACKAGE_ARCH or arch == PACKAGE_ARCH:
+                pkgs.append(name)
     return sorted(set(pkgs))
 
 
 def package_info(pkg: str) -> dict:
     out = subprocess.run(
-        [DPKG_QUERY, "-W", "-f", "${Version}\t${source:Package}\t${source:Version}", pkg],
+        [DPKG_QUERY, "-W", "-f", "${Version}\t${source:Package}\t${source:Version}",
+         f"{pkg}:{PACKAGE_ARCH}" if PACKAGE_ARCH else pkg],
         check=True, capture_output=True, text=True,
     ).stdout
     version, source, source_version = out.split("\t")

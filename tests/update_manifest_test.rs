@@ -10,13 +10,17 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const BUNDLES: [(&str, &str); 6] = [
+const BUNDLES: [(&str, &str); 7] = [
     ("jamuru-macos-arm64/macos", "jamuru_aarch64.app.tar.gz"),
     ("jamuru-macos-x64/macos", "jamuru_x64.app.tar.gz"),
     ("jamuru-linux-x64/bundle/appimage", "jamuru_amd64.AppImage"),
     (
         "jamuru-linux-arm64/bundle/appimage",
         "jamuru_aarch64.AppImage",
+    ),
+    (
+        "jamuru-linux-armv7/bundle/appimage",
+        "jamuru_armhf.AppImage",
     ),
     ("jamuru-windows-x64/bundle/nsis", "jamuru_x64-setup.exe"),
     ("jamuru-windows-x64/bundle/msi", "jamuru_x64_en-US.msi"),
@@ -111,6 +115,7 @@ fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_a
             "darwin-aarch64-app",
             "darwin-x86_64-app",
             "linux-aarch64-appimage",
+            "linux-armv7-appimage",
             "linux-x86_64-appimage",
             "windows-x86_64-msi",
             "windows-x86_64-nsis",

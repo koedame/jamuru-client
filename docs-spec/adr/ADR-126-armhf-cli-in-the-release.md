@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted。
+Accepted。決定 1（GUI は出さない）は [ADR-128](./ADR-128-armhf-app-in-the-release.md) で置き換えた。アプリも armhf で出す。CLI を出す決定（2〜6）は変わらない。
 
 ## Context
 
@@ -12,7 +12,7 @@ NEO のような小さな機器では、画面を持つアプリ（Tauri。WebKi
 
 ## Decision
 
-1. **対象は CLI の `jamuru` だけ。** GUI（Tauri のアプリ）は armhf で出さない。画面に使う WebKitGTK と描画のぶんだけで、NEO のメモリの大半を使う。armhf 向けの AppImage を作る道具（Tauri のバンドラ）の対応も確かめていない。GUI を出す理由が生まれたら、別の決定として扱う。
+1. **（ADR-128 で置き換え済み）対象は CLI の `jamuru` だけ。** GUI（Tauri のアプリ）は armhf で出さない。画面に使う WebKitGTK と描画のぶんだけで、NEO のメモリの大半を使う。armhf 向けの AppImage を作る道具（Tauri のバンドラ）の対応も確かめていない。GUI を出す理由が生まれたら、別の決定として扱う。
 2. **ターゲットは `armv7-unknown-linux-gnueabihf`。** Ubuntu 22.04 の amd64 のランナーでクロスコンパイルする（Linux のアプリと同じ OS。要求する glibc は同じ 2.35 まで）。クロスコンパイラ（`gcc-arm-linux-gnueabihf`）と armhf の ALSA（`libasound2-dev:armhf`）は `scripts/install-armhf-cross-deps.sh` が入れる。armhf のパッケージは amd64 のミラーに無いので `ports.ubuntu.com` から取り、既存の取得先は amd64 に絞る。
 3. **機能は既定のまま（`opus-codec` を付けない）。** アプリも付けずに配っているので、CLI だけ増やさない。付けるとビルドに cmake が要る。armv7 の既定のターゲットには NEON が無いため、そのままでは libopus の NEON の部分（`silk/arm/NSQ_neon.c`）のコンパイルで落ちる。CFLAGS に `-mfpu=neon` を渡せば作れて、qemu で起動した（実機の音は未確認）。ただしその場合、NEON の無い 32bit ARM では動かなくなる。必要になったら、別の決定として扱う。
 4. **配布の形は tar.gz の単体バイナリ。** `jamuru-cli-linux-armv7.tar.gz`（`jamuru`・`LICENSE`・`THIRD_PARTY_LICENSES.md`）と、その `.sha256` を同じリリースに添える。armhf の deb は作らない（パッケージの依存と更新の仕組みを持つほどの利用者がいない）。署名はせず、自動更新もしない。`latest.json`（アプリの自動更新の情報）には載せず、Homebrew の cask にも出さない。

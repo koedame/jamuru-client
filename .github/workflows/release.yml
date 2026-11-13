@@ -77,6 +77,16 @@ jobs:
             target: aarch64-unknown-linux-gnu
             artifact_name: jamuru-linux-arm64
             bundled_libraries: jamuru-linux-arm64-bundled-libraries.txt
+          # 32-bit ARM (armv7 / "armhf"; a NanoPi NEO, a Raspberry Pi running a
+          # 32-bit OS), cross-compiled on the same Ubuntu release as the x64 app
+          # so its glibc floor is the same (ADR-128). `cross` is what the steps
+          # below test for.
+          - os: ubuntu-latest
+            runner: ubuntu-22.04
+            target: armv7-unknown-linux-gnueabihf
+            artifact_name: jamuru-linux-armv7
+            bundled_libraries: jamuru-linux-armv7-bundled-libraries.txt
+            cross: armhf
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: jamuru-macos-x64
@@ -91,7 +101,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install system dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !matrix.cross
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -102,6 +112,41 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf
+
+      # The armhf libraries come from ports.ubuntu.com (the script sets that
+      # up). The AppImage bundler runs armhf programs (linuxdeploy), which
+      # qemu-user-static does through binfmt; the second script widens what it
+      # matches, because the AppImage tools carry a marker in their ELF header
+      # that the default match refuses. The environment lines are for every
+      # later step: pkg-config finds the armhf libraries only, the linker and
+      # the C compiler are the cross ones, and linuxdeploy neither strips the
+      # armhf libraries with the amd64 `strip` (it cannot read them) nor needs
+      # FUSE to start. qemu goes in first so the armhf packages' own install
+      # scripts (they run the armhf tools that build the GTK caches) can run.
+      # `ldd` is replaced by one that reads armhf programs: the amd64 one
+      # cannot, and linuxdeploy then bundles none of the libraries.
+      # The GTK plugin of the bundler looks for GTK's libraries and tools under
+      # the build machine's own architecture unless told otherwise.
+      - name: Install the cross compiler and the armhf libraries
+        if: matrix.cross == 'armhf'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user-static binfmt-support
+          scripts/register-armhf-binfmt.sh
+          scripts/install-armhf-cross-deps.sh gui
+          mkdir -p "${RUNNER_TEMP}/armhf-bin"
+          ln -sf "${GITHUB_WORKSPACE}/scripts/armhf-ldd.sh" "${RUNNER_TEMP}/armhf-bin/ldd"
+          echo "${RUNNER_TEMP}/armhf-bin" >> "${GITHUB_PATH}"
+          {
+            echo "PKG_CONFIG_ALLOW_CROSS=1"
+            echo "PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
+            echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc"
+            echo "CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc"
+            echo "NO_STRIP=true"
+            echo "APPIMAGE_EXTRACT_AND_RUN=1"
+            echo "LD_GTK_LIBRARY_PATH=/usr/lib/arm-linux-gnueabihf"
+            echo "DEB_HOST_ARCH=armhf"
+          } >> "${GITHUB_ENV}"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
@@ -271,10 +316,18 @@ jobs:
       # matched to a package: the notice would be missing it.
       - name: List the libraries bundled in the AppImage
         if: matrix.os == 'ubuntu-latest'
+        env:
+          # The machine has the amd64 copies of these packages too (the build
+          # tools need them); only the armhf ones are in the AppImage.
+          PACKAGE_ARCH: ${{ matrix.cross == 'armhf' && 'armhf' || '' }}
         run: |
           set -euo pipefail
           dir="src-tauri/target/${{ matrix.target }}/release/bundle/appimage"
           python3 scripts/appimage-bundled-libraries.py "${dir}"/*.AppImage "${dir}/${{ matrix.bundled_libraries }}"
+          # The window's libraries must be in the AppImage; an AppImage without
+          # them starts only where the same version of WebKitGTK is installed.
+          grep -q 'libwebkit2gtk-4.1\.so' "${dir}/${{ matrix.bundled_libraries }}" \
+            || { echo "ERROR: the AppImage does not carry WebKitGTK" >&2; exit 1; }
 
       - name: Check the app dials the signaling server it was built for
         shell: bash
@@ -288,6 +341,8 @@ jobs:
 
       - name: Check the Linux build runs on the oldest glibc we support
         if: matrix.os == 'ubuntu-latest'
+        env:
+          OBJDUMP: ${{ matrix.cross == 'armhf' && 'arm-linux-gnueabihf-objdump' || 'objdump' }}
         run: scripts/check-glibc-floor.sh "src-tauri/target/${{ matrix.target }}/release/jamuru-app" 2.35
 
       - name: Check the update drill cannot break a release
@@ -343,13 +398,13 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
 
   # The command-line tool for ARM Linux: 32-bit (armv7 / "armhf"; a NanoPi NEO,
-  # a Raspberry Pi running a 32-bit OS) and 64-bit (aarch64; a NanoPi R3S). The
-  # 32-bit boards do not run the app (its window needs more memory than they
-  # have), so only the CLI is built there, cross-compiled on the same Ubuntu
-  # release as the Linux app so its glibc floor is the same. The 64-bit one is
-  # built natively on an arm64 runner. They are not signed and do not update
-  # themselves: a person downloads the tar.gz and checks it against the .sha256
-  # next to it (ADR-126, ADR-127).
+  # a Raspberry Pi running a 32-bit OS) and 64-bit (aarch64; a NanoPi R3S), next
+  # to the apps built for them above (ADR-128, ADR-127). A board too small for
+  # the app's window runs this one. The 32-bit one is cross-compiled on the same
+  # Ubuntu release as the Linux app so its glibc floor is the same. The 64-bit
+  # one is built natively on an arm64 runner. They are not signed and do not
+  # update themselves: a person downloads the tar.gz and checks it against the
+  # .sha256 next to it (ADR-126, ADR-127).
   build-cli:
     name: Build CLI (${{ matrix.target }})
     needs: prepare
@@ -436,7 +491,7 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
-      - name: Verify all 10 release artifacts are present
+      - name: Verify all 12 release artifacts are present
         shell: bash
         run: |
           set -uo pipefail
@@ -451,6 +506,8 @@ jobs:
             ["Windows exe"]="artifacts/jamuru-windows-x64/**/*.exe"
             ["Linux AppImage (64-bit ARM)"]="artifacts/jamuru-linux-arm64/**/*.AppImage"
             ["Linux deb (64-bit ARM)"]="artifacts/jamuru-linux-arm64/**/*.deb"
+            ["Linux armv7 AppImage"]="artifacts/jamuru-linux-armv7/**/*.AppImage"
+            ["Linux armv7 deb"]="artifacts/jamuru-linux-armv7/**/*.deb"
             ["CLI for 32-bit ARM Linux"]="artifacts/jamuru-cli-linux-armv7/**/*.tar.gz"
             ["CLI for 64-bit ARM Linux"]="artifacts/jamuru-cli-linux-aarch64/**/*.tar.gz"
           )
@@ -471,7 +528,7 @@ jobs:
             ls -R artifacts >&2
             exit 1
           fi
-          echo "All 10 release artifacts present."
+          echo "All 12 release artifacts present."
 
       # What installed apps read to learn there is a newer release. It stops
       # the release, before anything is published, when the bundles would not
@@ -502,6 +559,10 @@ jobs:
             artifacts/jamuru-linux-arm64/**/*.AppImage.sig
             artifacts/jamuru-linux-arm64/**/jamuru-linux-arm64-bundled-libraries.txt
             artifacts/jamuru-linux-arm64/**/*.deb
+            artifacts/jamuru-linux-armv7/**/*.AppImage
+            artifacts/jamuru-linux-armv7/**/*.AppImage.sig
+            artifacts/jamuru-linux-armv7/**/jamuru-linux-armv7-bundled-libraries.txt
+            artifacts/jamuru-linux-armv7/**/*.deb
             artifacts/jamuru-macos-x64/**/*.dmg
             artifacts/jamuru-macos-x64/**/*.app.tar.gz
             artifacts/jamuru-macos-x64/**/*.app.tar.gz.sig
