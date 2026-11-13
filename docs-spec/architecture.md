@@ -717,6 +717,7 @@ TOML形式を使用する。
 | Windows | MSIインストーラー、ポータブルZIP |
 | macOS | DMG、Homebrew Cask |
 | Linux | AppImage、deb、rpm |
+| Linux（32bit ARM。armv7 / armhf） | CLI `jamuru` の tar.gz のみ（[ADR-126](./adr/ADR-126-armhf-cli-in-the-release.md)） |
 
 ---
 

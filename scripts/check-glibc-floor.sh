@@ -8,6 +8,9 @@
 #
 # Usage:
 #   scripts/check-glibc-floor.sh <app binary> <highest allowed glibc, e.g. 2.35>
+#
+# `OBJDUMP` names the objdump that reads the binary: a cross build needs the
+# one for its architecture (`arm-linux-gnueabihf-objdump`).
 set -euo pipefail
 
 binary=${1:?usage: $0 <app binary> <highest allowed glibc>}
@@ -18,7 +21,7 @@ if [ ! -f "$binary" ]; then
   exit 1
 fi
 
-needed=$(objdump -T "$binary" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -n 1)
+needed=$("${OBJDUMP:-objdump}" -T "$binary" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -n 1)
 if [ -z "$needed" ]; then
   echo "$binary asks for no glibc version - is it a Linux binary?" >&2
   exit 1
