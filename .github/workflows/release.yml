@@ -114,6 +114,8 @@ jobs:
       # armhf libraries with the amd64 `strip` (it cannot read them) nor needs
       # FUSE to start. qemu goes in first so the armhf packages' own install
       # scripts (they run the armhf tools that build the GTK caches) can run.
+      # `ldd` is replaced by one that reads armhf programs: the amd64 one
+      # cannot, and linuxdeploy then bundles none of the libraries.
       # The GTK plugin of the bundler looks for GTK's libraries and tools under
       # the build machine's own architecture unless told otherwise.
       - name: Install the cross compiler and the armhf libraries
@@ -123,6 +125,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends qemu-user-static binfmt-support
           scripts/register-armhf-binfmt.sh
           scripts/install-armhf-cross-deps.sh gui
+          mkdir -p "${RUNNER_TEMP}/armhf-bin"
+          ln -sf "${GITHUB_WORKSPACE}/scripts/armhf-ldd.sh" "${RUNNER_TEMP}/armhf-bin/ldd"
+          echo "${RUNNER_TEMP}/armhf-bin" >> "${GITHUB_PATH}"
           {
             echo "PKG_CONFIG_ALLOW_CROSS=1"
             echo "PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
@@ -305,6 +310,10 @@ jobs:
           set -euo pipefail
           dir="src-tauri/target/${{ matrix.target }}/release/bundle/appimage"
           python3 scripts/appimage-bundled-libraries.py "${dir}"/*.AppImage "${dir}/${{ matrix.libraries_notice }}"
+          # The window's libraries must be in the AppImage; an AppImage without
+          # them starts only where the same version of WebKitGTK is installed.
+          grep -q 'libwebkit2gtk-4.1\.so' "${dir}/${{ matrix.libraries_notice }}" \
+            || { echo "ERROR: the AppImage does not carry WebKitGTK" >&2; exit 1; }
 
       - name: Check the app dials the signaling server it was built for
         shell: bash

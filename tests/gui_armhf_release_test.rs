@@ -57,6 +57,14 @@ fn when_a_release_is_made_the_armv7_app_goes_through_the_same_build_job_as_the_x
         "the AppImage bundler cannot run the armhf AppImage tools"
     );
     assert!(
+        build.contains("scripts/armhf-ldd.sh"),
+        "linuxdeploy bundles none of the armv7 app's libraries with the amd64 ldd"
+    );
+    assert!(
+        build.contains("grep -q 'libwebkit2gtk-4.1\\.so'"),
+        "an AppImage without WebKitGTK is released"
+    );
+    assert!(
         build.contains("OBJDUMP: ${{ matrix.cross == 'armhf' && 'arm-linux-gnueabihf-objdump'"),
         "the glibc floor of the armv7 app is read with the amd64 objdump"
     );
@@ -129,4 +137,17 @@ fn when_the_install_script_is_given_an_unknown_argument_it_refuses_before_changi
 
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("usage"));
+}
+
+/// Verifies: REQ-DIST-012
+#[test]
+fn when_ldd_is_given_a_native_program_it_lists_the_libraries_as_the_real_ldd_does() {
+    let out = std::process::Command::new("bash")
+        .arg(repo_file("scripts/armhf-ldd.sh"))
+        .arg("/bin/sh")
+        .output()
+        .expect("bash is needed to run scripts/armhf-ldd.sh");
+
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("libc.so.6"));
 }
