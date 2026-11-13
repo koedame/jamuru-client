@@ -76,6 +76,7 @@ add_platform() {
 add_platform darwin-aarch64-app "$artifacts/jamuru-macos-arm64/**/*.app.tar.gz"
 add_platform darwin-x86_64-app "$artifacts/jamuru-macos-x64/**/*.app.tar.gz"
 add_platform linux-x86_64-appimage "$artifacts/jamuru-linux-x64/**/*.AppImage"
+add_platform linux-aarch64-appimage "$artifacts/jamuru-linux-arm64/**/*.AppImage"
 add_platform windows-x86_64-nsis "$artifacts/jamuru-windows-x64/**/*-setup.exe"
 add_platform windows-x86_64-msi "$artifacts/jamuru-windows-x64/**/*.msi"
 

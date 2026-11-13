@@ -387,6 +387,7 @@ REQ-RMT-001〜003・007・030・031 の「2 台のアプリの間で実際に動
 | REQ-DIST-008 | Linux の AppImage に同梱するシステムのライブラリ（GTK・WebKitGTK・GLib など。LGPL が多い）は、ビルドした AppImage そのものから、どのパッケージのどの版かを引き、パッケージごとの著作権ファイル・それが参照するライセンス本文・ソースの入手先を書いた表示を作って、同じリリースに添える。パッケージに引けないライブラリがあればリリースを止める | must |
 | REQ-DIST-009 | 署名の証明書・鍵と、Homebrew の tap に書き込むトークンは、environment のシークレットに置く。読むジョブは、その environment を 1 つだけ名指しする（署名は `desktop-signing`、tap の更新は `tap-publish`）。environment は決めたブランチ（`develop` と `main`。tap は `main` だけ）とリリースのタグ（`v*`）にしか開かない | must |
 | REQ-DIST-010 | リリースのたびに、32bit ARM の Linux（armv7 / armhf。NanoPi NEO など）向けの CLI `jamuru` を tar.gz と SHA-256 で同じリリースに添える。ビルドは Ubuntu 22.04 でクロスコンパイルし、glibc は 2.35 までしか要求しない。qemu で `--version` と `--help` が動くことを確かめてから公開し、動かなければリリースを止める。GUI は含めない | must |
+| REQ-DIST-011 | リリースのたびに、64bit ARM の Linux（aarch64 / arm64。NanoPi R3S など）向けに、アプリ（AppImage と deb）と CLI `jamuru`（tar.gz と SHA-256）を同じリリースに添える。ビルドは Ubuntu 22.04 の arm64 のランナーでネイティブに行い、glibc は 2.35 までしか要求しない。CLI は公開の前に起動を確かめる。arm64 の AppImage は自動更新の情報（`latest.json` の `linux-aarch64-appimage`）に載せ、更新ドリルを arm64 でも通してから公開する。どれかの成果物が欠ければリリースを止める | must |
 
 REQ-DIST-005 の決定は [ADR-030](./adr/ADR-030-signaling-url-by-build-profile.md)。`cargo test` は開発側の選択と、ソースに本番の接続先が無いことを検証する。リリース側の接続先の検査はアプリのビルドスクリプト（`src-tauri/build.rs`）が行い、配布物そのもの（バイナリと `ui/dist`）は `build.yml` / `release.yml` が `scripts/check-release-server-url.sh` で検査する。
 
@@ -397,6 +398,8 @@ REQ-DIST-008 の表示は `scripts/appimage-bundled-libraries.py` が `release.y
 REQ-DIST-009 の決定は [ADR-091](./adr/ADR-091-release-credentials-in-environments.md)。`tests/distribution_config_test.rs` が、これらのシークレットを読むジョブが `release.yml` の中で environment を名指ししていることを検証する。environment の中身と、どの ref に開くかは GitHub 側の設定で、リポジトリの中のテストでは見られない。
 
 REQ-DIST-010 の決定は [ADR-126](./adr/ADR-126-armhf-cli-in-the-release.md)。`tests/cli_armhf_release_test.rs` が、`release.yml` がビルドを待ってから公開すること、成果物と checksum を載せること、このジョブが秘密も書き込み権限も持たないこと、スクリプトが誤った呼び出しを断ることを検証する。実際のクロスビルドと qemu での起動は `build-cli` ジョブが行う。実機の NEO で音が途切れないか（Cortex-A7 で小さいバッファが間に合うか）は検証範囲に入れない。
+
+REQ-DIST-011 の決定は [ADR-127](./adr/ADR-127-arm64-linux-in-the-release.md)。`tests/cli_armhf_release_test.rs` が、`release.yml` が arm64 のアプリと CLI をビルドして待ってから公開すること、成果物と checksum を載せること、欠ければ止めること、AppImage ごとに表示のファイル名が違うこと、スクリプトが誤った呼び出しを断ることを検証する。`tests/update_manifest_test.rs` が `latest.json` に `linux-aarch64-appimage` が載り、arm64 の AppImage が欠ければ書かれないことを、`tests/update_drill_test.rs` が更新ドリルが arm64 の Linux でも回ることを検証する。実際の arm64 でのビルドと起動は `release.yml` の `build` と `build-cli` が行う。実機の R3S で音が途切れないかは検証範囲に入れない。
 
 REQ-DIST-001 の宣言が実行時に効くこと（マイク許可ダイアログに説明が出て、プロセスが終了しないこと）は macOS 実機でしか確かめられない。本要求は宣言の存在までを検証範囲とする。
 

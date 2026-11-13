@@ -68,6 +68,7 @@ fn the_update_drill_runs_on_every_system_that_installs_updates_itself() {
     );
     for target in [
         "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
         "aarch64-apple-darwin",
         "x86_64-pc-windows-msvc",
     ] {
