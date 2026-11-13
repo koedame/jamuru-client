@@ -116,18 +116,8 @@ jobs:
           key: cargo-target-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-target-release-${{ matrix.target }}-
 
-      # arm64 Linux has no prebuilt Tauri CLI; the release's weekly rehearsal
-      # saves the compiled one.
-      - name: Restore the Tauri CLI (arm64 Linux)
-        id: cache-tauri-cli
-        if: runner.os == 'Linux' && runner.arch == 'ARM64'
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/.cargo/bin/cargo-tauri*
-          key: tauri-cli-release-linux-arm64-${{ hashFiles('scripts/install-tauri-cli.sh') }}
-
+      # arm64 Linux has no prebuilt Tauri CLI: the script compiles it.
       - name: Install Tauri CLI
-        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         shell: bash
         run: scripts/install-tauri-cli.sh
 

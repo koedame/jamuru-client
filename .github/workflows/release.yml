@@ -53,7 +53,8 @@ jobs:
     # The signing certificate and key are in this environment, which admits
     # `develop`, `main` and `v*` tags only (docs-spec/adr/ADR-091).
     environment: desktop-signing
-    timeout-minutes: 30
+    # The arm64 Linux build also compiles the Tauri CLI first.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -157,28 +158,13 @@ jobs:
         run: rm -rf "src-tauri/target/${{ matrix.target }}/release/bundle"
 
       # The Tauri project publishes no prebuilt CLI for arm64 Linux, so there
-      # it is compiled (scripts/install-tauri-cli.sh), which takes minutes; the
-      # result is cached like the other build caches: the weekly rehearsal on
-      # develop saves it, a tag run only restores it.
-      - name: Restore the Tauri CLI (arm64 Linux)
-        id: cache-tauri-cli
-        if: runner.os == 'Linux' && runner.arch == 'ARM64'
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/.cargo/bin/cargo-tauri*
-          key: tauri-cli-release-linux-arm64-${{ hashFiles('scripts/install-tauri-cli.sh') }}
-
+      # scripts/install-tauri-cli.sh compiles it from crates.io (`--locked`),
+      # which takes minutes. The result is not cached: this binary runs in the
+      # step that holds the update signing key, and a cached executable that
+      # another run could have replaced is not something to run there.
       - name: Install Tauri CLI
-        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         shell: bash
         run: scripts/install-tauri-cli.sh
-
-      - name: Save the Tauri CLI (arm64 Linux)
-        if: github.ref_type != 'tag' && runner.os == 'Linux' && runner.arch == 'ARM64' && steps.cache-tauri-cli.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ~/.cargo/bin/cargo-tauri*
-          key: tauri-cli-release-linux-arm64-${{ hashFiles('scripts/install-tauri-cli.sh') }}
 
       # A beta is built as X.Y.Z-N, not as X.Y.Z: two betas of one version are
       # otherwise the same version, and an installed beta never updates to the
