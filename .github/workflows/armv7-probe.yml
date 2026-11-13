@@ -43,7 +43,7 @@ jobs:
         env:
           # The signaling server the app dials (ADR-030). Kept out of the source.
           JAMJAM_SERVER_URL: https://example.invalid
-        run: cargo tauri build --target armv7-unknown-linux-gnueabihf
+        run: cargo tauri build --target armv7-unknown-linux-gnueabihf --verbose
 
       - name: Check the Linux build runs on the oldest glibc we support
         env:
