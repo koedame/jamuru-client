@@ -123,7 +123,7 @@ export function SettingsPanelAdapter({
   const [openRouterPort, setOpenRouterPort] = useState(true);
 
   // Whether the audio packets are marked as voice (on until turned off)
-  const [voicePriority, setVoicePriority] = useState(false);
+  const [voicePriority, setVoicePriority] = useState(true);
 
   // Whether asks to buffer someone's audio for longer are put to the person (ADR-097)
   const [bufferAsks, setBufferAsks] = useState<BufferAskPolicy>("ask");
