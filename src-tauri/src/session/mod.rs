@@ -305,7 +305,9 @@ impl<R: Runtime> Backend for AppBackend<R> {
     }
 
     fn address_moved(&self) -> bool {
-        self.app.state::<streaming::StreamingState>().address_moved()
+        self.app
+            .state::<streaming::StreamingState>()
+            .address_moved()
     }
 
     fn entered_as(&self, id: Uuid) {

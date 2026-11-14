@@ -11,6 +11,10 @@
 #               plus GAP ports that something else used meanwhile
 #   portset     SNAT --random into 16 ports of each of several blocks of 1024: a carrier-grade
 #               NAT that gives each customer a set of ports (MAP-E)
+# MOVE_AT_MS (epoch ms; cone and random only) makes the router give what leaves the lan another
+# port from then on, and forget the ports it had given (a router that renumbers: it was
+# restarted, or took the flow out of its table, or moved the app to another of its addresses
+# after the app had been told its port).
 # What comes in from the wan is let through only for a flow that went out first (the kernel's
 # connection tracking: the packet has to come from the address and port the app sent to).
 set -eu
@@ -80,6 +84,17 @@ case "$MODE" in
     exit 1
     ;;
 esac
+
+if [ -n "${MOVE_AT_MS:-}" ]; then
+  (
+    # the clock here is to the second (busybox date has no %N): the move comes up to a second early
+    now=$(date +%s)
+    [ $((MOVE_AT_MS / 1000)) -le "$now" ] || sleep $((MOVE_AT_MS / 1000 - now))
+    iptables-legacy -t nat -R POSTROUTING 1 -o "$WAN_IF" -p udp -j MASQUERADE --to-ports 50000-50099
+    conntrack -F >/dev/null 2>&1
+    echo "MOVED at $(date +%s)"
+  ) &
+fi
 
 # CT_EVENTS=1 logs every change of the kernel's flow table (without the STUN servers), with the time
 if [ "${CT_EVENTS:-0}" = 1 ]; then
