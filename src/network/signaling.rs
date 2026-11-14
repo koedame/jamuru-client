@@ -2121,4 +2121,20 @@ mod tests {
         assert_eq!(addrs[1], sock("203.0.113.5:6005"));
         assert!(!addrs.contains(&sock("203.0.113.5:5000")));
     }
+
+    /// Verifies: REQ-CON-177
+    #[test]
+    fn when_stun_sees_more_addresses_than_are_kept_then_after_telling_none_is_untold() {
+        let seen: Vec<SocketAddr> = (1..=5)
+            .map(|i| format!("203.0.113.1:{}", 40000 + i).parse().unwrap())
+            .collect();
+        let told = vec![AddressCandidate::server_reflexive(
+            "203.0.113.1:39999".parse().unwrap(),
+        )];
+
+        let told = with_mappings_seen(&told, &seen);
+        let told_addrs: Vec<SocketAddr> = told.iter().map(|c| c.address).collect();
+
+        assert!(crate::network::untold(&told_addrs, &seen).is_empty());
+    }
 }

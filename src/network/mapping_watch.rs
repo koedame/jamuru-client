@@ -147,10 +147,15 @@ impl MappingWatch {
 /// told when entered and the ones seen since, newest first
 pub const MAX_TOLD_MAPPINGS: usize = 3;
 
-/// The addresses in `seen` that are not among `told`, the room's server-reflexive ones
+/// The addresses in `seen` that are not among `told`, the room's server-reflexive ones. Only the
+/// first [`MAX_TOLD_MAPPINGS`] of `seen` count: a router that gives each server another port
+/// would otherwise leave addresses that are never told, and the room would be told again and
+/// again.
 pub fn untold(told: &[SocketAddr], seen: &[SocketAddr]) -> Vec<SocketAddr> {
     seen.iter()
-        .filter(|addr| addr.is_ipv4() && !told.contains(addr))
+        .filter(|addr| addr.is_ipv4())
+        .take(MAX_TOLD_MAPPINGS)
+        .filter(|addr| !told.contains(addr))
         .copied()
         .collect()
 }
