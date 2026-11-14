@@ -1010,6 +1010,37 @@ pub async fn gather_candidates_using(
     candidates
 }
 
+/// `told`, with the addresses STUN saw the audio socket at since (`seen`) that it does not have
+/// added as server-reflexive candidates, ahead of the ones STUN gave before (ADR-129)
+///
+/// The older ones stay, up to [`super::MAX_TOLD_MAPPINGS`]: the router may have given other
+/// links the address the room was first told. The oldest go first.
+pub fn with_mappings_seen(told: &[AddressCandidate], seen: &[SocketAddr]) -> Vec<AddressCandidate> {
+    let told_addrs: Vec<SocketAddr> = told.iter().map(|c| c.address).collect();
+    let new = super::mapping_watch::untold(&told_addrs, seen);
+    if new.is_empty() {
+        return told.to_vec();
+    }
+    let mut out = told.to_vec();
+    let is_stun_ipv4 = |c: &AddressCandidate| {
+        c.candidate_type == CandidateType::ServerReflexive
+            && c.address.is_ipv4()
+            && c.priority == AddressCandidate::server_reflexive(c.address).priority
+    };
+    let at = out.iter().position(is_stun_ipv4).unwrap_or(out.len());
+    for (i, addr) in new.into_iter().enumerate() {
+        out.insert(at + i, AddressCandidate::server_reflexive(addr));
+    }
+    while out.iter().filter(|c| is_stun_ipv4(c)).count() > super::mapping_watch::MAX_TOLD_MAPPINGS {
+        let Some(oldest) = out.iter().rposition(is_stun_ipv4) else {
+            break;
+        };
+        out.remove(oldest);
+    }
+    sort_and_dedupe(&mut out);
+    out
+}
+
 /// Sorts by priority (highest first), and keeps one candidate per address, the highest priority:
 /// an IPv6 host has no NAT, so STUN reports its own address back; a router that keeps the
 /// mapping it was asked for also gives the audio socket that same public port toward STUN.
@@ -2036,5 +2067,58 @@ mod tests {
         let json = r#"{"id":"550e8400-e29b-41d4-a716-446655440000","name":"OldPeer"}"#;
         let peer: PeerInfo = serde_json::from_str(json).unwrap();
         assert_eq!(peer.joined_at, 0);
+    }
+
+    fn sock(text: &str) -> SocketAddr {
+        text.parse().unwrap()
+    }
+
+    /// Verifies: REQ-CON-177
+    #[test]
+    fn when_stun_sees_a_new_address_then_it_is_told_ahead_of_the_one_the_room_had() {
+        let told = vec![
+            AddressCandidate::host(sock("192.168.1.5:5000")),
+            AddressCandidate::server_reflexive(sock("203.0.113.5:5000")),
+        ];
+
+        let now = with_mappings_seen(&told, &[sock("203.0.113.5:6100")]);
+
+        let addrs: Vec<SocketAddr> = now.iter().map(|c| c.address).collect();
+        assert_eq!(
+            addrs,
+            vec![
+                sock("192.168.1.5:5000"),
+                sock("203.0.113.5:6100"),
+                sock("203.0.113.5:5000")
+            ]
+        );
+    }
+
+    /// Verifies: REQ-CON-177
+    #[test]
+    fn when_stun_sees_only_what_the_room_was_told_then_the_candidates_stay_as_they_were() {
+        let told = vec![AddressCandidate::server_reflexive(sock("203.0.113.5:5000"))];
+
+        let now = with_mappings_seen(&told, &[sock("203.0.113.5:5000")]);
+
+        assert_eq!(now.len(), 1);
+        assert_eq!(now[0].address, sock("203.0.113.5:5000"));
+    }
+
+    /// Verifies: REQ-CON-177
+    #[test]
+    fn when_the_address_keeps_moving_then_the_oldest_ones_are_dropped_and_a_forwarded_port_stays() {
+        let mut told = vec![AddressCandidate::port_mapped(sock("203.0.113.5:7000"))];
+        told.push(AddressCandidate::server_reflexive(sock("203.0.113.5:5000")));
+        for port in 6001..6006 {
+            let seen = [sock(&format!("203.0.113.5:{port}"))];
+            told = with_mappings_seen(&told, &seen);
+        }
+
+        let addrs: Vec<SocketAddr> = told.iter().map(|c| c.address).collect();
+        assert_eq!(addrs.len(), 1 + crate::network::MAX_TOLD_MAPPINGS);
+        assert_eq!(addrs[0], sock("203.0.113.5:7000"));
+        assert_eq!(addrs[1], sock("203.0.113.5:6005"));
+        assert!(!addrs.contains(&sock("203.0.113.5:5000")));
     }
 }

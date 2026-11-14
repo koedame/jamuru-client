@@ -22,11 +22,11 @@ use jamjam::audio::{
 use jamjam::audio_session::{self, Command, InputSignal, LinkTarget, Params, Running, Shared};
 use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, Timing};
 use jamjam::network::{
-    bind_audio_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate,
-    ConnectionStats, EnterError, EnterRequest, Entered, Gathered, LatencyBreakdown, LinkClaim,
-    LinkHealth, LinkIdentity, LinkSnapshot, LocalLatencyInfo, NetworkError, PeerLatencyInfo,
-    PortMapping, RoomEntry, RoomInfo, SignalingClient, SignalingConnection, SignalingMessage,
-    CLOCK_SKEW_NOTICE_SECS,
+    bind_audio_std, gather_candidates_on, server_clock_offset_secs, with_mappings_seen,
+    AddressCandidate, ConnectionStats, EnterError, EnterRequest, Entered, Gathered,
+    LatencyBreakdown, LinkClaim, LinkHealth, LinkIdentity, LinkSnapshot, LocalLatencyInfo,
+    NetworkError, PeerLatencyInfo, PortMapping, RoomEntry, RoomInfo, SignalingClient,
+    SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
 };
 use uuid::Uuid;
 
@@ -1424,6 +1424,12 @@ impl Backend for CliBackend {
         }
     }
 
+    fn address_moved(&self) -> bool {
+        self.audio()
+            .as_ref()
+            .is_some_and(AudioSession::address_moved)
+    }
+
     /// Tells the room where to send audio. Done before any peer is known, because the peer needs
     /// an address to send to (ADR-026).
     async fn advertise(&self, conn: u32) -> Result<(), String> {
@@ -1548,7 +1554,8 @@ struct AudioSession {
     identity: LinkIdentity,
     /// What the room is told of the audio socket
     local_addr: SocketAddr,
-    candidates: Vec<AddressCandidate>,
+    /// The candidates the room was told, with the addresses STUN saw the socket at since
+    candidates: std::sync::Mutex<Vec<AddressCandidate>>,
     /// The router's forward of the audio port, which the room's addresses include; closed with
     /// the session
     port_mapping: Option<PortMapping>,
@@ -1637,7 +1644,7 @@ impl AudioSession {
             settings: settings.clone(),
             identity,
             local_addr,
-            candidates,
+            candidates: std::sync::Mutex::new(candidates),
             port_mapping,
             names: HashMap::new(),
             told_up: HashSet::new(),
@@ -1646,11 +1653,27 @@ impl AudioSession {
 
     /// What tells the room where to send audio
     fn advertisement(&self) -> SignalingMessage {
+        let mut told = self.candidates.lock().unwrap_or_else(|e| e.into_inner());
+        let seen = self
+            .controls
+            .shared
+            .seen_mappings
+            .read()
+            .map(|seen| seen.clone())
+            .unwrap_or_default();
+        *told = with_mappings_seen(&told, &seen);
         SignalingMessage::UpdatePeerInfo {
-            candidates: self.candidates.clone(),
-            public_addr: self.candidates.first().map(|c| c.address),
+            candidates: told.clone(),
+            public_addr: told.first().map(|c| c.address),
             local_addr: Some(self.local_addr),
         }
+    }
+
+    /// Whether STUN saw the socket at an address the room was not told
+    fn address_moved(&self) -> bool {
+        let told = self.candidates.lock().unwrap_or_else(|e| e.into_inner());
+        let told: Vec<SocketAddr> = told.iter().map(|c| c.address).collect();
+        !self.controls.shared.untold_mappings(&told).is_empty()
     }
 
     /// Opens an audio link to `peer`, racing `candidates`. It is set up on the audio thread;

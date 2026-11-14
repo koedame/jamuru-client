@@ -171,6 +171,9 @@ pub struct Shared {
     /// The id the room knows this app by, and the key it entered with under that id. Each link
     /// tells it to the participant at its far end.
     pub own_id: Arc<RwLock<Option<(Uuid, LinkIdentity)>>>,
+    /// The addresses STUN last saw the audio socket at, asked again while a link heard nothing
+    /// (ADR-129). The room is told the ones it was not told.
+    pub seen_mappings: Arc<RwLock<Vec<SocketAddr>>>,
 }
 
 impl Default for Shared {
@@ -207,6 +210,7 @@ impl Shared {
             local_pan: Arc::new(AtomicI32::new(0)),       // 0 = centre
             recorder: RoomRecorder::new(),
             own_id: Arc::new(RwLock::new(None)),
+            seen_mappings: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -235,6 +239,9 @@ impl Shared {
         }
         if let Ok(mut links) = self.links.write() {
             links.clear();
+        }
+        if let Ok(mut seen) = self.seen_mappings.write() {
+            seen.clear();
         }
         if let Ok(mut ended) = self.ended.write() {
             ended.clear();
@@ -325,6 +332,17 @@ impl Shared {
                 Some((peer, claim))
             })
             .collect()
+    }
+
+    /// The addresses STUN saw the audio socket at, asked again while a link heard nothing, that
+    /// are not among `told` (the ones the room was told)
+    pub fn untold_mappings(&self, told: &[SocketAddr]) -> Vec<SocketAddr> {
+        let seen = self
+            .seen_mappings
+            .read()
+            .map(|seen| seen.clone())
+            .unwrap_or_default();
+        crate::network::untold(told, &seen)
     }
 
     /// How the audio link to each participant is doing, in the order the links were opened.

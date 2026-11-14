@@ -365,6 +365,36 @@ impl StreamingState {
         }
     }
 
+    /// Merges the addresses STUN saw the running session's socket at into the ones the room was
+    /// told of `port`, and keeps the result. None when the session is not on `port`.
+    pub(crate) fn told_with_mappings_seen(
+        &self,
+        port: u16,
+    ) -> Option<Vec<jamjam::network::AddressCandidate>> {
+        let told = self.told_candidates_of_running(port)?;
+        let seen = self
+            .shared
+            .seen_mappings
+            .read()
+            .map(|seen| seen.clone())
+            .unwrap_or_default();
+        let merged = jamjam::network::with_mappings_seen(&told, &seen);
+        self.remember_told_candidates(port, &merged);
+        Some(merged)
+    }
+
+    /// Whether STUN saw the running session's socket at an address the room was not told
+    pub(crate) fn address_moved(&self) -> bool {
+        let Some(port) = self.running_port() else {
+            return false;
+        };
+        let Some(told) = self.told_candidates_of_running(port) else {
+            return false;
+        };
+        let told: Vec<std::net::SocketAddr> = told.iter().map(|c| c.address).collect();
+        !self.shared.untold_mappings(&told).is_empty()
+    }
+
     /// Whether an audio session is running
     pub fn is_active(&self) -> bool {
         self.shared.is_active.load(Ordering::SeqCst)

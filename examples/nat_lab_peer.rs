@@ -16,7 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use jamjam::network::{
-    bind_audio_std, gather_candidates_using, CandidateType, Connection, LinkIdentity, PunchSchedule,
+    bind_audio_std, gather_candidates_using, CandidateType, Connection, LinkIdentity,
+    PunchSchedule, UdpMux,
 };
 
 fn arg(name: &str) -> Option<String> {
@@ -120,7 +121,23 @@ async fn main() {
         .filter_map(|a| a.parse().ok())
         .collect();
 
-    let mut conn = Connection::from_std(socket).expect("connection on the socket");
+    let mux = Arc::new(UdpMux::from_std(socket).expect("mux on the socket"));
+    let mut conn = Connection::on(&mux).expect("connection on the mux");
+    if let Some(after) = arg("--probe-stun-after-secs").and_then(|v| v.parse::<u64>().ok()) {
+        let mux = mux.clone();
+        let servers: Vec<String> = servers.iter().map(|s| s.to_string()).collect();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(after)).await;
+            let fresh = arg("--fresh-stun");
+            let names: Vec<&str> = match &fresh {
+                Some(fresh) => fresh.split(',').collect(),
+                None => servers.iter().map(|s| s.as_str()).collect(),
+            };
+            for seen in mux.mappings_seen_by(&names).await {
+                println!("RESTUN {} by {}", seen.mapped_address, seen.server);
+            }
+        });
+    }
     // The audio's timestamp is the time it was sent in tenths of a millisecond, and the lab's
     // containers share a clock: a packet's delay is the time it arrives minus what it says
     let delays = Arc::new(Mutex::new(Vec::<f32>::new()));

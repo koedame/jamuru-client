@@ -545,7 +545,7 @@ pub async fn signaling_publish_local_candidates(
 ) -> Result<usize, String> {
     // A session that runs has its socket, so its address is told again as it was told, not
     // asked of STUN through a socket it cannot be asked through
-    let candidates = match streaming.told_candidates_of_running(local_port) {
+    let candidates = match streaming.told_with_mappings_seen(local_port) {
         Some(candidates) => candidates,
         None => {
             let ask_router = config.get()?.open_router_port;

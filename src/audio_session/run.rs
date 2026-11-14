@@ -25,7 +25,7 @@ use crate::audio::{open_asio, shared_asio_driver, AsioDuplex, AsioSwitch};
 use crate::link::Senders;
 use crate::network::{
     audio_packet_duration_ms, longer_of_buffer_and_period, mark_voice, required_bps,
-    AudioEncodingConfig, UdpMux,
+    AudioEncodingConfig, LinkHealth, MappingWatch, UdpMux,
 };
 use crate::protocol::LatencyInfoMessage;
 
@@ -120,6 +120,7 @@ pub(super) async fn run(
     enlarge_socket_buffers(&prepared_socket);
     let mux = UdpMux::from_std(prepared_socket)
         .map_err(|e| format!("Failed to adopt the prepared audio socket: {}", e))?;
+    let mut mapping_watch = MappingWatch::new(&mux, shared.seen_mappings.clone());
 
     // Create separate audio engines for capture (mono) and playback (stereo)
     let mut capture_engine = AudioEngine::new(capture_config.clone());
@@ -1020,6 +1021,15 @@ pub(super) async fn run(
 
         if std::time::Instant::now() >= next_stats_at {
             next_stats_at = std::time::Instant::now() + STATS_INTERVAL;
+            // A link that has heard nothing for a while may be sending from an address the room
+            // was not told: STUN is asked again, through the socket the links send through
+            mapping_watch.tick(
+                links
+                    .iter()
+                    .filter(|link| link.report.health() == LinkHealth::Starting)
+                    .map(|link| link.opened_at.elapsed())
+                    .max(),
+            );
             for link in &mut links {
                 link.refresh(
                     &preset,

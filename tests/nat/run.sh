@@ -100,7 +100,7 @@ run_case() {
   docker network create --internal --subnet 10.78.2.0/24 "$lan_b" >/dev/null
   docker create --name "$prefix-stun" --cap-add NET_ADMIN --network "$wan" --ip "${wan_prefix}11" \
     -v "$stun_bin":/stun:ro "$client_image" \
-    sh -c "ip addr add ${wan_prefix}12/24 dev eth0; ip addr add ${wan_prefix}13/24 dev eth0; exec /stun $(for ip in $stun_ips; do printf '%s:3478 ' "$ip"; done)" >/dev/null
+    sh -c "ip addr add ${wan_prefix}12/24 dev eth0; ip addr add ${wan_prefix}13/24 dev eth0; ip addr add ${wan_prefix}14/24 dev eth0; ip addr add ${wan_prefix}15/24 dev eth0; exec /stun $(for ip in $stun_ips ${wan_prefix}14 ${wan_prefix}15; do printf '%s:3478 ' "$ip"; done)" >/dev/null
   docker start "$prefix-stun" >/dev/null
   start_router a -e MODE="$mode_a" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1 -e RECORD_UNSOLICITED="$([[ $record == *a* ]] && echo 1 || echo 0)"
   start_router b -e MODE="$mode_b" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1 -e RECORD_UNSOLICITED="$([[ $record == *b* ]] && echo 1 || echo 0)"
