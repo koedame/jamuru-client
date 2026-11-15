@@ -92,6 +92,16 @@ impl LinkReport {
         }
     }
 
+    /// Whether nothing has come in from the peer yet, in whatever state the link is. A link that
+    /// was "connected" on a guess and then declared lost for hearing nothing is still this.
+    pub fn heard_nothing(&self) -> bool {
+        self.stats
+            .read()
+            .ok()
+            .and_then(|stats| stats.as_ref().map(|s| s.packets_received == 0))
+            .unwrap_or(true)
+    }
+
     pub fn health(&self) -> LinkHealth {
         let heard = self
             .stats
@@ -410,5 +420,23 @@ mod tests {
             Arc::ptr_eq(&buffers[&to], &buffer),
             "the buffer is the one they had"
         );
+    }
+
+    /// Verifies: REQ-CON-177
+    #[test]
+    fn a_link_that_was_declared_lost_without_ever_hearing_the_peer_still_counts_as_hearing_nothing()
+    {
+        let report = LinkReport::default();
+        assert!(report.heard_nothing(), "before any statistics");
+        for state in ["connecting", "connected", "reconnecting", "failed"] {
+            report.set_state(state, None);
+            *report.stats.write().unwrap() = Some(ConnectionStats::default());
+            assert!(report.heard_nothing(), "{state} with no packet received");
+        }
+        *report.stats.write().unwrap() = Some(ConnectionStats {
+            packets_received: 1,
+            ..ConnectionStats::default()
+        });
+        assert!(!report.heard_nothing(), "once a packet has come in");
     }
 }

@@ -25,7 +25,7 @@ use crate::audio::{open_asio, shared_asio_driver, AsioDuplex, AsioSwitch};
 use crate::link::Senders;
 use crate::network::{
     audio_packet_duration_ms, longer_of_buffer_and_period, mark_voice, required_bps,
-    AudioEncodingConfig, LinkHealth, MappingWatch, UdpMux,
+    AudioEncodingConfig, MappingWatch, UdpMux,
 };
 use crate::protocol::LatencyInfoMessage;
 
@@ -1027,7 +1027,7 @@ pub(super) async fn run(
             mapping_watch.tick(
                 links
                     .iter()
-                    .filter(|link| link.report.health() == LinkHealth::Starting)
+                    .filter(|link| link.report.heard_nothing())
                     .map(|link| link.opened_at.elapsed())
                     .max(),
             );
