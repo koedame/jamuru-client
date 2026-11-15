@@ -116,6 +116,12 @@ pub trait Backend: Send + Sync + 'static {
     fn link_claims(&self) -> Vec<(Uuid, LinkClaim)>;
     /// Tells the room where to send audio
     fn advertise(&self, conn: u32) -> impl Future<Output = Result<(), String>> + Send;
+    /// Whether the router gives the audio socket an address that the room was not told: STUN,
+    /// asked again while a link heard nothing, saw one (ADR-129). The next `advertise` tells it,
+    /// and this is false after.
+    fn address_moved(&self) -> bool {
+        false
+    }
     /// Starts the audio session on the devices if none runs, with no link, so the microphone is
     /// heard while the participant is alone in the room
     fn open_audio(&self) -> impl Future<Output = Result<(), String>> + Send;
@@ -645,6 +651,10 @@ impl<B: Backend> Driver<B> {
             audio
         });
         self.run_audio(conn, audio).await;
+        if self.backend().address_moved() {
+            tracing::info!("The audio socket is at an address the room was not told: telling it");
+            self.advertise(conn).await;
+        }
     }
 
     /// Ends the connection `conn` and gets it back, rejoining the room the participant is in,
@@ -789,6 +799,8 @@ mod tests {
         claims: Mutex<Vec<(Uuid, LinkClaim)>>,
         /// How many times the claims were read
         claim_reads: std::sync::atomic::AtomicU32,
+        /// Whether STUN saw the audio socket at an address the room was not told; told, it is not
+        moved: std::sync::atomic::AtomicBool,
     }
 
     impl FakeBackend {
@@ -891,8 +903,13 @@ mod tests {
             self.audio.lock().unwrap().clone()
         }
 
+        fn address_moved(&self) -> bool {
+            self.moved.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
         async fn advertise(&self, _conn: u32) -> Result<(), String> {
             self.ask("advertise");
+            self.moved.store(false, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
 
@@ -1235,6 +1252,28 @@ mod tests {
         .await;
 
         assert_eq!(driver.backend().asked("stop_audio"), 1);
+    }
+
+    /// A router that gives the audio socket another address, and STUN sees it while a link has
+    /// heard nothing: the room is told it, and only once.
+    ///
+    /// Verifies: REQ-CON-177
+    #[tokio::test]
+    async fn the_audio_socket_is_seen_at_an_address_the_room_was_not_told_tells_the_room_once() {
+        let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
+        let told_before = driver.backend().asked("advertise");
+        driver
+            .backend()
+            .moved
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        until(&driver, |_| {
+            driver.backend().asked("advertise") == told_before + 1
+        })
+        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        assert_eq!(driver.backend().asked("advertise"), told_before + 1);
     }
 
     fn id(n: u128) -> Uuid {

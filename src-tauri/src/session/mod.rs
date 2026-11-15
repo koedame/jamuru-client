@@ -304,6 +304,12 @@ impl<R: Runtime> Backend for AppBackend<R> {
         (audio.is_active(), audio.link_healths())
     }
 
+    fn address_moved(&self) -> bool {
+        self.app
+            .state::<streaming::StreamingState>()
+            .address_moved()
+    }
+
     fn entered_as(&self, id: Uuid) {
         if let Some(identity) = self.app.state::<SignalingState>().link_identity() {
             self.app

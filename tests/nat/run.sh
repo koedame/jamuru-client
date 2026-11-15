@@ -77,21 +77,24 @@ start_client() { # start_client <a|b> <peer args...>; connect_at_a / connect_at_
     sh -c "ip route replace default via 10.78.$net.2 && exec /peer --name $side --peer $other --dir /lab --stun $stun_arg --settle-secs $settle --audio-secs $audio $connect_arg ${NAT_LAB_PEER_ARGS:-} \"\$@\"" sh "$@" >/dev/null
 }
 
-# run_case <name> <a mode> <b mode> <gap> <expected: heard|silent> [skew ms] [records: a|b|ab] [patient]
+# run_case <name> <a mode> <b mode> <gap> <expected: heard|silent> [skew ms] [records: a|b|ab] [patient] [moved: a|b] [no-restun]
 # skew: how many ms after B's first packet A's goes out (negative: before); empty leaves the two to
 # start when each has the other's offer. record=1: a router keeps the packets nobody had sent for
 # (the app's first packet to that address is then given another port). Which routers: a, b or ab
 # patient: the peers go quiet for long enough for the router to forget what it kept (the flows
 # time out after 8 s here, and the kernel removes them within a minute of that), and take turns
 # sending first. The default is 30 s and 100 s, which takes minutes more per case.
+# moved: the router a|b gives the app another port after it was told the first one (before the
+# peers connect). no-restun: the peers do not ask STUN again, as the app did before.
 run_case() {
-  local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5 skew=${6:--} record=${7:--} patient=${8:--}
+  local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5 skew=${6:--} record=${7:--} patient=${8:--} moved=${9:--} norestun=${10:--}
   local settle=$settle saved_timeout=${NAT_LAB_UDP_TIMEOUT:-} saved_args=${NAT_LAB_PEER_ARGS:-}
   if [ "$patient" != - ]; then
     settle=280
     NAT_LAB_UDP_TIMEOUT=8
     NAT_LAB_PEER_ARGS="--punch-settle-ms 3000 --punch-quiet-ms 75000 --punch-second-ms 1500 --punch-window-ms 5000"
   fi
+  if [ "$norestun" != - ]; then NAT_LAB_PEER_ARGS="${NAT_LAB_PEER_ARGS:-} --no-restun"; fi
   cleanup
   work=$work_root/$suffix-$name
   rm -rf "$work"; mkdir -p "$work"
@@ -100,15 +103,18 @@ run_case() {
   docker network create --internal --subnet 10.78.2.0/24 "$lan_b" >/dev/null
   docker create --name "$prefix-stun" --cap-add NET_ADMIN --network "$wan" --ip "${wan_prefix}11" \
     -v "$stun_bin":/stun:ro "$client_image" \
-    sh -c "ip addr add ${wan_prefix}12/24 dev eth0; ip addr add ${wan_prefix}13/24 dev eth0; exec /stun $(for ip in $stun_ips; do printf '%s:3478 ' "$ip"; done)" >/dev/null
+    sh -c "ip addr add ${wan_prefix}12/24 dev eth0; ip addr add ${wan_prefix}13/24 dev eth0; ip addr add ${wan_prefix}14/24 dev eth0; ip addr add ${wan_prefix}15/24 dev eth0; exec /stun $(for ip in $stun_ips ${wan_prefix}14 ${wan_prefix}15; do printf '%s:3478 ' "$ip"; done)" >/dev/null
   docker start "$prefix-stun" >/dev/null
-  start_router a -e MODE="$mode_a" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1 -e RECORD_UNSOLICITED="$([[ $record == *a* ]] && echo 1 || echo 0)"
-  start_router b -e MODE="$mode_b" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1 -e RECORD_UNSOLICITED="$([[ $record == *b* ]] && echo 1 || echo 0)"
+  local move_ms=""
+  if [ "$moved" != - ]; then move_ms=$(( $(date +%s%3N) + 9000 )); fi
+  start_router a ${move_ms:+$([ "$moved" = a ] && echo "-e MOVE_AT_MS=$move_ms")} -e MODE="$mode_a" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1 -e RECORD_UNSOLICITED="$([[ $record == *a* ]] && echo 1 || echo 0)"
+  start_router b ${move_ms:+$([ "$moved" = b ] && echo "-e MOVE_AT_MS=$move_ms")} -e MODE="$mode_b" -e GAP="$gap" -e PORTSET_MIDDLE=5 -e PORTSET_BLOCKS=3,10,17,24,31,38,45,52 -e SAMPLE=1 -e RECORD_UNSOLICITED="$([[ $record == *b* ]] && echo 1 || echo 0)"
   sleep 1.5
   connect_at_a="" connect_at_b=""
   if [ "$skew" != - ]; then
     # far enough on for both to have gathered and traded offers
     local base_ms=$(( $(date +%s%3N) + 6000 ))
+    [ -z "$move_ms" ] || base_ms=$(( move_ms + 1500 ))
     connect_at_b=$base_ms; connect_at_a=$((base_ms + skew))
   fi
   start_client a
@@ -163,11 +169,14 @@ cases=(
   "patient-b-same-time   cone       cone       0  heard  0     b  1"
   "patient-a-b-first     cone       cone       0  heard  1000  a  1"
   "patient-both-a-first  cone       cone       0  silent -1000 ab 1"
+  "moved-a-no-restun     cone       cone       0  silent 0     -  -  a  1"
+  "moved-a               cone       cone       0  heard  0     -  -  a"
+  "moved-b               cone       cone       0  heard  0     -  -  b"
 )
 for line in "${cases[@]}"; do
-  read -r name mode_a mode_b gap expected skew record patient <<<"$line"
+  read -r name mode_a mode_b gap expected skew record patient moved norestun <<<"$line"
   if [ "$#" -gt 0 ] && ! printf '%s\n' "$@" | grep -qx "$name"; then continue; fi
-  run_case "$name" "$mode_a" "$mode_b" "$gap" "$expected" "${skew:--}" "${record:--}" "${patient:--}"
+  run_case "$name" "$mode_a" "$mode_b" "$gap" "$expected" "${skew:--}" "${record:--}" "${patient:--}" "${moved:--}" "${norestun:--}"
 done
 
 echo

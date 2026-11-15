@@ -22,11 +22,11 @@ use jamjam::audio::{
 use jamjam::audio_session::{self, Command, InputSignal, LinkTarget, Params, Running, Shared};
 use jamjam::network::room_driver::{Backend, Driver, Polled, RoomEvent, Session, Timing};
 use jamjam::network::{
-    bind_audio_std, gather_candidates_on, server_clock_offset_secs, AddressCandidate,
-    ConnectionStats, EnterError, EnterRequest, Entered, Gathered, LatencyBreakdown, LinkClaim,
-    LinkHealth, LinkIdentity, LinkSnapshot, LocalLatencyInfo, NetworkError, PeerLatencyInfo,
-    PortMapping, RoomEntry, RoomInfo, SignalingClient, SignalingConnection, SignalingMessage,
-    CLOCK_SKEW_NOTICE_SECS,
+    bind_audio_std, gather_candidates_on, server_clock_offset_secs, with_mappings_seen,
+    AddressCandidate, ConnectionStats, EnterError, EnterRequest, Entered, Gathered,
+    LatencyBreakdown, LinkClaim, LinkHealth, LinkIdentity, LinkSnapshot, LocalLatencyInfo,
+    NetworkError, PeerLatencyInfo, PortMapping, RoomEntry, RoomInfo, SignalingClient,
+    SignalingConnection, SignalingMessage, CLOCK_SKEW_NOTICE_SECS,
 };
 use uuid::Uuid;
 
@@ -684,6 +684,13 @@ struct Observed {
     links: HashMap<String, LinkSeries>,
     /// Seconds from entering the room to the link coming up
     connected_after: HashMap<String, f64>,
+    /// How many addresses STUN saw the audio socket at when asked again while a link heard
+    /// nothing (ADR-129)
+    restun_seen: usize,
+    /// How many times the room was told an address it had not been told
+    restun_told_again: u32,
+    restun_asked: u32,
+    restun_answered: u32,
 }
 
 /// Minimum, median, 95th percentile, maximum and standard deviation of `values`, or `null`
@@ -804,6 +811,12 @@ fn session_report(
             })
             .collect::<Vec<_>>(),
         "round_trip": round_trip,
+        "restun": {
+            "seen": observed.restun_seen,
+            "told_again": observed.restun_told_again,
+            "asked": observed.restun_asked,
+            "answered": observed.restun_answered,
+        },
     })
 }
 
@@ -1424,6 +1437,12 @@ impl Backend for CliBackend {
         }
     }
 
+    fn address_moved(&self) -> bool {
+        self.audio()
+            .as_ref()
+            .is_some_and(AudioSession::address_moved)
+    }
+
     /// Tells the room where to send audio. Done before any peer is known, because the peer needs
     /// an address to send to (ADR-026).
     async fn advertise(&self, conn: u32) -> Result<(), String> {
@@ -1548,7 +1567,10 @@ struct AudioSession {
     identity: LinkIdentity,
     /// What the room is told of the audio socket
     local_addr: SocketAddr,
-    candidates: Vec<AddressCandidate>,
+    /// The candidates the room was told, with the addresses STUN saw the socket at since
+    candidates: std::sync::Mutex<Vec<AddressCandidate>>,
+    /// How many times the room was told an address it had not been told
+    told_again: std::sync::atomic::AtomicU32,
     /// The router's forward of the audio port, which the room's addresses include; closed with
     /// the session
     port_mapping: Option<PortMapping>,
@@ -1637,7 +1659,8 @@ impl AudioSession {
             settings: settings.clone(),
             identity,
             local_addr,
-            candidates,
+            candidates: std::sync::Mutex::new(candidates),
+            told_again: std::sync::atomic::AtomicU32::new(0),
             port_mapping,
             names: HashMap::new(),
             told_up: HashSet::new(),
@@ -1646,11 +1669,35 @@ impl AudioSession {
 
     /// What tells the room where to send audio
     fn advertisement(&self) -> SignalingMessage {
+        let mut told = self.candidates.lock().unwrap_or_else(|e| e.into_inner());
+        let seen = self
+            .controls
+            .shared
+            .seen_mappings
+            .read()
+            .map(|seen| seen.clone())
+            .unwrap_or_default();
+        let merged = with_mappings_seen(&told, &seen);
+        let addresses = |candidates: &[AddressCandidate]| -> Vec<SocketAddr> {
+            candidates.iter().map(|c| c.address).collect()
+        };
+        if addresses(&merged) != addresses(&told) {
+            self.told_again
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        *told = merged;
         SignalingMessage::UpdatePeerInfo {
-            candidates: self.candidates.clone(),
-            public_addr: self.candidates.first().map(|c| c.address),
+            candidates: told.clone(),
+            public_addr: told.first().map(|c| c.address),
             local_addr: Some(self.local_addr),
         }
+    }
+
+    /// Whether STUN saw the socket at an address the room was not told
+    fn address_moved(&self) -> bool {
+        let told = self.candidates.lock().unwrap_or_else(|e| e.into_inner());
+        let told: Vec<SocketAddr> = told.iter().map(|c| c.address).collect();
+        !self.controls.shared.untold_mappings(&told).is_empty()
     }
 
     /// Opens an audio link to `peer`, racing `candidates`. It is set up on the audio thread;
@@ -1725,6 +1772,23 @@ impl AudioSession {
 
     /// Adds what every link looks like now to what the session has seen
     fn sample_links(&self, observed: &mut Observed) {
+        observed.restun_seen = self
+            .controls
+            .shared
+            .seen_mappings
+            .read()
+            .map_or(0, |seen| seen.len());
+        observed.restun_asked = self
+            .controls
+            .shared
+            .restun_asked
+            .load(std::sync::atomic::Ordering::Relaxed);
+        observed.restun_answered = self
+            .controls
+            .shared
+            .restun_answered
+            .load(std::sync::atomic::Ordering::Relaxed);
+        observed.restun_told_again = self.told_again.load(std::sync::atomic::Ordering::Relaxed);
         for report in summaries(&self.names, self.controls.shared.link_reports()) {
             let series = observed.links.entry(report.name.clone()).or_default();
             if series.rtt_ms.len() >= MAX_SAMPLES_PER_LINK {
@@ -2090,6 +2154,26 @@ mod tests {
             jitter_buffer_delay_us: 0,
             facts: LinkSnapshot::default(),
         }
+    }
+
+    /// Verifies: REQ-CON-177
+    #[test]
+    fn a_session_that_asked_stun_again_reports_how_many_addresses_it_saw_and_how_often_it_told_the_room(
+    ) {
+        let observed = Observed {
+            restun_seen: 2,
+            restun_told_again: 1,
+            restun_asked: 3,
+            restun_answered: 2,
+            ..Observed::default()
+        };
+
+        let report = session_report(&settings(), &[], Duration::ZERO, None, &observed);
+
+        assert_eq!(report["restun"]["seen"], 2);
+        assert_eq!(report["restun"]["told_again"], 1);
+        assert_eq!(report["restun"]["asked"], 3);
+        assert_eq!(report["restun"]["answered"], 2);
     }
 
     /// A session with a link to each of the others measured each of them. What a report of a

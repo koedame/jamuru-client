@@ -42,6 +42,8 @@ pub(super) struct Link {
     /// Their place in the mix: they are heard for as long as the link is held
     _voice: VoiceHandle,
     pub(super) stage: LinkStage,
+    /// When the link was opened
+    pub(super) opened_at: std::time::Instant,
     /// Reports quality changes on the edge rather than on every stats poll
     quality_monitor: QualityMonitor,
     /// Measures what the link actually carries, so one too narrow for PCM can
@@ -170,6 +172,7 @@ impl LinkSetup<'_> {
             receive,
             _voice: voice,
             stage: LinkStage::Checking(checking),
+            opened_at: std::time::Instant::now(),
             quality_monitor: QualityMonitor::new(),
             bandwidth_estimator: BandwidthEstimator::default(),
             bandwidth_verdict: BandwidthVerdict::default(),

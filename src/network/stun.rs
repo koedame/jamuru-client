@@ -41,7 +41,7 @@ pub const DEFAULT_STUN_SERVERS_V6: &[&str] = &[
 ];
 
 /// How long the other IP family is waited for once one has answered
-const OTHER_FAMILY_GRACE: Duration = Duration::from_millis(1000);
+pub(super) const OTHER_FAMILY_GRACE: Duration = Duration::from_millis(1000);
 
 /// Result of a STUN binding request
 #[derive(Debug, Clone)]
@@ -323,7 +323,7 @@ impl StunClient {
 }
 
 /// The address of `server` in the IPv4 family if `v4`, in the IPv6 one if not
-async fn resolve(server: &str, v4: bool) -> Result<SocketAddr, NetworkError> {
+pub(super) async fn resolve(server: &str, v4: bool) -> Result<SocketAddr, NetworkError> {
     tokio::net::lookup_host(server)
         .await
         .map_err(|e| NetworkError::StunFailed(format!("DNS lookup failed: {}", e)))?
@@ -332,7 +332,7 @@ async fn resolve(server: &str, v4: bool) -> Result<SocketAddr, NetworkError> {
 }
 
 /// Build a STUN binding request message
-fn build_binding_request(transaction_id: &[u8; 12]) -> Vec<u8> {
+pub(super) fn build_binding_request(transaction_id: &[u8; 12]) -> Vec<u8> {
     let mut msg = Vec::with_capacity(20);
 
     // Message type: Binding Request
@@ -351,7 +351,7 @@ fn build_binding_request(transaction_id: &[u8; 12]) -> Vec<u8> {
 }
 
 /// Parse a STUN binding response
-fn parse_binding_response(
+pub(super) fn parse_binding_response(
     data: &[u8],
     expected_txn_id: &[u8; 12],
 ) -> Result<SocketAddr, NetworkError> {

@@ -92,6 +92,16 @@ impl LinkReport {
         }
     }
 
+    /// Whether nothing has come in from the peer yet, in whatever state the link is. A link that
+    /// was "connected" on a guess and then declared lost for hearing nothing is still this.
+    pub fn heard_nothing(&self) -> bool {
+        self.stats
+            .read()
+            .ok()
+            .and_then(|stats| stats.as_ref().map(|s| s.packets_received == 0))
+            .unwrap_or(true)
+    }
+
     pub fn health(&self) -> LinkHealth {
         let heard = self
             .stats
@@ -171,6 +181,12 @@ pub struct Shared {
     /// The id the room knows this app by, and the key it entered with under that id. Each link
     /// tells it to the participant at its far end.
     pub own_id: Arc<RwLock<Option<(Uuid, LinkIdentity)>>>,
+    /// The addresses STUN last saw the audio socket at, asked again while a link heard nothing
+    /// (ADR-129). The room is told the ones it was not told.
+    pub seen_mappings: Arc<RwLock<Vec<SocketAddr>>>,
+    /// How many times STUN was asked again, and how many times it answered
+    pub restun_asked: Arc<AtomicU32>,
+    pub restun_answered: Arc<AtomicU32>,
 }
 
 impl Default for Shared {
@@ -207,6 +223,9 @@ impl Shared {
             local_pan: Arc::new(AtomicI32::new(0)),       // 0 = centre
             recorder: RoomRecorder::new(),
             own_id: Arc::new(RwLock::new(None)),
+            seen_mappings: Arc::new(RwLock::new(Vec::new())),
+            restun_asked: Arc::new(AtomicU32::new(0)),
+            restun_answered: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -235,6 +254,9 @@ impl Shared {
         }
         if let Ok(mut links) = self.links.write() {
             links.clear();
+        }
+        if let Ok(mut seen) = self.seen_mappings.write() {
+            seen.clear();
         }
         if let Ok(mut ended) = self.ended.write() {
             ended.clear();
@@ -327,6 +349,17 @@ impl Shared {
             .collect()
     }
 
+    /// The addresses STUN saw the audio socket at, asked again while a link heard nothing, that
+    /// are not among `told` (the ones the room was told)
+    pub fn untold_mappings(&self, told: &[SocketAddr]) -> Vec<SocketAddr> {
+        let seen = self
+            .seen_mappings
+            .read()
+            .map(|seen| seen.clone())
+            .unwrap_or_default();
+        crate::network::untold(told, &seen)
+    }
+
     /// How the audio link to each participant is doing, in the order the links were opened.
     pub fn link_healths(&self) -> Vec<(Uuid, LinkHealth)> {
         self.link_reports()
@@ -387,5 +420,23 @@ mod tests {
             Arc::ptr_eq(&buffers[&to], &buffer),
             "the buffer is the one they had"
         );
+    }
+
+    /// Verifies: REQ-CON-177
+    #[test]
+    fn a_link_that_was_declared_lost_without_ever_hearing_the_peer_still_counts_as_hearing_nothing()
+    {
+        let report = LinkReport::default();
+        assert!(report.heard_nothing(), "before any statistics");
+        for state in ["connecting", "connected", "reconnecting", "failed"] {
+            report.set_state(state, None);
+            *report.stats.write().unwrap() = Some(ConnectionStats::default());
+            assert!(report.heard_nothing(), "{state} with no packet received");
+        }
+        *report.stats.write().unwrap() = Some(ConnectionStats {
+            packets_received: 1,
+            ..ConnectionStats::default()
+        });
+        assert!(!report.heard_nothing(), "once a packet has come in");
     }
 }
