@@ -80,9 +80,11 @@ describe('the voice priority switch in the settings panel', () => {
     fakeBackend({ voice_priority: false }, true);
     render(<SettingsPanelAdapter />);
     const toggle = await screen.findByTestId('general-voice-priority-toggle');
+    await waitFor(() => expect(toggle).not.toBeChecked());
 
     fireEvent.click(toggle);
 
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('config_set_voice_priority', { enabled: true }, undefined));
     await waitFor(() => expect(toggle).not.toBeChecked());
   });
 });

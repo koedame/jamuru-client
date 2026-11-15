@@ -200,9 +200,9 @@ pub struct AppConfig {
     #[serde(default = "default_ask_name_on_entry")]
     pub ask_name_on_entry: bool,
     /// Whether the audio packets are marked as voice, so that a Wi-Fi sends them ahead of other
-    /// traffic (ADR-110). Off unless turned on: how it behaves on a Wi-Fi is not measured.
-    /// Takes effect when the next session starts.
-    #[serde(default)]
+    /// traffic (ADR-110). On unless turned off: on a busy Wi-Fi it cut the receive stalls and the
+    /// round trip, and on a quiet line it changed nothing. Takes effect when the next session starts.
+    #[serde(default = "default_voice_priority")]
     pub voice_priority: bool,
     /// Whether the app asks the router to forward the audio port to it, so that a peer behind
     /// a NAT that STUN cannot see through can still reach it (UPnP, ADR-113). On unless turned
@@ -303,6 +303,10 @@ fn default_open_router_port() -> bool {
     true
 }
 
+fn default_voice_priority() -> bool {
+    true
+}
+
 fn default_buffer_size() -> u32 {
     DEFAULT_BUFFER_SIZE
 }
@@ -317,7 +321,7 @@ impl Default for AppConfig {
             preset: AudioPreset::default(),
             peer_name: DEFAULT_PEER_NAME.to_string(),
             ask_name_on_entry: true,
-            voice_priority: false,
+            voice_priority: true,
             open_router_port: true,
             sample_rate: DEFAULT_SAMPLE_RATE,
             input_channel_l: 1,
@@ -681,17 +685,17 @@ mod tests {
 
     /// Verifies: REQ-CON-160
     #[test]
-    fn when_the_setting_is_absent_the_audio_packets_are_not_marked() {
-        assert!(!AppConfig::default().voice_priority);
+    fn when_the_setting_is_absent_the_audio_packets_are_marked() {
+        assert!(AppConfig::default().voice_priority);
         let config: AppConfig = toml::from_str("peer_name = \"Aki\"").unwrap();
-        assert!(!config.voice_priority);
+        assert!(config.voice_priority);
     }
 
     /// Verifies: REQ-CON-160
     #[test]
-    fn when_the_setting_is_on_in_the_file_the_audio_packets_are_marked() {
-        let config: AppConfig = toml::from_str("voice_priority = true").unwrap();
-        assert!(config.voice_priority);
+    fn when_the_setting_is_off_in_the_file_the_audio_packets_are_not_marked() {
+        let config: AppConfig = toml::from_str("voice_priority = false").unwrap();
+        assert!(!config.voice_priority);
     }
 
     /// Verifies: REQ-CON-165

@@ -217,7 +217,7 @@ export function GeneralTab({
             <span className="tab-content__switch-hint">
               {t(
                 "settings.general.voicePriorityHint",
-                "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. Try it when audio breaks up while others use the same Wi-Fi; turn it off if it gets worse. Not available on macOS. Applies from the next session"
+                "Marks audio packets so a Wi-Fi router sends them ahead of other traffic. On by default; turn it off if audio gets worse. Not available on macOS. Applies from the next session"
               )}
             </span>
           </span>
