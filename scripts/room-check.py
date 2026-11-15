@@ -1227,6 +1227,8 @@ def analyze(work, index, room):
             best[link["peer"]] = link
     links = [dict(best[peer], opened=opened[peer]) for peer in sorted(best)]
     result["links"] = links
+    # How often the app asked STUN again, and told the room an address it was not told
+    result["restun"] = report.get("restun")
     came_up = [link["connected_after_seconds"] for link in links if link["connected_after_seconds"] is not None]
     result["all_linked_seconds"] = max(came_up) if len(came_up) == total - 1 else None
     return result

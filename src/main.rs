@@ -684,6 +684,11 @@ struct Observed {
     links: HashMap<String, LinkSeries>,
     /// Seconds from entering the room to the link coming up
     connected_after: HashMap<String, f64>,
+    /// How many addresses STUN saw the audio socket at when asked again while a link heard
+    /// nothing (ADR-129)
+    restun_seen: usize,
+    /// How many times the room was told an address it had not been told
+    restun_told_again: u32,
 }
 
 /// Minimum, median, 95th percentile, maximum and standard deviation of `values`, or `null`
@@ -804,6 +809,10 @@ fn session_report(
             })
             .collect::<Vec<_>>(),
         "round_trip": round_trip,
+        "restun": {
+            "seen": observed.restun_seen,
+            "told_again": observed.restun_told_again,
+        },
     })
 }
 
@@ -1556,6 +1565,8 @@ struct AudioSession {
     local_addr: SocketAddr,
     /// The candidates the room was told, with the addresses STUN saw the socket at since
     candidates: std::sync::Mutex<Vec<AddressCandidate>>,
+    /// How many times the room was told an address it had not been told
+    told_again: std::sync::atomic::AtomicU32,
     /// The router's forward of the audio port, which the room's addresses include; closed with
     /// the session
     port_mapping: Option<PortMapping>,
@@ -1645,6 +1656,7 @@ impl AudioSession {
             identity,
             local_addr,
             candidates: std::sync::Mutex::new(candidates),
+            told_again: std::sync::atomic::AtomicU32::new(0),
             port_mapping,
             names: HashMap::new(),
             told_up: HashSet::new(),
@@ -1661,7 +1673,15 @@ impl AudioSession {
             .read()
             .map(|seen| seen.clone())
             .unwrap_or_default();
-        *told = with_mappings_seen(&told, &seen);
+        let merged = with_mappings_seen(&told, &seen);
+        let addresses = |candidates: &[AddressCandidate]| -> Vec<SocketAddr> {
+            candidates.iter().map(|c| c.address).collect()
+        };
+        if addresses(&merged) != addresses(&told) {
+            self.told_again
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        *told = merged;
         SignalingMessage::UpdatePeerInfo {
             candidates: told.clone(),
             public_addr: told.first().map(|c| c.address),
@@ -1748,6 +1768,13 @@ impl AudioSession {
 
     /// Adds what every link looks like now to what the session has seen
     fn sample_links(&self, observed: &mut Observed) {
+        observed.restun_seen = self
+            .controls
+            .shared
+            .seen_mappings
+            .read()
+            .map_or(0, |seen| seen.len());
+        observed.restun_told_again = self.told_again.load(std::sync::atomic::Ordering::Relaxed);
         for report in summaries(&self.names, self.controls.shared.link_reports()) {
             let series = observed.links.entry(report.name.clone()).or_default();
             if series.rtt_ms.len() >= MAX_SAMPLES_PER_LINK {
@@ -2113,6 +2140,22 @@ mod tests {
             jitter_buffer_delay_us: 0,
             facts: LinkSnapshot::default(),
         }
+    }
+
+    /// Verifies: REQ-CON-177
+    #[test]
+    fn a_session_that_asked_stun_again_reports_how_many_addresses_it_saw_and_how_often_it_told_the_room(
+    ) {
+        let observed = Observed {
+            restun_seen: 2,
+            restun_told_again: 1,
+            ..Observed::default()
+        };
+
+        let report = session_report(&settings(), &[], Duration::ZERO, None, &observed);
+
+        assert_eq!(report["restun"]["seen"], 2);
+        assert_eq!(report["restun"]["told_again"], 1);
     }
 
     /// A session with a link to each of the others measured each of them. What a report of a
