@@ -36,7 +36,13 @@ pub fn mark_voice(socket: &std::net::UdpSocket) -> Option<&'static str> {
             Some(how)
         }
         Err(reason) => {
-            warn!("Audio packets are not marked as voice: {reason}");
+            // macOS is left unmarked on purpose and the setting is on by default, so every session
+            // there reaches this: a note, not a warning.
+            if cfg!(target_os = "macos") {
+                info!("Audio packets are not marked as voice: {reason}");
+            } else {
+                warn!("Audio packets are not marked as voice: {reason}");
+            }
             None
         }
     }
