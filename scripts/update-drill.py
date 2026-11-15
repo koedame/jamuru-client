@@ -506,18 +506,37 @@ class Look:
         )
 
 
+READ_TRIES = 10
+READ_PAUSE = 0.2
+
+
 def read(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        return ""
+    """The text of `path`, or "" if it is not there. On Windows a file the app
+    is writing (or renaming into place) at that moment cannot be opened: that
+    is a PermissionError which passes, so it is tried again for a short while
+    and only then left to the caller."""
+    for attempt in range(READ_TRIES):
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            return ""
+        except PermissionError:
+            if attempt == READ_TRIES - 1:
+                raise
+            time.sleep(READ_PAUSE)
+    return ""
 
 
 def wait_for(what: str, limit: float, check) -> None:
+    """Until `check()` holds. A file that cannot be read yet (see `read`) is
+    one more time that it does not hold; the next round reads it again."""
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
-        if check():
-            return
+        try:
+            if check():
+                return
+        except PermissionError:
+            pass
         time.sleep(1)
     raise DrillFailed(f"not within {limit:.0f} s: {what}")
 
