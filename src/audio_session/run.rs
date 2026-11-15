@@ -120,7 +120,8 @@ pub(super) async fn run(
     enlarge_socket_buffers(&prepared_socket);
     let mux = UdpMux::from_std(prepared_socket)
         .map_err(|e| format!("Failed to adopt the prepared audio socket: {}", e))?;
-    let mut mapping_watch = MappingWatch::new(&mux, shared.seen_mappings.clone());
+    let mut mapping_watch = MappingWatch::new(&mux, shared.seen_mappings.clone())
+        .counting(shared.restun_asked.clone(), shared.restun_answered.clone());
 
     // Create separate audio engines for capture (mono) and playback (stereo)
     let mut capture_engine = AudioEngine::new(capture_config.clone());

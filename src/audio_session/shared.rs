@@ -174,6 +174,9 @@ pub struct Shared {
     /// The addresses STUN last saw the audio socket at, asked again while a link heard nothing
     /// (ADR-129). The room is told the ones it was not told.
     pub seen_mappings: Arc<RwLock<Vec<SocketAddr>>>,
+    /// How many times STUN was asked again, and how many times it answered
+    pub restun_asked: Arc<AtomicU32>,
+    pub restun_answered: Arc<AtomicU32>,
 }
 
 impl Default for Shared {
@@ -211,6 +214,8 @@ impl Shared {
             recorder: RoomRecorder::new(),
             own_id: Arc::new(RwLock::new(None)),
             seen_mappings: Arc::new(RwLock::new(Vec::new())),
+            restun_asked: Arc::new(AtomicU32::new(0)),
+            restun_answered: Arc::new(AtomicU32::new(0)),
         }
     }
 

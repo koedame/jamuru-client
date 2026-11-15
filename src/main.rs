@@ -689,6 +689,8 @@ struct Observed {
     restun_seen: usize,
     /// How many times the room was told an address it had not been told
     restun_told_again: u32,
+    restun_asked: u32,
+    restun_answered: u32,
 }
 
 /// Minimum, median, 95th percentile, maximum and standard deviation of `values`, or `null`
@@ -812,6 +814,8 @@ fn session_report(
         "restun": {
             "seen": observed.restun_seen,
             "told_again": observed.restun_told_again,
+            "asked": observed.restun_asked,
+            "answered": observed.restun_answered,
         },
     })
 }
@@ -1774,6 +1778,16 @@ impl AudioSession {
             .seen_mappings
             .read()
             .map_or(0, |seen| seen.len());
+        observed.restun_asked = self
+            .controls
+            .shared
+            .restun_asked
+            .load(std::sync::atomic::Ordering::Relaxed);
+        observed.restun_answered = self
+            .controls
+            .shared
+            .restun_answered
+            .load(std::sync::atomic::Ordering::Relaxed);
         observed.restun_told_again = self.told_again.load(std::sync::atomic::Ordering::Relaxed);
         for report in summaries(&self.names, self.controls.shared.link_reports()) {
             let series = observed.links.entry(report.name.clone()).or_default();
@@ -2149,6 +2163,8 @@ mod tests {
         let observed = Observed {
             restun_seen: 2,
             restun_told_again: 1,
+            restun_asked: 3,
+            restun_answered: 2,
             ..Observed::default()
         };
 
@@ -2156,6 +2172,8 @@ mod tests {
 
         assert_eq!(report["restun"]["seen"], 2);
         assert_eq!(report["restun"]["told_again"], 1);
+        assert_eq!(report["restun"]["asked"], 3);
+        assert_eq!(report["restun"]["answered"], 2);
     }
 
     /// A session with a link to each of the others measured each of them. What a report of a

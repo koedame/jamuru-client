@@ -9,6 +9,7 @@
 //! socket the links send through, says what the router gives it now.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -51,6 +52,8 @@ pub struct MappingWatch {
     asking: Option<JoinHandle<Vec<StunResult>>>,
     last_asked: Option<Instant>,
     asked: u32,
+    /// How many questions were asked and how many were answered, for whoever reports on them
+    counts: Option<(Arc<AtomicU32>, Arc<AtomicU32>)>,
 }
 
 impl MappingWatch {
@@ -68,7 +71,14 @@ impl MappingWatch {
             asking: None,
             last_asked: None,
             asked: 0,
+            counts: None,
         }
+    }
+
+    /// Counts the questions asked and the questions answered in these
+    pub fn counting(mut self, asked: Arc<AtomicU32>, answered: Arc<AtomicU32>) -> Self {
+        self.counts = Some((asked, answered));
+        self
     }
 
     /// Uses these STUN servers instead of the default ones
@@ -108,6 +118,9 @@ impl MappingWatch {
 
     fn ask(&mut self) {
         self.asked += 1;
+        if let Some((asked, _)) = &self.counts {
+            asked.fetch_add(1, Ordering::Relaxed);
+        }
         self.last_asked = Some(Instant::now());
         let stun = self.stun.clone();
         let servers = self.servers.clone();
@@ -135,6 +148,9 @@ impl MappingWatch {
         }
         if addrs.is_empty() {
             return;
+        }
+        if let Some((_, answered)) = &self.counts {
+            answered.fetch_add(1, Ordering::Relaxed);
         }
         info!("STUN sees the audio socket at {:?}", addrs);
         if let Ok(mut seen) = self.seen.write() {
