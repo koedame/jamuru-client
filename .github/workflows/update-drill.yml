@@ -64,7 +64,7 @@ jobs:
     steps:
       # All the tags and what is before them: the release before this one is
       # one of them.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -92,7 +92,7 @@ jobs:
       # The release build's caches, which the weekly rehearsal of the release
       # saves; the drill's builds differ from it only in the app itself.
       - name: Restore cargo registry
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -100,7 +100,7 @@ jobs:
             cargo-registry-
 
       - name: Restore cargo git
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -108,7 +108,7 @@ jobs:
             cargo-git-
 
       - name: Restore cargo target
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             src-tauri/target

@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install system dependencies
         run: |
@@ -40,7 +40,7 @@ jobs:
           toolchain: stable
 
       - name: Cache cargo registry
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -48,7 +48,7 @@ jobs:
             cargo-registry-
 
       - name: Cache cargo git
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -56,7 +56,7 @@ jobs:
             cargo-git-
 
       - name: Cache cargo target
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
           key: cargo-target-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install mingw-w64
         run: |
@@ -97,7 +97,7 @@ jobs:
           targets: x86_64-pc-windows-gnu
 
       - name: Cache cargo registry
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -105,7 +105,7 @@ jobs:
             cargo-registry-
 
       - name: Cache cargo git
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -113,7 +113,7 @@ jobs:
             cargo-git-
 
       - name: Cache cargo target
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
           key: cargo-target-windows-${{ hashFiles('**/Cargo.lock') }}
@@ -137,7 +137,7 @@ jobs:
     timeout-minutes: 15
     needs: check
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install system dependencies
         run: |
@@ -150,7 +150,7 @@ jobs:
           toolchain: stable
 
       - name: Cache cargo registry
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -158,7 +158,7 @@ jobs:
             cargo-registry-
 
       - name: Cache cargo git
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -171,7 +171,7 @@ jobs:
       # No restore-keys: restoring the last build and adding to it keeps every
       # crate version the lock file has ever had in the saved cache.
       - name: Cache cargo target
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
           key: cargo-target-test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
@@ -184,7 +184,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install system dependencies
         run: |
@@ -198,7 +198,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo registry
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -206,7 +206,7 @@ jobs:
             cargo-registry-
 
       - name: Cache cargo git
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -214,7 +214,7 @@ jobs:
             cargo-git-
 
       - name: Cache cargo target
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
           key: cargo-target-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
@@ -236,7 +236,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install system dependencies
         run: |
@@ -250,7 +250,7 @@ jobs:
           components: clippy
 
       - name: Cache cargo registry
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -260,7 +260,7 @@ jobs:
       # No restore-keys, for the reason given at the Test job: this entry grew
       # past 4 GB and took longer to restore than the build it saved.
       - name: Cache cargo target
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
           key: cargo-target-opus-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
@@ -282,10 +282,10 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -309,7 +309,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
@@ -347,7 +347,7 @@ jobs:
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

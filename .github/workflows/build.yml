@@ -41,7 +41,7 @@ jobs:
             target: x86_64-pc-windows-msvc
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install system dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -62,7 +62,7 @@ jobs:
           toolchain: stable
 
       - name: Cache cargo registry
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -70,7 +70,7 @@ jobs:
             cargo-registry-
 
       - name: Cache cargo git
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -78,7 +78,7 @@ jobs:
             cargo-git-
 
       - name: Cache cargo target
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
           key: cargo-target-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
@@ -87,7 +87,7 @@ jobs:
 
       - name: Cache Tauri CLI
         id: cache-tauri-cli
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-tauri*
           key: tauri-cli-${{ runner.os }}-v2
@@ -118,7 +118,7 @@ jobs:
 
       - name: Upload artifacts (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jamuru-linux
           path: |
@@ -127,7 +127,7 @@ jobs:
 
       - name: Upload artifacts (macOS)
         if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jamuru-macos
           path: |
@@ -135,7 +135,7 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jamuru-windows
           path: |
