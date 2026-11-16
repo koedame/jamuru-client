@@ -25,7 +25,7 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Decide the tag
         id: tag
@@ -98,7 +98,7 @@ jobs:
             artifact_name: jamuru-windows-x64
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install system dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest' && !matrix.cross
@@ -159,7 +159,7 @@ jobs:
       # out of the 10 GiB the repository gets. Only the develop rehearsal saves.
       - name: Restore cargo registry
         id: cache-registry
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -168,7 +168,7 @@ jobs:
 
       - name: Restore cargo git
         id: cache-git
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
@@ -182,7 +182,7 @@ jobs:
       # this; a tag run only restores it and saves nothing.
       - name: Restore cargo target
         id: cache-target
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             src-tauri/target
@@ -282,21 +282,21 @@ jobs:
 
       - name: Save cargo registry
         if: github.ref_type != 'tag' && steps.cache-registry.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Save cargo git
         if: github.ref_type != 'tag' && steps.cache-git.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: cargo-git-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Save cargo target
         if: github.ref_type != 'tag' && steps.cache-target.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             src-tauri/target
@@ -367,7 +367,7 @@ jobs:
 
       - name: Upload artifacts (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -378,7 +378,7 @@ jobs:
 
       - name: Upload artifacts (macOS)
         if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -388,7 +388,7 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -425,7 +425,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             artifact_name: jamuru-cli-linux-aarch64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -459,7 +459,7 @@ jobs:
         run: scripts/check-cli-runs.sh target/${{ matrix.target }}/release/jamuru
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -481,10 +481,10 @@ jobs:
     # uploaded. A `v*` tag publishes a release.
     if: needs.prepare.outputs.tag != ''
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
 
@@ -590,7 +590,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [prepare, release]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download the update manifest
         env:
@@ -617,10 +617,10 @@ jobs:
     # koedame/tap/jamuru@beta`), so a prerelease reaches only the people
     # who opted in and `brew upgrade jamuru` never picks it up.
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: jamuru-macos-*
           path: artifacts
@@ -714,7 +714,7 @@ jobs:
     needs: [prepare, release, update-beta-channel, update-cask]
     if: needs.prepare.outputs.tag != ''
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Delete the releases older than this one
         env:
