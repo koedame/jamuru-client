@@ -8,6 +8,7 @@ use crate::audio::{
     WIRE_CHANNELS,
 };
 use crate::link::Senders;
+use crate::network::SharedPcm;
 
 /// What the send thread reads and is told, besides the audio itself
 pub(super) struct SendFeed {
@@ -56,6 +57,8 @@ pub(super) fn spawn(feed: SendFeed) -> std::thread::JoinHandle<()> {
             .expect("Failed to create send thread runtime");
 
         let mut timestamp: u32 = 0;
+        // What every link with PCM sends is encoded once per frame
+        let mut shared_pcm = SharedPcm::new(WIRE_CHANNELS);
         // Room for the widest capture, so a switch between mono and stereo
         // needs no new allocation
         let mut send_buffer = vec![0.0f32; send_buffer_size * WIRE_CHANNELS];
@@ -135,6 +138,7 @@ pub(super) fn spawn(feed: SendFeed) -> std::thread::JoinHandle<()> {
                         .read()
                         .map(|senders| senders.clone())
                         .unwrap_or_else(|e| e.into_inner().clone());
+                    shared_pcm.next_frame();
                     rt.block_on(async {
                         let mut noted = false;
                         for connection in targets.iter() {
@@ -144,8 +148,13 @@ pub(super) fn spawn(feed: SendFeed) -> std::thread::JoinHandle<()> {
                                     probe.note_sent(&stereo_send_buffer);
                                     noted = true;
                                 }
-                                if let Err(e) =
-                                    conn.send_audio(&stereo_send_buffer, timestamp).await
+                                if let Err(e) = conn
+                                    .send_audio_shared(
+                                        &stereo_send_buffer,
+                                        timestamp,
+                                        &mut shared_pcm,
+                                    )
+                                    .await
                                 {
                                     tracing::warn!("Failed to send audio: {}", e);
                                 }

@@ -10,7 +10,7 @@ use parking_lot::{Mutex, RwLock};
 use tokio::time::interval;
 use tracing::{debug, info, trace, warn};
 
-use crate::audio::{create_codec, AudioCodec, CodecConfig, CodecType, PcmCodec};
+use crate::audio::{create_codec, encode_packed, AudioCodec, CodecConfig, CodecType, PcmCodec};
 use crate::protocol::{
     LatencyInfoMessage, LatencyPing, LatencyPong, Packet, PacketType, PongWall, HEADER_SIZE,
 };
@@ -168,6 +168,61 @@ pub struct ConnectionStats {
     /// Samples sent that did not fit the audio format and were clipped (cumulative):
     /// the input went past 0 dBFS
     pub samples_clipped: u64,
+}
+
+/// PCM encoded once for the links a frame goes to
+///
+/// PCM packing keeps nothing from one packet to the next, so the bytes a link would encode
+/// are the bytes every other link with the same channel count would encode. The send
+/// thread keeps one of these, calls [`Self::next_frame`] for each frame, and hands it to
+/// [`Connection::send_audio_shared`] for each link.
+pub struct SharedPcm {
+    channels: usize,
+    parts: Option<Vec<SharedPart>>,
+}
+
+struct SharedPart {
+    bytes: Vec<u8>,
+    timestamp: u32,
+    /// Samples of this packet that did not fit
+    clipped: u64,
+}
+
+impl SharedPcm {
+    /// An encoder for audio of `channels` interleaved channels
+    pub fn new(channels: usize) -> Self {
+        let channels = channels.max(1);
+        Self {
+            channels,
+            parts: None,
+        }
+    }
+
+    /// Forgets the frame encoded last: the next link to send encodes the next one
+    pub fn next_frame(&mut self) {
+        self.parts = None;
+    }
+
+    /// The packets of the frame, encoded on the first call after [`Self::next_frame`]
+    fn parts(&mut self, data: &[f32], timestamp: u32) -> &[SharedPart] {
+        if self.parts.is_none() {
+            let per_packet = samples_per_audio_packet(data.len(), self.channels);
+            let mut timestamp = timestamp;
+            let mut parts = Vec::with_capacity(data.len().div_ceil(per_packet));
+            for part in data.chunks(per_packet) {
+                let mut bytes = Vec::new();
+                let clipped = encode_packed(part, self.channels, &mut bytes);
+                parts.push(SharedPart {
+                    bytes,
+                    timestamp,
+                    clipped,
+                });
+                timestamp = timestamp.wrapping_add((part.len() / self.channels) as u32);
+            }
+            self.parts = Some(parts);
+        }
+        self.parts.as_deref().unwrap_or_default()
+    }
 }
 
 impl ConnectionStats {
@@ -1109,6 +1164,9 @@ pub struct Connection {
     packets_received: Arc<AtomicU64>,
     fec_recovered: Arc<AtomicU64>,
     bytes_sent: Arc<AtomicU64>,
+    /// Samples clipped by an encoding shared with other links ([`SharedPcm`]), which this
+    /// link's own encoder never saw
+    shared_clipped: AtomicU64,
     bytes_received: Arc<AtomicU64>,
     last_received: Arc<std::sync::Mutex<Instant>>,
     /// When the user last asked for a new attempt: the give-up time is counted from here
@@ -1233,6 +1291,7 @@ impl Connection {
             packets_received: Arc::new(AtomicU64::new(0)),
             fec_recovered: Arc::new(AtomicU64::new(0)),
             bytes_sent: Arc::new(AtomicU64::new(0)),
+            shared_clipped: AtomicU64::new(0),
             bytes_received: Arc::new(AtomicU64::new(0)),
             last_received: Arc::new(std::sync::Mutex::new(Instant::now())),
             retry_at: Arc::new(std::sync::Mutex::new(Instant::now())),
@@ -1869,13 +1928,7 @@ impl Connection {
     /// timestamped as the frame it is a part of. The receiver plays them as frames of
     /// their own; nothing on the wire says they were one.
     pub async fn send_audio(&self, data: &[f32], timestamp: u32) -> Result<(), NetworkError> {
-        let splittable = self
-            .encoder
-            .lock()
-            .map_err(|_| NetworkError::Configuration("Codec lock poisoned".into()))?
-            .codec_type()
-            == CodecType::Pcm;
-        if !splittable || data.is_empty() {
+        if !self.carries_pcm()? || data.is_empty() {
             return self.send_audio_packet(data, timestamp).await;
         }
         let per_packet = samples_per_audio_packet(data.len(), self.audio_channels);
@@ -1885,6 +1938,48 @@ impl Connection {
             timestamp = timestamp.wrapping_add((part.len() / self.audio_channels) as u32);
         }
         Ok(())
+    }
+
+    /// Like [`Self::send_audio`], for a frame that goes to several links: PCM is encoded once
+    /// for all of them, in `shared`, and each link numbers, seals and sends the same bytes.
+    /// What goes out is what `send_audio` would have sent. A link that does not carry PCM of
+    /// the channel count `shared` encodes, or one that cannot send yet, takes the way
+    /// `send_audio` takes.
+    ///
+    /// Call [`SharedPcm::next_frame`] before the first link of each frame.
+    pub async fn send_audio_shared(
+        &self,
+        data: &[f32],
+        timestamp: u32,
+        shared: &mut SharedPcm,
+    ) -> Result<(), NetworkError> {
+        if data.is_empty() || !self.carries_pcm()? || self.audio_channels != shared.channels {
+            return self.send_audio(data, timestamp).await;
+        }
+        if !self.state().can_transmit() {
+            return Err(NetworkError::NotConnected);
+        }
+        // Nothing may be sent before the keys are agreed, and nothing is numbered either
+        if !self.secure_link.can_send_media() {
+            return Ok(());
+        }
+        for part in shared.parts(data, timestamp) {
+            self.shared_clipped
+                .fetch_add(part.clipped, Ordering::Relaxed);
+            self.send_audio_bytes(part.bytes.clone(), part.timestamp)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Whether what this link sends is PCM, which a packet of is cut from the frame
+    fn carries_pcm(&self) -> Result<bool, NetworkError> {
+        Ok(self
+            .encoder
+            .lock()
+            .map_err(|_| NetworkError::Configuration("Codec lock poisoned".into()))?
+            .codec_type()
+            == CodecType::Pcm)
     }
 
     async fn send_audio_packet(&self, data: &[f32], timestamp: u32) -> Result<(), NetworkError> {
@@ -1906,6 +2001,11 @@ impl Connection {
             .encode(data)
             .map_err(|e| NetworkError::Configuration(format!("Audio encode: {}", e)))?;
 
+        self.send_audio_bytes(bytes, timestamp).await
+    }
+
+    /// Numbers, protects and sends one encoded audio packet (and the FEC packet it completes)
+    async fn send_audio_bytes(&self, bytes: Vec<u8>, timestamp: u32) -> Result<(), NetworkError> {
         // The receiver files a packet under group `sequence / group_size`, and
         // the encoder groups packets in the order it is given them. The two
         // agree only if every audio sequence reaches the encoder, in order - so
@@ -2000,7 +2100,8 @@ impl Connection {
                 .encoder
                 .lock()
                 .map(|codec| codec.clipped_samples())
-                .unwrap_or(0),
+                .unwrap_or(0)
+                + self.shared_clipped.load(Ordering::Relaxed),
         }
     }
 
