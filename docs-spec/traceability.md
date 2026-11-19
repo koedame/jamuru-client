@@ -9,10 +9,10 @@
 
 | 項目 | 件数 |
 |------|------|
-| 要求 総数 | 379 |
-| うち must | 337 |
+| 要求 総数 | 380 |
+| うち must | 338 |
 | うち should | 42 |
-| 検証済み | 352 |
+| 検証済み | 353 |
 | サーバーを立てた接続テストでのみ検証 | 23 |
 | 未検証（should のみ許容） | 4 |
 
@@ -85,6 +85,7 @@
 | REQ-AUD-132 | must | 詰めた音声パケットの大きさは、音の中身を細かく漏らさないよう、24-bit のままの大きさの 8 分の 1 刻みに切り上げる。刻みの余りは復号側が読み飛ばす。必要帯域の見積もり（`required_bps`）は詰めない場合の上限のままで、実際の帯域はそれ以下になる（[ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md)） | `docs-spec/requirements.md` | `src/audio/packed.rs`::the_size_of_a_packet_is_one_of_a_few_sizes |
 | REQ-AUD-133 | must | 詰めた音声パケットの復号は、壊れた・偽造されたパケットでも panic せず、確保する量も入力の大きさに比例する範囲に収まり、エラーを返す。復号は全チャンネルで 2048 サンプルまでの固定の領域（スタック）で行い、それを超える数を名乗るパケットは受け付けず、リアルタイムの音声スレッドで確保をしない（[ADR-111](./adr/ADR-111-pack-audio-packets-without-loss.md)） | `docs-spec/requirements.md` | `src/audio/packed.rs`::a_damaged_packet_is_refused_and_does_not_panic<br/>`src/audio/packed.rs`::a_packet_that_claims_more_samples_than_a_packet_holds_is_refused_before_anything_is_made_for_them |
 | REQ-AUD-134 | should | 音声のセッションは、音声のソケットの受信・送信バッファを、大きさが 1 MiB に満たなければ 1 MiB に広げる。OS が小さく丸めたときもそのまま動き、頼む前と後の大きさをログに残す。設計は [ADR-116](./adr/ADR-116-widen-the-audio-socket-buffers.md) | `docs-spec/requirements.md` | `src/audio_session/socket_buffers.rs`::when_the_socket_buffers_are_enlarged_then_they_are_not_smaller_than_before |
+| REQ-AUD-135 | must | 1 つのフレームを複数のリンクへ送るとき、PCM はフレームごとに 1 回だけ詰め、各リンクは同じバイト列を自分のシーケンス番号・暗号化・FEC で送る。受け手に届くパケットの中身（シーケンス・タイムスタンプ・ペイロード）は、リンクごとに詰めた場合と 1 ビットも変わらない。まだ鍵が決まっていないリンクは、詰めたバイト列を渡されてもシーケンス番号を使わない。PCM でないリンク・チャンネル数が違うリンクは自分で詰める。クリップしたサンプルの数（REQ-AUD-045）は、詰めたバイト列を使ったリンクにも、そのリンクに送ったぶんとして数える | `docs-spec/requirements.md` | `tests/shared_pcm_send_test.rs`::when_a_frame_goes_to_many_links_each_gets_the_same_bytes_under_its_own_numbers<br/>`tests/shared_pcm_send_test.rs`::when_a_frame_is_shared_each_link_counts_the_samples_that_went_past_0_dbfs<br/>`tests/shared_pcm_send_test.rs`::when_a_frame_is_shared_the_peer_gets_the_packets_its_own_encoding_would_send<br/>`tests/shared_pcm_send_test.rs`::when_a_link_cannot_send_yet_it_takes_no_sequence_number<br/>`tests/shared_pcm_send_test.rs`::when_a_link_does_not_carry_pcm_of_the_shared_channels_it_encodes_its_own |
 | REQ-CLI-001 | must | CLI でルームを作成でき、招待コードが表示される。他の参加者はそのコードで参加し、チャットが双方に届く | `docs-spec/requirements.md` | サーバーを立てた接続テスト（このリポジトリの外） |
 | REQ-CLI-002 | must | セッション中のコマンド（`/mute` `/unmute` `/stats` `/help` `/quit`）が解釈され、ミュート状態が切り替わる。コマンド以外はチャットとして送られる | `docs-spec/requirements.md` | `src/main.rs`::muting_without_audio_reports_that_there_is_nothing_to_mute<br/>`src/main.rs`::only_commands_are_intercepted<br/>`src/main.rs`::session_commands_are_recognised_and_act |
 | REQ-CLI-003 | must | プリセットの選択を保存でき、GUI と同じ設定ファイルに書かれる。未知のプリセット名は拒否される | `docs-spec/requirements.md` | `tests/cli_test.rs`::preset_use_refuses_a_name_that_is_not_a_preset<br/>`tests/cli_test.rs`::preset_use_saves_the_choice_where_the_app_reads_it |
