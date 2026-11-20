@@ -32,6 +32,12 @@ datacenter as the cloud's own metadata tells it, whether IPv6 works, and how its
 NAT maps ports). An address is never written: where two must be compared, a
 keyed hash stands for it, and the key is of this run alone.
 
+After its room, each runner also enters, alone and muted, a second room of the same server
+where one fixed participant of the deployment stays (the far end), and keeps the round trip to it
+(`latency`, ADR-130): the runners go in one after another, so that nothing but the far end is in
+the room while one is measured. A runner that found anyone else there, or never reached the far
+end, is told apart in the numbers and is not part of the room's verdict.
+
 The output of this script is the only thing that reaches the log: pass or fail
 and numbers per participant. What the server answers, what `jamuru` prints and
 where the participants connected from are never printed.
@@ -56,6 +62,7 @@ import statistics
 import struct
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import zipfile
@@ -110,6 +117,24 @@ UDP_KEEP_SECONDS = 3000
 # How long a participant waits for the host to say when the turns start.
 START_WAIT_SECONDS = JOINED_WAIT_SECONDS + 300
 JOINED_PATTERN = re.compile(r"📥 (\S+) joined the room")
+# The latency room (ADR-130): the code is a secret, so nothing in this repository says where it is.
+LATENCY_ROOM_ENV = "ROOM_CHECK_LATENCY_ROOM"
+# The runners of this check enter the latency room as `r<run>a<attempt>-q<runner>`. Whoever is there
+# under another name is the far end.
+LATENCY_RUNNER_NAME = re.compile(r"^r\d+a\d+-q\d+$")
+# How long a runner stays in the latency room once it has entered (the far end is pinged once a second or so,
+# so this is about 30 round trips), and how far apart the runners' turns in it are: the stay, and the
+# time to start the app, to take the seat and to leave it.
+LATENCY_STAY_SECONDS = 30
+LATENCY_PITCH_SECONDS = 45
+# From the end of the room check's own run to the first turn in the latency room: every participant of
+# the room has quit by then (the host kills a laggard 30 seconds after the end).
+LATENCY_MARGIN_SECONDS = 60
+# A runner that is later than this for its turn leaves it out, rather than overlap the next one's.
+LATENCY_LATE_SECONDS = 5
+# How long the app has to take its seat in the latency room.
+LATENCY_ENTER_SECONDS = 60
+ROSTER_PATTERN = re.compile(r"^\s+- (.+?) \(id: ")
 
 
 def name_of(index):
@@ -530,6 +555,190 @@ def run(args):
     """`join` then `measure` in one step, for the runners other than the host."""
     join(args)
     measure(args)
+
+
+def latency_enter_at(start_at, total, slot, runner):
+    """When runner `runner` enters the latency room: after the room check's run, one runner's turn after the other."""
+    _, end_at = schedule(start_at, total, slot)
+    return end_at + LATENCY_MARGIN_SECONDS + runner * LATENCY_PITCH_SECONDS
+
+
+def names_in_room(lines):
+    """Who a session's output shows in its room: the far end, and the runners that are not it.
+
+    Returns `(far, runners)`: the name of the far end (the first one shown that is not named like a
+    runner of this check, or None) and the names of the runners (and of anybody else beyond that first
+    name) that were shown, whether or not they left since. Those that were there when the session
+    entered (`Peers in room`) and those that came while it stayed (`joined the room`) are both counted.
+    """
+    names = []
+    for line in lines:
+        found = ROSTER_PATTERN.match(line) or JOINED_PATTERN.search(line)
+        if found and found.group(1) not in names:
+            names.append(found.group(1))
+    far = next((name for name in names if not LATENCY_RUNNER_NAME.match(name)), None)
+    return far, {name for name in names if name != far}
+
+
+def latency_of(report, far, others):
+    """The status and numbers of one stay in the latency room, from the app's report.
+
+    `measured`: alone with the far end, and its round trips were timed. `shared`: somebody else was in
+    the room at some time during the stay, so the numbers are kept but left out of the collections.
+    `unreached`: the far end was in the room but no round trip came back, `no_far_end`: it was not in the room.
+    """
+    peer = next((peer for peer in report.get("peers", []) if far is not None and peer.get("name") == far), None)
+    spread = (peer or {}).get("rtt_spread_ms") or {}
+    link = (peer or {}).get("link") or {}
+    network = (peer or {}).get("network") or {}
+    if far is None:
+        status = "no_far_end"
+    elif not spread.get("samples"):
+        status = "unreached"
+    elif others:
+        status = "shared"
+    else:
+        status = "measured"
+    return {
+        "status": status,
+        "others_seen": len(others),
+        "rtt_ms": {key: spread.get(key) for key in ("samples", "min", "median", "p95", "max", "stdev")} if spread else None,
+        "loss": network.get("packet_loss_rate"),
+        "route": link.get("route"),
+        "route_confirmed": link.get("route_confirmed"),
+        "family": link.get("family"),
+        "connect_ms": link.get("connect_ms"),
+        "connected_after_seconds": (peer or {}).get("connected_after_seconds"),
+    }
+
+
+def latency(args):
+    """Takes this runner's turn in the latency room and keeps the round trip to the far end there.
+
+    Never fails the job: what cannot be measured is written as such (`status`), so the numbers
+    of a night say how many runners were left out and why.
+    """
+    work = Path(args.work)
+    results = work / "results"
+    results.mkdir(parents=True, exist_ok=True)
+    runner_facts = {}
+    try:
+        runner_facts = json.loads((work / "runner.json").read_text())
+    except (OSError, ValueError):
+        pass
+    cloud = runner_facts.get("cloud") or {}
+    result = {
+        "runner": args.runner,
+        "os": os.environ.get("RUNNER_OS", platform.system()).lower(),
+        "arch": runner_facts.get("arch"),
+        "cpus": runner_facts.get("cpus"),
+        "region": cloud.get("region"),
+        "vm_size": cloud.get("vm_size"),
+        "stay_seconds": LATENCY_STAY_SECONDS,
+    }
+    target = results / "latency.json"
+
+    def finish(status, reason=None, **more):
+        result.update(more, status=status, reason=reason)
+        target.write_text(json.dumps(result))
+        rtt = result.get("rtt_ms") or {}
+        print(
+            f"latency: runner {args.runner} {result['os']} {result.get('region') or '?'}: {status}"
+            + (f" ({reason})" if reason else "")
+            + (f", round trip median {rtt['median']} ms, p95 {rtt['p95']} ms of {rtt['samples']}" if rtt.get("median") is not None else "")
+        )
+
+    code = os.environ.get(LATENCY_ROOM_ENV, "").strip()
+    if not code:
+        return finish("skipped", "no latency room is set")
+    server = server_url(args.server_env)
+    try:
+        room = json.loads((work / "room.json").read_text())
+        start_file = start_file_of(work)
+        if not start_file.exists():
+            attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+            fetch_artifact(start_file.parent, f"room-start-{attempt}", "start.json", 0)
+        start_at = json.loads(start_file.read_text())["start_at"]
+    except (OSError, ValueError, KeyError):
+        return finish("skipped", "the time the turns started is not known")
+    enter_at = latency_enter_at(start_at, room["total"], room["slot"], args.runner)
+    result["planned_enter_unix"] = enter_at
+    if time.time() > enter_at + LATENCY_LATE_SECONDS:
+        return finish("skipped", f"this runner was {int(time.time() - enter_at)} s late for its turn")
+    while time.time() < enter_at:
+        time.sleep(min(1.0, max(0.0, enter_at - time.time())))
+
+    home = work / "home" / "latency"
+    home.mkdir(parents=True, exist_ok=True)
+    out = work / "out" / "latency"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    report_path = Path(str(out) + ".json")
+    report_path.unlink(missing_ok=True)
+    command = [
+        str(binary_of(args.binary)), "join-room",
+        "--server", server,
+        "--room", code,
+        "--name", f"{room_name_of(0).rsplit('-', 1)[0]}-q{args.runner:02d}",
+        "--input-tone", "440",
+        "--output-file", str(out) + ".f32",
+        "--report-json", str(report_path),
+    ]
+    env = dict(
+        os.environ,
+        HOME=str(home),
+        XDG_CONFIG_HOME=str(home / ".config"),
+        JAMJAM_CONFIG_DIR=str(home / "config"),
+    )
+    lines = []
+    process = subprocess.Popen(
+        command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+    )
+
+    def read_output():
+        for raw in iter(process.stdout.readline, b""):
+            lines.append((time.time(), raw.decode("utf-8", "replace").rstrip("\r\n")))
+
+    reader = threading.Thread(target=read_output, daemon=True)
+    reader.start()
+
+    def say(text):
+        try:
+            process.stdin.write(text.encode())
+            process.stdin.flush()
+        except OSError:
+            pass
+
+    # Nothing is sent: it is the app's own pings, answered by the far end, that are timed.
+    say("/mute\n")
+    began = time.time()
+    entered = None
+    while time.time() < began + LATENCY_ENTER_SECONDS and process.poll() is None:
+        entered = next((at for at, line in list(lines) if line.startswith("Joined room:")), None)
+        if entered:
+            break
+        time.sleep(0.2)
+    if entered:
+        result["entered_unix"] = entered
+        while time.time() < entered + LATENCY_STAY_SECONDS and process.poll() is None:
+            time.sleep(0.2)
+    say("/quit\n")
+    try:
+        process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+    reader.join(timeout=5)
+    result["left_unix"] = time.time()
+    Path(str(out) + ".f32").unlink(missing_ok=True)
+    if not entered:
+        return finish("failed", "the runner did not take its seat in the room")
+    try:
+        report = json.loads(report_path.read_text())
+    except (OSError, ValueError):
+        return finish("failed", "no report was written")
+    far, others = names_in_room([line for _, line in lines])
+    found = latency_of(report, far, others)
+    finish(found.pop("status"), **found)
 
 
 STUN_SERVERS = (("stun.l.google.com", 19302), ("stun.cloudflare.com", 3478))
@@ -1433,6 +1642,24 @@ def summary(args):
                 f"{way['forward_ms']:.1f} / {way['back_ms']:.1f} ms (+-{way['error_ms']:.1f} ms{known})"
             )
 
+    latencies = [json.loads(path.read_text()) for path in sorted(Path(args.results).rglob("latency.json"))]
+    if latencies:
+        lines.append("")
+        lines.append("Round trip to the far end of the latency room, one runner at a time (not part of the verdict):")
+        for entry in sorted(latencies, key=lambda found: found["runner"]):
+            rtt = entry.get("rtt_ms") or {}
+            numbers = (
+                f", median {rtt['median']:.1f} ms, p95 {rtt['p95']:.1f} ms, lowest {rtt['min']:.1f} ms of {rtt['samples']}"
+                if rtt.get("median") is not None else ""
+            )
+            why = f" ({entry['reason']})" if entry.get("reason") else ""
+            lines.append(
+                f"  runner {entry['runner']} {entry.get('os') or '?'} {entry.get('region') or '?'}: {entry['status']}{why}{numbers}"
+            )
+        counted = {}
+        for entry in latencies:
+            counted[entry["status"]] = counted.get(entry["status"], 0) + 1
+        lines.append("  " + ", ".join(f"{status} {count}" for status, count in sorted(counted.items())))
 
     order = first_packet_lines(results, args.min_heard)
     if order:
@@ -1495,6 +1722,12 @@ def main():
         if name != "udp-wait":
             sub.add_argument("--runner", type=int, required=True)
         sub.set_defaults(handler=handler)
+
+    turn = commands.add_parser("latency")
+    common(turn)
+    turn.add_argument("--runner", type=int, required=True)
+    turn.add_argument("--binary", required=True)
+    turn.set_defaults(handler=latency)
 
     watch = commands.add_parser("supervise")
     watch.add_argument("--out", required=True)
