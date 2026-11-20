@@ -28,6 +28,11 @@ run-name: ${{ inputs.source && format('Room check [{0}]', inputs.source) || 'Roo
 # The result also has, per link, the time each way of the round trip takes (up and down), and
 # per runner how well its clock keeps time, which is what a one-way time is given with (ADR-120).
 #
+# After the room, the runners go one at a time, muted, into a second room of the same server where
+# one fixed participant of the deployment stays, and keep the round trip to it (ADR-130). Together
+# with the datacenter each runner is in, that says how far apart the places are, in round trip,
+# from the far end. It is not part of the verdict.
+#
 # The runners' CPUs are shared, so this says nothing about performance.
 
 on:
@@ -276,6 +281,17 @@ jobs:
         if: matrix.runner != 0
         run: |
           ${{ matrix.python }} scripts/room-check.py run --work "$WORK" --binary bin/jamuru \
+            --runner "${{ matrix.runner }}"
+
+      # Whatever happened above, this runner takes its turn in the latency room: runner i goes in
+      # i turns after the end of the room's run, so that no two are in it together. It cannot fail the job.
+      - name: Time the round trip to the far end
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          ROOM_CHECK_LATENCY_ROOM: ${{ secrets.ROOM_CHECK_LATENCY_ROOM }}
+        run: |
+          ${{ matrix.python }} scripts/room-check.py latency --work "$WORK" --binary bin/jamuru \
             --runner "${{ matrix.runner }}"
 
       - name: Keep the numbers
