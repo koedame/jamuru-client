@@ -21,7 +21,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -109,6 +109,7 @@ fn build_router(app: AppHandle) -> Router {
         .route("/e2e/input", post(input))
         .route("/e2e/scroll", post(scroll))
         .route("/e2e/invoke", post(invoke))
+        .layer(DefaultBodyLimit::max(rpc::link::MAX_FRAME_BYTES))
         .with_state(ControlState { app })
 }
 
