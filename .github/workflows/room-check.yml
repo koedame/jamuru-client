@@ -193,7 +193,6 @@ jobs:
       WORK: ${{ github.workspace }}/room-work
       JAMJAM_SERVER_URL_BETA: ${{ secrets.JAMJAM_SERVER_URL_BETA }}
       ROOM_CHECK_KEY: ${{ secrets.ROOM_CHECK_KEY }}
-      ROOM_CHECK_LATENCY_ROOM: ${{ secrets.ROOM_CHECK_LATENCY_ROOM }}
       GH_TOKEN: ${{ github.token }}
       PYTHONIOENCODING: utf-8
     steps:
@@ -289,6 +288,8 @@ jobs:
       - name: Time the round trip to the far end
         if: ${{ !cancelled() }}
         continue-on-error: true
+        env:
+          ROOM_CHECK_LATENCY_ROOM: ${{ secrets.ROOM_CHECK_LATENCY_ROOM }}
         run: |
           ${{ matrix.python }} scripts/room-check.py latency --work "$WORK" --binary bin/jamuru \
             --runner "${{ matrix.runner }}"
