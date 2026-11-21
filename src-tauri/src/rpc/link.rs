@@ -220,6 +220,11 @@ async fn handle_frame<R: Runtime>(
     outgoing: &mpsc::Sender<String>,
     text: &str,
 ) -> bool {
+    // The relay enforces the limit too, but this end does not rely on it:
+    // nothing larger than a frame is parsed.
+    if text.len() > MAX_FRAME_BYTES {
+        return true;
+    }
     let Ok(frame) = serde_json::from_str::<Value>(text) else {
         return true;
     };
@@ -459,6 +464,28 @@ mod tests {
             .unwrap();
 
         // The next answer is the one for the request: the two before it made no reply.
+        assert_eq!(next(&mut from_app).await["id"], 2);
+    }
+
+    #[tokio::test]
+    async fn a_frame_larger_than_the_limit_is_ignored() {
+        let (to_app, mut from_app, _app) = serve(Portal::Help).await;
+        next(&mut from_app).await;
+
+        let padding = "x".repeat(MAX_FRAME_BYTES);
+        to_app
+            .send(format!(
+                r#"{{"id":1,"method":"no_such_method","params":{{"pad":"{}"}}}}"#,
+                padding
+            ))
+            .await
+            .unwrap();
+        to_app
+            .send(r#"{"id":2,"method":"no_such_method"}"#.to_string())
+            .await
+            .unwrap();
+
+        // The next answer is the one for the small request: the large one made no reply.
         assert_eq!(next(&mut from_app).await["id"], 2);
     }
 
