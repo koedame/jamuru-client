@@ -1,28 +1,49 @@
+<div align="center">
+
 # jamuru
 
-P2P Audio Communication for Musicians
+**Low-latency, uncompressed peer-to-peer audio for musicians playing together over the internet.**
 
-Low-latency peer-to-peer audio communication application for macOS, Windows, and Linux.
+<img alt="The jamuru room window with four participants: the room's invite code and participant list on the left, a mixer with a fader and level meter for each person in the middle, and chat on the right" src="docs/images/hero.png">
+
+![CI](https://github.com/koedame/jamuru-client/actions/workflows/ci.yml/badge.svg?branch=develop)
+![Platforms: macOS, Windows, Linux](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-e6b800)
+![Audio: 24-bit PCM](https://img.shields.io/badge/audio-24--bit%20PCM-e6b800)
+![License: source available](https://img.shields.io/badge/license-source%20available-e6b800)
+
+[Install](#install) · [Highlights](#highlights) · [Documentation](#documentation) · [Development](#development) · [License](#license)
+
+</div>
+
+Open a room, send the 9-character invite code to your bandmates and play. Audio goes straight between your computers, uncompressed, so the delay you hear is close to the network round trip and little else. The screenshot above is drawn from sample data.
+
+## Highlights
+
+- **Uncompressed by default.** Audio is sent as 24-bit PCM at 44.1, 48 or 96 kHz, packed without loss. No lossy codec sits between you and your bandmates.
+- **Built around delay.** The design target is under 2 ms of delay added by the app itself, one way, so the delay is mostly your network (about 10-25 ms RTT on a domestic fibre line).
+- **Direct connections.** Audio flows peer to peer; no central server carries it.
+- **A mixer for the room.** Each participant gets a fader, pan and level meter, and you can record the room.
+- **Three desktop platforms.** macOS, Windows, and Linux including 64-bit ARM; the command-line tool also runs on 32-bit ARM Linux.
+
+## Install
+
+Use the official binaries; the [LICENSE](./LICENSE) does not permit building from source.
+
+- Download the installer for your platform from [GitHub Releases](https://github.com/koedame/jamuru-client/releases). Every release is currently a pre-release (beta).
+- On macOS with Homebrew: `brew install --cask koedame/tap/jamuru@beta`
+
+See [docs/getting-started/installation.md](./docs/getting-started/installation.md) for system requirements, the warning shown for unsigned apps, ARM Linux and automatic updates, then the [quick start](./docs/getting-started/quick-start.md) for your first session.
 
 ## Documentation
-
-### In-Repository Development Docs
 
 - [docs/](./docs/README.md) - Installation, quick start, troubleshooting, privacy, and development guides
 - [docs-spec/](./docs-spec/README.md) - Specifications (single source of truth for the implementation; ADRs are append-only)
 - [AGENTS.md](./AGENTS.md) - Development guide: workflow, commands, and the development rules index (commit conventions, secrets policy, etc.)
 - [Plans.md](./Plans.md) - Task tracking
 
-## Features
-
-- Cross-platform support (macOS, Windows, Linux including 64-bit ARM, arm64 / aarch64; the app and the command-line tool also for 32-bit ARM Linux, armv7 / armhf)
-- Low-latency audio streaming
-- Peer-to-peer connection (no central server required for audio)
-- Multiple audio codec support (Opus, PCM)
-
 ## Development
 
-This section is for the copyright holder's development work. The [LICENSE](./LICENSE) does not permit anyone else to build or run the software from source; use the official binaries from GitHub Releases.
+This section is for the copyright holder's development work. The [LICENSE](./LICENSE) does not permit anyone else to build or run the software from source; use the official binaries from [GitHub Releases](https://github.com/koedame/jamuru-client/releases) (see [Install](#install)).
 
 See [docs/development/](./docs/development/building.md) for detailed development guides.
 
@@ -48,7 +69,9 @@ cargo test
 ```bash
 # Run from project root (not src-tauri directory)
 
-# Development mode (frontend server starts automatically)
+# Development mode (frontend server starts automatically).
+# Needs the Tauri CLI (`cargo install tauri-cli --version "^2"`) and, on Linux, system
+# libraries such as libasound2-dev and libwebkit2gtk-4.1-dev; see docs/development/building.md
 cargo tauri dev
 
 # Production build (pass the server the app asks for its signaling server)

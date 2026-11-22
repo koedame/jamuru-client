@@ -27,26 +27,22 @@ jamuruをインストールする方法を説明します。
 
 ### Homebrew（macOS）
 
-Homebrew を使っているなら tap を追加して cask で入れられます。
-
-```bash
-brew install --cask koedame/tap/jamuru
-```
-
-更新はアプリが自分で行います（後述の「自動更新」）。`brew upgrade --cask jamuru` でも更新できます。削除は `brew uninstall --cask jamuru`（設定ファイルごと消すなら `brew uninstall --zap --cask jamuru`）。
-
-Homebrew はダウンロードしたものに Gatekeeper の隔離属性を付けます。付いたままだと公証なしのアプリは 「"jamuru.app" is damaged and can't be opened.」で開けないため、cask 側でインストール後に属性を外しています。そのため brew で入れた場合は下の「署名なしアプリの警告」の手順は要りません。
-cask が指すのは [GitHub Releases](https://github.com/koedame/jamuru-client/releases) に公開済みのタグで、リリースのたびに自動更新されます。
-
-#### ベータ版を試す
-
-正式版より先に動作を確かめたい人向けに、動作を確かめたい変更ごとにベータ版（`v0.2.0-beta.7` のようなタグ）を作り、`jamuru@beta` として配っています。`brew install --cask koedame/tap/jamuru` や `brew upgrade` でベータ版が入ることはなく、正式版を使う人は何もしなくて構いません。
+Homebrew を使っているなら cask で入れられます。いま配っているのはベータ版（`jamuru@beta`）だけで、正式版（`jamuru`）はまだ出ていません（`brew install --cask koedame/tap/jamuru` は、最初の正式版が出てから使えます）。
 
 ```bash
 brew install --cask koedame/tap/jamuru@beta
 ```
 
-正式版とベータ版は同じ `jamuru.app` を入れるため同時には入れられません。正式版に戻すときは `brew uninstall --cask jamuru@beta` のあとで `brew install --cask koedame/tap/jamuru` を実行してください。ベータ版の更新は `brew upgrade --cask jamuru@beta` です。
+更新はアプリが自分で行います（後述の「自動更新」）。`brew upgrade --cask jamuru@beta` でも更新できます。削除は `brew uninstall --cask jamuru@beta`（設定ファイルごと消すなら `brew uninstall --zap --cask jamuru@beta`）。
+
+Homebrew はダウンロードしたものに Gatekeeper の隔離属性を付けます。付いたままだと公証なしのアプリは 「"jamuru.app" is damaged and can't be opened.」で開けないため、cask 側でインストール後に属性を外しています。そのため brew で入れた場合は下の「署名なしアプリの警告」の手順は要りません。
+cask が指すのは [GitHub Releases](https://github.com/koedame/jamuru-client/releases) に公開済みのタグで、リリースのたびに自動更新されます。
+
+#### ベータ版と正式版
+
+動作を確かめたい変更ごとにベータ版（`v0.2.0-beta.7` のようなタグ）を作り、`jamuru@beta` として配っています。正式版が出たあとも、`brew install --cask koedame/tap/jamuru` や `brew upgrade` でベータ版が入ることはなく、正式版を使う人は何もしなくて構いません。
+
+正式版とベータ版は同じ `jamuru.app` を入れるため同時には入れられません。正式版が出て、ベータ版から戻すときは `brew uninstall --cask jamuru@beta` のあとで `brew install --cask koedame/tap/jamuru` を実行してください。
 
 ### 自動更新
 
