@@ -90,6 +90,16 @@ const MAX_LINKS: usize = MAX_PEERS_PER_ROOM - 1;
 /// server lists them.
 const MAX_REJOINS: u32 = 3;
 
+/// How many times in a row a link that is not heard is started over because its peer published
+/// other addresses, before the roster keeps the link it has. Each start probes the addresses
+/// and, for a peer that answers the key exchange, guesses ports; a peer that published again
+/// and again would otherwise have that go on for as long as it likes, and not only once as
+/// the link would on its own. Five is what a peer that is not heard publishes at most in good
+/// faith: the address STUN saw again up to four times while nothing is heard (ADR-129), and
+/// the one the router opened. A link that gives up is dealt with by entering the room again
+/// (see [`MAX_REJOINS`]), which starts the count over.
+const MAX_RESTARTS: u32 = 5;
+
 /// The audio link to one participant.
 #[derive(Debug)]
 struct Link {
@@ -99,6 +109,8 @@ struct Link {
     /// The addresses the link was started with.
     started_with: Vec<SocketAddr>,
     health: LinkHealth,
+    /// How many times the link was started over at other addresses since it was last heard
+    restarts: u32,
     /// The room no longer lists them (they left it, or entered it again as someone new) but
     /// their audio still arrives. The link is kept for as long as it is heard: it goes on as
     /// the link to whoever their far end says it is now, and ends when their audio stops.
@@ -368,6 +380,7 @@ impl Roster {
         match health {
             LinkHealth::Starting => Vec::new(),
             LinkHealth::Heard => {
+                link.restarts = 0;
                 self.rejoins = 0;
                 Vec::new()
             }
@@ -462,6 +475,7 @@ impl Roster {
                 name: peer.name.clone(),
                 started_with: candidates.clone(),
                 health: LinkHealth::Starting,
+                restarts: 0,
                 departed: false,
                 claimed: None,
             });
@@ -476,8 +490,8 @@ impl Roster {
 
     /// Opens the link to `peer` again at the addresses they have published,
     /// when it is not hearing them and those are not the ones it was started
-    /// with. The address this app advertised is kept, so they find it where
-    /// they already look.
+    /// with, up to [`MAX_RESTARTS`] times until they are heard. The address
+    /// this app advertised is kept, so they find it where they already look.
     fn follow(&mut self, peer: Uuid) -> Vec<Audio> {
         let Some(info) = self.peers.iter().find(|p| p.id == peer) else {
             return Vec::new();
@@ -489,9 +503,11 @@ impl Roster {
         if link.health == LinkHealth::Heard
             || candidates.is_empty()
             || candidates == link.started_with
+            || link.restarts >= MAX_RESTARTS
         {
             return Vec::new();
         }
+        link.restarts += 1;
         link.started_with = candidates.clone();
         link.health = LinkHealth::Starting;
         vec![
@@ -1011,6 +1027,87 @@ mod tests {
         let audio = roster.updated(peer(2, Some("192.0.2.2:7000")));
 
         assert_eq!(audio, vec![end(2), start(2, "192.0.2.2:7000")]);
+    }
+
+    /// The addresses of a peer, other every time: `n` of them in turn
+    fn at_round(n: u32) -> PeerInfo {
+        peer(2, Some(&format!("192.0.2.2:{}", 7000 + n % 2 * 1000)))
+    }
+
+    /// Verifies: REQ-CON-179
+    #[test]
+    fn a_peer_not_heard_publishes_other_addresses_again_and_again_has_the_link_opened_again_only_a_few_times(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![peer(2, Some("192.0.2.2:5000"))]);
+
+        let opened_again = (0..100)
+            .filter(|round| !roster.updated(at_round(*round)).is_empty())
+            .count();
+
+        assert_eq!(opened_again, usize::try_from(MAX_RESTARTS).unwrap());
+        assert_eq!(roster.linked(), vec![id(2)]);
+    }
+
+    /// Verifies: REQ-CON-179
+    #[test]
+    fn a_peer_not_heard_publishes_the_addresses_the_stun_server_saw_as_often_as_it_asks_has_the_link_opened_again_each_time(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![peer(2, Some("192.0.2.2:5000"))]);
+
+        // One address first, then one more each time the peer asked again (REQ-CON-177)
+        for asked in 1..=4 {
+            let candidates: Vec<String> = (0..=asked)
+                .map(|i| format!("192.0.2.2:{}", 5000 + i))
+                .collect();
+            let mut info = peer(2, None);
+            info.candidates = candidates
+                .iter()
+                .map(|a| crate::network::AddressCandidate::host(a.parse().unwrap()))
+                .collect();
+            let audio = roster.updated(info);
+            assert_eq!(audio.len(), 2, "round {asked}: {audio:?}");
+        }
+    }
+
+    /// Verifies: REQ-CON-179
+    #[test]
+    fn a_link_is_heard_after_it_was_opened_again_to_its_limit_can_be_opened_again_when_it_goes_silent(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![peer(2, Some("192.0.2.2:5000"))]);
+        for round in 0..100 {
+            roster.updated(at_round(round));
+        }
+        assert_eq!(roster.updated(at_round(1001)), vec![]);
+
+        assert_eq!(roster.link_is(id(2), LinkHealth::Heard), vec![]);
+        let silent = roster.link_is(id(2), LinkHealth::Silent);
+
+        assert_eq!(silent, vec![end(2), start(2, "192.0.2.2:8000")]);
+    }
+
+    /// Verifies: REQ-CON-179
+    #[test]
+    fn a_link_opened_again_to_its_limit_gives_up_and_the_room_is_entered_again_opens_a_new_link_that_follows_again(
+    ) {
+        let mut roster = Roster::default();
+        roster.entered(me(), vec![peer(2, Some("192.0.2.2:5000"))]);
+        for round in 0..100 {
+            roster.updated(at_round(round));
+        }
+
+        assert_eq!(
+            roster.link_is(id(2), LinkHealth::Failed),
+            vec![Audio::Rejoin]
+        );
+        let published = at_round(1);
+        let audio = roster.entered(Uuid::from_u128(100), vec![published.clone()]);
+        assert_eq!(audio.len(), 3, "{audio:?}");
+        let updated = roster.updated(at_round(0));
+
+        assert_eq!(updated, vec![end(2), start(2, "192.0.2.2:7000")]);
     }
 
     /// Verifies: REQ-CON-134

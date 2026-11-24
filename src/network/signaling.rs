@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::{connect_async_with_config, tungstenite::Message};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -36,6 +37,13 @@ pub(super) fn signed_device_headers(identity: &DeviceIdentity) -> [(&'static str
 
 /// Maximum peers per room
 pub const MAX_PEERS_PER_ROOM: usize = 16;
+
+/// How large one message from the signaling server may be, in bytes. The server takes at most
+/// 16 KiB in one message, and a room lists every one of its [`MAX_PEERS_PER_ROOM`] peers from
+/// what each of them sent, so what the room says is no more than 16 times that. A larger one
+/// ends the connection as soon as its size is known, before the rest of it is read into
+/// memory, where the library's own limit is 64 MiB.
+pub const MAX_SIGNALING_MESSAGE_BYTES: usize = 512 * 1024;
 
 /// The most addresses of one peer that the app sends to. The signaling server keeps a
 /// peer to this many too, but the app does not rely on that: every address is probed,
@@ -676,25 +684,32 @@ impl SignalingClient {
             })?;
             request.headers_mut().insert(name, header_value);
         }
-        let (ws_stream, _) = connect_async(request).await.map_err(|e| {
-            use tokio_tungstenite::tungstenite::Error as WsError;
-            if let WsError::Http(response) = &e {
-                let date = response.headers().get("date").and_then(|v| v.to_str().ok());
-                if let Some(skew) = clock_skew_of_refusal(response.status().as_u16(), date) {
-                    return skew;
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(MAX_SIGNALING_MESSAGE_BYTES))
+            .max_frame_size(Some(MAX_SIGNALING_MESSAGE_BYTES));
+        let (ws_stream, _) = connect_async_with_config(request, Some(config), false)
+            .await
+            .map_err(|e| {
+                use tokio_tungstenite::tungstenite::Error as WsError;
+                if let WsError::Http(response) = &e {
+                    let date = response.headers().get("date").and_then(|v| v.to_str().ok());
+                    if let Some(skew) = clock_skew_of_refusal(response.status().as_u16(), date) {
+                        return skew;
+                    }
                 }
-            }
-            let failure = match &e {
-                WsError::Http(response) => SignalingFailure::of_status(response.status().as_u16()),
-                WsError::Tls(_) => SignalingFailure::Tls,
-                WsError::Io(io) => SignalingFailure::of_error(io),
-                _ => SignalingFailure::Other,
-            };
-            NetworkError::SignalingUnreachable {
-                failure,
-                message: format!("Connect failed: {}", e),
-            }
-        })?;
+                let failure = match &e {
+                    WsError::Http(response) => {
+                        SignalingFailure::of_status(response.status().as_u16())
+                    }
+                    WsError::Tls(_) => SignalingFailure::Tls,
+                    WsError::Io(io) => SignalingFailure::of_error(io),
+                    _ => SignalingFailure::Other,
+                };
+                NetworkError::SignalingUnreachable {
+                    failure,
+                    message: format!("Connect failed: {}", e),
+                }
+            })?;
 
         debug!("Connected to signaling server: {}", signaling_url);
 

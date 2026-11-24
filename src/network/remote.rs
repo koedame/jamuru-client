@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::time::{interval_at, timeout, timeout_at, Instant, Interval, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 
 use super::device_identity::DeviceIdentity;
 use super::discovery::check_signaling_url;
@@ -40,6 +41,11 @@ pub const RELAY_SILENCE_LIMIT: Duration = Duration::from_secs(60);
 /// stopped acknowledging lets the kernel's buffer fill, and the send then waits
 /// without end.
 const RELAY_SEND_LIMIT: Duration = Duration::from_secs(30);
+
+/// How large one message from the relay may be, in bytes: what the app's RPC takes in a frame.
+/// A larger one ends the connection as soon as its size is known, before the rest of it is read
+/// into memory, where the library's own limit is 64 MiB.
+pub const RELAY_MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 
 /// The server's answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,9 +190,14 @@ pub async fn connect_remote(
             .map_err(|e| NetworkError::SignalingError(format!("Invalid {} header: {}", name, e)))?;
         request.headers_mut().insert(name, value);
     }
-    let (socket, _) = connect_async(request).await.map_err(|e| {
-        NetworkError::SignalingError(format!("Connecting to the relay failed: {}", e))
-    })?;
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(RELAY_MAX_MESSAGE_BYTES))
+        .max_frame_size(Some(RELAY_MAX_MESSAGE_BYTES));
+    let (socket, _) = connect_async_with_config(request, Some(config), false)
+        .await
+        .map_err(|e| {
+            NetworkError::SignalingError(format!("Connecting to the relay failed: {}", e))
+        })?;
     Ok(halves(socket, RELAY_SILENCE_LIMIT))
 }
 

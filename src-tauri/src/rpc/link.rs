@@ -25,7 +25,7 @@ pub const PROTOCOL: &str = "jamjam-rpc/1";
 
 /// The most a frame may carry, as the relay enforces. A result too large for
 /// it is answered with an error instead: the method pages its own output.
-pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_FRAME_BYTES: usize = jamjam::network::RELAY_MAX_MESSAGE_BYTES;
 
 /// How long one method may run before it is answered with a timeout.
 const CALL_TIMEOUT: Duration = Duration::from_secs(25);
