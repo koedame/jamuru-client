@@ -64,7 +64,8 @@ pub use priority::mark_voice;
 pub use quality::{ConnectionQuality, QualityChange, QualityMonitor};
 pub use remote::{
     connect_remote, discover_remote_enrollment, help_relay_url, is_help_session, new_help_session,
-    HelpEnd, RemoteEnrollment, RemoteReader, RemoteWriter, REMOTE_ENROLLMENT_PATH,
+    HelpEnd, RemoteEnrollment, RemoteReader, RemoteWriter, RELAY_MAX_MESSAGE_BYTES,
+    REMOTE_ENROLLMENT_PATH,
 };
 pub use room_entry::{EnterError, EnterRequest, Entered, RoomEntry};
 pub use roster::{LinkHealth, Roster};
