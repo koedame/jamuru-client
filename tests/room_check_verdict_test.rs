@@ -64,7 +64,10 @@ print(json.dumps({{'rc': done.returncode, 'verdict': verdict_line.split(':')[0]}
 
 #[test]
 fn runners_that_lost_udp_between_them_even_without_the_app_are_not_measured_and_not_failed() {
-    assert_eq!(verdict("lost", 0.0), r#"{"rc": 0, "verdict": "NOT MEASURED"}"#);
+    assert_eq!(
+        verdict("lost", 0.0),
+        r#"{"rc": 0, "verdict": "NOT MEASURED"}"#
+    );
 }
 
 #[test]
@@ -142,7 +145,10 @@ fn a_runner_that_gives_up_because_github_refused_says_what_github_said() {
     let found: serde_json::Value = serde_json::from_str(&fetching(refused, 1)).unwrap();
     assert_eq!(found["found"], serde_json::json!([false]));
     assert!(
-        found["why"].as_str().unwrap().contains("API rate limit exceeded"),
+        found["why"]
+            .as_str()
+            .unwrap()
+            .contains("API rate limit exceeded"),
         "{found}"
     );
 }
