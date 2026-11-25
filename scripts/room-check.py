@@ -389,35 +389,84 @@ def start_host(args):
     print("host: room created")
 
 
+# What the runners of this run asked GitHub for the last time: the tag of the answer (so that
+# asking again costs nothing while nothing was added), the artifacts it listed (name -> id), when,
+# and why the last ask failed.
+ARTIFACT_LIST = {"etag": None, "ids": {}, "at": 0.0, "error": ""}
+# Asking for the list again within this many seconds reuses the last answer.
+ARTIFACT_LIST_REUSE_SECONDS = 1.0
+
+
+def artifact_ids():
+    """The artifacts of this workflow run, as `name -> id`.
+
+    Every runner asks again and again for what the others have published, for as long as 25
+    minutes when a macOS runner waits for its machine, and the token of a workflow run may ask
+    for 1,000 things an hour in all. So the list is asked for with the tag of the last answer: a
+    `304 Not Modified` is not counted against that limit. If the ask fails, the last answer stays
+    and the reason is kept in `ARTIFACT_LIST["error"]`.
+    """
+    now = time.time()
+    if now - ARTIFACT_LIST["at"] < ARTIFACT_LIST_REUSE_SECONDS:
+        return ARTIFACT_LIST["ids"]
+    repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
+    command = ["gh", "api", "--include"]
+    if ARTIFACT_LIST["etag"]:
+        command += ["-H", f"If-None-Match: {ARTIFACT_LIST['etag']}"]
+    command.append(f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100")
+    asked = subprocess.run(command, capture_output=True, text=True)
+    head, _, body = asked.stdout.replace("\r\n", "\n").partition("\n\n")
+    words = head.split(None, 2)
+    status = words[1] if head.startswith("HTTP") and len(words) > 1 else ""
+    ARTIFACT_LIST["at"] = now
+    if status == "304":
+        ARTIFACT_LIST["error"] = ""
+    elif status == "200":
+        try:
+            listed = json.loads(body)["artifacts"]
+        except (ValueError, KeyError):
+            ARTIFACT_LIST["error"] = "the list of artifacts could not be read"
+            return ARTIFACT_LIST["ids"]
+        etag = next((line.split(":", 1)[1].strip() for line in head.splitlines() if line.lower().startswith("etag:")), None)
+        # The same name may be listed twice (a run started again): the newest is the one.
+        ARTIFACT_LIST["ids"] = {item["name"]: item["id"] for item in sorted(listed, key=lambda item: item["id"])}
+        ARTIFACT_LIST["etag"] = etag
+        ARTIFACT_LIST["error"] = ""
+    else:
+        ARTIFACT_LIST["error"] = (asked.stderr.strip() or head or "no answer").splitlines()[0]
+    return ARTIFACT_LIST["ids"]
+
+
 def fetch_artifact(work, name, member, timeout):
     """Waits for the artifact `name` of this workflow run and extracts `member` from it into `work`.
 
     It looks once at least, so a `timeout` of 0 asks "is it there yet?".
     """
-    repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
+    repo = os.environ["GITHUB_REPOSITORY"]
     work.mkdir(parents=True, exist_ok=True)
     deadline = time.time() + timeout
     while True:
-        listed = subprocess.run(
-            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/artifacts?name={name}",
-             "--jq", ".artifacts[0].id // empty"],
-            capture_output=True, text=True,
-        )
-        artifact = listed.stdout.strip()
-        if listed.returncode == 0 and artifact:
+        artifact = artifact_ids().get(name)
+        if artifact:
             archive = work / f"{name}.zip"
             with open(archive, "wb") as handle:
                 done = subprocess.run(
                     ["gh", "api", f"repos/{repo}/actions/artifacts/{artifact}/zip"],
-                    stdout=handle,
+                    stdout=handle, stderr=subprocess.PIPE, text=True,
                 )
             if done.returncode == 0:
                 with zipfile.ZipFile(archive) as bundle:
                     bundle.extract(member, work)
                 return True
+            ARTIFACT_LIST["error"] = (done.stderr.strip() or "the download failed").splitlines()[0]
         if time.time() >= deadline:
             return False
         time.sleep(5)
+
+
+def why_not_fetched():
+    """` (GitHub said: ...)` when the last ask for an artifact failed, so that a runner that gave up says why."""
+    return f" (GitHub said: {ARTIFACT_LIST['error']})" if ARTIFACT_LIST["error"] else ""
 
 
 def fetch(args):
@@ -426,7 +475,7 @@ def fetch(args):
     work.mkdir(parents=True, exist_ok=True)
     attempt = os.environ["GITHUB_RUN_ATTEMPT"]
     if not fetch_artifact(work, f"room-rendezvous-{attempt}", "room.enc", args.timeout):
-        print("fetch: the host published nothing in time")
+        print("fetch: the host published nothing in time" + why_not_fetched())
         sys.exit(1)
     (work / "room.json").write_text(decrypt(work / "room.enc"))
     print("fetch: got the room")
@@ -507,7 +556,7 @@ def measure(args):
     if args.runner != 0:
         attempt = os.environ["GITHUB_RUN_ATTEMPT"]
         if not fetch_artifact(target.parent, f"room-start-{attempt}", "start.json", START_WAIT_SECONDS):
-            print("measure: the host did not say when the turns start")
+            print("measure: the host did not say when the turns start" + why_not_fetched())
             sys.exit(1)
         start_at = json.loads(target.read_text())["start_at"]
         if time.time() > start_at - QUIET_SECONDS:
@@ -1673,10 +1722,26 @@ def summary(args):
         )
     for mismatch in mismatches:
         lines.append(f"  {mismatch}")
+    unmeasured_by_environment = False
     if len({result["runner"] for result in results}) > 1 and not across_runners:
-        failures.append("no pair of different runners could be measured")
-    verdict = "FAIL" if failures else "PASS"
+        if blocked:
+            # Every pair of runners lost UDP flows without the app as well: the room was measured
+            # inside each runner only, and what happens between runners was not.
+            unmeasured_by_environment = True
+        else:
+            failures.append("no pair of different runners could be measured")
+    if failures:
+        verdict = "FAIL"
+    elif unmeasured_by_environment:
+        verdict = "NOT MEASURED"
+    else:
+        verdict = "PASS"
     lines.append(f"{verdict}: {args.total} participants, every speaker needs {args.min_heard:.2f} of their turn")
+    if unmeasured_by_environment:
+        lines.append(
+            "  no pair of runners reached each other with UDP even without the app, so only participants "
+            "on the same runner were measured (not a pass of the app between runners)"
+        )
     for failure in failures[:20]:
         lines.append(f"  {failure}")
     text = "\n".join(lines)
