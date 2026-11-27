@@ -7,7 +7,9 @@
 #   tests/nat/run.sh [case-name ...]       (all cases without names)
 #   NAT_LAB_PEER=<path> tests/nat/run.sh   (a peer binary built from another version)
 #   NAT_LAB_AUDIO_SECS=10 tests/nat/run.sh (also send audio once the route is settled, and
-#                                           report the delay and loss it had)
+#                                           report the delay and loss it had; a case whose
+#                                           peers heard each other fails when either lost
+#                                           more than NAT_LAB_MAX_LOSS of it, 0.02 unless set)
 #
 # Needs docker and the ability to give a container NET_ADMIN.
 #
@@ -36,6 +38,7 @@ wan_b=${wan_prefix}3
 base_port=${NAT_LAB_BASE_PORT:-30000}
 settle=${NAT_LAB_SETTLE_SECS:-20}
 audio=${NAT_LAB_AUDIO_SECS:-0}
+max_loss=${NAT_LAB_MAX_LOSS:-0.02}
 work_root=$root/target/nat-lab
 results=()
 fail=0
@@ -139,6 +142,26 @@ run_case() {
   if [ "${recv_a:-0}" -gt 0 ] && [ "${recv_b:-0}" -gt 0 ]; then got=heard; fi
   local verdict=ok
   if [ "$got" != "$expected" ]; then verdict="UNEXPECTED(want $expected)"; fail=1; fi
+  # A moved case says something only when the app was told the port it had before the move: a
+  # client that started late (a loaded machine) asks STUN after it and offers the new port
+  if [ "$moved" != - ]; then
+    local moved_log=$log_a; [ "$moved" = b ] && moved_log=$log_b
+    if grep -Eq '^CANDIDATE reflexive .*:500[0-9][0-9]$' <<<"$moved_log"; then
+      verdict="MOVED-BEFORE-GATHER(run it again)"; fail=1
+    fi
+  fi
+  # Heard is not enough when audio was sent: a route that lets a few packets a second through
+  # is heard, and nobody could play over it
+  if [ "$verdict" = ok ] && [ "$got" = heard ] && [ "$audio" -gt 0 ]; then
+    local side loss
+    for side in a b; do
+      local log=$log_a; [ "$side" = b ] && log=$log_b
+      loss=$(grep '^AUDIO' <<<"$log" | grep -o 'loss=[0-9.]*' | cut -d= -f2)
+      if [ -z "$loss" ] || awk -v l="$loss" -v m="$max_loss" 'BEGIN {exit !(l > m)}'; then
+        verdict="LOST(${side} ${loss:-?} > $max_loss)"; fail=1
+      fi
+    done
+  fi
   results+=("$(printf '%-22s A=%-10s B=%-10s gap=%-3s %-7s recv a=%s b=%s  route a=%s b=%s  moved-at a=%sms b=%sms  max-out-pps a=%s b=%s  %s' \
     "$name" "$mode_a" "$mode_b" "$gap" "$got" "${recv_a:-?}" "${recv_b:-?}" "${route_a:-?}" "${route_b:-?}" "${ms_a:--}" "${ms_b:--}" "${pps_a:-?}" "${pps_b:-?}" "$verdict")")
   if [ "$verdict" != ok ]; then

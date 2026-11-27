@@ -272,6 +272,14 @@ impl UdpTransport {
         }
     }
 
+    /// Says that the link now sends to `addr`, so that a shared socket's datagrams from there
+    /// come to this transport for as long as it does
+    pub(super) fn sending_to(&self, addr: SocketAddr) {
+        if let Some(lane) = &self.lane {
+            lane.follow(addr);
+        }
+    }
+
     /// Stops taking the peer's datagrams off a shared socket, which ends a
     /// receive that is waiting for one
     pub(super) fn release(&self) {
