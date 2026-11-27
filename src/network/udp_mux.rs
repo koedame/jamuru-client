@@ -20,7 +20,7 @@ use super::stun::{
     build_binding_request, parse_binding_response, resolve, StunResult, OTHER_FAMILY_GRACE,
 };
 use super::transport::{
-    bind_std, canonical_addr, destination_for, send_datagram, IpFamilies, UdpTransport,
+    bind_std, canonical_addr, destination_for, recv_whole, send_datagram, IpFamilies, UdpTransport,
     RECV_BUFFER_SIZE,
 };
 
@@ -115,6 +115,10 @@ struct LaneState {
     peer_addrs: Option<Vec<SocketAddr>>,
     /// How many of `peer_addrs` came from `claim`; the rest were learned
     offered: usize,
+    /// Where the link sends to since it moved off the addresses it claimed. What comes from
+    /// there is the peer's for as long as the link sends there, however many addresses are
+    /// learned meanwhile: the audio comes from there.
+    route: Option<SocketAddr>,
 }
 
 struct LaneShared {
@@ -141,6 +145,7 @@ impl Lane {
             None => Vec::new(),
         };
         state.offered = peer_addrs.len();
+        state.route = None;
         let mut all = peer_addrs.to_vec();
         all.extend(learned);
         state.peer_addrs = Some(all);
@@ -162,11 +167,21 @@ impl Lane {
         }
     }
 
+    /// Takes what `addr` sends for as long as the link sends there, because the link moved its
+    /// route there
+    pub(super) fn follow(&self, addr: SocketAddr) {
+        let mut state = self.shared.state.lock();
+        if state.peer_addrs.is_some() {
+            state.route = Some(addr);
+        }
+    }
+
     /// Takes nothing from now on, and lets go of what is waiting
     pub(super) fn release(&self) {
         {
             let mut state = self.shared.state.lock();
             state.peer_addrs = None;
+            state.route = None;
             state.waiting.clear();
         }
         self.shared.arrived.notify_one();
@@ -219,7 +234,7 @@ fn deliver(
     let taking = |lane: &Arc<LaneShared>, known_only: bool| {
         let state = lane.state.lock();
         match &state.peer_addrs {
-            Some(addrs) => !known_only || addrs.contains(&from),
+            Some(addrs) => !known_only || addrs.contains(&from) || state.route == Some(from),
             None => false,
         }
     };
@@ -293,12 +308,9 @@ impl UdpMux {
             let mut buf = vec![0u8; RECV_BUFFER_SIZE];
             let mut unknown = UnknownSources::new(Instant::now());
             loop {
-                match reading.recv_from(&mut buf).await {
-                    // A datagram that fills the buffer may have been cut short
-                    Ok((len, from)) if len == RECV_BUFFER_SIZE => {
-                        debug!("Dropping a datagram from {from} that fills the receive buffer");
-                    }
-                    Ok((len, from)) => {
+                match recv_whole(&reading, &mut buf).await {
+                    Ok(None) => {}
+                    Ok(Some((len, from))) => {
                         let from = canonical_addr(from);
                         if take_stun_answer(&asking, &buf[..len], from) {
                             continue;
@@ -347,6 +359,7 @@ impl UdpMux {
                 waiting: VecDeque::new(),
                 peer_addrs: None,
                 offered: 0,
+                route: None,
             }),
             arrived: Notify::new(),
         });
@@ -459,6 +472,7 @@ mod tests {
                 waiting: VecDeque::new(),
                 peer_addrs: peer_addrs.map(|addrs| addrs.iter().map(|a| addr(a)).collect()),
                 offered: peer_addrs.map_or(0, |addrs| addrs.len()),
+                route: None,
             }),
             arrived: Notify::new(),
         })
@@ -638,6 +652,26 @@ mod tests {
             read.await.unwrap(),
             Err(NetworkError::NotConnected)
         ));
+    }
+
+    #[tokio::test]
+    async fn when_datagrams_that_may_have_been_cut_short_reach_the_shared_socket_then_the_link_gets_only_the_whole_one_after(
+    ) {
+        let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
+        let sender = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let transport = mux.transport();
+        transport.expect_peer_at(&[sender.local_addr().unwrap()]);
+
+        for size in [RECV_BUFFER_SIZE, RECV_BUFFER_SIZE * 2] {
+            sender.send_to(&vec![7u8; size], mux.local_addr()).unwrap();
+        }
+        sender.send_to(b"whole", mux.local_addr()).unwrap();
+
+        let (bytes, _) = tokio::time::timeout(Duration::from_secs(2), transport.recv_raw())
+            .await
+            .expect("the whole datagram reaches the link")
+            .unwrap();
+        assert_eq!(bytes, b"whole");
     }
 
     #[tokio::test]
@@ -836,5 +870,42 @@ mod tests {
         assert_eq!(addrs[0], addr("192.0.2.2:5000"));
         assert!(!addrs.contains(&addr("198.51.100.4:7000")));
         assert!(addrs.contains(&addr("198.51.100.4:7005")));
+    }
+
+    /// Verifies: REQ-CON-165
+    #[test]
+    fn when_the_link_moved_its_route_to_an_address_then_its_datagrams_are_not_limited_however_many_are_learned_after(
+    ) {
+        let shared = lane(Some(&["192.0.2.2:5000"]));
+        let owner = Lane {
+            shared: shared.clone(),
+            lanes: Arc::new(Mutex::new(Vec::new())),
+        };
+        let lanes = vec![shared.clone()];
+        let mut unknown = UnknownSources::new(Instant::now());
+
+        owner.follow(addr("198.51.100.4:30003"));
+        for port in 7000..7000 + LEARNED_ADDRS as u16 + 2 {
+            owner.learn(addr(&format!("198.51.100.9:{port}")));
+        }
+        for _ in 0..500 {
+            deliver(&lanes, vec![7], addr("198.51.100.4:30003"), &mut unknown);
+        }
+
+        assert_eq!(waiting(&shared).len(), 500);
+    }
+
+    #[test]
+    fn when_the_lane_claims_addresses_again_then_the_address_it_had_moved_to_is_unknown_again() {
+        let shared = lane(Some(&["192.0.2.2:5000"]));
+        let owner = Lane {
+            shared: shared.clone(),
+            lanes: Arc::new(Mutex::new(Vec::new())),
+        };
+        owner.follow(addr("198.51.100.4:30003"));
+
+        owner.claim(&[addr("192.0.2.2:5000")]);
+
+        assert_eq!(shared.state.lock().route, None);
     }
 }
