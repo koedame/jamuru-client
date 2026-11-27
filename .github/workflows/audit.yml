@@ -26,6 +26,14 @@ on:
     - cron: "17 3 * * 1"
   workflow_dispatch:
 
+# A newer push to the same pull request replaces the run in progress.
+# Every other run (pushes to develop and main, tags, schedules, calls from
+# another workflow) gets a group of its own, so it is never cancelled or
+# replaced while it waits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
