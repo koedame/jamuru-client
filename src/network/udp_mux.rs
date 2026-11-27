@@ -20,7 +20,8 @@ use super::stun::{
     build_binding_request, parse_binding_response, resolve, StunResult, OTHER_FAMILY_GRACE,
 };
 use super::transport::{
-    bind_std, canonical_addr, destination_for, IpFamilies, UdpTransport, RECV_BUFFER_SIZE,
+    bind_std, canonical_addr, destination_for, send_datagram, IpFamilies, UdpTransport,
+    RECV_BUFFER_SIZE,
 };
 
 /// How long a STUN query through the shared socket waits for its first answer
@@ -393,10 +394,12 @@ impl MuxStun {
                 answers: answers_tx.clone(),
             });
             let request = build_binding_request(&transaction_id);
-            match self
-                .socket
-                .send_to(&request, destination_for(self.local_addr, server))
-                .await
+            match send_datagram(
+                &self.socket,
+                &request,
+                destination_for(self.local_addr, server),
+            )
+            .await
             {
                 Ok(_) => sent.push((server, transaction_id)),
                 Err(e) => {

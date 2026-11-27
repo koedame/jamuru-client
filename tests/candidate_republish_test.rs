@@ -25,9 +25,9 @@ const PORTS: u16 = 41;
 /// The distance between the two sets of addresses the participant publishes in turn
 const SET_APART: u16 = 20;
 
-/// How long the test waits between two publishes: a link probes for a second before it falls
-/// back, and then takes about as long again to guess the ports
-const BETWEEN_PUBLISHES: Duration = Duration::from_millis(2600);
+/// How long the test waits between two publishes: a link opens its own NAT for 0.4 s and probes
+/// for a second before it falls back, and then takes about as long again to guess the ports
+const BETWEEN_PUBLISHES: Duration = Duration::from_millis(3000);
 
 /// Ports on loopback with something counting what arrives
 struct Listeners {

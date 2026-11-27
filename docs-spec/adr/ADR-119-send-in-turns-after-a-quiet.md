@@ -35,7 +35,7 @@ Linux の NAT 2 台（コンテナ、`tests/nat/run.sh`）で再現した。
   アドレスそのものは書かない
 - 検討して採らなかったもの
   - 最初のパケットだけ TTL を小さくして先に NAT を開く: 音声と同じソケットで 1 パケットごとに TTL を変える必要があり、OS ごとに挙動が違い、
-    この環境では途中の 1 段が無くて試せない
+    この環境では途中の 1 段が無くて試せない（のちに macOS の実測で効くと分かり、[ADR-131](./ADR-131-open-our-own-nat-before-the-first-probe.md) で採った）
   - 中継（TURN 相当）: 作らない方針
   - 受信が無いリンクの STUN のやり直しと、新しいポートの公開（`UpdatePeerInfo`）: [ADR-129](./ADR-129-ask-stun-again-while-a-link-hears-nothing.md) で作った。
     入室後に外のポートが付け替わる形は解けるが、この ADR の両側が覚える形は解けない（STUN から付け替えが見えない）

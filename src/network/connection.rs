@@ -30,6 +30,29 @@ use super::signaling::usable_candidates;
 use super::transport::UdpTransport;
 use super::udp_mux::UdpMux;
 
+/// The hop limit of the packets sent to every candidate before the first probe: enough to get
+/// through our own NAT (and a carrier's NAT behind it), too few to reach the peer's. Some NATs
+/// keep a packet of the peer that arrives before we have sent to the peer, and then never let what
+/// we send reach it; one that has seen ours go out first takes the peer's as the answer (ADR-131).
+const OPENING_HOPS: u32 = 3;
+
+/// How many of those packets go to each candidate, and how far apart
+const OPENING_PACKETS: usize = 3;
+const OPENING_INTERVAL: Duration = Duration::from_millis(50);
+
+/// How long after the first of those packets the first probe goes out, unless a probe of the peer
+/// comes first: the peer sent that only after opening its own NAT, so ours can go at once. Who
+/// learns of the other through the room's update (the one who was in the room first) starts later
+/// than the other by the server's relay and its poll of the room; this lead is for a peer that
+/// started at about the same time.
+const OPENING_LEAD: Duration = Duration::from_millis(400);
+
+/// The lead of a link started right after this app told the room its address (it entered the
+/// room): the others learn of it from the room's update, which takes them up to about 1.5 s more
+/// than it took this app (the starts of the two ends were that far apart in 99 of 100 pairs of the
+/// Room check), and their first probe, answered at once, ends the lead much sooner.
+const OPENING_LEAD_AFTER_ADVERTISING: Duration = Duration::from_millis(2000);
+
 /// How long the connectivity check waits for the first answer after the last probe went out
 const PROBE_TIMEOUT: Duration = Duration::from_millis(1000);
 
@@ -557,6 +580,15 @@ impl<'a> Probing<'a> {
         let mut replies: Vec<Duration> = self.rtt[index].iter().flatten().copied().collect();
         replies.sort();
         replies.get(replies.len().checked_sub(1)? / 2).copied()
+    }
+
+    /// Whether `bytes`, from `from`, are a probe the peer sent to one of our candidates: whether or
+    /// not it is answered, the peer had opened its own NAT when it sent it
+    fn is_peer_probe(&self, from: SocketAddr, bytes: &[u8]) -> bool {
+        self.candidates.contains(&from)
+            && Packet::from_bytes(bytes)
+                .and_then(|packet| packet.route_probe_token())
+                .is_some_and(|(reply, _)| !reply)
     }
 
     /// Take in a datagram that reached the socket. Returns what to send back to `from` when
@@ -1150,6 +1182,8 @@ pub type LatencyInfoCallback = Box<dyn Fn(PeerLatencyInfo) + Send + Sync + 'stat
 /// A P2P connection to a remote peer
 pub struct Connection {
     transport: Arc<UdpTransport>,
+    /// [`OPENING_LEAD`], or [`OPENING_LEAD_AFTER_ADVERTISING`] once [`Connection::advertised_just_now`]
+    opening_lead: Duration,
     route: Arc<Mutex<Route>>,
     state: Arc<AtomicU8>,
     /// Last error message that caused connection failure (if any)
@@ -1279,6 +1313,7 @@ impl Connection {
     fn from_transport(transport: UdpTransport) -> Result<Self, NetworkError> {
         Ok(Self {
             transport: Arc::new(transport),
+            opening_lead: OPENING_LEAD,
             route: Arc::new(Mutex::new(Route::new(
                 "0.0.0.0:0".parse().unwrap(),
                 Vec::new(),
@@ -1377,6 +1412,62 @@ impl Connection {
         self.transport.socket()
     }
 
+    /// Sends a keep-alive to every candidate with a hop limit too small to reach the peer, so that
+    /// our NAT has seen us send there before the peer's first packet arrives ([`OPENING_HOPS`])
+    /// This app told the room its address just before this link started: the peer learns of it
+    /// only now, later than this app learned of the peer, so the first probe waits for it longer
+    /// ([`OPENING_LEAD_AFTER_ADVERTISING`]).
+    pub fn advertised_just_now(&mut self) {
+        self.opening_lead = OPENING_LEAD_AFTER_ADVERTISING;
+    }
+
+    /// Sends the keep-alives that open our NAT to `candidates`, [`OPENING_PACKETS`] of them
+    /// [`OPENING_INTERVAL`] apart, then waits out the lead: until a probe of the peer comes, or
+    /// for as long as the lead. A probe that comes is answered at once. Returns when the lead
+    /// ended, which is when the probes are timed from.
+    async fn open_own_nat_and_wait(
+        &self,
+        candidates: &[SocketAddr],
+        probing: &mut Probing<'_>,
+    ) -> Result<Instant, NetworkError> {
+        let started = Instant::now();
+        let mut heard = false;
+        for k in 0..OPENING_PACKETS {
+            let at = started + OPENING_INTERVAL * k as u32;
+            while Instant::now() < at {
+                heard |= self.hear_probe(probing, at - Instant::now()).await?;
+            }
+            self.open_own_nat(candidates);
+        }
+        let lead_ends = started + self.opening_lead;
+        while !heard && Instant::now() < lead_ends {
+            heard = self.hear_probe(probing, lead_ends - Instant::now()).await?;
+        }
+        if heard {
+            debug!("The peer probed before the lead ended: probing it now");
+        }
+        Ok(Instant::now())
+    }
+
+    fn open_own_nat(&self, candidates: &[SocketAddr]) {
+        let Some(packet) = self
+            .secure_link
+            .seal(Packet::keep_alive(self.next_sequence()))
+        else {
+            return;
+        };
+        match self
+            .transport
+            .send_with_hop_limit(&packet, candidates, OPENING_HOPS)
+        {
+            Ok(sent) => debug!(
+                "Sent a keep-alive with hop limit {OPENING_HOPS} to {sent} of {} candidates",
+                candidates.len()
+            ),
+            Err(e) => warn!("Could not send the keep-alives that open our NAT: {e}"),
+        }
+    }
+
     /// Connect to a remote peer
     pub async fn connect(&mut self, remote_addr: SocketAddr) -> Result<(), NetworkError> {
         if self.is_connected() {
@@ -1420,7 +1511,8 @@ impl Connection {
     /// Every candidate is probed several times with a keep-alive that asks for one back, and
     /// the one whose median round trip is shortest is used. A peer that answers no probe is
     /// not connected to. `JAMJAM_ROUTE` pins the kind of route for debugging.
-    /// Candidates are probed in order of priority, with a small delay between each.
+    /// Candidates are probed in order of priority, with a small delay between each, once
+    /// keep-alives that die on the way have opened our own NAT to them ([`OPENING_HOPS`]).
     pub async fn connect_with_candidates(
         &mut self,
         candidates: &[SocketAddr],
@@ -1461,19 +1553,23 @@ impl Connection {
 
         // If only one candidate, use simple connect
         if candidates.len() == 1 {
+            self.transport.expect_peer_at(candidates);
+            self.open_own_nat_and_wait(candidates, &mut Probing::new(candidates))
+                .await?;
             return self.connect(candidates[0]).await;
         }
 
-        let started = Instant::now();
         self.transport.expect_peer_at(candidates);
         self.link_facts.candidates_offered(candidates);
         self.set_state(ConnectionState::CheckingConnectivity);
         info!("Checking connectivity with {} candidates", candidates.len());
 
-        // Probe every candidate PROBE_ROUNDS times, a little apart, hearing the peer's probes
-        // in between so that its requests are answered at once: a request left in the socket
-        // until the loop ends would be timed by the peer as a long round trip.
+        // Open our own NAT to every candidate, then probe every candidate PROBE_ROUNDS times, a
+        // little apart, hearing the peer's probes in between so that its requests are answered
+        // at once: a request left in the socket until the loop ends would be timed by the peer
+        // as a long round trip.
         let mut probing = Probing::new(candidates);
+        let started = self.open_own_nat_and_wait(candidates, &mut probing).await?;
         let mut due: Vec<(Duration, usize, usize)> = (0..PROBE_ROUNDS)
             .flat_map(|round| {
                 (0..candidates.len()).map(move |i| {
@@ -1511,10 +1607,10 @@ impl Connection {
             match probing.assess(now) {
                 Verdict::WaitUntil(until) => {
                     self.hear_probe(&mut probing, until.saturating_duration_since(now))
-                        .await?
+                        .await?;
                 }
                 Verdict::NoAnswer if now < give_up_at => {
-                    self.hear_probe(&mut probing, give_up_at - now).await?
+                    self.hear_probe(&mut probing, give_up_at - now).await?;
                 }
                 verdict => break verdict,
             }
@@ -2119,14 +2215,15 @@ impl Connection {
     }
 
     /// Wait up to `wait` for one datagram while probing and take it in, answering a peer's
-    /// request for a reply to its probe. A socket that cannot be read ends the check.
+    /// request for a reply to its probe. Says whether it was a probe of the peer, answered or
+    /// not. A socket that cannot be read ends the check.
     async fn hear_probe(
         &self,
         probing: &mut Probing<'_>,
         wait: Duration,
-    ) -> Result<(), NetworkError> {
+    ) -> Result<bool, NetworkError> {
         let heard = match tokio::time::timeout(wait, self.transport.recv_raw()).await {
-            Err(_) => return Ok(()),
+            Err(_) => return Ok(false),
             Ok(Ok(heard)) => heard,
             Ok(Err(e)) => {
                 warn!("Error receiving probe response: {}", e);
@@ -2137,24 +2234,26 @@ impl Connection {
             }
         };
         let (bytes, from) = heard;
-        if let Some(answer) = probing.hear(from, &bytes, Instant::now()) {
-            let reply = Packet::route_probe_reply(self.next_sequence(), answer.reply_token);
-            if let Err(e) = send_sealed(&self.transport, &self.secure_link, reply, from).await {
-                debug!("Failed to answer the probe from {}: {}", from, e);
-            }
-            if let Some(token) = answer.probe_back {
-                let probe = Packet::route_probe(self.next_sequence(), token);
-                match send_sealed(&self.transport, &self.secure_link, probe, from).await {
-                    Ok(_) => {
-                        let (round, index) = ((token >> 16) as usize, (token & 0xFFFF) as usize);
-                        probing.sent(index, round, Instant::now());
-                        debug!("Sent a probe back to {} for the one it sent", from);
-                    }
-                    Err(e) => debug!("Failed to probe {} back: {}", from, e),
+        let probe_of_peer = probing.is_peer_probe(from, &bytes);
+        let Some(answer) = probing.hear(from, &bytes, Instant::now()) else {
+            return Ok(probe_of_peer);
+        };
+        let reply = Packet::route_probe_reply(self.next_sequence(), answer.reply_token);
+        if let Err(e) = send_sealed(&self.transport, &self.secure_link, reply, from).await {
+            debug!("Failed to answer the probe from {}: {}", from, e);
+        }
+        if let Some(token) = answer.probe_back {
+            let probe = Packet::route_probe(self.next_sequence(), token);
+            match send_sealed(&self.transport, &self.secure_link, probe, from).await {
+                Ok(_) => {
+                    let (round, index) = ((token >> 16) as usize, (token & 0xFFFF) as usize);
+                    probing.sent(index, round, Instant::now());
+                    debug!("Sent a probe back to {} for the one it sent", from);
                 }
+                Err(e) => debug!("Failed to probe {} back: {}", from, e),
             }
         }
-        Ok(())
+        Ok(probe_of_peer)
     }
 
     /// Drops the audio that reached the socket while connectivity was being
@@ -2927,6 +3026,8 @@ impl Drop for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::network::transport::HopLimitReceiver;
 
     fn latency_info(
         sample_rate: u32,
@@ -3049,6 +3150,100 @@ mod tests {
             Err(NetworkError::AlreadyConnected) => {}
             _ => panic!("Expected AlreadyConnected error"),
         }
+    }
+
+    /// What a candidate gets from a connection checking it, in order: whether each datagram is a
+    /// probe, the hop limit it came with, and how long after the first one it came
+    #[cfg(unix)]
+    fn arrivals_at(receiver: &HopLimitReceiver, count: usize) -> Vec<(bool, u32, Duration)> {
+        let mut first = None;
+        (0..count)
+            .map(|_| {
+                let (bytes, hops) = receiver.recv().expect("a datagram comes");
+                let at = *first.get_or_insert_with(Instant::now);
+                let packet = Packet::from_bytes(&bytes).unwrap();
+                (packet.route_probe_token().is_some(), hops, at.elapsed())
+            })
+            .collect()
+    }
+
+    /// Verifies: REQ-CON-181
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn when_a_connection_checks_its_candidates_each_first_gets_keep_alives_that_die_on_the_way_and_the_probes_come_after_the_lead(
+    ) {
+        for (candidates, advertised, lead) in [
+            (1, false, OPENING_LEAD),
+            (2, false, OPENING_LEAD),
+            (1, true, OPENING_LEAD_AFTER_ADVERTISING),
+            (2, true, OPENING_LEAD_AFTER_ADVERTISING),
+        ] {
+            let receivers: Vec<Arc<HopLimitReceiver>> = (0..candidates)
+                .map(|_| Arc::new(HopLimitReceiver::bind("127.0.0.1:0")))
+                .collect();
+            let addrs: Vec<SocketAddr> = receivers.iter().map(|r| r.local_addr()).collect();
+            let mut conn = conn().await;
+            if advertised {
+                conn.advertised_just_now();
+            }
+            let checking = tokio::spawn(async move {
+                let _ = conn.connect_with_candidates(&addrs).await;
+                conn
+            });
+
+            // Each candidate is read at once from its own thread, so the times are when they came
+            let reading: Vec<_> = receivers
+                .iter()
+                .map(|receiver| {
+                    let receiver = receiver.clone();
+                    tokio::task::spawn_blocking(move || arrivals_at(&receiver, OPENING_PACKETS + 1))
+                })
+                .collect();
+            for reading in reading {
+                let arrivals = reading.await.unwrap();
+                let (opening, probe) = arrivals.split_at(OPENING_PACKETS);
+                for &(is_probe, hops, _) in opening {
+                    assert!(!is_probe, "{candidates} candidates: {arrivals:?}");
+                    assert_eq!(hops, OPENING_HOPS, "{candidates} candidates: {arrivals:?}");
+                }
+                let (_, hops, after) = probe[0];
+                assert!(hops > OPENING_HOPS, "{candidates} candidates: {arrivals:?}");
+                assert!(
+                    after >= lead - Duration::from_millis(20),
+                    "{candidates} candidates, advertised {advertised}: {arrivals:?}"
+                );
+            }
+            checking.abort();
+        }
+    }
+
+    /// Verifies: REQ-CON-181
+    #[tokio::test]
+    async fn when_the_peer_probes_before_the_long_lead_of_a_link_started_after_advertising_ends_the_link_probes_at_once(
+    ) {
+        let mut joining = conn().await;
+        let mut there = conn().await;
+        trust_each_other(&mut joining, &mut there);
+        joining.advertised_just_now();
+        let (joining_at, there_at) = (joining.local_addr(), there.local_addr());
+        let (_silent, nowhere) = silent();
+
+        let (for_joining, for_there) = ([nowhere, there_at], [nowhere, joining_at]);
+
+        let started = Instant::now();
+        let (from_joining, from_there) = tokio::join!(
+            joining.connect_with_candidates(&for_joining),
+            there.connect_with_candidates(&for_there)
+        );
+
+        from_joining.unwrap();
+        from_there.unwrap();
+        assert_eq!(joining.remote_addr(), there_at);
+        assert!(
+            started.elapsed() < OPENING_LEAD_AFTER_ADVERTISING - Duration::from_millis(500),
+            "the peer's probes, after its short lead, end the long one: {:?}",
+            started.elapsed()
+        );
     }
 
     #[tokio::test]

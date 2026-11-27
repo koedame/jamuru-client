@@ -93,9 +93,6 @@ ed25519-dalek = "3"
 # base32 (device identifiers) and base64 (public keys, signatures)
 data-encoding = "2"
 
-# Dynamic library loading for plugins
-libloading = "0.9"
-
 # JSON for signaling messages
 serde_json = "1"
 
@@ -182,6 +179,10 @@ warnings = "deny"
 
 [workspace.lints.clippy]
 all = "deny"
+
+# The core library and the CLI are held to the same lints as the app
+[lints]
+workspace = true
 
 [[bin]]
 name = "jamuru"

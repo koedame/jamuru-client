@@ -8,11 +8,12 @@
 //! nat_lab_peer --name a --peer b --dir /lab --stun ip:port,ip:port,ip:port
 //!              [--wait-secs N] [--settle-secs N] [--audio-secs N] [--connect-at-ms EPOCH_MS]
 //!              [--punch-settle-ms N] [--punch-quiet-ms N] [--punch-second-ms N] [--punch-window-ms N]
-//!              [--no-restun]
+//!              [--no-restun] [--advertised-just-now]
 //!
 //! Like a room link, it asks STUN again through the audio socket while it has heard nothing, tells
 //! the other side an address it was not told (a new offer in the shared directory), and starts
 //! over with the other side's offer when that changes. `--no-restun` is the app as it was.
+//! `--advertised-just-now` is a link of the one who entered the room: the other learns of it later.
 //! ```
 
 use std::net::SocketAddr;
@@ -152,8 +153,12 @@ async fn main() {
     // The audio's timestamp is the time it was sent in tenths of a millisecond, and the lab's
     // containers share a clock: a packet's delay is the time it arrives minus what it says
     let delays = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let advertised_just_now = std::env::args().any(|a| a == "--advertised-just-now");
     let new_connection = || {
         let mut conn = Connection::on(&mux).expect("connection on the mux");
+        if advertised_just_now {
+            conn.advertised_just_now();
+        }
         let heard = delays.clone();
         conn.set_audio_callback(move |_, _, timestamp| {
             let now = tenths_of_ms();

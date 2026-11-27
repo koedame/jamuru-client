@@ -361,6 +361,7 @@ impl<R: Runtime> Backend for AppBackend<R> {
         peer: Uuid,
         candidates: Vec<std::net::SocketAddr>,
         link_key: Option<String>,
+        mut advertised_just_now: bool,
     ) -> Result<(), String> {
         let app = &self.app;
         // A session that starts takes the socket the room was told the
@@ -369,8 +370,9 @@ impl<R: Runtime> Backend for AppBackend<R> {
         // send to a socket bound without telling.
         let audio = app.state::<streaming::StreamingState>();
         if !audio.is_active() && !audio.has_prepared_socket().await {
-            if let Err(e) = self.advertise(conn).await {
-                tracing::error!("Failed to publish our audio address: {}", e);
+            match self.advertise(conn).await {
+                Ok(()) => advertised_just_now = true,
+                Err(e) => tracing::error!("Failed to publish our audio address: {}", e),
             }
         }
         mixer::set_on_audio(app, &peer.to_string()).await;
@@ -385,6 +387,7 @@ impl<R: Runtime> Backend for AppBackend<R> {
                 peer,
                 candidates,
                 link: (ours, link_key),
+                advertised_just_now,
             },
             app.state(),
             app.state(),

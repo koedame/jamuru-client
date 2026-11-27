@@ -77,7 +77,7 @@ start_client() { # start_client <a|b> <peer args...>; connect_at_a / connect_at_
     sh -c "ip route replace default via 10.78.$net.2 && exec /peer --name $side --peer $other --dir /lab --stun $stun_arg --settle-secs $settle --audio-secs $audio $connect_arg ${NAT_LAB_PEER_ARGS:-} \"\$@\"" sh "$@" >/dev/null
 }
 
-# run_case <name> <a mode> <b mode> <gap> <expected: heard|silent> [skew ms] [records: a|b|ab] [patient] [moved: a|b] [no-restun]
+# run_case <name> <a mode> <b mode> <gap> <expected: heard|silent> [skew ms] [records: a|b|ab] [patient] [moved: a|b] [no-restun] [joined: a|b]
 # skew: how many ms after B's first packet A's goes out (negative: before); empty leaves the two to
 # start when each has the other's offer. record=1: a router keeps the packets nobody had sent for
 # (the app's first packet to that address is then given another port). Which routers: a, b or ab
@@ -85,9 +85,10 @@ start_client() { # start_client <a|b> <peer args...>; connect_at_a / connect_at_
 # time out after 8 s here, and the kernel removes them within a minute of that), and take turns
 # sending first. The default is 30 s and 100 s, which takes minutes more per case.
 # moved: the router a|b gives the app another port after it was told the first one (before the
-# peers connect). no-restun: the peers do not ask STUN again, as the app did before.
+# peers connect). no-restun: the peers do not ask STUN again, as the app did before. joined: that
+# side entered the room, so the other learns of it later (its first probe waits longer, ADR-131).
 run_case() {
-  local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5 skew=${6:--} record=${7:--} patient=${8:--} moved=${9:--} norestun=${10:--}
+  local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5 skew=${6:--} record=${7:--} patient=${8:--} moved=${9:--} norestun=${10:--} joined=${11:--}
   local settle=$settle saved_timeout=${NAT_LAB_UDP_TIMEOUT:-} saved_args=${NAT_LAB_PEER_ARGS:-}
   if [ "$patient" != - ]; then
     settle=280
@@ -117,8 +118,8 @@ run_case() {
     [ -z "$move_ms" ] || base_ms=$(( move_ms + 1500 ))
     connect_at_b=$base_ms; connect_at_a=$((base_ms + skew))
   fi
-  start_client a
-  start_client b
+  start_client a $([ "$joined" = a ] && echo --advertised-just-now)
+  start_client b $([ "$joined" = b ] && echo --advertised-just-now)
   for _ in $(seq $(( (60 + settle + audio) * 2 ))); do
     docker logs "$prefix-a" 2>&1 | grep -q '^DONE' && docker logs "$prefix-b" 2>&1 | grep -q '^DONE' && break
     sleep 0.5
@@ -161,10 +162,14 @@ cases=(
   "b-portset            cone       portset    0  heard"
   "record-b-b-first      cone       cone       0  heard  1000  b"
   "record-b-a-first      cone       cone       0  silent -1000 b"
-  "record-b-same-time    cone       cone       0  silent 0     b"
+  "record-b-same-time    cone       cone       0  heard  0     b"
+  "record-b-a-first-300  cone       cone       0  heard  -300  b"
   "record-a-a-first      cone       cone       0  heard  -1000 a"
   "record-a-b-first      cone       cone       0  silent 1000  a"
   "record-both-a-first   cone       cone       0  silent -1000 ab"
+  "record-both-same-time cone       cone       0  heard  0     ab"
+  "record-b-a-joined-first cone    cone       0  heard  -1000 b  -  -  -  a"
+  "record-b-a-joined-first-1700 cone cone     0  heard  -1700 b  -  -  -  a"
   "patient-b-a-first     cone       cone       0  heard  -1000 b  1"
   "patient-b-same-time   cone       cone       0  heard  0     b  1"
   "patient-a-b-first     cone       cone       0  heard  1000  a  1"
@@ -174,9 +179,9 @@ cases=(
   "moved-b               cone       cone       0  heard  0     -  -  b"
 )
 for line in "${cases[@]}"; do
-  read -r name mode_a mode_b gap expected skew record patient moved norestun <<<"$line"
+  read -r name mode_a mode_b gap expected skew record patient moved norestun joined <<<"$line"
   if [ "$#" -gt 0 ] && ! printf '%s\n' "$@" | grep -qx "$name"; then continue; fi
-  run_case "$name" "$mode_a" "$mode_b" "$gap" "$expected" "${skew:--}" "${record:--}" "${patient:--}" "${moved:--}" "${norestun:--}"
+  run_case "$name" "$mode_a" "$mode_b" "$gap" "$expected" "${skew:--}" "${record:--}" "${patient:--}" "${moved:--}" "${norestun:--}" "${joined:--}"
 done
 
 echo

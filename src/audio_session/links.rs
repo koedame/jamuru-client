@@ -85,8 +85,11 @@ impl LinkSetup<'_> {
         jitter_buffer_frames: u32,
     ) -> Result<Link, String> {
         let peer = target.peer;
-        let connection = Connection::on(self.mux)
+        let mut connection = Connection::on(self.mux)
             .map_err(|e| format!("Failed to create the connection: {}", e))?;
+        if target.advertised_just_now {
+            connection.advertised_just_now();
+        }
 
         let report = Arc::new(LinkReport::default());
         report.jitter_buffer_delay_us.store(
@@ -499,6 +502,7 @@ mod tests {
                     peer: Uuid::new_v4(),
                     candidates: vec![their_addr],
                     link: (ours, Some(their_key)),
+                    advertised_just_now: false,
                 },
                 AudioPreset::HighQuality.jitter_buffer_frames(),
             )
@@ -552,6 +556,7 @@ mod tests {
                             LinkIdentity::generate(),
                             Some(LinkIdentity::generate().public_key()),
                         ),
+                        advertised_just_now: false,
                     },
                     preset.jitter_buffer_frames(),
                 )
