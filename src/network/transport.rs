@@ -1,5 +1,6 @@
 //! UDP transport layer
 
+use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
@@ -18,6 +19,77 @@ use super::udp_mux::Lane;
 /// A datagram that fills the buffer may have been cut short, so it is refused
 /// rather than played with its end missing.
 pub(super) const RECV_BUFFER_SIZE: usize = 4096;
+
+/// Held for reading by every send through a socket, and for writing while a socket sends with a
+/// hop limit other than its own ([`send_with_hop_limit`]). The hop limit belongs to the socket, and
+/// one socket carries the audio of every link in a room: a packet of another link sent meanwhile
+/// would go out with the small hop limit and die on the way.
+static HOP_LIMIT: parking_lot::RwLock<()> = parking_lot::RwLock::new(());
+
+/// Sends `data` to `to` through `socket` with the socket's own hop limit
+///
+/// Every send through a socket the app shares goes through here, so that none of them goes out
+/// while [`send_with_hop_limit`] has changed the hop limit.
+pub(super) async fn send_datagram(
+    socket: &UdpSocket,
+    data: &[u8],
+    to: SocketAddr,
+) -> io::Result<usize> {
+    loop {
+        {
+            let _gate = HOP_LIMIT.read();
+            match socket.try_send_to(data, to) {
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                sent => return sent,
+            }
+        }
+        socket.writable().await?;
+    }
+}
+
+/// Sends `data` to each of `to` through `socket` with `hops` as the hop limit (the TTL of IPv4),
+/// then gives the socket its own hop limit back. Returns how many of `to` it was sent to.
+///
+/// An IPv6 socket that takes IPv4 too sends to an IPv4 peer with its IPv4 TTL on some systems and
+/// with its IPv6 hop limit on others, so both are set where the socket has them. Fails without
+/// sending when neither can be set.
+pub(super) fn send_with_hop_limit(
+    socket: &UdpSocket,
+    data: &[u8],
+    to: &[SocketAddr],
+    hops: u32,
+) -> io::Result<usize> {
+    let sock = SockRef::from(socket);
+    let ipv6 = socket.local_addr()?.is_ipv6();
+    let _gate = HOP_LIMIT.write();
+    let own_v4 = sock.ttl_v4().ok();
+    let own_v6 = if ipv6 {
+        sock.unicast_hops_v6().ok()
+    } else {
+        None
+    };
+    if own_v4.is_none() && own_v6.is_none() {
+        return Err(io::Error::other("the socket has no hop limit to set"));
+    }
+    let set = own_v4
+        .map_or(Ok(()), |_| sock.set_ttl_v4(hops))
+        .and_then(|()| own_v6.map_or(Ok(()), |_| sock.set_unicast_hops_v6(hops)));
+    let sent = set.map(|()| {
+        // Straight to the system: Tokio's `try_send_to` refuses until the runtime has seen the
+        // socket writable, which a socket that has not sent yet it has not
+        to.iter()
+            .filter(|&&addr| sock.send_to(data, &addr.into()).is_ok())
+            .count()
+    });
+    let restored = own_v4
+        .map_or(Ok(()), |own| sock.set_ttl_v4(own))
+        .and_then(|()| own_v6.map_or(Ok(()), |own| sock.set_unicast_hops_v6(own)));
+    if let Err(e) = restored {
+        error!("The socket's own hop limit could not be set back: {e}");
+        return Err(e);
+    }
+    sent
+}
 
 /// UDP transport for sending and receiving packets
 pub struct UdpTransport {
@@ -222,11 +294,24 @@ impl UdpTransport {
     /// Send a packet to a remote address
     pub async fn send_to(&self, packet: &Packet, addr: SocketAddr) -> Result<(), NetworkError> {
         let data = packet.to_bytes();
-        self.socket
-            .send_to(&data, destination_for(self.local_addr, addr))
-            .await?;
+        send_datagram(&self.socket, &data, destination_for(self.local_addr, addr)).await?;
         trace!("Sent {} bytes to {}", data.len(), addr);
         Ok(())
+    }
+
+    /// Sends `packet` to each of `to` with `hops` as its hop limit instead of the socket's own
+    /// ([`send_with_hop_limit`]). Returns how many of `to` it was sent to.
+    pub(super) fn send_with_hop_limit(
+        &self,
+        packet: &Packet,
+        to: &[SocketAddr],
+        hops: u32,
+    ) -> io::Result<usize> {
+        let to: Vec<SocketAddr> = to
+            .iter()
+            .map(|&addr| destination_for(self.local_addr, addr))
+            .collect();
+        send_with_hop_limit(&self.socket, &packet.to_bytes(), &to, hops)
     }
 
     /// Receive a packet (returns packet and sender address)
@@ -308,6 +393,88 @@ impl UdpTransport {
         });
 
         (rx, handle)
+    }
+}
+
+/// A socket that tells the hop limit (the TTL of IPv4) each datagram arrived with, for the tests
+/// of [`send_with_hop_limit`]. Loopback does not lower it, so it is the one the sender set.
+#[cfg(all(test, unix))]
+pub(super) struct HopLimitReceiver {
+    socket: std::net::UdpSocket,
+}
+
+#[cfg(all(test, unix))]
+impl HopLimitReceiver {
+    pub(super) fn bind(addr: &str) -> Self {
+        use std::os::fd::AsRawFd;
+        let socket = std::net::UdpSocket::bind(addr).unwrap();
+        socket
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let (level, name) = if socket.local_addr().unwrap().is_ipv4() {
+            (libc::IPPROTO_IP, libc::IP_RECVTTL)
+        } else {
+            (libc::IPPROTO_IPV6, libc::IPV6_RECVHOPLIMIT)
+        };
+        let on: libc::c_int = 1;
+        // SAFETY: `on` outlives the call and its size is the one passed
+        let set = unsafe {
+            libc::setsockopt(
+                socket.as_raw_fd(),
+                level,
+                name,
+                (&on as *const libc::c_int).cast(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        };
+        assert_eq!(set, 0, "{}", io::Error::last_os_error());
+        Self { socket }
+    }
+
+    pub(super) fn local_addr(&self) -> SocketAddr {
+        self.socket.local_addr().unwrap()
+    }
+
+    /// The next datagram and the hop limit it arrived with; `None` when none comes for 2 s
+    pub(super) fn recv(&self) -> Option<(Vec<u8>, u32)> {
+        use std::os::fd::AsRawFd;
+        let mut buf = vec![0u8; RECV_BUFFER_SIZE];
+        let mut control = [0u64; 16];
+        let mut iov = libc::iovec {
+            iov_base: buf.as_mut_ptr().cast(),
+            iov_len: buf.len(),
+        };
+        // SAFETY: an all-zero msghdr is a valid empty one
+        let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = control.as_mut_ptr().cast();
+        msg.msg_controllen = std::mem::size_of_val(&control) as _;
+        // SAFETY: `msg` points at `iov`, `buf` and `control`, which outlive the call
+        let len = unsafe { libc::recvmsg(self.socket.as_raw_fd(), &mut msg, 0) };
+        if len < 0 {
+            return None;
+        }
+        buf.truncate(len as usize);
+        // SAFETY: the headers are walked as the system filled them in, within `control`
+        let mut header = unsafe { libc::CMSG_FIRSTHDR(&msg) };
+        while !header.is_null() {
+            let (level, kind) = unsafe { ((*header).cmsg_level, (*header).cmsg_type) };
+            let data = unsafe { libc::CMSG_DATA(header) };
+            // Linux gives the TTL as an int under IP_TTL, macOS as a byte under IP_RECVTTL
+            let hops = match (level, kind) {
+                (libc::IPPROTO_IP, libc::IP_TTL) | (libc::IPPROTO_IPV6, libc::IPV6_HOPLIMIT) => {
+                    Some(unsafe { data.cast::<libc::c_int>().read_unaligned() } as u32)
+                }
+                (libc::IPPROTO_IP, libc::IP_RECVTTL) => Some(u32::from(unsafe { *data })),
+                _ => None,
+            };
+            if let Some(hops) = hops {
+                return Some((buf, hops));
+            }
+            header = unsafe { libc::CMSG_NXTHDR(&msg, header) };
+        }
+        panic!("a datagram came without its hop limit");
     }
 }
 
@@ -538,5 +705,127 @@ mod tests {
 
         assert_eq!(heard_by_peer, audio_at);
         assert_eq!(heard_by_audio, peer.local_addr());
+    }
+
+    /// Sends one packet through `sender` with the hop limit `hops` and one with the socket's own,
+    /// and returns the hop limits they arrived at `receiver` with
+    #[cfg(unix)]
+    async fn hop_limits_through(
+        sender: &UdpTransport,
+        receiver: &HopLimitReceiver,
+        hops: u32,
+    ) -> (u32, u32) {
+        let to = receiver.local_addr();
+        let sent = sender
+            .send_with_hop_limit(&Packet::keep_alive(1), &[to], hops)
+            .unwrap();
+        assert_eq!(sent, 1);
+        let (_, limited) = receiver
+            .recv()
+            .expect("the packet with the hop limit arrives");
+        sender.send_to(&Packet::keep_alive(2), to).await.unwrap();
+        let (_, own) = receiver.recv().expect("the next packet arrives");
+        (limited, own)
+    }
+
+    /// Verifies: REQ-CON-181
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn when_a_dual_stack_socket_sends_to_an_ipv4_peer_with_a_hop_limit_the_packet_has_it_and_the_next_one_does_not(
+    ) {
+        let sender = UdpTransport::from_std(bind_audio_std(0).unwrap()).unwrap();
+        let receiver = HopLimitReceiver::bind("127.0.0.1:0");
+
+        let (limited, own) = hop_limits_through(&sender, &receiver, 3).await;
+
+        assert_eq!(limited, 3);
+        assert!(own > 3, "the socket's own hop limit came back: {own}");
+    }
+
+    /// Verifies: REQ-CON-181
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn when_a_dual_stack_socket_sends_to_an_ipv6_peer_with_a_hop_limit_the_packet_has_it_and_the_next_one_does_not(
+    ) {
+        if !ip6_loopback_is_usable() {
+            return;
+        }
+        let sender = UdpTransport::from_std(bind_audio_std(0).unwrap()).unwrap();
+        let receiver = HopLimitReceiver::bind("[::1]:0");
+
+        let (limited, own) = hop_limits_through(&sender, &receiver, 3).await;
+
+        assert_eq!(limited, 3);
+        assert!(own > 3, "the socket's own hop limit came back: {own}");
+    }
+
+    /// Verifies: REQ-CON-181
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn when_an_ipv4_socket_sends_with_a_hop_limit_the_packet_has_it_and_the_next_one_does_not(
+    ) {
+        let sender = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+        let receiver = HopLimitReceiver::bind("127.0.0.1:0");
+
+        let (limited, own) = hop_limits_through(&sender, &receiver, 3).await;
+
+        assert_eq!(limited, 3);
+        assert!(own > 3, "the socket's own hop limit came back: {own}");
+    }
+
+    /// The other links of a room send their audio through the same socket while one link sends
+    /// with a small hop limit; none of their packets may go out with it.
+    ///
+    /// Verifies: REQ-CON-181
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn when_one_link_sends_with_a_hop_limit_while_another_sends_audio_through_the_socket_the_audio_keeps_the_sockets_own(
+    ) {
+        let sender = Arc::new(UdpTransport::from_std(bind_audio_std(0).unwrap()).unwrap());
+        let audio = Arc::new(HopLimitReceiver::bind("127.0.0.1:0"));
+        let opened = HopLimitReceiver::bind("127.0.0.1:0");
+        let audio_at = audio.local_addr();
+        let packets = 2000;
+
+        let other_link = {
+            let sender = sender.clone();
+            tokio::spawn(async move {
+                for sequence in 0..packets {
+                    sender
+                        .send_to(&Packet::audio(sequence, 0, vec![0u8; 256]), audio_at)
+                        .await
+                        .unwrap();
+                    tokio::task::yield_now().await;
+                }
+            })
+        };
+        let heard = {
+            let audio = audio.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut hops = Vec::new();
+                while hops.len() < packets as usize {
+                    match audio.recv() {
+                        Some((_, h)) => hops.push(h),
+                        None => break,
+                    }
+                }
+                hops
+            })
+        };
+        while !other_link.is_finished() {
+            sender
+                .send_with_hop_limit(&Packet::keep_alive(0), &[opened.local_addr()], 1)
+                .unwrap();
+            tokio::task::yield_now().await;
+        }
+        other_link.await.unwrap();
+        let hops = heard.await.unwrap();
+
+        assert_eq!(hops.len(), packets as usize, "every audio packet arrives");
+        assert!(
+            hops.iter().all(|&h| h > 1),
+            "{} audio packets went out with the hop limit 1",
+            hops.iter().filter(|&&h| h == 1).count()
+        );
     }
 }

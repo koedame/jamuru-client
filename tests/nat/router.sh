@@ -33,6 +33,11 @@ iptables-legacy -t filter -A FORWARD -i "$WAN_IF" -o "$LAN_IF" -m state --state 
 # packet already recorded (the lab would break a peer that is not behind any odd NAT).
 # (the kernel forgets a flow nobody answered after UDP_TIMEOUT seconds, 30 unless changed; so does the set)
 ipset create seen hash:ip,port timeout "${UDP_TIMEOUT:-30}"
+# The internet between the two routers has routers of its own, at least two (carriers): a packet
+# that arrives with a TTL of 2 or less would have died in them, so it never gets here and leaves no
+# record (the app sends its first packets with a TTL that only gets them through its own NAT and a
+# carrier's NAT behind it, ADR-131)
+iptables-legacy -t raw -A PREROUTING -i "$WAN_IF" -m ttl --ttl-lt 3 -j DROP
 iptables-legacy -t mangle -A POSTROUTING -o "$WAN_IF" -p udp -j SET --add-set seen dst,dst --exist
 # RECORD_UNSOLICITED=1 leaves that packet alone, as a router that accepts what is addressed to
 # itself does: the kernel records it as a flow nobody answered, and the app's own first packet

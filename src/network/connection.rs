@@ -30,6 +30,21 @@ use super::signaling::usable_candidates;
 use super::transport::UdpTransport;
 use super::udp_mux::UdpMux;
 
+/// The hop limit of the packets sent to every candidate before the first probe: enough to get
+/// through our own NAT (and a carrier's NAT behind it), too few to reach the peer's. Some NATs
+/// keep a packet of the peer that arrives before we have sent to the peer, and then never let what
+/// we send reach it; one that has seen ours go out first takes the peer's as the answer (ADR-131).
+const OPENING_HOPS: u32 = 3;
+
+/// How many of those packets go to each candidate, and how far apart
+const OPENING_PACKETS: usize = 3;
+const OPENING_INTERVAL: Duration = Duration::from_millis(50);
+
+/// How long after the first of those packets the first probe goes out. The two ends start when the
+/// room tells each of the other, so each has opened its own NAT before the other's first probe
+/// arrives when they start less than this apart.
+const OPENING_LEAD: Duration = Duration::from_millis(400);
+
 /// How long the connectivity check waits for the first answer after the last probe went out
 const PROBE_TIMEOUT: Duration = Duration::from_millis(1000);
 
@@ -1377,6 +1392,27 @@ impl Connection {
         self.transport.socket()
     }
 
+    /// Sends a keep-alive to every candidate with a hop limit too small to reach the peer, so that
+    /// our NAT has seen us send there before the peer's first packet arrives ([`OPENING_HOPS`])
+    fn open_own_nat(&self, candidates: &[SocketAddr]) {
+        let Some(packet) = self
+            .secure_link
+            .seal(Packet::keep_alive(self.next_sequence()))
+        else {
+            return;
+        };
+        match self
+            .transport
+            .send_with_hop_limit(&packet, candidates, OPENING_HOPS)
+        {
+            Ok(sent) => debug!(
+                "Sent a keep-alive with hop limit {OPENING_HOPS} to {sent} of {} candidates",
+                candidates.len()
+            ),
+            Err(e) => warn!("Could not send the keep-alives that open our NAT: {e}"),
+        }
+    }
+
     /// Connect to a remote peer
     pub async fn connect(&mut self, remote_addr: SocketAddr) -> Result<(), NetworkError> {
         if self.is_connected() {
@@ -1420,7 +1456,8 @@ impl Connection {
     /// Every candidate is probed several times with a keep-alive that asks for one back, and
     /// the one whose median round trip is shortest is used. A peer that answers no probe is
     /// not connected to. `JAMJAM_ROUTE` pins the kind of route for debugging.
-    /// Candidates are probed in order of priority, with a small delay between each.
+    /// Candidates are probed in order of priority, with a small delay between each, once
+    /// keep-alives that die on the way have opened our own NAT to them ([`OPENING_HOPS`]).
     pub async fn connect_with_candidates(
         &mut self,
         candidates: &[SocketAddr],
@@ -1459,26 +1496,40 @@ impl Connection {
             None => candidates,
         };
 
+        let started = Instant::now();
+        let opening = (0..OPENING_PACKETS).map(|k| started + OPENING_INTERVAL * k as u32);
+
         // If only one candidate, use simple connect
         if candidates.len() == 1 {
+            for at in opening {
+                tokio::time::sleep_until(at.into()).await;
+                self.open_own_nat(candidates);
+            }
+            tokio::time::sleep_until((started + OPENING_LEAD).into()).await;
             return self.connect(candidates[0]).await;
         }
 
-        let started = Instant::now();
         self.transport.expect_peer_at(candidates);
         self.link_facts.candidates_offered(candidates);
         self.set_state(ConnectionState::CheckingConnectivity);
         info!("Checking connectivity with {} candidates", candidates.len());
 
-        // Probe every candidate PROBE_ROUNDS times, a little apart, hearing the peer's probes
-        // in between so that its requests are answered at once: a request left in the socket
-        // until the loop ends would be timed by the peer as a long round trip.
+        // Open our own NAT to every candidate, then probe every candidate PROBE_ROUNDS times, a
+        // little apart, hearing the peer's probes in between so that its requests are answered
+        // at once: a request left in the socket until the loop ends would be timed by the peer
+        // as a long round trip.
         let mut probing = Probing::new(candidates);
+        for at in opening {
+            while Instant::now() < at {
+                self.hear_probe(&mut probing, at - Instant::now()).await?;
+            }
+            self.open_own_nat(candidates);
+        }
         let mut due: Vec<(Duration, usize, usize)> = (0..PROBE_ROUNDS)
             .flat_map(|round| {
                 (0..candidates.len()).map(move |i| {
                     (
-                        ROUND_INTERVAL * round as u32 + CANDIDATE_DELAY * i as u32,
+                        OPENING_LEAD + ROUND_INTERVAL * round as u32 + CANDIDATE_DELAY * i as u32,
                         round,
                         i,
                     )
@@ -2927,6 +2978,8 @@ impl Drop for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::network::transport::HopLimitReceiver;
 
     fn latency_info(
         sample_rate: u32,
@@ -3048,6 +3101,63 @@ mod tests {
         match result {
             Err(NetworkError::AlreadyConnected) => {}
             _ => panic!("Expected AlreadyConnected error"),
+        }
+    }
+
+    /// What a candidate gets from a connection checking it, in order: whether each datagram is a
+    /// probe, the hop limit it came with, and how long after the first one it came
+    #[cfg(unix)]
+    fn arrivals_at(receiver: &HopLimitReceiver, count: usize) -> Vec<(bool, u32, Duration)> {
+        let mut first = None;
+        (0..count)
+            .map(|_| {
+                let (bytes, hops) = receiver.recv().expect("a datagram comes");
+                let at = *first.get_or_insert_with(Instant::now);
+                let packet = Packet::from_bytes(&bytes).unwrap();
+                (packet.route_probe_token().is_some(), hops, at.elapsed())
+            })
+            .collect()
+    }
+
+    /// Verifies: REQ-CON-181
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn when_a_connection_checks_its_candidates_each_first_gets_keep_alives_that_die_on_the_way_and_the_probes_come_after_the_lead(
+    ) {
+        for candidates in 1..=2 {
+            let receivers: Vec<Arc<HopLimitReceiver>> = (0..candidates)
+                .map(|_| Arc::new(HopLimitReceiver::bind("127.0.0.1:0")))
+                .collect();
+            let addrs: Vec<SocketAddr> = receivers.iter().map(|r| r.local_addr()).collect();
+            let mut conn = conn().await;
+            let checking = tokio::spawn(async move {
+                let _ = conn.connect_with_candidates(&addrs).await;
+                conn
+            });
+
+            // Each candidate is read at once from its own thread, so the times are when they came
+            let reading: Vec<_> = receivers
+                .iter()
+                .map(|receiver| {
+                    let receiver = receiver.clone();
+                    tokio::task::spawn_blocking(move || arrivals_at(&receiver, OPENING_PACKETS + 1))
+                })
+                .collect();
+            for reading in reading {
+                let arrivals = reading.await.unwrap();
+                let (opening, probe) = arrivals.split_at(OPENING_PACKETS);
+                for &(is_probe, hops, _) in opening {
+                    assert!(!is_probe, "{candidates} candidates: {arrivals:?}");
+                    assert_eq!(hops, OPENING_HOPS, "{candidates} candidates: {arrivals:?}");
+                }
+                let (_, hops, after) = probe[0];
+                assert!(hops > OPENING_HOPS, "{candidates} candidates: {arrivals:?}");
+                assert!(
+                    after >= OPENING_LEAD - Duration::from_millis(20),
+                    "{candidates} candidates: {arrivals:?}"
+                );
+            }
+            checking.abort();
         }
     }
 

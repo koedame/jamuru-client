@@ -10,7 +10,7 @@ use tokio::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use super::error::NetworkError;
-use super::transport::{destination_for, IpFamilies};
+use super::transport::{destination_for, send_datagram, IpFamilies};
 
 /// STUN message types
 const BINDING_REQUEST: u16 = 0x0001;
@@ -269,13 +269,12 @@ impl StunClient {
         let mut last_error = None;
         for &(target, transaction_id) in targets {
             debug!("Sending STUN binding request to {}", target);
-            match self
-                .socket
-                .send_to(
-                    &build_binding_request(&transaction_id),
-                    destination_for(local, target),
-                )
-                .await
+            match send_datagram(
+                &self.socket,
+                &build_binding_request(&transaction_id),
+                destination_for(local, target),
+            )
+            .await
             {
                 Ok(_) => sent.push((target, transaction_id)),
                 Err(e) => last_error = Some(e),
