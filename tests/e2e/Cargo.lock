@@ -1366,7 +1366,6 @@ dependencies = [
  "hkdf",
  "igd-next",
  "libc",
- "libloading",
  "local-ip-address",
  "objc2",
  "objc2-av-foundation",
@@ -1509,16 +1508,6 @@ name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
-
-[[package]]
-name = "libloading"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1832accd5a4ca2795ace4d05d15c4039be15b62d3b950eff99746a990e3cc10"
-dependencies = [
- "cfg-if",
- "windows-link 0.2.1",
-]
 
 [[package]]
 name = "libredox"
