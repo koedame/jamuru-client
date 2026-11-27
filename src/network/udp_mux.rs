@@ -115,6 +115,10 @@ struct LaneState {
     peer_addrs: Option<Vec<SocketAddr>>,
     /// How many of `peer_addrs` came from `claim`; the rest were learned
     offered: usize,
+    /// Where the link sends to since it moved off the addresses it claimed. What comes from
+    /// there is the peer's for as long as the link sends there, however many addresses are
+    /// learned meanwhile: the audio comes from there.
+    route: Option<SocketAddr>,
 }
 
 struct LaneShared {
@@ -141,6 +145,7 @@ impl Lane {
             None => Vec::new(),
         };
         state.offered = peer_addrs.len();
+        state.route = None;
         let mut all = peer_addrs.to_vec();
         all.extend(learned);
         state.peer_addrs = Some(all);
@@ -162,11 +167,21 @@ impl Lane {
         }
     }
 
+    /// Takes what `addr` sends for as long as the link sends there, because the link moved its
+    /// route there
+    pub(super) fn follow(&self, addr: SocketAddr) {
+        let mut state = self.shared.state.lock();
+        if state.peer_addrs.is_some() {
+            state.route = Some(addr);
+        }
+    }
+
     /// Takes nothing from now on, and lets go of what is waiting
     pub(super) fn release(&self) {
         {
             let mut state = self.shared.state.lock();
             state.peer_addrs = None;
+            state.route = None;
             state.waiting.clear();
         }
         self.shared.arrived.notify_one();
@@ -219,7 +234,7 @@ fn deliver(
     let taking = |lane: &Arc<LaneShared>, known_only: bool| {
         let state = lane.state.lock();
         match &state.peer_addrs {
-            Some(addrs) => !known_only || addrs.contains(&from),
+            Some(addrs) => !known_only || addrs.contains(&from) || state.route == Some(from),
             None => false,
         }
     };
@@ -344,6 +359,7 @@ impl UdpMux {
                 waiting: VecDeque::new(),
                 peer_addrs: None,
                 offered: 0,
+                route: None,
             }),
             arrived: Notify::new(),
         });
@@ -456,6 +472,7 @@ mod tests {
                 waiting: VecDeque::new(),
                 peer_addrs: peer_addrs.map(|addrs| addrs.iter().map(|a| addr(a)).collect()),
                 offered: peer_addrs.map_or(0, |addrs| addrs.len()),
+                route: None,
             }),
             arrived: Notify::new(),
         })
@@ -853,5 +870,42 @@ mod tests {
         assert_eq!(addrs[0], addr("192.0.2.2:5000"));
         assert!(!addrs.contains(&addr("198.51.100.4:7000")));
         assert!(addrs.contains(&addr("198.51.100.4:7005")));
+    }
+
+    /// Verifies: REQ-CON-165
+    #[test]
+    fn when_the_link_moved_its_route_to_an_address_then_its_datagrams_are_not_limited_however_many_are_learned_after(
+    ) {
+        let shared = lane(Some(&["192.0.2.2:5000"]));
+        let owner = Lane {
+            shared: shared.clone(),
+            lanes: Arc::new(Mutex::new(Vec::new())),
+        };
+        let lanes = vec![shared.clone()];
+        let mut unknown = UnknownSources::new(Instant::now());
+
+        owner.follow(addr("198.51.100.4:30003"));
+        for port in 7000..7000 + LEARNED_ADDRS as u16 + 2 {
+            owner.learn(addr(&format!("198.51.100.9:{port}")));
+        }
+        for _ in 0..500 {
+            deliver(&lanes, vec![7], addr("198.51.100.4:30003"), &mut unknown);
+        }
+
+        assert_eq!(waiting(&shared).len(), 500);
+    }
+
+    #[test]
+    fn when_the_lane_claims_addresses_again_then_the_address_it_had_moved_to_is_unknown_again() {
+        let shared = lane(Some(&["192.0.2.2:5000"]));
+        let owner = Lane {
+            shared: shared.clone(),
+            lanes: Arc::new(Mutex::new(Vec::new())),
+        };
+        owner.follow(addr("198.51.100.4:30003"));
+
+        owner.claim(&[addr("192.0.2.2:5000")]);
+
+        assert_eq!(shared.state.lock().route, None);
     }
 }

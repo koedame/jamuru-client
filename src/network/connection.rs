@@ -2372,6 +2372,9 @@ impl Connection {
                         left, addr
                     );
                     link_facts.route_moved(addr);
+                    // On a shared socket, what comes from there would otherwise reach this link
+                    // only as from an address nobody expects: a few a second, not the audio
+                    transport.sending_to(addr);
                 }
 
                 let packet = match opened {
@@ -4386,6 +4389,77 @@ mod tests {
                 )
             });
         assert!(!offered_by_nat.contains(&given));
+    }
+
+    /// In a room the links share the audio socket, and what comes from an address no link
+    /// expects is handed on a few a second. The port that answered the guess was not offered,
+    /// so once the route has gone there, the peer's audio from there still has to reach the
+    /// link, all of it.
+    ///
+    /// Verifies: REQ-CON-170
+    #[tokio::test]
+    async fn when_a_link_on_a_shared_socket_moved_to_the_guessed_port_then_all_the_audio_from_there_comes(
+    ) {
+        let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
+        let mut behind_nat = conn().await;
+        let mut guessing = Connection::on(&mux).unwrap();
+        guessing.predict_ports_on_loopback();
+        trust_each_other(&mut behind_nat, &mut guessing);
+        let heard = Arc::new(AtomicU64::new(0));
+        let counting = heard.clone();
+        guessing.set_audio_callback(move |_, _, _| {
+            counting.fetch_add(1, Ordering::Relaxed);
+        });
+        let nat = symmetric_nat(
+            behind_nat.local_addr(),
+            vec![None, None, Some(guessing.local_addr())],
+            2,
+        )
+        .await;
+        let (_silent, nowhere) = silent();
+        let offered_by_nat = nat.taken_by_stun.clone();
+        let mut behind_nat_candidates = nat.fronts.clone();
+        behind_nat_candidates.insert(0, nowhere);
+        let guessing_candidates = [nowhere, offered_by_nat[0], offered_by_nat[1]];
+        let (from_nat, from_guessing) = tokio::join!(
+            behind_nat.connect_with_candidates(&behind_nat_candidates),
+            guessing.connect_with_candidates(&guessing_candidates)
+        );
+        from_nat.unwrap();
+        from_guessing.unwrap();
+        let given = nat.mapped.lock()[2].expect("the NAT gave the peer's address a port");
+        let moved = async {
+            while guessing.remote_addr() != given {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(6), moved)
+            .await
+            .expect("the route goes to the port the NAT gave");
+        let keys = async {
+            while !behind_nat.secure_link.can_send_media() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), keys)
+            .await
+            .expect("the peer can send audio");
+
+        // A second of audio, at the pace the app sends it
+        const FRAMES: u64 = 400;
+        let frame = vec![0.25f32; 120];
+        for i in 0..FRAMES {
+            behind_nat.send_audio(&frame, i as u32).await.unwrap();
+            tokio::time::sleep(Duration::from_micros(2500)).await;
+        }
+        let all = async {
+            while heard.load(Ordering::Relaxed) < FRAMES {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(2), all).await;
+        let got = heard.load(Ordering::Relaxed);
+        assert!(got >= FRAMES * 99 / 100, "{got} of {FRAMES} frames came");
     }
 
     /// A peer that offers one port per public address has nothing to guess, and a peer that
