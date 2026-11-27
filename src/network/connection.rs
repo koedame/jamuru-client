@@ -283,6 +283,9 @@ struct Route {
     others: Vec<(SocketAddr, bool)>,
     /// When `current` was taken up, or the peer last answered a ping
     answered_at: Instant,
+    /// `current` is where the link fell back to when no candidate answered, and nothing has
+    /// answered since. There is no answer to wait for there: the peer is where it is heard from.
+    fell_back: bool,
     /// The ports guessed for a peer none of whose offered addresses answered: it is behind a NAT
     /// that gives each destination a port of its own (ADR-115). What comes from one of them is
     /// the peer's, and the route follows an answer from there.
@@ -346,6 +349,7 @@ impl Route {
             current,
             others,
             answered_at: Instant::now(),
+            fell_back: false,
             predicted: None,
             reprobe_until: None,
             checks: Vec::new(),
@@ -377,9 +381,16 @@ impl Route {
             .is_some_and(|p| p.covers(addr) && p.is_token_for(token, addr))
     }
 
+    /// Whether the peer has not answered on `current` for `after`, or not at all since the link
+    /// fell back to it
+    fn unanswered_for(&self, after: Duration) -> bool {
+        self.fell_back || self.answered_at.elapsed() >= after
+    }
+
     /// The peer answered a ping, so what we send reaches it
     fn answered(&mut self) {
         self.answered_at = Instant::now();
+        self.fell_back = false;
     }
 
     /// Starts the wait for the peer's first answer `after` from now instead of at once
@@ -393,10 +404,14 @@ impl Route {
     /// Moves to `from` when a packet arrived from there, we can send to it,
     /// and the peer has not answered for `after`. Returns the address left.
     ///
+    /// A route the link fell back to has not been answered at all, so it is left at once: the
+    /// peer's probe to a port guessed for us can arrive just after our own probing ended, and
+    /// waiting `after` there sends the first seconds of audio where nobody is.
+    ///
     /// An address that is only guessed at is moved to when `proven` says the packet shows the
     /// peer is there: the answer to a probe sent to it, or a packet opened by an encrypted link.
     fn follow(&mut self, from: SocketAddr, after: Duration, proven: bool) -> Option<SocketAddr> {
-        if from == self.current || self.answered_at.elapsed() < after {
+        if from == self.current || !self.unanswered_for(after) {
             return None;
         }
         let index = self
@@ -412,6 +427,7 @@ impl Route {
             None => self.others.push((left, true)),
         }
         self.answered_at = Instant::now();
+        self.fell_back = false;
         Some(left)
     }
 
@@ -427,7 +443,7 @@ impl Route {
     fn start_check(&mut self, from: SocketAddr, after: Duration) -> Option<u32> {
         if from == self.current
             || self.others.iter().any(|&(other, _)| other == from)
-            || self.answered_at.elapsed() < after
+            || !self.unanswered_for(after)
         {
             return None;
         }
@@ -1703,6 +1719,7 @@ impl Connection {
                 self.set_state(ConnectionState::Connecting);
                 let fallback = fallback_candidate(candidates, |i| probing.sendable(i));
                 let mut route = Route::new(fallback, other_candidates(fallback));
+                route.fell_back = true;
                 // Nothing answered. A peer that offered the same public address with several
                 // ports is behind a NAT that gives each destination a port of its own, and
                 // the port it will send from is none of the ones offered: guess it (ADR-115).
@@ -3577,6 +3594,36 @@ mod tests {
 
     /// Verifies: REQ-CON-114
     #[test]
+    fn when_the_link_fell_back_and_nothing_answered_a_packet_from_another_address_moves_the_route_there_at_once(
+    ) {
+        let lan = addr("192.168.1.10:5000");
+        let vpn = addr("100.64.0.2:5000");
+        let mut route = Route::new(lan, vec![(vpn, true)]);
+        route.fell_back = true;
+
+        assert_eq!(route.follow(vpn, Duration::from_secs(60), false), Some(lan));
+        assert_eq!(route.current, vpn);
+
+        // The address moved to is waited on as any other
+        assert_eq!(route.follow(lan, Duration::from_secs(60), false), None);
+        assert_eq!(route.current, vpn);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
+    fn when_the_route_the_link_fell_back_to_is_answered_the_route_waits_before_leaving_it() {
+        let lan = addr("192.168.1.10:5000");
+        let vpn = addr("100.64.0.2:5000");
+        let mut route = Route::new(lan, vec![(vpn, true)]);
+        route.fell_back = true;
+        route.answered();
+
+        assert_eq!(route.follow(vpn, Duration::from_secs(60), false), None);
+        assert_eq!(route.current, lan);
+    }
+
+    /// Verifies: REQ-CON-114
+    #[test]
     fn when_the_peer_answered_recently_the_route_stays_where_it_is() {
         let lan = addr("192.168.1.10:5000");
         let vpn = addr("100.64.0.2:5000");
@@ -4627,6 +4674,76 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(2), all).await;
         let got = heard.load(Ordering::Relaxed);
         assert!(got >= FRAMES * 99 / 100, "{got} of {FRAMES} frames came");
+    }
+
+    /// The peer that guesses starts guessing once its own probing has ended, so on a real network
+    /// its probe to the right port comes after the probing of the peer behind the NAT has ended
+    /// too, and that peer has fallen back to an address nobody answered at. It goes to where the
+    /// probe came from at once, not after waiting for an answer that cannot come: until then its
+    /// audio goes nowhere.
+    ///
+    /// Verifies: REQ-CON-114, REQ-CON-170
+    #[tokio::test]
+    async fn when_the_guessed_probe_comes_after_the_probing_ended_the_peer_behind_the_nat_goes_where_it_came_from_at_once(
+    ) {
+        let mut behind_nat = conn().await;
+        let mut guessing = conn().await;
+        guessing.predict_ports_on_loopback();
+        trust_each_other(&mut behind_nat, &mut guessing);
+        let nat = symmetric_nat(
+            behind_nat.local_addr(),
+            vec![None, None, Some(guessing.local_addr())],
+            2,
+        )
+        .await;
+        let (_silent, nowhere) = silent();
+        let (_also_silent, private) = silent_elsewhere();
+        let offered_by_nat = nat.taken_by_stun.clone();
+        let mut behind_nat_candidates = nat.fronts.clone();
+        behind_nat_candidates.insert(0, nowhere);
+        let guessing_candidates = [private, offered_by_nat[0], offered_by_nat[1]];
+        // The guess comes well after the probing of the peer behind the NAT has ended, as it does
+        // when the two are a round trip apart
+        let late = async {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            guessing.connect_with_candidates(&guessing_candidates).await
+        };
+        let (from_nat, from_guessing) = tokio::join!(
+            behind_nat.connect_with_candidates(&behind_nat_candidates),
+            late
+        );
+        from_nat.unwrap();
+        from_guessing.unwrap();
+        assert_eq!(
+            behind_nat.remote_addr(),
+            nowhere,
+            "the probing of the peer behind the NAT ended before the guess came"
+        );
+
+        let given = nat.mapped.lock()[2].expect("the NAT gave the peer's address a port");
+        let moved = async {
+            while guessing.remote_addr() != given {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(6), moved)
+            .await
+            .expect("the route of the peer that guesses goes to the port the NAT gave");
+        let to_the_nat = nat.fronts[2];
+        let followed = async {
+            while behind_nat.remote_addr() != to_the_nat {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(1), followed)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the peer behind the NAT still sends to {} and not {}",
+                    behind_nat.remote_addr(),
+                    to_the_nat
+                )
+            });
     }
 
     /// A peer that offers one port per public address has nothing to guess, and a peer that
