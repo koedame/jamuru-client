@@ -28,7 +28,32 @@ pub const MAX_PAYLOAD_SIZE: usize = 1460;
 
 const ROUTE_PROBE_REQUEST: u8 = 1;
 const ROUTE_PROBE_REPLY: u8 = 2;
-const ROUTE_PROBE_SIZE: usize = 5;
+
+/// Bytes of Ed25519 signature at the end of a route probe and of its reply
+pub const ROUTE_PROBE_SIGNATURE_LEN: usize = 64;
+
+/// Size of a route probe payload: kind, token, signature
+const ROUTE_PROBE_SIZE: usize = 1 + 4 + ROUTE_PROBE_SIGNATURE_LEN;
+
+/// What a route probe or its reply carries, as read off the wire. The signature is not checked
+/// here: only the link knows whose key it has to be (`SecureLink::read_route_probe`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteProbeFields {
+    /// `false` for a probe, `true` for the reply to one
+    pub reply: bool,
+    pub token: u32,
+    pub signature: [u8; ROUTE_PROBE_SIGNATURE_LEN],
+}
+
+/// The byte that tells a route probe (`false`) from its reply (`true`) on the wire. A signature
+/// covers it, so a probe's signature is not a reply's.
+pub fn route_probe_kind(reply: bool) -> u8 {
+    if reply {
+        ROUTE_PROBE_REPLY
+    } else {
+        ROUTE_PROBE_REQUEST
+    }
+}
 
 /// Packet types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,23 +193,35 @@ impl Packet {
     }
 
     /// A keep-alive that asks the peer to send one back carrying the same `token`, so the
-    /// sender can time the round trip on the address it went to
+    /// sender can time the round trip on the address it went to. `signature` is the sender's
+    /// signature over it with the key the room lists for it (`SecureLink::route_probe`): the
+    /// probe may go before the link has agreed its keys, and the signature is what tells the
+    /// peer's probe from one sent from the peer's address by someone else.
     ///
     /// A peer that does not know the request takes it for an ordinary keep-alive and sends
-    /// nothing back. Unlike a latency ping it may go before the link has agreed its keys:
-    /// it holds only a number the sender chose.
-    pub fn route_probe(sequence: u32, token: u32) -> Self {
-        Self::keep_alive_with(sequence, ROUTE_PROBE_REQUEST, token)
+    /// nothing back.
+    pub fn route_probe(
+        sequence: u32,
+        token: u32,
+        signature: &[u8; ROUTE_PROBE_SIGNATURE_LEN],
+    ) -> Self {
+        Self::keep_alive_with(sequence, ROUTE_PROBE_REQUEST, token, signature)
     }
 
-    /// The keep-alive that answers a [`Self::route_probe`]
-    pub fn route_probe_reply(sequence: u32, token: u32) -> Self {
-        Self::keep_alive_with(sequence, ROUTE_PROBE_REPLY, token)
+    /// The keep-alive that answers a [`Self::route_probe`], signed the same way
+    pub fn route_probe_reply(
+        sequence: u32,
+        token: u32,
+        signature: &[u8; ROUTE_PROBE_SIGNATURE_LEN],
+    ) -> Self {
+        Self::keep_alive_with(sequence, ROUTE_PROBE_REPLY, token, signature)
     }
 
-    /// Whether this is a [`Self::route_probe`] (`false`) or a [`Self::route_probe_reply`]
-    /// (`true`), and its token. `None` for any other packet, including a plain keep-alive.
-    pub fn route_probe_token(&self) -> Option<(bool, u32)> {
+    /// What this [`Self::route_probe`] or [`Self::route_probe_reply`] carries, its signature
+    /// unchecked. `None` for any other packet, including a plain keep-alive and a probe of the
+    /// form before probes were signed. Nothing may be done on it before the link has checked
+    /// the signature (`SecureLink::read_route_probe`).
+    pub fn unverified_route_probe(&self) -> Option<RouteProbeFields> {
         if self.packet_type != PacketType::KeepAlive || self.payload.len() != ROUTE_PROBE_SIZE {
             return None;
         }
@@ -193,19 +230,25 @@ impl Packet {
             ROUTE_PROBE_REPLY => true,
             _ => return None,
         };
-        let token = u32::from_be_bytes([
-            self.payload[1],
-            self.payload[2],
-            self.payload[3],
-            self.payload[4],
-        ]);
-        Some((reply, token))
+        let token = u32::from_be_bytes(self.payload[1..5].try_into().ok()?);
+        let signature = self.payload[5..].try_into().ok()?;
+        Some(RouteProbeFields {
+            reply,
+            token,
+            signature,
+        })
     }
 
-    fn keep_alive_with(sequence: u32, kind: u8, token: u32) -> Self {
+    fn keep_alive_with(
+        sequence: u32,
+        kind: u8,
+        token: u32,
+        signature: &[u8; ROUTE_PROBE_SIGNATURE_LEN],
+    ) -> Self {
         let mut packet = Self::keep_alive(sequence);
         packet.payload.push(kind);
         packet.payload.extend_from_slice(&token.to_be_bytes());
+        packet.payload.extend_from_slice(signature);
         packet
     }
 
@@ -575,29 +618,43 @@ mod tests {
     }
 
     #[test]
-    fn when_a_route_probe_is_sent_the_peer_reads_its_token_and_that_it_is_a_request() {
-        let bytes = Packet::route_probe(7, 0xABCD).to_bytes();
+    fn when_a_route_probe_is_sent_the_peer_reads_its_token_its_signature_and_that_it_is_a_request()
+    {
+        let bytes = Packet::route_probe(7, 0xABCD, &[5; 64]).to_bytes();
 
         let packet = Packet::from_bytes(&bytes).expect("a keep-alive with a payload decodes");
 
         assert_eq!(packet.packet_type, PacketType::KeepAlive);
-        assert_eq!(packet.route_probe_token(), Some((false, 0xABCD)));
+        assert_eq!(
+            packet.unverified_route_probe(),
+            Some(RouteProbeFields {
+                reply: false,
+                token: 0xABCD,
+                signature: [5; 64],
+            })
+        );
     }
 
     #[test]
     fn when_a_route_probe_is_answered_the_reply_carries_the_token_and_is_not_a_request() {
-        let bytes = Packet::route_probe_reply(8, 0xABCD).to_bytes();
+        let bytes = Packet::route_probe_reply(8, 0xABCD, &[6; 64]).to_bytes();
 
         let packet = Packet::from_bytes(&bytes).unwrap();
+        let fields = packet.unverified_route_probe().unwrap();
 
-        assert_eq!(packet.route_probe_token(), Some((true, 0xABCD)));
+        assert!(fields.reply);
+        assert_eq!(fields.token, 0xABCD);
     }
 
     #[test]
-    fn when_a_keep_alive_carries_nothing_it_is_not_a_route_probe() {
-        assert_eq!(Packet::keep_alive(1).route_probe_token(), None);
+    fn when_a_keep_alive_carries_nothing_or_an_unsigned_probe_it_is_not_a_route_probe() {
+        let mut unsigned = Packet::keep_alive(1);
+        unsigned.payload = vec![ROUTE_PROBE_REQUEST, 0, 0, 0xAB, 0xCD];
+
+        assert_eq!(Packet::keep_alive(1).unverified_route_probe(), None);
+        assert_eq!(unsigned.unverified_route_probe(), None);
         assert_eq!(
-            Packet::audio(1, 0, vec![1, 0, 0, 0, 0]).route_probe_token(),
+            Packet::audio(1, 0, vec![1; ROUTE_PROBE_SIZE]).unverified_route_probe(),
             None
         );
     }

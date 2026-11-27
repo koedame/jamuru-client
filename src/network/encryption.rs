@@ -57,7 +57,9 @@ use sha2::Sha256;
 use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-use crate::protocol::{Packet, PacketType};
+use crate::protocol::{
+    route_probe_kind, Packet, PacketType, RouteProbeFields, ROUTE_PROBE_SIGNATURE_LEN,
+};
 
 /// First byte of a control packet that carries a key exchange
 const KEY_EXCHANGE: u8 = 0x01;
@@ -80,6 +82,9 @@ const ANSWER_SIGNATURE_DOMAIN: &[u8] = b"jamjam-link-key-exchange-answer-v1:";
 
 /// Mixed into the text a participant signs to say which id the room knows it by
 const CLAIM_SIGNATURE_DOMAIN: &[u8] = b"jamjam-link-peer-id-v1:";
+
+/// Mixed into the text a participant signs a route probe or its reply over
+const ROUTE_PROBE_SIGNATURE_DOMAIN: &[u8] = b"jamjam-route-probe-v1:";
 
 /// Bytes of a claim of an id: the id, then the signature
 pub const CLAIM_LEN: usize = 16 + SIGNATURE_LEN;
@@ -197,6 +202,19 @@ impl std::fmt::Debug for LinkIdentity {
             .field("public_key", &self.public_key())
             .finish_non_exhaustive()
     }
+}
+
+/// What a route probe or its reply is signed over: its kind and token, who sent it and who it
+/// is for. Binding both ends keeps a probe from being passed to another participant who knows
+/// the sender, and from being sent back to its sender as the peer's.
+fn route_probe_text(reply: bool, token: u32, sender: &[u8; 32], recipient: &[u8; 32]) -> Vec<u8> {
+    let mut text = Vec::with_capacity(ROUTE_PROBE_SIGNATURE_DOMAIN.len() + 69);
+    text.extend_from_slice(ROUTE_PROBE_SIGNATURE_DOMAIN);
+    text.push(route_probe_kind(reply));
+    text.extend_from_slice(&token.to_be_bytes());
+    text.extend_from_slice(sender);
+    text.extend_from_slice(recipient);
+    text
 }
 
 /// What a link needs to sign its half of the exchange and to check the peer's
@@ -444,6 +462,64 @@ impl SecureLink {
             text,
             signature,
         })
+    }
+
+    /// A route probe asking the peer to send `token` back, signed with our identity for the
+    /// peer's (see [`route_probe_text`]). `None` for a link that does not know its peer.
+    ///
+    /// The connectivity check runs before the keys are agreed, so the probe goes plain. The
+    /// identities are the one thing both ends hold by then (the server gave each the other's),
+    /// and the signature is what keeps someone who sends from the peer's address from making
+    /// us answer, or from ending the wait for the peer's first probe early.
+    pub fn route_probe(&self, sequence: u32, token: u32) -> Option<Packet> {
+        let signature = self.sign_route_probe(false, token)?;
+        Some(Packet::route_probe(sequence, token, &signature))
+    }
+
+    /// The reply to the peer's route probe that carried `token`, signed as
+    /// [`SecureLink::route_probe`] is
+    pub fn route_probe_reply(&self, sequence: u32, token: u32) -> Option<Packet> {
+        let signature = self.sign_route_probe(true, token)?;
+        Some(Packet::route_probe_reply(sequence, token, &signature))
+    }
+
+    /// Whether `packet` is a route probe (`false`) or the reply to one (`true`) that the peer
+    /// signed for us, and its token. `None` for anything else: a probe signed by another key or
+    /// for another participant, one whose token or kind was changed after it was signed, one
+    /// with no signature (an app before probes were signed), and any probe on a link that does
+    /// not know its peer.
+    ///
+    /// A signature does not say when the probe was sent: one seen on the path can be sent
+    /// again, while both ends keep the identities they have in the room.
+    pub fn read_route_probe(&self, packet: &Packet) -> Option<(bool, u32)> {
+        let check = self.peer.as_ref()?;
+        let RouteProbeFields {
+            reply,
+            token,
+            signature,
+        } = packet.unverified_route_probe()?;
+        let text = route_probe_text(
+            reply,
+            token,
+            check.theirs.as_bytes(),
+            check.ours.verifying_key().as_bytes(),
+        );
+        check
+            .theirs
+            .verify(&text, &Signature::from_bytes(&signature))
+            .ok()
+            .map(|()| (reply, token))
+    }
+
+    fn sign_route_probe(&self, reply: bool, token: u32) -> Option<[u8; ROUTE_PROBE_SIGNATURE_LEN]> {
+        let check = self.peer.as_ref()?;
+        let text = route_probe_text(
+            reply,
+            token,
+            check.ours.verifying_key().as_bytes(),
+            check.theirs.as_bytes(),
+        );
+        Some(check.ours.sign(&text).to_bytes())
     }
 
     /// Whether the keys of this link are bound to the peer's identity from the server. A link
@@ -875,6 +951,97 @@ mod tests {
             .unwrap()
             .is_signed_by(Some(&ben.public_key())));
         let _ = a2;
+    }
+
+    /// The links of two participants who know each other's keys from the room, and of a third
+    /// who knows them too
+    fn route_probe_links() -> (SecureLink, SecureLink, SecureLink) {
+        let (amy, ben, cid) = (
+            LinkIdentity::from_seed(1),
+            LinkIdentity::from_seed(2),
+            LinkIdentity::from_seed(3),
+        );
+        (
+            SecureLink::for_peer(&amy, &ben.public_key()).unwrap(),
+            SecureLink::for_peer(&ben, &amy.public_key()).unwrap(),
+            SecureLink::for_peer(&cid, &amy.public_key()).unwrap(),
+        )
+    }
+
+    /// Verifies: REQ-SEC-010
+    #[test]
+    fn when_the_peer_signs_a_route_probe_and_its_reply_the_other_end_reads_their_kind_and_token() {
+        let (amy, ben, _) = route_probe_links();
+
+        let probe = ben.route_probe(1, 0x0002_0001).unwrap();
+        let reply = ben.route_probe_reply(2, 0x0002_0001).unwrap();
+
+        assert_eq!(probe.packet_type, PacketType::KeepAlive);
+        assert_eq!(amy.read_route_probe(&probe), Some((false, 0x0002_0001)));
+        assert_eq!(amy.read_route_probe(&reply), Some((true, 0x0002_0001)));
+    }
+
+    /// Someone who sends from the peer's address does not hold the peer's key: what they sign,
+    /// or leave unsigned as an app before probes were signed did, is not the peer's probe.
+    ///
+    /// Verifies: REQ-SEC-010
+    #[test]
+    fn when_a_route_probe_is_not_signed_by_the_peer_for_us_it_is_not_read() {
+        let (amy, ben, cid) = route_probe_links();
+        let ben_identity = LinkIdentity::from_seed(2);
+        let ben_to_someone_else =
+            SecureLink::for_peer(&ben_identity, &LinkIdentity::from_seed(4).public_key()).unwrap();
+        let mut unsigned = Packet::keep_alive(1);
+        unsigned.payload = vec![1, 0, 0, 0, 7];
+        let mut no_signature = ben.route_probe(1, 7).unwrap();
+        no_signature.payload[5..].fill(0);
+
+        assert_eq!(amy.read_route_probe(&cid.route_probe(1, 7).unwrap()), None);
+        assert_eq!(
+            amy.read_route_probe(&ben_to_someone_else.route_probe(1, 7).unwrap()),
+            None
+        );
+        assert_eq!(amy.read_route_probe(&unsigned), None);
+        assert_eq!(amy.read_route_probe(&no_signature), None);
+    }
+
+    /// Verifies: REQ-SEC-010
+    #[test]
+    fn when_the_token_or_the_kind_of_a_signed_route_probe_is_changed_it_is_not_read() {
+        let (amy, ben, _) = route_probe_links();
+        let mut other_token = ben.route_probe(1, 7).unwrap();
+        other_token.payload[4] ^= 1;
+        let mut made_a_reply = ben.route_probe(1, 7).unwrap();
+        made_a_reply.payload[0] = 2;
+
+        assert_eq!(amy.read_route_probe(&other_token), None);
+        assert_eq!(amy.read_route_probe(&made_a_reply), None);
+    }
+
+    /// Verifies: REQ-SEC-010
+    #[test]
+    fn when_our_own_route_probe_is_sent_back_to_us_it_is_not_read_as_the_peers() {
+        let (amy, _, _) = route_probe_links();
+
+        let ours = amy.route_probe(1, 7).unwrap();
+
+        assert_eq!(amy.read_route_probe(&ours), None);
+    }
+
+    /// Verifies: REQ-SEC-010
+    #[test]
+    fn when_a_link_does_not_know_its_peer_it_neither_signs_nor_reads_a_route_probe() {
+        let (_, ben, _) = route_probe_links();
+        let probe = ben.route_probe(1, 7).unwrap();
+
+        for link in [
+            SecureLink::unbound(),
+            SecureLink::answering(&LinkIdentity::from_seed(1)),
+        ] {
+            assert!(link.route_probe(1, 7).is_none());
+            assert!(link.route_probe_reply(1, 7).is_none());
+            assert_eq!(link.read_route_probe(&probe), None);
+        }
     }
 
     /// Verifies: REQ-CON-150
