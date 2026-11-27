@@ -1123,19 +1123,14 @@ mod tests {
         assert_eq!(driver.backend().asked("link after advertising"), 1);
 
         let cleo = at(3, "Cleo", "192.0.2.3:6000");
-        driver
-            .backend()
-            .polls
-            .lock()
-            .unwrap()
-            .push_back(vec![
-                Polled::Room(RoomEvent::PeerJoined(PeerInfo {
-                    public_addr: None,
-                    candidates: vec![],
-                    ..cleo.clone()
-                })),
-                Polled::Room(RoomEvent::PeerUpdated(cleo)),
-            ]);
+        driver.backend().polls.lock().unwrap().push_back(vec![
+            Polled::Room(RoomEvent::PeerJoined(PeerInfo {
+                public_addr: None,
+                candidates: vec![],
+                ..cleo.clone()
+            })),
+            Polled::Room(RoomEvent::PeerUpdated(cleo)),
+        ]);
         until(&driver, |_| driver.backend().asked("link") == 2).await;
 
         assert_eq!(driver.backend().asked("link after advertising"), 1);
