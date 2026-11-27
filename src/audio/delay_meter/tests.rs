@@ -206,7 +206,6 @@ fn ms_of(frames: u64) -> f64 {
 // ---------------------------------------------------------------------
 // The run, against a device
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn when_the_output_is_cabled_to_the_input_the_figure_is_the_delay_of_the_cable_to_a_sample() {
     let device = Device::loop_of(23.0);
@@ -225,7 +224,6 @@ fn when_the_output_is_cabled_to_the_input_the_figure_is_the_delay_of_the_cable_t
     assert_eq!(found.kept, REPEATS);
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn when_the_buffers_are_large_the_arrival_is_still_read_to_a_sample_not_to_a_buffer() {
     let device = Device {
@@ -245,7 +243,6 @@ fn when_the_buffers_are_large_the_arrival_is_still_read_to_a_sample_not_to_a_buf
     );
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn when_the_path_is_quiet_the_volume_goes_up_until_the_sound_is_heard() {
     let device = Device {
@@ -259,7 +256,6 @@ fn when_the_path_is_quiet_the_volume_goes_up_until_the_sound_is_heard() {
     assert!((found.delay_ms - 40.0).abs() <= 0.03, "{}", found.delay_ms);
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn when_the_clicks_are_lost_in_the_noise_the_tone_is_heard_through_the_filter() {
     let device = Device {
@@ -278,7 +274,6 @@ fn when_the_clicks_are_lost_in_the_noise_the_tone_is_heard_through_the_filter() 
     );
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn when_nothing_comes_back_there_is_no_figure_and_the_run_ends_within_its_time() {
     let device = Device {
@@ -289,7 +284,6 @@ fn when_nothing_comes_back_there_is_no_figure_and_the_run_ends_within_its_time()
     assert_eq!(measure(&device), Err(Failure::NoSound));
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_sound_that_leaks_from_the_output_into_the_input_at_once_is_not_taken_for_the_path() {
     let device = Device {
@@ -301,7 +295,6 @@ fn a_sound_that_leaks_from_the_output_into_the_input_at_once_is_not_taken_for_th
     assert_eq!(measure(&device), Err(Failure::NoSound), "1 ms is crosstalk");
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_path_just_over_the_crosstalk_limit_is_measured() {
     let device = Device::loop_of(3.0);
@@ -311,7 +304,6 @@ fn a_path_just_over_the_crosstalk_limit_is_measured() {
     assert!((found.delay_ms - 3.0).abs() <= 0.03, "{}", found.delay_ms);
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn when_every_sound_comes_back_at_another_time_the_run_says_the_delay_is_unsteady() {
     let ms = |ms: f64| (ms * f64::from(RATE) / 1000.0).round() as u64;
@@ -323,7 +315,6 @@ fn when_every_sound_comes_back_at_another_time_the_run_says_the_delay_is_unstead
     assert_eq!(measure(&device), Err(Failure::Unsteady));
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn while_a_run_is_under_way_the_session_gets_silence_and_after_it_the_input_again() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
@@ -366,7 +357,6 @@ fn while_a_run_is_under_way_the_session_gets_silence_and_after_it_the_input_agai
     assert_eq!(state(), State::Done(Err(Failure::Cancelled)));
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn when_no_run_is_under_way_the_callbacks_leave_the_sound_as_it_is() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
@@ -380,7 +370,6 @@ fn when_no_run_is_under_way_the_callbacks_leave_the_sound_as_it_is() {
     assert!(!muted);
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn when_no_stream_is_calling_back_the_run_says_so() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
@@ -405,7 +394,6 @@ fn when_no_stream_is_calling_back_the_run_says_so() {
 // ---------------------------------------------------------------------
 // The parts
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn the_click_train_is_thirty_one_sample_pulses_a_millisecond_apart() {
     let len = stimulus_frames(Stimulus::Clicks, RATE);
@@ -418,7 +406,6 @@ fn the_click_train_is_thirty_one_sample_pulses_a_millisecond_apart() {
     assert!(pulses.windows(2).all(|pair| pair[1] - pair[0] == 48));
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn the_tone_is_a_one_kilohertz_sine_for_fifty_milliseconds() {
     let len = stimulus_frames(Stimulus::Tone, RATE);
@@ -436,7 +423,6 @@ fn the_tone_is_a_one_kilohertz_sine_for_fifty_milliseconds() {
     assert!(samples[len - 1].abs() < 0.1, "and fades out");
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn the_noise_is_the_amplitude_ninety_percent_of_the_samples_stay_under() {
     let window: Vec<f32> = (0..1000).map(|n| -(n as f32 / 1000.0)).collect();
@@ -451,7 +437,6 @@ fn the_noise_is_the_amplitude_ninety_percent_of_the_samples_stay_under() {
     );
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn the_arrival_is_traced_back_to_where_the_rise_began() {
     let mut signal = vec![0.0f32; 1000];
@@ -474,7 +459,6 @@ fn the_arrival_is_traced_back_to_where_the_rise_began() {
     );
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_rise_is_not_traced_back_to_before_where_the_search_began() {
     let signal = vec![0.5f32; 1000];
@@ -485,7 +469,6 @@ fn a_rise_is_not_traced_back_to_before_where_the_search_began() {
     );
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_spike_that_does_not_go_on_is_not_taken_for_the_sound() {
     let mut signal = vec![0.0f32; 2000];
@@ -499,7 +482,6 @@ fn a_spike_that_does_not_go_on_is_not_taken_for_the_sound() {
     assert_eq!(tone, Seek::Found(1000), "a spike is gone 6 ms later");
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_crossing_too_near_the_end_of_the_signal_waits_for_more_of_it() {
     let mut signal = vec![0.0f32; 700];
@@ -511,7 +493,6 @@ fn a_crossing_too_near_the_end_of_the_signal_waits_for_more_of_it() {
     );
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn the_band_pass_filter_passes_one_kilohertz_and_holds_back_the_rest() {
     let amplitude_of = |hz: f64| {
@@ -530,7 +511,6 @@ fn the_band_pass_filter_passes_one_kilohertz_and_holds_back_the_rest() {
     assert!(amplitude_of(8000.0) < 0.2);
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_result_far_from_the_rest_is_dropped_and_the_figure_is_the_median_of_the_others() {
     let (figure, spread, kept) = evaluate(&[20.0, 20.4, 19.8, 20.2, 95.0]).unwrap();
@@ -540,7 +520,6 @@ fn a_result_far_from_the_rest_is_dropped_and_the_figure_is_the_median_of_the_oth
     assert!((spread - 0.6).abs() < 1e-9, "{spread}");
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn results_within_three_milliseconds_of_the_median_are_never_dropped() {
     let (_, _, kept) = evaluate(&[20.0, 20.0, 20.0, 20.0, 22.9]).unwrap();
@@ -548,7 +527,6 @@ fn results_within_three_milliseconds_of_the_median_are_never_dropped() {
     assert_eq!(kept, 5, "the MAD is 0 here, and 3 ms is the least room");
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_figure_needs_three_results_that_are_close_and_not_longer_than_five_hundred_milliseconds() {
     assert_eq!(evaluate(&[20.0, 21.0]), Err(Failure::NoSound));
@@ -563,7 +541,6 @@ fn a_figure_needs_three_results_that_are_close_and_not_longer_than_five_hundred_
     assert!(evaluate(&[498.0, 499.0, 499.5]).is_ok());
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_spread_up_to_two_milliseconds_is_steady_and_up_to_six_slightly_shaky() {
     assert_eq!(Stability::of_spread(0.0), Stability::Steady);
@@ -573,7 +550,6 @@ fn a_spread_up_to_two_milliseconds_is_steady_and_up_to_six_slightly_shaky() {
     assert_eq!(Stability::of_spread(6.1), Stability::Shaky);
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn a_delay_over_a_hundred_milliseconds_asks_for_a_second_look_at_the_settings() {
     let at = |delay_ms| Measurement {
@@ -590,7 +566,6 @@ fn a_delay_over_a_hundred_milliseconds_asks_for_a_second_look_at_the_settings() 
     assert!(at(100.5).needs_review());
 }
 
-/// Verifies: REQ-AUD-050
 #[test]
 fn the_steps_get_louder_by_six_decibels_and_the_last_three_ask_for_less_over_the_noise() {
     assert!(LEVELS_DB.windows(2).all(|pair| pair[1] - pair[0] == 6.0));

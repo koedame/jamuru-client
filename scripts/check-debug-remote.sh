@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks that a built app carries remote debugging only when it should (ADR-044).
+# Checks that a built app carries remote debugging only when it should.
 #
 # A beta build is made with the `debug-remote` feature and a release build
 # without it. The feature leaves a marker in the binary; this looks for it, so a

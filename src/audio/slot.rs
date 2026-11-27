@@ -287,7 +287,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn switching_returns_at_once_and_the_result_comes_when_the_open_finishes() {
         let mut slot = slot();
@@ -305,8 +304,6 @@ mod tests {
 
     /// The failure of the ticket: the device that was chosen never answers,
     /// and the user chooses another.
-    ///
-    /// Verifies: REQ-AUD-123
     #[test]
     fn switching_to_another_device_while_one_hangs_does_not_wait_for_the_hung_open() {
         let mut slot = slot();
@@ -323,7 +320,6 @@ mod tests {
         assert_eq!(slot.device(), Some(&DeviceId("works".into())));
     }
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn what_a_given_up_open_returns_when_it_finally_does_is_not_reported() {
         let mut slot = slot();
@@ -338,7 +334,6 @@ mod tests {
         assert!(slot.poll().is_none(), "the late open reports nothing");
     }
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn a_failed_open_is_reported_and_the_next_switch_still_works() {
         let mut slot = slot();
@@ -366,7 +361,6 @@ mod tests {
         from + Duration::from_millis(millis)
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn a_stream_whose_callback_keeps_being_called_is_never_reopened() {
         let (mut slot, heartbeat) = watched();
@@ -380,8 +374,6 @@ mod tests {
 
     /// The failure of the ticket: PipeWire left the stream open and quit
     /// calling it, and nothing said so.
-    ///
-    /// Verifies: REQ-AUD-128
     #[test]
     fn a_stream_that_stops_calling_back_is_opened_again_and_goes_on_when_the_new_one_calls() {
         let (mut slot, heartbeat) = watched();
@@ -404,7 +396,6 @@ mod tests {
         assert_eq!(slot.watch(after(t0, 5000)), Verdict::Flowing);
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn while_the_stream_is_being_opened_again_it_is_not_judged() {
         let (mut slot, heartbeat) = watched();
@@ -423,7 +414,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn a_stream_that_stays_silent_after_every_reopen_is_given_up_on() {
         let (mut slot, heartbeat) = watched();
@@ -456,7 +446,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn a_reopen_that_fails_is_reported_by_the_open_and_the_stream_is_watched_no_more() {
         let (mut slot, heartbeat) = watched();
@@ -478,7 +467,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn a_slot_whose_device_never_opened_has_no_stream_to_reopen() {
         let engine = AudioEngine::new(AudioConfig::default());
@@ -500,7 +488,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn an_engine_made_while_another_open_is_out_counts_on_the_same_heartbeat() {
         let (mut slot, heartbeat) = watched();

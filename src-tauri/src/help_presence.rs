@@ -1,4 +1,4 @@
-//! Where the two people of a settings help are looking (ADR-044 §5).
+//! Where the two people of a settings help are looking.
 //!
 //! While a help goes on, each person's screen marks the part the other one is
 //! pointing at and the part the other one has focused, as co-editing tools do.
@@ -170,7 +170,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-RMT-034
     #[test]
     fn a_message_with_anything_but_parts_and_places_is_not_accepted() {
         let with_a_trail = json!({
@@ -182,7 +181,6 @@ mod tests {
         assert!(serde_json::from_value::<Presence>(with_a_screen_position).is_err());
     }
 
-    /// Verifies: REQ-RMT-034
     #[test]
     fn a_place_outside_its_part_is_held_to_the_part() {
         let presence = Presence {
@@ -195,7 +193,6 @@ mod tests {
         assert_eq!((held.x, held.y), (1.0, 0.0));
     }
 
-    /// Verifies: REQ-RMT-034
     #[test]
     fn a_name_that_is_empty_too_long_or_not_text_is_refused() {
         for id in ["", &"a".repeat(MAX_ID_CHARS + 1), "line\nbreak"] {
@@ -212,7 +209,6 @@ mod tests {
         assert!(not_a_number.checked().is_err());
     }
 
-    /// Verifies: REQ-RMT-034
     #[test]
     fn a_message_that_comes_sooner_than_ten_a_second_with_slack_is_not_passed_on() {
         let state = PresenceState::default();
@@ -223,7 +219,6 @@ mod tests {
         assert!(state.admit(start + Duration::from_millis(100)));
     }
 
-    /// Verifies: REQ-RMT-034
     #[tokio::test]
     async fn the_helpers_message_reaches_the_main_window_of_the_person_helped() {
         let app = tauri::test::mock_app();
@@ -256,7 +251,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-034
     #[test]
     fn when_there_is_no_main_window_the_message_is_not_said_to_have_arrived() {
         let app = tauri::test::mock_app();

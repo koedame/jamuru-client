@@ -1,5 +1,5 @@
 /**
- * RecordingPanel - Record the room (ADR-095)
+ * RecordingPanel - Record the room
  *
  * One card in the room sidebar under the master meter, the thing it records:
  * a title with the time on top, then either the button that starts a

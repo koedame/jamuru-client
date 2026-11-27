@@ -1,6 +1,6 @@
 /**
  * SettingsHelpQuestion - tells the participant someone asked them for help
- * with their audio settings and lets them say yes or not now (ADR-044 §5).
+ * with their audio settings and lets them say yes or not now.
  * Nothing happens until they answer; Escape says not now, and clicking outside
  * does nothing, so a stray click cannot answer for them.
  *

@@ -210,7 +210,7 @@ export const NoLatencyDisplay: Story = {
 };
 
 /**
- * Quality bands (REQ-LAT-121). The band is classified by the core library from
+ * Quality bands. The band is classified by the core library from
  * RTT and packet loss; the component only picks the colour.
  */
 export const QualityGood: Story = {
@@ -244,7 +244,7 @@ export const QualityUnknown: Story = {
   },
 };
 
-/** Audio device input/output latency, shown separately (REQ-LAT-122). */
+/** Audio device input/output latency, shown separately. */
 export const WithDeviceLatency: Story = {
   args: {
     status: 'connected',

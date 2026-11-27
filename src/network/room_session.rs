@@ -1,4 +1,4 @@
-//! How far a participant has got into a room, and what each step changes (ADR-044 §6).
+//! How far a participant has got into a room, and what each step changes.
 //!
 //! [`State`] is the session as a state machine with no I/O: the phase (reaching the server,
 //! in a room, failed), the connection and room there are, the participants, and getting the
@@ -66,9 +66,9 @@ pub enum Reconnect {
 pub struct Participant {
     pub id: String,
     pub name: String,
-    /// What their app can do beyond the base protocol (ADR-043).
+    /// What their app can do beyond the base protocol.
     pub features: Vec<String>,
-    /// The room no longer lists them but their audio still arrives (REQ-CON-150). They are
+    /// The room no longer lists them but their audio still arrives. They are
     /// shown, with a fader, for as long as they are heard; none of what needs the room
     /// (messages, help) is for them.
     pub departed: bool,
@@ -212,7 +212,7 @@ impl State {
         self.revision += 1;
         now.revision = self.revision;
         // Which step the app is at decides which buttons do anything, so its
-        // transitions are the first thing a bug report needs (ADR-036).
+        // transitions are the first thing a bug report needs.
         let from = before.as_ref().map(|b| b.phase.name()).unwrap_or("(start)");
         let changed = before
             .as_ref()
@@ -554,7 +554,6 @@ mod tests {
         state
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_the_rooms_are_listed_the_session_is_connected_to_the_server_with_the_test_room_if_any()
     {
@@ -573,7 +572,6 @@ mod tests {
         assert_eq!(view.room, None);
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_a_room_is_entered_it_is_shown_with_the_code_the_participants_and_the_audio_to_start() {
         let mut state = State::default();
@@ -597,7 +595,6 @@ mod tests {
         assert!(audio.iter().any(|step| matches!(step, Audio::Start { .. })));
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_the_server_tells_no_code_the_one_the_app_asked_with_is_the_rooms() {
         let mut state = State::default();
@@ -607,7 +604,6 @@ mod tests {
         assert_eq!(state.view().room.unwrap().invite_code, "XYZ234ABC");
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_the_connection_is_lost_the_room_is_rejoined_by_its_code_or_else_its_id() {
         let mut state = in_a_room(vec![]);
@@ -621,7 +617,6 @@ mod tests {
         assert_eq!(state.rejoin_code(), None);
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_the_room_is_left_the_session_is_in_no_room_and_back_on_the_list_or_failed() {
         let mut state = in_a_room(vec![peer(2, None)]);
@@ -638,7 +633,6 @@ mod tests {
         assert_eq!(view.error.as_deref(), Some("the server hung up"));
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_the_connection_is_got_back_in_a_room_the_room_stays_and_the_reconnect_says_how_it_goes()
     {
@@ -661,7 +655,6 @@ mod tests {
         assert_eq!(view.signaling_reconnect_error, None);
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_the_connection_is_got_back_outside_a_room_it_is_a_first_connect_again() {
         let mut state = State::default();
@@ -675,7 +668,6 @@ mod tests {
         assert_eq!(view.signaling_reconnect, Reconnect::Idle);
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_a_step_fails_the_phase_is_error_with_the_reason_and_the_code_being_joined_is_dropped() {
         let mut state = State::default();
@@ -691,7 +683,6 @@ mod tests {
         assert_eq!(view.joining_code, None);
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_the_connection_is_dropped_the_audio_ends_and_the_connection_is_handed_back_to_close() {
         let mut state = in_a_room(vec![peer(2, Some("10.0.0.2:5000"))]);
@@ -704,7 +695,6 @@ mod tests {
         assert!(state.view().streaming_peer_ids.is_empty());
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn when_the_connection_is_dropped_to_get_it_back_the_audio_is_not_to_be_stopped_and_the_links_stay(
     ) {
@@ -717,7 +707,6 @@ mod tests {
         assert_eq!(state.view().streaming_peer_ids.len(), 1);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn when_someone_left_the_room_while_their_audio_is_heard_they_are_listed_as_departed_until_it_stops(
     ) {
@@ -759,7 +748,6 @@ mod tests {
         assert!(!room.participants[0].departed);
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_an_event_is_of_another_connection_or_of_no_room_the_session_is_left_as_it_is() {
         let mut state = in_a_room(vec![]);
@@ -782,7 +770,6 @@ mod tests {
         assert!(no_room.view().room.is_none());
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn when_the_audio_session_ended_on_its_own_the_links_are_forgotten_and_nothing_is_followed() {
         let mut state = in_a_room(vec![peer(2, Some("10.0.0.2:5000"))]);
@@ -794,7 +781,6 @@ mod tests {
         assert!(state.view().streaming_peer_ids.is_empty());
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn a_step_is_ended_by_a_new_epoch_and_an_event_of_a_let_go_connection_ends_nothing() {
         let mut state = State::default();
@@ -809,7 +795,6 @@ mod tests {
         assert_eq!(state.epoch(), second);
     }
 
-    /// Verifies: REQ-RMT-028
     #[test]
     fn a_change_is_announced_with_a_higher_revision_and_one_that_changes_nothing_is_not() {
         let mut state = State::default();

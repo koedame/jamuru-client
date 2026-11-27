@@ -24,8 +24,8 @@ function percentOf(progress: StartupUpdatePhase): number | null {
 }
 
 /**
- * The small window a start shows while it updates the app before opening it
- * (ADR-089): what it is doing, how far the download is, and a way to open the
+ * The small window a start shows while it updates the app before opening it:
+ * what it is doing, how far the download is, and a way to open the
  * app without waiting until the install begins.
  */
 export function StartupUpdate({ progress, onSkip, skipping = false }: StartupUpdateProps) {

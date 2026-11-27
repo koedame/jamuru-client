@@ -1,8 +1,8 @@
-//! Restarting the app (ADR-055).
+//! Restarting the app.
 //!
 //! Tauri restarts from a worker thread by asking the main thread's event loop
 //! to exit and restarting when it has. A main thread that is stuck (a call into
-//! a hung audio driver, ADR-050) never gets there: nothing restarts, the old
+//! a hung audio driver) never gets there: nothing restarts, the old
 //! process stays and no new one starts. So the restart is given a time, and
 //! when it has not happened by then the new instance is started from here and
 //! the old process is ended without waiting for the main thread.
@@ -39,7 +39,7 @@ pub(crate) fn is_restarting() -> bool {
 pub(crate) async fn restart<R: Runtime>(app: &AppHandle<R>) {
     RESTARTING.store(true, Ordering::SeqCst);
     stop_audio(app).await;
-    // An update installed for this restart is what starts (ADR-089).
+    // An update installed for this restart is what starts.
     crate::updater::handing_over();
     let handle = app.clone();
     let reporter = app
@@ -84,7 +84,7 @@ fn start_new_instance<R: Runtime>(app: &AppHandle<R>, reporter: Option<UsageRepo
         let stalled_ms = u32::try_from(GRACE.as_millis()).unwrap_or(u32::MAX);
         reporter.write_hang(HangStage::Restart, Some(stalled_ms));
     }
-    // The exit that would let go of the one-copy lock (ADR-085) is the one
+    // The exit that would let go of the one-copy lock is the one
     // that is stuck: without this the new instance finds the old one still
     // holding it, hands over to it and ends, and nothing runs.
     tauri_plugin_single_instance::destroy(app);
@@ -100,7 +100,6 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
 
-    /// Verifies: REQ-UPD-017
     #[test]
     fn when_the_time_has_passed_the_action_runs() {
         let (ran, waiting) = mpsc::channel();

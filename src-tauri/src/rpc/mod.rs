@@ -1,4 +1,4 @@
-//! Portals and permissions (ADR-044).
+//! Portals and permissions.
 //!
 //! Every way into the app - the screen, the E2E control channel, remote
 //! debugging, someone helping with settings - reaches the same methods
@@ -27,8 +27,7 @@ use tauri::{AppHandle, Runtime};
 
 pub use spec::{Kind, Method, Portal};
 
-/// Why a call did not return a value. `code` is what goes on the wire
-/// (ADR-044 §4).
+/// Why a call did not return a value. `code` is what goes on the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RpcError {
     pub code: Code,
@@ -176,8 +175,6 @@ mod tests {
     }
 
     /// A method the table does not list cannot be called, whoever asks.
-    ///
-    /// Verifies: REQ-RMT-022
     #[tokio::test]
     async fn a_method_that_is_not_in_the_table_is_unknown_to_every_portal() {
         let app = app();
@@ -196,8 +193,6 @@ mod tests {
 
     /// A method the table lists but not for this portal is refused before it
     /// runs: there is no window here, so a call that ran would say so instead.
-    ///
-    /// Verifies: REQ-RMT-022, REQ-RMT-025
     #[tokio::test]
     async fn a_method_the_portal_may_not_call_is_denied_and_not_run() {
         let app = app();
@@ -210,8 +205,6 @@ mod tests {
     }
 
     /// A method the portal may call is let through to the webview.
-    ///
-    /// Verifies: REQ-RMT-022
     #[tokio::test]
     async fn a_method_the_portal_may_call_reaches_the_webview() {
         let app = app();

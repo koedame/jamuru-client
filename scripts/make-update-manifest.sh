@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Writes `latest.json`, the file the installed apps read to learn that a newer
-# release exists (ADR-041), and refuses to when the release would not update
+# release exists, and refuses to when the release would not update
 # anyone.
 #
 # Usage (from the repository root, after the build jobs uploaded their bundles
@@ -19,8 +19,8 @@
 #     version (the app rejects a signature that does not).
 #
 # `reports_started` tells the version installed now that this release says
-# when it has started, so the version it replaces is kept until it does
-# (ADR-089). A release made before that mechanism lacks it and would never
+# when it has started, so the version it replaces is kept until it does.
+# A release made before that mechanism lacks it and would never
 # say so, and is installed without being watched.
 set -euo pipefail
 

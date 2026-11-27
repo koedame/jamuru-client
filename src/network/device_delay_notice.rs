@@ -1,5 +1,4 @@
-//! Telling the others in the room the delay of this app's audio devices
-//! (REQ-CON-035).
+//! Telling the others in the room the delay of this app's audio devices.
 //!
 //! The delay is measured in the settings (`audio::delay_meter`) and is a
 //! number of milliseconds for the sender's own input and output. It is all the
@@ -43,7 +42,6 @@ mod tests {
     use super::super::settings_help::PeerBody;
     use super::*;
 
-    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_notice_travels_it_is_a_peer_message_under_its_own_topic_with_only_the_number() {
         let body = serde_json::to_value(PeerBody::DeviceDelay(DeviceDelayNotice::of(Some(23.44))))
@@ -62,7 +60,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-035
     #[test]
     fn when_the_sender_has_no_figure_the_notice_says_so() {
         let body =
@@ -74,7 +71,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-035
     #[test]
     fn a_number_that_cannot_be_a_delay_is_not_stated() {
         assert_eq!(DeviceDelayNotice::of(Some(-1.0)).delay_ms, None);

@@ -1,4 +1,4 @@
-//! The rule for the jamuru server a release build is given (ADR-030).
+//! The rule for the jamuru server a release build is given.
 //!
 //! Shared by the app's build script, which enforces it, and
 //! `tests/distribution_config_test.rs`, which pins it down. Only `std`, as a

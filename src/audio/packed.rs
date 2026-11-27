@@ -1,4 +1,4 @@
-//! Lossless packing of 24-bit PCM audio packets (ADR-111)
+//! Lossless packing of 24-bit PCM audio packets
 //!
 //! Neighbouring samples of a waveform are close to each other, so what is left
 //! of a sample after predicting it from the ones before is a small number, and
@@ -770,8 +770,6 @@ mod tests {
     }
 
     /// Lossless is the point: what comes out is the 24-bit integer that went in.
-    ///
-    /// Verifies: REQ-AUD-131
     #[test]
     fn what_is_packed_comes_back_as_the_same_24_bit_samples() {
         let mut rng = Rng(0x2545_F491_4F6C_DD1D);
@@ -897,8 +895,6 @@ mod tests {
 
     /// The size of a packet follows the audio and so tells a watcher of the encrypted
     /// traffic about it; there are only so many sizes it can be.
-    ///
-    /// Verifies: REQ-AUD-132
     #[test]
     fn the_size_of_a_packet_is_one_of_a_few_sizes() {
         let mut rng = Rng(11);
@@ -964,7 +960,6 @@ mod tests {
         ));
     }
 
-    /// Verifies: REQ-AUD-133
     #[test]
     fn a_damaged_packet_is_refused_and_does_not_panic() {
         let mut rng = Rng(99);
@@ -996,7 +991,6 @@ mod tests {
         assert!(decode_packed(&[3], &mut out).is_err());
     }
 
-    /// Verifies: REQ-AUD-133
     #[test]
     fn a_packet_that_claims_more_samples_than_a_packet_holds_is_refused_before_anything_is_made_for_them(
     ) {

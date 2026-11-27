@@ -1,8 +1,8 @@
 /**
  * AboutTab - The update check, and the terms of use, the license and the pages published for users
  *
- * The legal rows themselves live in LegalSection (ADR-072); the update check
- * in UpdateSection (ADR-082), shown when it is given.
+ * The legal rows themselves live in LegalSection; the update check
+ * in UpdateSection, shown when it is given.
  */
 
 import { LegalSection, type LegalSectionProps } from "../../Terms/LegalSection";

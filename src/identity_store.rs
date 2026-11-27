@@ -1,10 +1,10 @@
-//! Where this installation's device identity lives (ADR-024)
+//! Where this installation's device identity lives
 //!
 //! jamuru has no account registration. The first time the app or the CLI
 //! connects, it generates an Ed25519 key pair (see
 //! [`crate::network::DeviceIdentity`]), stores the secret key in the config
 //! directory, and reuses it from then on: the app and the CLI on one machine
-//! are the same device, as they share `config.toml` (ADR-027).
+//! are the same device, as they share `config.toml`.
 //!
 //! The identity lives in `device_identity.json`, deliberately separate from
 //! `config.toml`: copying a settings file between machines must not clone a
@@ -56,8 +56,8 @@ pub fn load_or_create_at(path: &Path) -> Result<DeviceIdentity, String> {
 
     let identity = DeviceIdentity::generate();
     write_identity(path, &identity)?;
-    // Not the identifier itself: it is internal (REQ-GUI-002) and this line
-    // ends up in a log file users send to others (ADR-036).
+    // Not the identifier itself: it is internal and this line
+    // ends up in a log file users send to others.
     info!("Generated a new device identity");
     Ok(identity)
 }
@@ -162,7 +162,6 @@ pub fn load_installation_identity() -> DeviceIdentity {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-IDT-001
     #[test]
     fn test_first_launch_generates_and_persists_an_identity() {
         let dir = tempfile::tempdir().unwrap();
@@ -173,7 +172,6 @@ mod tests {
         assert_eq!(identity.device_id().len(), crate::network::DEVICE_ID_LEN);
     }
 
-    /// Verifies: REQ-IDT-001
     #[test]
     fn test_later_launches_reuse_the_same_device_id() {
         let dir = tempfile::tempdir().unwrap();
@@ -188,7 +186,6 @@ mod tests {
         assert_eq!(first.secret_bytes(), second.secret_bytes());
     }
 
-    /// Verifies: REQ-IDT-001
     #[test]
     fn test_separate_installations_get_separate_device_ids() {
         let dir_a = tempfile::tempdir().unwrap();
@@ -200,7 +197,6 @@ mod tests {
         assert_ne!(a.device_id(), b.device_id());
     }
 
-    /// Verifies: REQ-IDT-001
     #[test]
     fn test_missing_parent_directory_is_created() {
         let dir = tempfile::tempdir().unwrap();
@@ -214,7 +210,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-IDT-006
     #[cfg(unix)]
     #[test]
     fn test_identity_file_is_owner_only() {

@@ -1,5 +1,5 @@
 /**
- * Helping with settings in the main window (ADR-044 §5): the state of the help
+ * Helping with settings in the main window: the state of the help
  * this app gives and receives, built from the events the backend sends, and what
  * to show for it - the asking, the question the helper answers, and the bar
  * that shows help is going on (with Stop).

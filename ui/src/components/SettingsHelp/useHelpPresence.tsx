@@ -1,6 +1,5 @@
 /**
- * Where the two people of a settings help are looking (ADR-044 §5,
- * REQ-RMT-034): sends where this screen's person is pointing and focusing,
+ * Where the two people of a settings help are looking: sends where this screen's person is pointing and focusing,
  * hears where the other person is, and gives the frames to draw for it.
  *
  * Both windows use it. The helper's window sends through the help portal

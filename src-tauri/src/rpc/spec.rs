@@ -1,4 +1,4 @@
-//! The permission table: which portal may call which method (ADR-044).
+//! The permission table: which portal may call which method.
 //!
 //! This is the one place that says what each way into the app may do. A row is
 //! a method, a column is a portal. A method that is not in the table cannot be
@@ -7,10 +7,10 @@
 //! registered without deciding who may call it.
 //!
 //! Change a row's access and the generated public document
-//! (`docs-spec/api/remote-permissions.md`) stops matching until it is
+//! (`docs/remote-permissions.md`) stops matching until it is
 //! regenerated, which is what keeps a change of range visible in review.
 
-/// A way into the app (ADR-044 §1).
+/// A way into the app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Portal {
     /// The app's own webview (IPC).
@@ -36,7 +36,7 @@ impl Access {
     /// Every portal.
     pub const ALL: Access = Access(15);
     /// Every portal but settings help: the method would act outside the range
-    /// a person who is helping has been trusted with (ADR-044 §3).
+    /// a person who is helping has been trusted with.
     pub const NO_HELP: Access = Access(7);
     /// The app's own webview and settings help, for what the two ends of a
     /// help say to each other.
@@ -111,9 +111,9 @@ macro_rules! app_commands {
 app_commands! {
     [Access::ALL] "動作確認用のあいさつ" crate::greet;
 
-    // Getting into a room is the session's, one command per step (ADR-044
-    // §6). Reading it is open to a helper - the room is theirs to see - but
-    // they may not move or speak for the person (ADR-044 §3).
+    // Getting into a room is the session's, one command per step. Reading it
+    // is open to a helper - the room is theirs to see - but
+    // they may not move or speak for the person.
     [Access::ALL] "接続・入室の状態を読む" crate::session::session_get;
     [Access::NO_HELP] "サーバーへの接続を最初からやり直す" crate::session::session_connect;
     [Access::NO_HELP] "ルームを作って入る" crate::session::session_create;
@@ -128,7 +128,7 @@ app_commands! {
     [Access::NO_HELP] "チャットのリアクションを付け外しする" crate::signaling::signaling_toggle_reaction;
     // What is opened is picked by a click on a participant's text, on the app's own screen only.
     [Access::SCREEN_ONLY] "チャットに書かれた Web のアドレスをブラウザで開く" crate::chat_link::chat_open_link;
-    // Starting and stopping a help is the person's own (ADR-044 §3).
+    // Starting and stopping a help is the person's own.
     [Access::NO_HELP] "設定の手伝いを頼む" crate::signaling::settings_help_ask;
     [Access::NO_HELP] "設定の手伝いの依頼に答える" crate::signaling::settings_help_answer;
     [Access::NO_HELP] "設定の手伝いを始める" crate::signaling::settings_help_begin;
@@ -137,20 +137,20 @@ app_commands! {
     // this; a helped app's own help portal may not start a help of its own.
     [Access::NO_HELP] "手伝いの画面から、手伝っている相手のアプリの操作を呼ぶ" crate::help_link::help_call;
     [Access::NO_HELP] "手伝いの画面が、いま誰を手伝っているかを読む" crate::help_link::help_window_info;
-    // What a help did is the helped person's to read and to undo (REQ-RMT-035).
+    // What a help did is the helped person's to read and to undo.
     [Access::NO_HELP] "手伝いの記録を読む" crate::help_record::help_record_get;
     [Access::NO_HELP] "手伝いで変わった音声の設定を、手伝いの前に戻す" crate::help_record::help_undo;
     [Access::NO_HELP] "手伝いの記録を読み終えて、片付ける" crate::help_record::help_record_dismiss;
     [Access::NO_HELP] "手伝いの記録のウィンドウを開く" crate::help_record::help_log_window_open;
     [Access::NO_HELP] "手伝いの記録のウィンドウから、手伝いを止めるよう画面に頼む" crate::help_record::help_stop_request;
     // What the two ends of a help tell each other of where they are looking:
-    // parts and places only, ten a second at most (REQ-RMT-034). Only a helper
+    // parts and places only, ten a second at most. Only a helper
     // sends the first; only the person's own screen publishes the second.
     [Access::HELP] "手伝う人が、いま指している部品とフォーカスしている部品を、相手の画面に伝える" crate::help_presence::help_presence;
     [Access::NO_HELP] "手伝われる人の画面が、いま指している部品とフォーカスしている部品を、手伝う人の窓に伝える" crate::help_presence::help_presence_publish;
 
     // Asking another participant to buffer one's audio for longer, and answering such an ask, is
-    // the person's own (ADR-097).
+    // the person's own.
     [Access::NO_HELP] "相手に、自分の音を受けるバッファを増やすよう頼む" crate::signaling::buffer_asks::buffer_request_ask;
     [Access::NO_HELP] "相手へのバッファの頼みを取り下げる" crate::signaling::buffer_asks::buffer_request_withdraw;
     [Access::NO_HELP] "相手からのバッファの頼みを受ける・断る" crate::signaling::buffer_asks::buffer_request_answer;
@@ -236,11 +236,11 @@ app_commands! {
     // screen is the helped app's, and a newer release is not theirs to act on.
     [Access::NO_HELP] "自分で入れ替えられない配布形態に、新しい版が出ているかを読む" crate::updater::update_notice_get;
     // Looking is the person's own, like the notice above. Installing is too,
-    // and only from the app's own screen (ADR-082): it restarts the app.
+    // and only from the app's own screen: it restarts the app.
     [Access::NO_HELP] "実行中の版と、このビルドで更新について何ができるかを読む" crate::updater::update_status;
     [Access::NO_HELP] "新しい版が出ているかを、いま確かめる" crate::updater::update_check;
     [Access::SCREEN_ONLY] "新しい版を入れて再起動する（セッション中は断る）" crate::updater::update_install;
-    // Before the app opens there is only the app's own screen (ADR-089). The
+    // Before the app opens there is only the app's own screen. The
     // main screen saying it is up is what keeps a version just installed, so
     // nothing else may say it.
     [Access::SCREEN_ONLY] "起動前の更新がどこまで進んだかを読む" crate::updater::startup::update_startup_progress;
@@ -266,7 +266,7 @@ app_commands! {
     [Access::ALL] "その記録を送るとき診断ログも添えるかを読む" crate::usage::usage_previous_hang_attaches_log;
     // Consent to send this one report is the person's own, like the toggle.
     [Access::NO_HELP] "前回終了できなかった記録を送る・捨てる" crate::usage::usage_send_previous_hang;
-    // The log can carry a room ID and other participants' identifiers (ADR-036),
+    // The log can carry a room ID and other participants' identifiers,
     // which a helper may not read (see the fixed "できない操作" text below).
     [Access::NO_HELP] "問題の報告として送る診断ログの見本を読む" crate::report_problem::report_problem_preview;
     [Access::NO_HELP] "問題を報告する（診断ログとコメントを送る）" crate::report_problem::report_problem_send;
@@ -293,16 +293,13 @@ mod tests {
 
     /// The public document lists what a person who is helping may do, from
     /// this table. Regenerate with `JAMJAM_UPDATE_REMOTE_PERMISSIONS=1 cargo test -p jamuru-app rpc::spec`.
-    const DOC_PATH: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../docs-spec/api/remote-permissions.md"
-    );
+    const DOC_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/remote-permissions.md");
 
     const HEAD: &str = "<!-- このドキュメントは src-tauri/src/rpc/spec.rs の表から作る。直すときは表を直して再生成する -->
 
 # 手伝いで相手に何をされうるか
 
-設定の手伝い（[ADR-044](../adr/ADR-044-portals-and-permissions.md)）で、手伝う人が手伝われる人のアプリに対してできる操作の一覧。
+設定の手伝いで、手伝う人が手伝われる人のアプリに対してできる操作の一覧。
 
 手伝いは、手伝われる人が相手を選んで頼み、頼まれた人が「手伝う」と答えると始まる。始まったあとは、手伝う人の手元に相手のアプリと同じ画面が
 別のウィンドウで開き、そこでの操作が相手のアプリに届く。1 つ 1 つの操作は聞かれない。かわりに、届いた操作を相手のアプリが
@@ -400,7 +397,6 @@ mod tests {
         std::fs::write(out, table).unwrap();
     }
 
-    /// Verifies: REQ-RMT-022
     #[test]
     fn a_method_has_one_row() {
         let mut names: Vec<&str> = all_methods().map(|m| m.name).collect();
@@ -417,8 +413,6 @@ mod tests {
     /// The methods that read or drive the screen and the app's internals are
     /// for testing and debugging only: neither the person's own screen nor a
     /// person helping may call them.
-    ///
-    /// Verifies: REQ-RMT-025
     #[test]
     fn a_tool_method_is_never_open_to_the_screen_or_to_a_helper() {
         for method in all_methods().filter(|m| m.kind == Kind::Native) {
@@ -440,11 +434,9 @@ mod tests {
         }
     }
 
-    /// What a helper is not trusted with (ADR-044 §3): speaking for the
+    /// What a helper is not trusted with: speaking for the
     /// person, leaving or moving them, and changing where the app connects or
     /// what it sends.
-    ///
-    /// Verifies: REQ-RMT-025
     #[test]
     fn a_helper_may_not_speak_move_or_redirect_the_person() {
         for name in [
@@ -492,9 +484,6 @@ mod tests {
     /// added to the table with more access than it should have is caught by this
     /// list rather than by nobody. Adding to it is a decision to give every
     /// helper that power over every person they help.
-    ///
-    /// Verifies: REQ-RMT-025
-    /// Verifies: REQ-UPD-023
     #[test]
     fn a_helper_may_neither_look_for_an_update_nor_install_one() {
         for name in ["update_status", "update_check", "update_install"] {
@@ -508,8 +497,6 @@ mod tests {
     }
 
     /// Installing restarts the app, so only the person's own screen asks.
-    ///
-    /// Verifies: REQ-UPD-023
     #[test]
     fn only_the_apps_own_screen_may_install_an_update() {
         let method = find("update_install").unwrap();
@@ -521,8 +508,6 @@ mod tests {
 
     /// The main screen saying it is up keeps a version just installed, and
     /// the update before the app opens is the person's own.
-    ///
-    /// Verifies: REQ-UPD-025, REQ-UPD-027
     #[test]
     fn only_the_apps_own_screen_may_say_it_is_up_or_skip_the_update_before_it_opens() {
         for name in [
@@ -593,8 +578,6 @@ mod tests {
     }
 
     /// Muting and the audio settings are what a helper is there to do.
-    ///
-    /// Verifies: REQ-RMT-025
     #[test]
     fn a_helper_may_mute_and_change_the_audio_settings() {
         for name in [
@@ -612,8 +595,6 @@ mod tests {
     }
 
     /// Only the app's own screen reports how a call settled.
-    ///
-    /// Verifies: REQ-RMT-022
     #[test]
     fn only_the_screen_may_report_how_a_call_settled() {
         let access = find("rpc_settle").unwrap().access;
@@ -623,7 +604,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-RMT-022
     #[test]
     fn the_public_document_lists_what_the_permission_table_lets_a_helper_do() {
         let generated = help_permissions_doc();
@@ -633,7 +613,7 @@ mod tests {
         let committed = std::fs::read_to_string(DOC_PATH).unwrap_or_default();
         assert_eq!(
             committed, generated,
-            "docs-spec/api/remote-permissions.md is out of date; regenerate it with \
+            "docs/remote-permissions.md is out of date; regenerate it with \
              JAMJAM_UPDATE_REMOTE_PERMISSIONS=1"
         );
     }

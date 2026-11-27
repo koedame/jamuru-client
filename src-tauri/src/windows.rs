@@ -18,7 +18,7 @@ pub mod labels {
     pub const MIXER: &str = "mixer";
     pub const CHAT: &str = "chat";
     pub const SETTINGS: &str = "settings";
-    /// Shown while the app updates before it opens (ADR-089).
+    /// Shown while the app updates before it opens.
     pub const UPDATING: &str = "updating";
 }
 
@@ -408,7 +408,7 @@ pub fn window_resize_main(
 
 /// Whether closing the window `label` must first be confirmed: the main
 /// window while in a room, since closing it ends the app and drops the person
-/// out of the room unasked (REQ-CON-137).
+/// out of the room unasked.
 fn close_needs_leave_confirmation(label: &str, in_room: bool) -> bool {
     label == labels::MAIN && in_room
 }
@@ -425,7 +425,7 @@ pub fn close_requested(app: &AppHandle, label: &str, api: &tauri::CloseRequestAp
     }
     api.prevent_close();
     // Before the screen is asked: whether or not it answers, nothing of the
-    // person's room goes out while the question stands (REQ-CON-138).
+    // person's room goes out while the question stands.
     let held = app.clone();
     tauri::async_runtime::spawn(async move {
         held.state::<crate::streaming::StreamingState>()
@@ -450,19 +450,16 @@ pub fn window_quit_app(app: AppHandle) {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-CON-137
     #[test]
     fn when_the_main_window_is_closed_in_a_room_the_close_is_confirmed_first() {
         assert!(close_needs_leave_confirmation(labels::MAIN, true));
     }
 
-    /// Verifies: REQ-CON-137
     #[test]
     fn when_the_main_window_is_closed_outside_a_room_it_closes_without_asking() {
         assert!(!close_needs_leave_confirmation(labels::MAIN, false));
     }
 
-    /// Verifies: REQ-CON-137
     #[test]
     fn when_another_window_is_closed_in_a_room_it_closes_without_asking() {
         for label in [labels::SETTINGS, labels::CHAT, "help-1"] {
@@ -470,7 +467,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-010
     #[test]
     fn when_the_settings_window_is_opened_to_check_for_updates_its_address_says_so() {
         assert_eq!(
@@ -488,8 +484,6 @@ mod tests {
     /// webview may call the listener only from the windows the capability
     /// names. The window shown while updating once was not, and never heard
     /// how far the update had come.
-    ///
-    /// Verifies: REQ-UPD-025
     #[test]
     fn every_window_the_app_opens_may_listen_for_what_it_is_told() {
         let capability: serde_json::Value =

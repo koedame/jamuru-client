@@ -1,5 +1,5 @@
 /**
- * HelperScreen - the window someone helping works in (ADR-044 §5).
+ * HelperScreen - the window someone helping works in.
  *
  * It is the helped app's own screen, drawn by the same code (`MainScreen`) from
  * the helped app's state: this window's backend is theirs, through the relay

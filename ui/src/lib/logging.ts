@@ -1,5 +1,5 @@
 /**
- * Webview side of the diagnostic log file (ADR-036).
+ * Webview side of the diagnostic log file.
  *
  * An installed app has no developer tools, so the webview's `console` output,
  * uncaught errors and failed Tauri commands are sent to the app's log file

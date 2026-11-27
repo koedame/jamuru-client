@@ -1,6 +1,6 @@
 /**
  * PeerBufferSection - the buffer one participant's audio is played from, and
- * the two ways to change it (ADR-097): the user holds it at a length of their
+ * the two ways to change it: the user holds it at a length of their
  * own, or asks the participant to hold the buffer their side plays the user's
  * audio from. Shown in the participant's dialog under the latency breakdown.
  */

@@ -47,7 +47,7 @@ struct Cli {
 ///
 /// All optional: an unset flag falls back to the preset and then to the
 /// config file the GUI writes, so `jamuru` and the app behave the same way
-/// without repeating the flags (ADR-027).
+/// without repeating the flags.
 #[derive(clap::Args, Clone, Debug)]
 struct AudioArgs {
     /// Preset name (see `jamuru preset list`)
@@ -436,7 +436,7 @@ fn device_id_of(wanted: &str, available: &[AudioDevice], kind: &str) -> Result<S
     }
 }
 
-/// Prints the presets with the numbers ADR-019 fixes for them.
+/// Prints the presets with the numbers their latency budget fixes for them.
 fn list_presets() {
     let current = jamjam::config::load_config().unwrap_or_default().preset;
 
@@ -458,7 +458,7 @@ fn list_presets() {
     }
     println!(
         "\nThe preset in use is marked with *. LATENCY is the design value at 48kHz, \
-         BUDGET its ceiling (ADR-019)."
+         BUDGET its ceiling."
     );
 }
 
@@ -669,7 +669,7 @@ struct LinkSeries {
     /// The round trip of the link itself (ping and answer), in milliseconds
     rtt_ms: Vec<f32>,
     /// The way from this computer to the peer, timed by the clocks of both ends
-    /// ([`jamjam::network::OneWayDelays`]); off by the gap between them (REQ-CLI-016)
+    /// ([`jamjam::network::OneWayDelays`]); off by the gap between them
     up_ms: Vec<f32>,
     /// The way from the peer to this computer, off by the same gap in the other direction
     down_ms: Vec<f32>,
@@ -685,7 +685,7 @@ struct Observed {
     /// Seconds from entering the room to the link coming up
     connected_after: HashMap<String, f64>,
     /// How many addresses STUN saw the audio socket at when asked again while a link heard
-    /// nothing (ADR-129)
+    /// nothing
     restun_seen: usize,
     /// How many times the room was told an address it had not been told
     restun_told_again: u32,
@@ -888,7 +888,7 @@ impl Controls {
 /// Interprets a line as a command or as chat.
 ///
 /// Slash commands exist because a debugging session needs the controls the
-/// mixer offers - muting above all - without a second window (ADR-027).
+/// mixer offers - muting above all - without a second window.
 fn handle_input_line(line: &str, audio: Option<&Controls>) -> Input {
     match line {
         "/help" | "/?" => {
@@ -945,7 +945,7 @@ fn handle_input_line(line: &str, audio: Option<&Controls>) -> Input {
 /// message is identical. The steps from reaching the server to opening a link to whoever
 /// publishes an address - also later, when the creator is alone in the room until someone
 /// joins, and again after the connection was lost - are the core's room driver, which the app
-/// runs too (ADR-044, ADR-077); this is what it steers here and what the prompt does.
+/// runs too; this is what it steers here and what the prompt does.
 #[allow(clippy::too_many_arguments)]
 async fn run_room_session(
     server: String,
@@ -1444,7 +1444,7 @@ impl Backend for CliBackend {
     }
 
     /// Tells the room where to send audio. Done before any peer is known, because the peer needs
-    /// an address to send to (ADR-026).
+    /// an address to send to.
     async fn advertise(&self, conn: u32) -> Result<(), String> {
         let Some(message) = self.audio().as_ref().map(AudioSession::advertisement) else {
             return Ok(());
@@ -1552,11 +1552,11 @@ impl LinkSummary {
 }
 
 /// The audio half of a session: the audio session of the core library, which the app runs
-/// too, steered from the prompt (ADR-077).
+/// too, steered from the prompt.
 ///
 /// Received audio takes the app's path - decoded on arrival, held in the play-out buffer,
 /// concealed when a frame is missing, FEC-recovered where the preset sends FEC - so a problem
-/// with jitter or loss sounds here the way it sounds in the app (ADR-027, ADR-028). And, as in
+/// with jitter or loss sounds here the way it sounds in the app. And, as in
 /// the app, there is a link to everyone in the room who has an address, what is played is the
 /// mix of them and what is captured goes to each of them.
 struct AudioSession {
@@ -2005,10 +2005,8 @@ mod tests {
     }
 
     /// The session commands are what make the CLI usable for debugging without
-    /// a second window (ADR-027): they have to be recognised, act, and not be
+    /// a second window: they have to be recognised, act, and not be
     /// mistaken for chat.
-    ///
-    /// Verifies: REQ-CLI-002
     #[test]
     fn session_commands_are_recognised_and_act() {
         let (audio, sent) = controls();
@@ -2049,8 +2047,6 @@ mod tests {
 
     /// Anything that is not a command is chat, and an unrecognised command is
     /// not sent to the room by accident.
-    ///
-    /// Verifies: REQ-CLI-002
     #[test]
     fn only_commands_are_intercepted() {
         let (audio, sent) = controls();
@@ -2072,8 +2068,6 @@ mod tests {
 
     /// Muting is meaningless in a chat-only session; saying so beats silently
     /// setting a flag nothing reads.
-    ///
-    /// Verifies: REQ-CLI-002
     #[test]
     fn muting_without_audio_reports_that_there_is_nothing_to_mute() {
         assert!(matches!(handle_input_line("/mute", None), Input::Handled));
@@ -2081,8 +2075,6 @@ mod tests {
 
     /// `/monitor` is the CLI's switch for hearing yourself; it has to reach the
     /// session the audio callbacks read, not just print a line.
-    ///
-    /// Verifies: REQ-CLI-006
     #[test]
     fn monitor_commands_switch_local_monitoring() {
         let (audio, sent) = controls();
@@ -2159,7 +2151,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-177
     #[test]
     fn a_session_that_asked_stun_again_reports_how_many_addresses_it_saw_and_how_often_it_told_the_room(
     ) {
@@ -2182,8 +2173,6 @@ mod tests {
     /// A session with a link to each of the others measured each of them. What a report of a
     /// room of two read - `peer`, `network`, `playout` - is the first one that came up, so the
     /// tools that read it go on reading the same thing; `peers` has all of them.
-    ///
-    /// Verifies: REQ-CLI-011
     #[test]
     fn a_session_linked_to_two_peers_reports_each_and_the_first_that_came_up_at_the_top() {
         let links = [
@@ -2216,8 +2205,6 @@ mod tests {
 
     /// What the report says of a link is the kind of address, never the address: the report
     /// leaves the machine in CI, and the participants are not to be found by it.
-    ///
-    /// Verifies: REQ-CLI-013
     #[test]
     fn a_link_is_reported_by_the_kind_of_its_address_and_how_it_came_up() {
         let mut linked = link("ben", Some("[2001:db8::2]:5000"), 100, 90);
@@ -2265,7 +2252,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CLI-015
     #[test]
     fn a_link_is_reported_with_why_it_runs_there_and_when_the_first_packets_went() {
         let mut linked = link("ben", Some("203.0.113.7:5000"), 100, 90);
@@ -2306,7 +2292,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CLI-013
     #[test]
     fn when_nothing_was_sampled_the_spread_of_a_link_is_null() {
         let report = session_report(
@@ -2322,7 +2307,6 @@ mod tests {
         assert_eq!(report["peers"][0]["link"]["route"], serde_json::Value::Null);
     }
 
-    /// Verifies: REQ-CLI-013
     #[test]
     fn the_spread_of_the_samples_gives_the_minimum_the_median_the_95th_percentile_and_the_maximum()
     {
@@ -2338,7 +2322,6 @@ mod tests {
         assert!((spread["stdev"].as_f64().unwrap() - 28.866).abs() < 0.01);
     }
 
-    /// Verifies: REQ-CLI-007
     #[test]
     fn a_session_nobody_linked_to_reports_no_peer_and_empty_counters() {
         let report = session_report(&settings(), &[], Duration::ZERO, None, &Observed::default());
@@ -2349,7 +2332,6 @@ mod tests {
         assert_eq!(report["peers"], serde_json::json!([]));
     }
 
-    /// Verifies: REQ-CLI-006
     #[test]
     fn monitoring_without_audio_reports_that_there_is_nothing_to_monitor() {
         assert!(matches!(
@@ -2372,8 +2354,6 @@ mod tests {
 
     /// The app reads a saved device as an id and opens the device whose id it
     /// is. A name saved as it was typed matched no device when a session started.
-    ///
-    /// Verifies: REQ-CLI-012
     #[test]
     fn a_device_chosen_by_name_is_saved_as_its_id() {
         let available = vec![
@@ -2391,7 +2371,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CLI-012
     #[test]
     fn the_default_keyword_saves_no_choice() {
         let available = vec![device("alsa:hw:0,0", "Built-in Audio")];
@@ -2402,7 +2381,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CLI-004, REQ-CLI-012
     #[test]
     fn a_device_the_machine_does_not_have_is_refused_naming_how_to_list_the_real_ones() {
         let available = vec![device("alsa:hw:0,0", "Built-in Audio")];
@@ -2417,7 +2395,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CLI-012
     #[test]
     fn a_name_that_two_devices_share_is_refused_naming_their_ids() {
         let available = vec![device("alsa:hw:2,0", "Twin"), device("alsa:hw:3,0", "Twin")];

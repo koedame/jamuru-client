@@ -1,6 +1,6 @@
 //! "Report a problem": the user's own action, from the Diagnostics tab, to
 //! send the current `jamuru.log` (masked, tail-capped) and a comment to a
-//! receiver kept apart from usage reporting (ADR-058, REQ-RPT-001..004).
+//! receiver kept apart from usage reporting.
 //! Pressing send is the only consent asked; there is no setting that gates
 //! this, and it does not touch `usage_reporting`.
 
@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::logging::redact_secrets;
 
-/// `jamuru.log` itself is capped at 5 MiB (ADR-036 §6); this feature sends
+/// `jamuru.log` itself is capped at 5 MiB; this feature sends
 /// far less of it, tail-first, so the upload stays quick on a bad connection
 /// and because the most recent activity is what an ongoing problem needs.
 pub const MAX_LOG_BYTES: usize = 512 * 1024;
@@ -35,7 +35,7 @@ trait ReportTransport: Send + Sync {
 }
 
 /// Sends to the jamuru server the build was made for. This is a separate
-/// channel from usage reporting's (ADR-037 decision 7 keeps `jamuru.log`
+/// channel from usage reporting's (usage reporting keeps `jamuru.log`
 /// itself apart from that channel; this feature is a third one, gated by
 /// the user's own action rather than a setting).
 struct HttpReportTransport {
@@ -107,11 +107,11 @@ fn capped_comment(comment: &str) -> String {
 }
 
 /// Reads `jamuru.log`, masked the same way `log_frontend` masks a webview
-/// line (ADR-036 §7) and capped to [`MAX_LOG_BYTES`]. The preview command
+/// line and capped to [`MAX_LOG_BYTES`]. The preview command
 /// and the send command both call this, so what is shown is exactly what is
-/// sent (REQ-RPT-002).
+/// sent.
 ///
-/// Generic over the runtime so `usage.rs`'s automatic hang report (ADR-060)
+/// Generic over the runtime so `usage.rs`'s automatic hang report
 /// can call it too, with the `AppHandle` startup builds directly rather
 /// than one a Tauri command received.
 fn read_log<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
@@ -125,7 +125,7 @@ fn read_log<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
 }
 
 /// The text `report_problem_send` will submit for `jamuru.log`, so the
-/// screen can show it before the user decides to send (REQ-RPT-002).
+/// screen can show it before the user decides to send.
 #[tauri::command]
 pub fn report_problem_preview(app: AppHandle) -> Result<String, String> {
     read_log(&app)
@@ -133,11 +133,11 @@ pub fn report_problem_preview(app: AppHandle) -> Result<String, String> {
 
 /// Sends `jamuru.log` (masked, capped) and `comment` (capped) to the problem
 /// report intake. Shared by the manual "Report a problem" command below,
-/// the confirmed hang report (`usage.rs`, ADR-059) and the automatic one
-/// sent while reporting is already on (`usage.rs`, ADR-060), so all three go
+/// the confirmed hang report (`usage.rs`) and the automatic one
+/// sent while reporting is already on (`usage.rs`), so all three go
 /// through the one send path and there is only one place that builds the
 /// body. Refuses until the user has agreed to the terms, like every command
-/// that reaches the network (REQ-TRM-003).
+/// that reaches the network.
 pub async fn send_log_report<R: Runtime>(app: &AppHandle<R>, comment: &str) -> Result<(), String> {
     crate::terms::require_accepted(app)?;
     let log = read_log(app)?;
@@ -165,7 +165,7 @@ pub async fn send_log_report<R: Runtime>(app: &AppHandle<R>, comment: &str) -> R
 /// Sends the current `jamuru.log` (masked, capped) and `comment` (capped) to
 /// the problem report intake. This is the only consent asked for this
 /// report: there is no setting to turn on first, and it does not read or
-/// change `usage_reporting` (REQ-RPT-001).
+/// change `usage_reporting`.
 #[tauri::command]
 pub async fn report_problem_send(app: AppHandle, comment: String) -> Result<(), String> {
     send_log_report(&app, &comment).await
@@ -180,7 +180,6 @@ mod tests {
         assert_eq!(tail("short", 100), "short");
     }
 
-    /// Verifies: REQ-RPT-003
     #[test]
     fn long_text_keeps_the_end_and_marks_the_cut() {
         let text = "a".repeat(10);
@@ -208,7 +207,6 @@ mod tests {
         assert_eq!(capped_comment("hello"), "hello");
     }
 
-    /// Verifies: REQ-RPT-004
     #[test]
     fn comment_over_the_cap_is_cut_by_unicode_scalar_count_not_bytes() {
         let comment = "あ".repeat(MAX_COMMENT_CHARS + 10);
@@ -218,7 +216,6 @@ mod tests {
         assert_eq!(result.chars().count(), MAX_COMMENT_CHARS);
     }
 
-    /// Verifies: REQ-RPT-003
     #[test]
     fn masking_runs_before_the_tail_cap_so_a_secret_within_the_kept_window_is_still_masked() {
         // The secret sits inside the last 15 characters kept by `tail`, so
@@ -283,7 +280,6 @@ mod tests {
         assert!(!transport.send(b"{}".to_vec()).await);
     }
 
-    /// Verifies: REQ-TRM-003
     #[tokio::test]
     async fn the_terms_are_not_agreed_to_and_a_report_is_sent_refuses_before_reading_the_log() {
         let app = tauri::test::mock_app();

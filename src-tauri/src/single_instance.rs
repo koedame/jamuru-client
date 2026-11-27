@@ -9,7 +9,7 @@
 //! devices.
 //!
 //! The second copy hands its arguments (the link) to the first, which brings
-//! its window forward, and exits (ADR-085).
+//! its window forward, and exits.
 
 use std::ffi::OsStr;
 
@@ -18,7 +18,7 @@ use tracing::warn;
 
 use crate::windows::labels;
 
-/// Set by the GUI E2E harness (ADR-025), which starts several apps at once,
+/// Set by the GUI E2E harness, which starts several apps at once,
 /// each with its own `$HOME` and control port.
 const E2E_PORT_ENV: &str = "JAMJAM_E2E_CONTROL_PORT";
 
@@ -56,13 +56,11 @@ fn show_main_window(app: &AppHandle) {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-CON-143
     #[test]
     fn the_e2e_harness_starts_several_apps_at_once_the_app_does_not_hand_over_to_one_running() {
         assert!(!wanted(Some(OsStr::new("17891"))));
     }
 
-    /// Verifies: REQ-CON-143
     #[test]
     fn nothing_asks_for_several_copies_a_second_copy_hands_over_to_the_one_running() {
         assert!(wanted(None));

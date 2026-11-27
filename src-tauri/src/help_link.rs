@@ -1,5 +1,5 @@
 //! The relay connections of a settings help, and the window the helper works
-//! in (ADR-044 §5).
+//! in.
 //!
 //! The helped side opens its end of the relay first, under a number it chose,
 //! and serves whatever arrives on it as the help portal: the requests go through
@@ -532,7 +532,6 @@ mod tests {
         serde_json::from_str(&sent.recv().await.expect("a request should go out")).unwrap()
     }
 
-    /// Verifies: REQ-RMT-002
     #[tokio::test]
     async fn a_call_goes_out_numbered_and_returns_what_answers_that_number() {
         let (bridge, mut out) = bridge();
@@ -562,7 +561,6 @@ mod tests {
         assert_eq!(calling.await.unwrap(), Ok(json!(true)));
     }
 
-    /// Verifies: REQ-RMT-002, REQ-RMT-025
     #[tokio::test]
     async fn a_refusal_comes_back_as_the_error_the_other_end_gave() {
         let (bridge, mut out) = bridge();
@@ -584,8 +582,6 @@ mod tests {
     }
 
     /// Answers come in any order.
-    ///
-    /// Verifies: REQ-RMT-002
     #[tokio::test]
     async fn calls_in_flight_at_once_are_answered_each_by_its_own_number() {
         let (bridge, mut out) = bridge();
@@ -608,7 +604,6 @@ mod tests {
         assert_eq!(second.await.unwrap(), Ok(json!("second")));
     }
 
-    /// Verifies: REQ-RMT-002
     #[test]
     fn an_event_of_the_helped_app_is_handed_to_the_window_and_the_greeting_is_not() {
         let (bridge, _out) = bridge();
@@ -633,7 +628,6 @@ mod tests {
         assert_eq!(bridge.receive("not json"), None);
     }
 
-    /// Verifies: REQ-RMT-003
     #[tokio::test]
     async fn when_the_connection_ends_the_calls_waiting_fail_and_new_ones_do_too() {
         let (bridge, out) = bridge();
@@ -653,7 +647,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-002
     #[tokio::test(start_paused = true)]
     async fn a_call_the_other_end_never_answers_times_out() {
         let (bridge, _out) = bridge();

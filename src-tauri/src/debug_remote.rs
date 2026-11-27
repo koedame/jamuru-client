@@ -1,4 +1,4 @@
-//! Remote debugging: the debug portal of a beta build (ADR-044)
+//! Remote debugging: the debug portal of a beta build
 //!
 //! A beta build asks the server, at start and every half hour, whether this
 //! installation is enrolled for remote debugging. Enrolling is done on the
@@ -138,7 +138,6 @@ async fn round(app: &AppHandle) -> Round {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-RMT-021
     #[test]
     fn after_a_failure_the_wait_doubles_up_to_a_minute() {
         let mut wait = RETRY_MIN;
@@ -150,7 +149,6 @@ mod tests {
         assert_eq!(seen, vec![10, 20, 40, 60, 60, 60]);
     }
 
-    /// Verifies: REQ-RMT-021
     #[test]
     fn after_a_connection_that_held_the_wait_starts_over() {
         assert_eq!(next_wait(RETRY_MAX, STABLE_AFTER), RETRY_MIN);

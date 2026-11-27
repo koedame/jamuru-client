@@ -70,8 +70,8 @@ struct Voice {
     meter: Arc<PeerMeter>,
     ramp: GainRamp,
     /// Their audio taken from the play-out buffer and not yet played. Frames
-    /// come in whatever length their app and the rate conversion make them
-    /// (ADR-013), so what one frame of ours does not use waits for the next.
+    /// come in whatever length their app and the rate conversion make them,
+    /// so what one frame of ours does not use waits for the next.
     held: Vec<f32>,
     held_len: usize,
 }
@@ -303,8 +303,6 @@ mod tests {
 
     /// The bug this guards: with three in a room only one of the others was
     /// played, because the output callback read one play-out buffer.
-    ///
-    /// Verifies: REQ-CON-133
     #[test]
     fn two_participants_send_at_once_plays_the_sum_of_both() {
         const FRAME: u32 = 4;
@@ -326,7 +324,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-009
     #[test]
     fn each_participant_is_played_at_their_own_fader_and_the_master_scales_them_all() {
         const FRAME: u32 = 4;
@@ -349,11 +346,9 @@ mod tests {
         );
     }
 
-    /// The room is silenced for the person by taking the master to zero
-    /// (REQ-CON-138): every participant must go silent, however loud their
+    /// The room is silenced for the person by taking the master to zero:
+    /// every participant must go silent, however loud their
     /// own fader is, while the dry frame still carries what they sent.
-    ///
-    /// Verifies: REQ-CON-138
     #[test]
     fn the_master_at_zero_silences_every_participant_whatever_their_faders_are() {
         const FRAME: u32 = 4;
@@ -408,8 +403,6 @@ mod tests {
 
     /// Muting a participant must not cut their audio off in one sample: that
     /// step is the click.
-    ///
-    /// Verifies: REQ-AUD-034
     #[test]
     fn a_participant_is_muted_fades_them_out_instead_of_cutting_them_and_leaves_the_others() {
         const FRAME: u32 = 480;
@@ -447,8 +440,6 @@ mod tests {
     /// A participant whose app runs a smaller buffer sends shorter frames. The
     /// mix has to take two of theirs for one of ours, not play half a frame of
     /// silence.
-    ///
-    /// Verifies: REQ-CON-133
     #[test]
     fn a_participant_sends_shorter_frames_than_ours_is_mixed_without_gaps() {
         const OURS: u32 = 4;
@@ -473,8 +464,6 @@ mod tests {
 
     /// A frame longer than ours, as a rate conversion makes them: what one
     /// frame of ours does not use is played with the next, not dropped.
-    ///
-    /// Verifies: REQ-CON-133
     #[test]
     fn a_participant_sends_longer_frames_than_ours_keeps_the_rest_for_the_next_frame() {
         const OURS: u32 = 4;
@@ -499,8 +488,6 @@ mod tests {
 
     /// A participant whose app runs a larger buffer sends frames several
     /// times the length of ours.
-    ///
-    /// Verifies: REQ-AUD-038
     #[test]
     fn a_participant_sends_frames_four_times_ours_is_played_whole_over_four_of_our_frames() {
         const OURS: u32 = 32;
@@ -521,7 +508,6 @@ mod tests {
         assert!(close(&played, &sent), "{played:?}");
     }
 
-    /// Verifies: REQ-CON-133
     #[test]
     fn a_participant_leaves_the_mix_plays_the_others_and_frees_their_place() {
         const FRAME: u32 = 4;
@@ -548,7 +534,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-020
     #[test]
     fn a_full_room_has_a_place_for_each_of_the_fifteen_others_and_no_more() {
         const FRAME: u32 = 4;
@@ -578,7 +563,6 @@ mod tests {
             .is_none());
     }
 
-    /// Verifies: REQ-AUD-112
     #[test]
     fn nobody_is_in_the_mix_makes_one_frame_of_silence() {
         const FRAME: u32 = 32;
@@ -593,8 +577,6 @@ mod tests {
 
     /// Each strip's meter has to follow that participant, not the mix: the
     /// screen once showed every participant the same level.
-    ///
-    /// Verifies: REQ-GUI-009
     #[test]
     fn each_participants_meter_follows_their_own_audio() {
         const FRAME: u32 = 64;

@@ -1,4 +1,4 @@
-//! Reaching the server's relay for remote operation (ADR-044)
+//! Reaching the server's relay for remote operation
 //!
 //! An app that is to be operated from elsewhere holds an outbound WebSocket to
 //! the relay, which pairs it with whoever operates it. This module asks whether
@@ -59,7 +59,7 @@ pub struct RemoteEnrollment {
 }
 
 /// Asks the jamuru server at `server_url` whether this installation is
-/// enrolled, proving the device identity (ADR-024). Nothing else is sent.
+/// enrolled, proving the device identity. Nothing else is sent.
 ///
 /// Redirects are not followed, for the reason given for the signaling question
 /// (`discover_signaling_url`). Errors name no URL: the server URL may carry
@@ -359,7 +359,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-RMT-021
     #[tokio::test]
     async fn when_the_relay_goes_silent_the_read_fails_instead_of_waiting_for_ever() {
         let (url, _relay) = local_relay(false).await;
@@ -377,7 +376,6 @@ mod tests {
         assert!(started.elapsed() >= LIMIT, "{:?}", started.elapsed());
     }
 
-    /// Verifies: REQ-RMT-021
     #[tokio::test]
     async fn while_the_relay_answers_pings_a_quiet_connection_stays_up_past_the_limit() {
         let (url, _relay) = local_relay(true).await;
@@ -389,7 +387,6 @@ mod tests {
         assert!(outcome.is_err(), "the connection ended: {:?}", outcome);
     }
 
-    /// Verifies: REQ-RMT-021
     #[tokio::test]
     async fn the_silence_is_counted_across_reads_that_were_given_up() {
         let (url, _relay) = local_relay(false).await;

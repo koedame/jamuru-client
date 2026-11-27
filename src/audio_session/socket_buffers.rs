@@ -44,7 +44,6 @@ pub fn enlarge_socket_buffers(socket: &UdpSocket) {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-AUD-134
     #[test]
     fn when_the_socket_buffers_are_enlarged_then_they_are_not_smaller_than_before() {
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();

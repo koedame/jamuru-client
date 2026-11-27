@@ -237,7 +237,7 @@ impl AudioDiagnostics {
     /// the same functions `streaming_start` uses, so the diagnostics tab
     /// reports on the device a call would actually use, not a different one.
     ///
-    /// The calls into the audio driver are bounded (REQ-AUD-123): a side
+    /// The calls into the audio driver are bounded: a side
     /// whose driver does not answer within [`LIST_TIMEOUT`] is reported as
     /// unresponsive, not as having no devices.
     pub async fn run(
@@ -478,7 +478,7 @@ impl AudioDiagnostics {
 
         #[cfg(target_os = "linux")]
         let (supports_32, supports_64, min_buffer) = {
-            // PipeWire's period is at least 64 frames (REQ-AUD-036), so a
+            // PipeWire's period is at least 64 frames, so a
             // buffer of 32 arrives in lumps of 64 and the receiver breaks up
             (false, true, Some(64u32))
         };
@@ -557,8 +557,6 @@ mod tests {
 
     /// PipeWire's period is at least 64 frames, so the diagnostics must not
     /// call Linux capable of 32 (the zero-latency preset follows from it).
-    ///
-    /// Verifies: REQ-AUD-037
     #[cfg(target_os = "linux")]
     #[test]
     fn on_linux_the_diagnostics_do_not_claim_a_buffer_of_32() {
@@ -649,8 +647,6 @@ mod tests {
     /// The point of the limit: a task of the runtime that asks a hung driver
     /// must not be the one that waits, or the runtime stops with it. With a
     /// single worker, a ticker that keeps ticking shows nothing was blocked.
-    ///
-    /// Verifies: REQ-AUD-123
     #[tokio::test(flavor = "current_thread")]
     async fn when_the_driver_hangs_while_the_devices_are_read_the_runtime_keeps_running() {
         let (read, release) = reader(Some(Direction::Input));
@@ -688,7 +684,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-123
     #[tokio::test]
     async fn when_the_input_driver_hangs_the_input_is_reported_unresponsive_and_the_output_is_still_read(
     ) {
@@ -721,7 +716,6 @@ mod tests {
         assert!(!codes.contains(&"OutputDeviceUnresponsive".to_string()));
     }
 
-    /// Verifies: REQ-AUD-123
     #[tokio::test]
     async fn when_the_output_driver_hangs_the_output_is_reported_unresponsive() {
         let (read, release) = reader(Some(Direction::Output));
@@ -743,12 +737,9 @@ mod tests {
         assert_eq!(result.input_devices.len(), 1);
     }
 
-    /// Verifies: REQ-AUD-123
     /// Given the system has refused the app the microphone
     /// When the audio is diagnosed
     /// Then an error says so, and no question is raised by the diagnosis
-    ///
-    /// Verifies: REQ-CON-169
     #[tokio::test]
     async fn when_the_microphone_is_refused_the_diagnosis_says_so() {
         let (read, _release) = reader(None);
@@ -772,8 +763,6 @@ mod tests {
     /// Given the system has not been asked about the microphone yet
     /// When the audio is diagnosed
     /// Then it is noted, as information
-    ///
-    /// Verifies: REQ-CON-169
     #[tokio::test]
     async fn when_the_microphone_is_not_decided_the_diagnosis_notes_it() {
         let (read, _release) = reader(None);
@@ -798,8 +787,6 @@ mod tests {
     /// When the audio is diagnosed
     /// Then the audio grades C, as it does with no input device: no sound
     /// can be sent
-    ///
-    /// Verifies: REQ-CON-176
     #[tokio::test]
     async fn when_the_microphone_is_refused_the_audio_grades_as_with_no_input_device() {
         let (read, _release) = reader(None);
@@ -819,8 +806,6 @@ mod tests {
     /// When the audio is diagnosed
     /// Then the audio grade is what the devices give, as when it is allowed:
     /// the question comes up on joining, and allowing it there is enough
-    ///
-    /// Verifies: REQ-CON-176
     #[tokio::test]
     async fn when_the_microphone_is_not_decided_the_audio_grade_is_not_lowered() {
         let mut grades = Vec::new();

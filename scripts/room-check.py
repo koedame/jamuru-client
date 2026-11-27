@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A many-peer room check for CI (ADR-117).
+"""A many-peer room check for CI.
 
 Every participant is a headless `jamuru` that sends a tone of its own and writes
 what it hears to a file. The participants take turns: one is unmuted for a few
@@ -34,7 +34,7 @@ keyed hash stands for it, and the key is of this run alone.
 
 After its room, each runner also enters, alone and muted, a second room of the same server
 where one fixed participant of the deployment stays (the far end), and keeps the round trip to it
-(`latency`, ADR-130): the runners go in one after another, so that nothing but the far end is in
+(`latency`): the runners go in one after another, so that nothing but the far end is in
 the room while one is measured. A runner that found anyone else there, or never reached the far
 end, is told apart in the numbers and is not part of the room's verdict.
 
@@ -117,7 +117,7 @@ UDP_KEEP_SECONDS = 3000
 # How long a participant waits for the host to say when the turns start.
 START_WAIT_SECONDS = JOINED_WAIT_SECONDS + 300
 JOINED_PATTERN = re.compile(r"📥 (\S+) joined the room")
-# The latency room (ADR-130): the code is a secret, so nothing in this repository says where it is.
+# The latency room: the code is a secret, so nothing in this repository says where it is.
 LATENCY_ROOM_ENV = "ROOM_CHECK_LATENCY_ROOM"
 # The runners of this check enter the latency room as `r<run>a<attempt>-q<runner>`. Whoever is there
 # under another name is the far end.

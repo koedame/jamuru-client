@@ -41,7 +41,7 @@ pub fn read_audio_env_within(
 ///
 /// The audio devices (their names and IDs, which can carry a person's name)
 /// are part of it only when `share_devices` is set, which is while usage
-/// reporting is on (ADR-065). The display name is never part of it.
+/// reporting is on. The display name is never part of it.
 ///
 /// Blocks for up to `timeout`: call it from a blocking thread.
 pub fn client_info(
@@ -117,7 +117,6 @@ mod tests {
         .unwrap()
     }
 
-    /// Verifies: REQ-CON-032
     #[test]
     fn when_the_devices_are_not_to_be_shared_the_room_entry_info_has_no_device_name_or_id() {
         let info = info(
@@ -139,7 +138,6 @@ mod tests {
         assert!(!info.to_string().contains("AirPods"), "{info}");
     }
 
-    /// Verifies: REQ-CON-032
     #[test]
     fn when_the_devices_are_to_be_shared_the_room_entry_info_has_their_name_and_id() {
         let info = info(true, microphone_named("Studio mic"), Duration::from_secs(1));
@@ -148,7 +146,6 @@ mod tests {
         assert_eq!(info["input_id"], "alsa:mic");
     }
 
-    /// Verifies: REQ-CON-032
     #[test]
     fn when_a_driver_does_not_answer_in_time_the_room_entry_info_keeps_the_ids_and_leaves_the_devices_out(
     ) {

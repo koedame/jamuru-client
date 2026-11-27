@@ -1,4 +1,4 @@
-//! `ui.*`: looking at and operating the rendered screen (ADR-025, ADR-044).
+//! `ui.*`: looking at and operating the rendered screen.
 //!
 //! What the E2E control channel exposes over loopback HTTP and what the debug
 //! portal exposes over the relay are the same methods, implemented once here.
@@ -416,7 +416,6 @@ mod tests {
         assert!(parsed.visible);
     }
 
-    /// Verifies: REQ-RMT-026
     #[test]
     fn test_scroll_params_default_to_bringing_the_element_to_the_center() {
         let parsed: ScrollParams =
@@ -427,7 +426,6 @@ mod tests {
         assert!(parsed.window.is_none());
     }
 
-    /// Verifies: REQ-RMT-026
     #[test]
     fn test_scroll_params_reject_a_position_the_screen_has_no_meaning_for() {
         let bad_block = serde_json::from_value::<ScrollParams>(

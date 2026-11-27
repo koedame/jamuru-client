@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that a built screen (ui/dist) carries the Alt+Shift element picker only
-# when it should (REQ-RMT-033).
+# when it should.
 #
 # A beta build is made with VITE_ELEMENT_GRAB=true and a release build without
 # it. The picker's overlay id is a string the bundler cannot drop from a build

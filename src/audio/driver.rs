@@ -144,7 +144,6 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn a_call_that_returns_in_time_gives_its_result() {
         let result = bounded("test call", Duration::from_secs(5), || 7);
@@ -152,7 +151,6 @@ mod tests {
         assert_eq!(result.unwrap(), 7);
     }
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn a_call_that_never_returns_is_given_up_on_at_the_limit() {
         let started = Instant::now();

@@ -1,4 +1,4 @@
-//! Recording the room to WAV files (ADR-095).
+//! Recording the room to WAV files.
 //!
 //! The recording is a copy of what the audio callbacks already produce: the
 //! mix the listener hears (`C`, the same frames as the virtual output) and, if
@@ -610,7 +610,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-046
     #[test]
     fn when_the_mix_is_pushed_while_recording_the_wav_holds_it_as_24_bit_stereo() {
         let dir = tempfile::tempdir().unwrap();
@@ -641,7 +640,6 @@ mod tests {
         assert!((finished.seconds - 0.01).abs() < 1e-4);
     }
 
-    /// Verifies: REQ-AUD-049
     #[test]
     fn when_nothing_records_a_tap_takes_nothing_so_a_later_recording_starts_clean() {
         let dir = tempfile::tempdir().unwrap();
@@ -656,7 +654,6 @@ mod tests {
         assert!(samples.is_empty());
     }
 
-    /// Verifies: REQ-AUD-046
     #[test]
     fn when_the_microphone_is_asked_for_it_is_written_to_a_second_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -682,7 +679,6 @@ mod tests {
         assert!(own.iter().all(|&s| s < 0));
     }
 
-    /// Verifies: REQ-AUD-046
     #[test]
     fn when_the_microphone_is_not_asked_for_its_ring_is_not_fed() {
         let dir = tempfile::tempdir().unwrap();
@@ -697,7 +693,6 @@ mod tests {
         recorder.stop(EndReason::Stopped);
     }
 
-    /// Verifies: REQ-AUD-046
     #[test]
     fn when_samples_are_beyond_full_scale_they_are_clipped_not_wrapped() {
         let dir = tempfile::tempdir().unwrap();
@@ -713,7 +708,6 @@ mod tests {
         assert_eq!(samples, vec![8_388_607, -8_388_607, 0, 0]);
     }
 
-    /// Verifies: REQ-AUD-047
     #[test]
     fn when_a_recording_runs_a_second_one_is_refused() {
         let dir = tempfile::tempdir().unwrap();
@@ -726,7 +720,6 @@ mod tests {
         recorder.stop(EndReason::Stopped);
     }
 
-    /// Verifies: REQ-AUD-046
     #[test]
     fn when_the_name_is_taken_the_new_recording_gets_a_number() {
         let dir = tempfile::tempdir().unwrap();
@@ -745,7 +738,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-047
     #[test]
     fn when_the_session_ends_the_recording_ends_with_the_file_finished() {
         let dir = tempfile::tempdir().unwrap();
@@ -764,7 +756,6 @@ mod tests {
         assert_eq!(read_wav(&last.mix_path).1.len(), 96);
     }
 
-    /// Verifies: REQ-AUD-047
     #[test]
     fn when_the_file_cannot_be_written_the_recording_ends_and_says_why() {
         let dir = tempfile::tempdir().unwrap();
@@ -795,7 +786,6 @@ mod tests {
         assert!(matches!(reason, EndReason::WriteFailed(_)), "{reason:?}");
     }
 
-    /// Verifies: REQ-AUD-047
     #[test]
     fn when_a_file_reaches_the_size_limit_nothing_more_is_written_to_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -809,7 +799,6 @@ mod tests {
         assert!(wav.full());
     }
 
-    /// Verifies: REQ-AUD-046
     #[test]
     fn when_the_header_is_made_right_midway_the_file_plays_up_to_there() {
         let dir = tempfile::tempdir().unwrap();
@@ -825,7 +814,6 @@ mod tests {
         assert_eq!(samples.len(), 200);
     }
 
-    /// Verifies: REQ-AUD-049
     #[test]
     fn when_the_writer_falls_behind_the_callback_does_not_wait_and_the_loss_is_counted() {
         let dir = tempfile::tempdir().unwrap();
@@ -857,7 +845,7 @@ mod tests {
         );
     }
 
-    /// What the recording costs the audio callback, measured (ADR-095):
+    /// What the recording costs the audio callback, measured:
     /// `cargo test --release --lib room_recorder_cost -- --ignored --nocapture`.
     /// It feeds 64-frame stereo callbacks at the real pace for 20 s, once with
     /// nothing recording and once recording, and prints the time a push takes
@@ -908,8 +896,6 @@ mod tests {
 
     /// The cost on the audio callback while nothing records is what the
     /// session pays for having the feature: one relaxed load.
-    ///
-    /// Verifies: REQ-AUD-049
     #[test]
     fn when_nothing_records_a_push_is_cheap_and_leaves_no_trace() {
         let recorder = RoomRecorder::new();

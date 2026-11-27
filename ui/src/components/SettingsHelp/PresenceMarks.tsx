@@ -1,6 +1,6 @@
 /**
  * PresenceMarks - the frames that show where the other person of a settings
- * help is looking (REQ-RMT-034). One frame for the part under their pointer,
+ * help is looking. One frame for the part under their pointer,
  * with a dot at the place in it, and one for the part they have focused. The
  * frames are drawn over the screen and take no clicks.
  */

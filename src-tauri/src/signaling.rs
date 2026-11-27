@@ -43,7 +43,7 @@ static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(1);
 /// timeout, and to find out that it is dead. Independent of the frontend's event polling, which
 /// only runs while inside a room and only puts bytes on the wire when there is a message to
 /// relay. In a room the server also keeps when it last heard one, which is what it tells the
-/// others of this connection (REQ-CON-164).
+/// others of this connection.
 const KEEPALIVE_INTERVAL: Duration = SERVER_PING_EVERY;
 
 /// Reaction on a chat message
@@ -128,14 +128,14 @@ pub struct SignalingState {
     /// Connections whose loss has been logged. The UI polls a dead connection
     /// every tick; without this each poll would repeat the same line.
     lost_logged: std::sync::Mutex<HashSet<u32>>,
-    /// Helping with settings, given and received (ADR-044 §5). Never held across
+    /// Helping with settings, given and received. Never held across
     /// an await: it decides, and the caller then sends.
     help: std::sync::Mutex<Help>,
     /// The connection the help talks over, for a message not prompted by
     /// the UI (the relay connection ending, a setting being changed).
     help_conn: std::sync::Mutex<Option<u32>>,
-    /// Asking participants to buffer this app's audio for longer, and their asks of this app
-    /// (ADR-097). Never held across an await.
+    /// Asking participants to buffer this app's audio for longer, and their asks of this app.
+    /// Never held across an await.
     buffer_asks: std::sync::Mutex<BufferRequests>,
     /// The connection the asks last talked over, for a message not prompted by a poll
     buffer_asks_conn: std::sync::Mutex<Option<u32>>,
@@ -151,16 +151,16 @@ pub struct SignalingState {
     /// connection (a new connection is a new room entry: the room has not been
     /// told anything over it).
     recording_told: std::sync::Mutex<Option<(u32, bool)>>,
-    /// The participants who said they record the room (ADR-095), by id
+    /// The participants who said they record the room, by id
     recording_peers: std::sync::Mutex<HashSet<String>>,
-    /// The delay of this app's devices that the others are to be told (REQ-CON-035),
+    /// The delay of this app's devices that the others are to be told,
     /// in tenths of a millisecond; `None` when there is no figure for the devices in use.
     own_delay: std::sync::Mutex<Option<u32>>,
     /// What the room was last told of it, and over which connection.
     delay_told: std::sync::Mutex<Option<(u32, Option<u32>)>>,
     /// The delays the participants told, in ms, by id
     peer_delays: std::sync::Mutex<HashMap<String, f64>>,
-    /// Which links are quiet, and whose line it is (ADR-112). Never held across an await.
+    /// Which links are quiet, and whose line it is. Never held across an await.
     dropouts: std::sync::Mutex<Dropouts>,
     /// The side each quiet link was last logged with, so a change is logged once
     dropouts_logged: std::sync::Mutex<HashMap<Uuid, jamjam::network::dropout::Side>>,
@@ -290,9 +290,9 @@ impl Default for SignalingState {
 /// Connect to the signaling server
 ///
 /// The server is resolved here rather than passed in, so the UI and
-/// diagnostics cannot disagree on it (ADR-030). The client asks that server
+/// diagnostics cannot disagree on it. The client asks that server
 /// where its signaling is, then presents this installation's device identity
-/// (ADR-024) on the handshake, so the server can identify the device without
+/// on the handshake, so the server can identify the device without
 /// any account registration.
 pub async fn signaling_connect<R: Runtime>(
     app: AppHandle<R>,
@@ -531,7 +531,7 @@ async fn enter_room<R: Runtime>(
 ///
 /// Without this, two GUI instances deadlock: each starts streaming only once
 /// it sees a peer with an address, and neither publishes one, so audio never
-/// flows between them (ADR-026). The CLI has always done this; the GUI did
+/// flows between them. The CLI has always done this; the GUI did
 /// not.
 ///
 /// `local_port` is the port from `streaming_prepare`.
@@ -585,7 +585,7 @@ pub async fn signaling_publish_local_candidates(
 
 /// Address candidates for `local_port` that a peer can actually send to.
 ///
-/// The audio socket is dual-stack (ADR-093): it takes IPv4 and IPv6 peers on one port, so
+/// The audio socket is dual-stack: it takes IPv4 and IPv6 peers on one port, so
 /// `gather_candidates` offers the host addresses of both families (IPv6 global unicast only:
 /// a link-local one needs a scope id (`fe80::1%en0`) that the wire format does not carry),
 /// ordered by the candidate priority (host before server-reflexive, which prefers a LAN path
@@ -593,7 +593,7 @@ pub async fn signaling_publish_local_candidates(
 /// only IPv4 addresses are offered.
 ///
 /// The public address is asked of STUN through the audio socket, so it carries
-/// the port the NAT really assigned to it (ADR-035). If that socket is no
+/// the port the NAT really assigned to it. If that socket is no
 /// longer available, only host candidates are offered - a public address
 /// guessed from another socket's mapping would be wrong on a NAT that
 /// renumbers ports.
@@ -896,13 +896,13 @@ pub enum SignalingEvent {
     /// The connection dropped (network blip, proxy reset, server restart).
     /// `conn_id` is dead - the frontend must disconnect it and reconnect.
     ConnectionLost { reason: String },
-    /// Something about helping with settings the UI shows (ADR-044 §5)
+    /// Something about helping with settings the UI shows
     SettingsHelp { event: HelpEvent },
     /// The help this app asked for was accepted: open the helper's end of the
     /// relay and the window the help is done in.
     HelpLink { link: Link },
     /// Something about asking a participant to buffer audio for longer, or being asked, that the
-    /// UI shows (ADR-097)
+    /// UI shows
     BufferRequest { event: BufferEvent },
 }
 
@@ -948,7 +948,7 @@ pub async fn signaling_poll_events(
     loop {
         let received = timeout(Duration::from_millis(50), conn.recv()).await;
         // The server answers a ping at once: a connection that has heard nothing for longer than a
-        // ping may be late is dead, though the socket has not been told so (REQ-CON-164)
+        // ping may be late is dead, though the socket has not been told so
         let received = match received {
             Err(_) if dropouts::connection_is_dead(conn) => {
                 Ok(Err(NetworkError::SignalingError(format!(
@@ -1205,7 +1205,7 @@ pub async fn signaling_poll_events(
 }
 
 // =============================================================================
-// Helping with settings (ADR-043)
+// Helping with settings
 // =============================================================================
 //
 // `settings_help::Help` decides; this sends what it decides over the room's
@@ -1920,8 +1920,6 @@ mod tests {
     /// A message type the server gained after this app was built is skipped:
     /// the peer update behind it still arrives, and the connection is not
     /// reported lost (which would make the app leave the room and reconnect).
-    ///
-    /// Verifies: REQ-CON-030
     #[tokio::test]
     async fn a_server_message_of_a_type_this_app_does_not_know_is_skipped_not_reported_as_a_lost_connection(
     ) {
@@ -2091,8 +2089,6 @@ mod tests {
     /// The window stops reading a batch of events at the connection dropping,
     /// so the help's end has to come first - or the window would go on showing
     /// a help that is over.
-    ///
-    /// Verifies: REQ-RMT-003
     #[tokio::test]
     async fn when_the_connection_drops_the_help_ends_first() {
         let identity = std::sync::Arc::new(jamjam::network::DeviceIdentity::generate());
@@ -2117,7 +2113,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-003
     #[tokio::test]
     async fn leaving_the_room_ends_the_help_and_the_window_hears_it_on_the_next_poll() {
         let url = spawn_server_sending(vec![]).await;
@@ -2149,8 +2144,6 @@ mod tests {
 
     /// The line for someone leaving names them, which is also how the room
     /// learns that a help with them ended.
-    ///
-    /// Verifies: REQ-RMT-004
     #[tokio::test]
     async fn the_line_for_someone_leaving_names_them() {
         let aki = Uuid::new_v4();
@@ -2184,8 +2177,6 @@ mod tests {
     /// A chat line about a help names the helper as the room knows them: a
     /// peer cannot put another name in it, nor name someone never in the
     /// room.
-    ///
-    /// Verifies: REQ-RMT-004
     #[tokio::test]
     async fn a_settings_help_line_names_the_helper_from_the_rooms_participants() {
         let helper = Uuid::new_v4();
@@ -2273,7 +2264,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-034
     #[tokio::test]
     async fn when_this_app_starts_and_stops_recording_the_room_is_told_once_each() {
         let (tx, mut received) = tokio::sync::mpsc::unbounded_channel();
@@ -2324,7 +2314,6 @@ mod tests {
         assert_eq!(next_recording_notice(&mut received).await, Some(false));
     }
 
-    /// Verifies: REQ-CON-034
     #[tokio::test]
     async fn when_someone_comes_in_while_this_app_records_they_are_told_on_arrival() {
         let newcomer = Uuid::new_v4();
@@ -2360,7 +2349,6 @@ mod tests {
         assert_eq!(sent["data"]["body"]["recording"]["on"], true);
     }
 
-    /// Verifies: REQ-CON-034
     #[tokio::test]
     async fn when_a_participant_says_they_record_it_is_noted_and_a_line_goes_in_the_chat() {
         let sender = Uuid::new_v4();
@@ -2396,7 +2384,6 @@ mod tests {
         assert!(app.state::<SignalingState>().recording_peers().is_empty());
     }
 
-    /// Verifies: REQ-CON-034
     #[tokio::test]
     async fn when_a_participant_repeats_what_is_already_known_the_chat_does_not_grow() {
         let sender = Uuid::new_v4();
@@ -2421,7 +2408,6 @@ mod tests {
         assert!(stopped_again.is_empty());
     }
 
-    /// Verifies: REQ-CON-034
     #[tokio::test]
     async fn when_the_notice_cannot_be_sent_the_room_is_not_taken_to_know_and_it_is_sent_again() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2499,8 +2485,6 @@ mod tests {
             .collect()
     }
 
-    /// Verifies: REQ-CON-036
-    /// Verifies: REQ-CON-037
     #[tokio::test]
     async fn when_a_participant_asks_the_buffer_is_held_only_after_the_user_accepts_and_they_are_told(
     ) {
@@ -2554,7 +2538,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-037
     #[tokio::test]
     async fn when_the_user_puts_the_buffer_back_it_is_the_presets_again_and_the_participant_is_told(
     ) {
@@ -2590,7 +2573,6 @@ mod tests {
         assert!(answers.contains(&"restored".to_string()), "{answers:?}");
     }
 
-    /// Verifies: REQ-CON-037
     #[tokio::test]
     async fn when_the_participant_who_asked_leaves_the_room_the_buffer_goes_back_without_a_word() {
         let asker = Uuid::new_v4();
@@ -2632,7 +2614,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-037
     #[tokio::test]
     async fn when_the_settings_take_no_asks_the_user_is_not_asked_and_the_buffer_is_left_alone() {
         let asker = Uuid::new_v4();
@@ -2657,7 +2638,6 @@ mod tests {
         assert_eq!(streaming.peer_buffer(asker).1.granted, None);
     }
 
-    /// Verifies: REQ-CON-037
     #[tokio::test]
     async fn when_the_connection_to_the_room_is_lost_every_buffer_that_was_held_goes_back() {
         let asker = Uuid::new_v4();
@@ -2708,7 +2688,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-035
     #[tokio::test]
     async fn when_the_delay_of_this_apps_devices_is_known_the_room_is_told_once_and_told_again_when_it_goes(
     ) {
@@ -2756,7 +2735,6 @@ mod tests {
         assert_eq!(next_delay_notice(&mut received).await, Some(None));
     }
 
-    /// Verifies: REQ-CON-035
     #[tokio::test]
     async fn when_someone_comes_in_after_the_delay_was_told_they_are_told_on_arrival() {
         let newcomer = Uuid::new_v4();
@@ -2788,7 +2766,6 @@ mod tests {
         assert_eq!(sent["data"]["body"]["device_delay"]["delay_ms"], 31.5);
     }
 
-    /// Verifies: REQ-CON-035
     #[tokio::test]
     async fn when_a_participant_tells_their_delay_it_is_kept_and_a_figure_that_cannot_be_a_delay_is_not(
     ) {
@@ -2832,7 +2809,6 @@ mod tests {
         assert!(state.peer_delays().is_empty());
     }
 
-    /// Verifies: REQ-CON-035
     #[tokio::test]
     async fn when_the_relay_sends_this_apps_own_delay_back_it_is_not_kept_as_a_participants() {
         let own = Uuid::new_v4();

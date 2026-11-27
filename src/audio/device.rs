@@ -492,7 +492,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-126
     #[test]
     fn a_device_id_with_the_asio_prefix_is_recognized_as_one_and_the_driver_name_is_read_out() {
         let asio = DeviceId(format!("{ASIO_ID_PREFIX}Focusrite USB ASIO"));
@@ -504,7 +503,6 @@ mod tests {
         assert_eq!(driver_name_of(&wasapi), None);
     }
 
-    /// Verifies: REQ-AUD-126
     #[test]
     fn the_same_asio_driver_on_both_sides_is_the_shared_driver() {
         let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
@@ -514,7 +512,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-126
     #[test]
     fn two_different_asio_drivers_are_not_a_shared_driver() {
         let a = DeviceId("asio:Focusrite USB ASIO".to_string());
@@ -522,7 +519,6 @@ mod tests {
         assert_eq!(shared_asio_driver(Some(&a), Some(&b)), None);
     }
 
-    /// Verifies: REQ-AUD-126
     #[test]
     fn a_non_asio_device_on_either_side_is_not_a_shared_driver() {
         let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
@@ -531,7 +527,6 @@ mod tests {
         assert_eq!(shared_asio_driver(Some(&wasapi), Some(&wasapi)), None);
     }
 
-    /// Verifies: REQ-AUD-126
     #[test]
     fn with_no_device_on_either_side_there_is_no_shared_driver() {
         let asio = DeviceId("asio:Focusrite USB ASIO".to_string());
@@ -561,7 +556,6 @@ mod tests {
         ]
     }
 
-    /// Verifies: REQ-AUD-039
     #[test]
     fn when_an_id_is_given_that_device_is_chosen() {
         let devices = offered();
@@ -571,7 +565,6 @@ mod tests {
         assert_eq!(chosen.name, "USB Interface");
     }
 
-    /// Verifies: REQ-AUD-039
     #[test]
     fn when_a_name_is_given_that_only_one_device_has_that_device_is_chosen() {
         let devices = offered();
@@ -581,7 +574,6 @@ mod tests {
         assert_eq!(chosen.id.0, "alsa:hw:1,0");
     }
 
-    /// Verifies: REQ-AUD-039
     #[test]
     fn when_a_name_is_given_that_several_devices_have_none_is_chosen_and_the_ids_are_named() {
         let devices = offered();
@@ -599,7 +591,6 @@ mod tests {
         assert!(message.contains("alsa:hw:2,0") && message.contains("alsa:hw:3,0"));
     }
 
-    /// Verifies: REQ-AUD-039
     #[test]
     fn when_the_text_is_one_device_s_id_and_another_device_s_name_the_id_wins() {
         let mut devices = offered();
@@ -610,7 +601,6 @@ mod tests {
         assert_eq!(chosen.name, "USB Interface");
     }
 
-    /// Verifies: REQ-AUD-039
     #[test]
     fn when_nothing_has_that_id_or_name_it_is_refused() {
         let devices = offered();
@@ -621,7 +611,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-039
     #[test]
     fn when_no_device_is_chosen_the_default_is_in_use_and_a_chosen_one_that_is_gone_leaves_none() {
         let devices = offered();
@@ -639,8 +628,6 @@ mod tests {
 
     /// The screen reads the device list as the app has always sent it: the id
     /// as a plain string beside the other fields.
-    ///
-    /// Verifies: REQ-AUD-039
     #[test]
     fn a_device_is_sent_to_the_screen_with_its_id_as_a_plain_string() {
         let sent = serde_json::to_value(device("alsa:hw:1,0", "USB Interface", false)).unwrap();
@@ -693,63 +680,53 @@ mod tests {
         )
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn when_the_device_offers_the_wanted_rate_it_is_opened_at_that_rate() {
         assert_eq!(rate_to_open([config_at(2, 44100, 96000)], 2, 48000), 48000);
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn when_the_device_offers_only_44100_it_is_opened_at_44100() {
         assert_eq!(rate_to_open([config_at(2, 44100, 44100)], 2, 48000), 44100);
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn when_two_offered_rates_are_equally_near_the_higher_one_is_used() {
         let configs = [config_at(2, 44000, 44000), config_at(2, 52000, 52000)];
         assert_eq!(rate_to_open(configs, 2, 48000), 52000);
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_opening_would_rewrite_the_device_rate_the_output_opens_at_the_rate_it_runs_at() {
         assert_eq!(pick_output_rate(48000, Some(24000), true), 24000);
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_the_device_already_runs_at_the_wanted_rate_the_output_opens_at_it() {
         assert_eq!(pick_output_rate(48000, Some(48000), true), 48000);
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_opening_does_not_rewrite_the_device_rate_the_output_opens_at_an_offered_rate() {
         assert_eq!(pick_output_rate(48000, Some(44100), false), 48000);
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_the_device_does_not_say_its_rate_the_output_opens_at_an_offered_rate() {
         assert_eq!(pick_output_rate(44100, None, true), 44100);
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn a_rate_offered_only_with_too_few_channels_is_not_chosen() {
         let configs = [config_at(2, 48000, 48000), config_at(8, 44100, 44100)];
         assert_eq!(rate_to_open(configs, 6, 48000), 44100);
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn a_device_that_offers_nothing_is_asked_for_the_wanted_rate() {
         assert_eq!(rate_to_open([], 2, 48000), 48000);
     }
 
-    /// Verifies: REQ-GUI-026
     #[test]
     fn when_the_system_says_the_device_is_bluetooth_it_is_bluetooth() {
         assert!(looks_bluetooth(
@@ -758,14 +735,12 @@ mod tests {
         ));
     }
 
-    /// Verifies: REQ-GUI-026
     #[test]
     fn when_coreaudio_says_the_transport_is_bluetooth_or_bluetooth_le_it_is_bluetooth() {
         assert!(is_bluetooth_transport(0x626c_7565)); // 'blue'
         assert!(is_bluetooth_transport(0x626c_6561)); // 'blea'
     }
 
-    /// Verifies: REQ-GUI-026
     #[test]
     fn when_coreaudio_says_the_transport_is_usb_built_in_or_virtual_it_is_not_bluetooth() {
         assert!(!is_bluetooth_transport(0x7573_6220)); // 'usb '
@@ -774,7 +749,6 @@ mod tests {
         assert!(!is_bluetooth_transport(0));
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn when_coreaudio_does_not_report_the_transport_the_log_line_names_no_device() {
         let line = transport_unknown_warning(cpal::InterfaceType::Unknown);
@@ -783,7 +757,6 @@ mod tests {
         assert!(!line.contains("coreaudio:"), "{line}");
     }
 
-    /// Verifies: REQ-GUI-026
     #[test]
     fn when_the_system_does_not_say_but_the_name_is_airpods_the_device_is_bluetooth() {
         assert!(looks_bluetooth(
@@ -796,7 +769,6 @@ mod tests {
         ));
     }
 
-    /// Verifies: REQ-GUI-026
     #[test]
     fn when_the_system_says_the_device_is_usb_a_bluetooth_looking_name_does_not_make_it_bluetooth()
     {
@@ -806,7 +778,6 @@ mod tests {
         ));
     }
 
-    /// Verifies: REQ-GUI-026
     #[test]
     fn when_the_device_is_unknown_and_its_name_is_ordinary_it_is_not_bluetooth() {
         assert!(!looks_bluetooth(

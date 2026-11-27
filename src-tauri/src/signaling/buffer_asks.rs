@@ -1,4 +1,4 @@
-//! Asking a participant to buffer your audio for longer, and answering such an ask (ADR-097)
+//! Asking a participant to buffer your audio for longer, and answering such an ask
 //!
 //! `BufferRequests` decides; this sends what it decides over the room's signaling connection as
 //! peer messages, sets the receive buffer it says to set, and hands its events to the UI with the
@@ -383,7 +383,6 @@ impl SignalingState {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-CON-036
     #[test]
     fn when_others_use_up_what_the_app_sends_of_itself_the_users_own_actions_still_go_out() {
         let state = SignalingState::new();

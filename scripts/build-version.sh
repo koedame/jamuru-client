@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prints the version an app is built as for a release tag (ADR-045).
+# Prints the version an app is built as for a release tag.
 #
 #   vX.Y.Z          -> X.Y.Z
 #   vX.Y.Z-beta.N   -> X.Y.Z-N

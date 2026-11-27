@@ -1,5 +1,5 @@
 //! The session: how far the app has got into a room, and what it does about
-//! the room and the audio (ADR-044 §6).
+//! the room and the audio.
 //!
 //! The backend owns this, not the screen. It connects to the signaling server,
 //! lists the rooms, creates, joins and leaves them, opens an audio link to
@@ -32,7 +32,7 @@ use crate::streaming;
 
 /// Announces a change of the session. The payload is the new [`Snapshot`].
 pub const CHANGED_EVENT: &str = "session:changed";
-/// Something about helping with settings that the screen shows (ADR-043). It
+/// Something about helping with settings that the screen shows. It
 /// arrives from the room with the room's other events.
 pub const HELP_EVENT: &str = "session:settings-help";
 
@@ -758,7 +758,6 @@ mod tests {
         app
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_app_starts_and_the_server_answers_lands_on_the_room_list_with_the_servers_test_room(
     ) {
@@ -778,7 +777,6 @@ mod tests {
         assert_eq!(snapshot.room, None);
     }
 
-    /// Verifies: REQ-TRM-003
     #[tokio::test]
     async fn the_app_starts_before_the_terms_are_agreed_to_does_not_reach_the_server_until_they_are(
     ) {
@@ -803,7 +801,6 @@ mod tests {
         assert_eq!(server.connections(), 1);
     }
 
-    /// Verifies: REQ-TRM-003
     #[tokio::test]
     async fn the_terms_are_not_agreed_to_and_a_command_that_connects_is_called_refuses_and_stays_off_the_network(
     ) {
@@ -815,7 +812,6 @@ mod tests {
         assert_eq!(server.connections(), 0);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_server_cannot_be_reached_ends_in_an_error_that_says_so_and_holds_no_connection() {
         let server = FakeServer::start().await;
@@ -838,7 +834,6 @@ mod tests {
         assert_eq!(snapshot.connection_id, None);
     }
 
-    /// Verifies: REQ-IDT-009
     #[tokio::test]
     async fn the_server_refuses_the_identity_because_the_clock_is_off_ends_in_an_error_that_names_the_gap(
     ) {
@@ -860,7 +855,6 @@ mod tests {
         assert_eq!(snapshot.connection_id, None);
     }
 
-    /// Verifies: REQ-IDT-010
     #[tokio::test]
     async fn the_clock_is_put_right_after_the_refusal_connects_again_without_being_asked() {
         let server = FakeServer::start().await;
@@ -878,7 +872,6 @@ mod tests {
         assert_eq!(snapshot.test_room_invite_code.as_deref(), Some("HJK567MNP"));
     }
 
-    /// Verifies: REQ-IDT-010
     #[tokio::test]
     async fn the_clock_is_still_off_after_a_wait_stays_in_the_error_and_does_not_flicker_to_connecting(
     ) {
@@ -897,7 +890,6 @@ mod tests {
         assert_eq!(snapshot.revision, revision);
     }
 
-    /// Verifies: REQ-IDT-010
     #[tokio::test]
     async fn the_person_connects_by_hand_while_the_clock_is_off_the_wait_for_the_clock_ends() {
         let server = FakeServer::start().await;
@@ -921,7 +913,6 @@ mod tests {
         driver(app.handle()).connect_afresh().await
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn a_room_is_created_puts_the_app_in_it_alone_with_the_code_to_share() {
         let server = FakeServer::start().await;
@@ -945,8 +936,6 @@ mod tests {
     /// in a room with no one else in it nothing captured the microphone, the
     /// meter stood still, and the macOS microphone permission was asked for
     /// only when someone joined.
-    ///
-    /// Verifies: REQ-CON-140
     #[tokio::test]
     async fn a_room_is_created_with_no_one_else_in_it_the_microphone_is_heard_and_the_meter_moves()
     {
@@ -973,7 +962,6 @@ mod tests {
         assert!(!app.state::<StreamingState>().is_active());
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn a_room_is_joined_lists_who_is_in_it() {
         let server = FakeServer::start().await;
@@ -993,7 +981,6 @@ mod tests {
         assert_eq!(room.participants[0].features, vec!["peer_message"]);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_snapshot_read_for_a_participant_carries_no_address_of_theirs() {
         let server = FakeServer::start().await;
@@ -1007,7 +994,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-032
     #[tokio::test]
     async fn creating_and_joining_a_room_tell_the_server_what_the_app_is_without_the_display_name()
     {
@@ -1037,7 +1023,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_app_is_already_in_a_room_refuses_to_enter_another_and_stays_where_it_is() {
         let server = FakeServer::start().await;
@@ -1053,7 +1038,6 @@ mod tests {
         assert_eq!(server.count("JoinRoom"), 1);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_server_refuses_the_room_ends_in_an_error_that_keeps_the_connection_for_another_try(
     ) {
@@ -1072,7 +1056,6 @@ mod tests {
         assert_eq!(snapshot.joining_code, None);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn someone_joins_and_leaves_the_room_is_listed_while_they_are_there() {
         let server = FakeServer::start().await;
@@ -1189,9 +1172,6 @@ mod tests {
     /// The bug this guards: the session opened audio to the first participant
     /// who published an address and to no one after, so the third in a room
     /// was heard by no one.
-    ///
-    /// Verifies: REQ-CON-133
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn two_participants_publish_an_address_opens_an_audio_link_to_each_and_says_so() {
         let server = FakeServer::start().await;
@@ -1213,7 +1193,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-133
     #[tokio::test]
     async fn one_of_two_linked_participants_leaves_closes_the_link_to_them_and_keeps_the_other() {
         use crate::streaming::StreamingCommand;
@@ -1244,7 +1223,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-134
     #[tokio::test]
     async fn a_link_gives_up_while_the_other_participant_is_heard_stays_in_the_room() {
         let server = FakeServer::start().await;
@@ -1267,7 +1245,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-134
     #[tokio::test]
     async fn every_link_gives_up_and_nobody_is_heard_enters_the_room_again() {
         let server = FakeServer::start().await;
@@ -1297,8 +1274,6 @@ mod tests {
 
     /// The audio goes between the apps, not through the server: a server that is gone, or a path
     /// to it that is, is no reason for the room to fall silent.
-    ///
-    /// Verifies: REQ-CON-150
     #[tokio::test]
     async fn the_connection_to_the_server_drops_while_the_audio_is_heard_enters_the_room_again_without_ending_the_audio_or_a_link(
     ) {
@@ -1337,7 +1312,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_app_leaves_the_room_goes_back_to_the_room_list_on_the_same_connection() {
         let server = FakeServer::start().await;
@@ -1354,7 +1328,6 @@ mod tests {
         assert_eq!(server.count("LeaveRoom"), 1);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_app_is_in_no_room_when_it_is_asked_to_leave_says_so_and_changes_nothing() {
         let server = FakeServer::start().await;
@@ -1368,7 +1341,6 @@ mod tests {
         assert_eq!(app.state::<SessionState>().snapshot(), before);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_connection_drops_in_a_room_keeps_the_room_up_while_it_rejoins_the_same_room() {
         let server = FakeServer::start().await;
@@ -1393,8 +1365,6 @@ mod tests {
     /// new buffer size reaches a room by starting the audio over in it: the
     /// room, and the connection to the server, stay. Leaving the room would
     /// end it for a person who is alone in it.
-    ///
-    /// Verifies: REQ-GUI-024
     #[tokio::test]
     async fn the_buffer_size_is_changed_in_a_room_restarts_the_audio_there_and_keeps_the_room() {
         let server = FakeServer::start().await;
@@ -1433,7 +1403,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-024
     #[tokio::test]
     async fn the_buffer_size_is_changed_outside_a_room_leaves_the_session_alone() {
         let server = FakeServer::start().await;
@@ -1456,7 +1425,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_connection_drops_in_a_room_says_it_is_reconnecting_and_still_shows_the_room() {
         let server = FakeServer::start().await;
@@ -1492,7 +1460,6 @@ mod tests {
             .all(|pair| pair[0].revision < pair[1].revision));
     }
 
-    /// Verifies: REQ-CON-130
     #[tokio::test]
     async fn the_connection_drops_and_the_room_still_lists_the_old_entry_of_the_app_does_not_list_it_as_a_participant(
     ) {
@@ -1531,7 +1498,6 @@ mod tests {
         signaling_reconnect: String,
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_connection_cannot_be_got_back_ends_in_failed_and_a_retry_rejoins_the_room() {
         let server = FakeServer::start().await;
@@ -1577,7 +1543,6 @@ mod tests {
         url
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_person_leaves_while_the_connection_is_being_got_back_ends_that_and_starts_from_the_room_list(
     ) {
@@ -1613,7 +1578,6 @@ mod tests {
         assert_eq!(server.count("JoinRoom"), 1);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_person_cancels_while_the_server_does_not_answer_connects_again_without_waiting_for_it(
     ) {
@@ -1642,7 +1606,6 @@ mod tests {
         assert_eq!(server.connections(), 1);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_session_changes_announces_each_new_state_once_with_a_rising_revision() {
         let server = FakeServer::start().await;
@@ -1669,7 +1632,6 @@ mod tests {
             .all(|pair| pair[0].revision < pair[1].revision));
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_connection_fails_while_leaving_leaves_the_app_in_no_room_and_never_rejoins_it() {
         let server = FakeServer::start().await;
@@ -1693,7 +1655,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_person_leaves_after_the_connection_could_not_be_got_back_starts_from_the_room_list(
     ) {

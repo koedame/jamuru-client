@@ -1,5 +1,5 @@
 /**
- * Invite code format (REQ-CON-103)
+ * Invite code format
  *
  * Shared by the deep-link parser (`deepLink.ts`) and the code input
  * (`ConnectionPanel`), which validated codes with a looser, separate regex

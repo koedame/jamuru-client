@@ -24,9 +24,8 @@
 //! # Scope not covered here
 //!
 //! - macOS and Windows have no user-mode way to create a device at runtime;
-//!   `start` returns [`AudioError::UnsupportedConfig`] there. Plans.md tracks
-//!   the follow-up (a bundled, installer-provisioned Core Audio HAL plugin /
-//!   virtual audio driver).
+//!   `start` returns [`AudioError::UnsupportedConfig`] there. The follow-up is a
+//!   bundled, installer-provisioned Core Audio HAL plugin / virtual audio driver.
 
 use std::io::Write;
 use std::process::Child;
@@ -134,7 +133,7 @@ impl VirtualOutputSink {
 
     /// Writes one block of interleaved `CHANNELS`-wide `f32` frames.
     /// Blocking: call this from a dedicated writer thread, never from an
-    /// audio callback (see the audio thread rules in `docs-spec/architecture.md`).
+    /// audio callback (an audio callback must never block).
     pub fn write_frames(&mut self, interleaved: &[f32]) -> Result<(), AudioError> {
         debug_assert_eq!(interleaved.len() % CHANNELS, 0);
         let stdin = self.writer.stdin.as_mut().expect("stdin piped at spawn");

@@ -1,5 +1,5 @@
 /**
- * The backend a helper's window is connected to (ADR-044 §5): the app being
+ * The backend a helper's window is connected to: the app being
  * helped, through the relay.
  *
  * The window draws the same screens as the app's own, but every command it

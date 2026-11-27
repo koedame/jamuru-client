@@ -1,7 +1,7 @@
 //! Audio codec abstraction for encoding/decoding audio frames
 //!
 //! Provides a unified interface for different audio codecs (PCM, Opus).
-//! PCM goes on the wire as 24-bit signed integers (ADR-096), packed without loss (ADR-111).
+//! PCM goes on the wire as 24-bit signed integers, packed without loss.
 //! Opus support requires the `opus-codec` feature. It builds a bundled libopus, which needs cmake.
 
 use thiserror::Error;
@@ -125,7 +125,7 @@ pub trait AudioCodec: Send {
     /// Decode into a caller-provided buffer
     ///
     /// For use on the playback path, where allocating a `Vec` per frame is not
-    /// affordable (ADR-020). Returns the number of samples written; `output`
+    /// affordable. Returns the number of samples written; `output`
     /// beyond that is left untouched.
     ///
     /// The default implementation forwards to [`Self::decode`] and copies, so a
@@ -500,8 +500,6 @@ mod tests {
 
     /// Every 24-bit value, negative ones included, comes back as the same integer: nothing is
     /// lost on the wire beyond the rounding to 24 bits that the encoder does.
-    ///
-    /// Verifies: REQ-AUD-044
     #[test]
     fn pcm_codec_carries_every_24_bit_value_as_itself() {
         let mut codec = PcmCodec::new(&CodecConfig::default());
@@ -517,7 +515,6 @@ mod tests {
         assert_eq!(codec.clipped_samples(), 0, "nothing here is out of range");
     }
 
-    /// Verifies: REQ-AUD-044
     #[test]
     fn pcm_codec_sends_a_sample_as_three_little_endian_bytes_of_its_24_bit_integer() {
         let mut bytes = Vec::new();
@@ -527,8 +524,6 @@ mod tests {
     }
 
     /// Samples that do not pack are sent as those three bytes each, after one byte that says so.
-    ///
-    /// Verifies: REQ-AUD-044
     #[test]
     fn pcm_codec_sends_samples_that_do_not_pack_as_their_24_bit_integers_after_a_format_byte() {
         let mut codec = PcmCodec::new(&CodecConfig::default());
@@ -543,8 +538,6 @@ mod tests {
 
     /// A sample past 0 dBFS is held at the largest value 24 bits take, with its sign,
     /// and counted - one count for each sample, over the codec's life.
-    ///
-    /// Verifies: REQ-AUD-045
     #[test]
     fn pcm_codec_clips_a_sample_past_full_scale_and_counts_it() {
         let mut codec = PcmCodec::new(&CodecConfig::default());
@@ -573,7 +566,6 @@ mod tests {
         assert_eq!(codec.clipped_samples(), 3, "the count carries on");
     }
 
-    /// Verifies: REQ-AUD-045
     #[test]
     fn pcm_codec_sends_silence_for_nan_and_counts_it() {
         let mut codec = PcmCodec::new(&CodecConfig::default());
@@ -582,7 +574,6 @@ mod tests {
         assert_eq!(codec.clipped_samples(), 2);
     }
 
-    /// Verifies: REQ-AUD-044
     #[test]
     fn pcm_codec_refuses_data_that_is_not_whole_samples() {
         let mut codec = PcmCodec::new(&CodecConfig::default());
@@ -697,8 +688,6 @@ mod tests {
     /// `decode_into` must produce exactly what `decode` produces, without
     /// allocating, and must refuse a buffer that is too small rather than
     /// truncating the frame.
-    ///
-    /// Verifies: REQ-AUD-023
     #[test]
     fn test_pcm_decode_into_matches_decode() {
         let config = CodecConfig {

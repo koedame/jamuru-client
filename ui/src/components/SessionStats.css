@@ -141,7 +141,7 @@
   gap: var(--space-xs);
 }
 
-/* Resampling Warning (ADR-013) */
+/* Resampling Warning */
 .session-stats__resampling-warning {
   display: flex;
   align-items: center;

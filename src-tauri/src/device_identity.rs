@@ -1,4 +1,4 @@
-//! This installation's device identity, held for the app's lifetime (ADR-024)
+//! This installation's device identity, held for the app's lifetime
 //!
 //! Where it is stored and how it is created is `jamjam::identity_store`,
 //! shared with the CLI. The identity is presented to the signaling server by

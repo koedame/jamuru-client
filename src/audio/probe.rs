@@ -223,7 +223,6 @@ mod tests {
         Duration::from_millis(n)
     }
 
-    /// Verifies: REQ-CLI-007
     #[test]
     fn a_burst_signal_starts_every_interval_with_silence_between() {
         let sample_rate = 48_000;
@@ -254,7 +253,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CLI-007
     #[test]
     fn a_burst_is_noticed_once_however_many_frames_carry_it() {
         let mut edges = Vec::new();
@@ -271,7 +269,6 @@ mod tests {
         assert_eq!(edges, vec![ms(10), ms(510)]);
     }
 
-    /// Verifies: REQ-CLI-007
     #[test]
     fn when_the_peer_holds_audio_the_hold_is_taken_off_the_delay() {
         let sent = [ms(1000), ms(1500), ms(2000)];
@@ -291,8 +288,6 @@ mod tests {
 
     /// A lost burst must not shift the pairing of the ones after it: each is
     /// paired by when it was due, not by counting off.
-    ///
-    /// Verifies: REQ-CLI-007
     #[test]
     fn when_a_burst_is_lost_the_bursts_after_it_still_pair_with_their_own() {
         let sent = [ms(0), ms(500), ms(1000), ms(1500)];
@@ -308,7 +303,6 @@ mod tests {
         assert!((delay.max_ms - 40.0).abs() < 1e-6);
     }
 
-    /// Verifies: REQ-CLI-007
     #[test]
     fn a_sound_with_no_burst_of_ours_before_it_is_not_counted() {
         let sent = [ms(1000)];
@@ -325,8 +319,6 @@ mod tests {
     /// The burst that a sound belongs to is the newest one sent before it. When
     /// that one is a whole interval or more back, its own burst was lost, and
     /// pairing it with an older one would report a delay that never happened.
-    ///
-    /// Verifies: REQ-CLI-007
     #[test]
     fn a_sound_more_than_an_interval_after_the_newest_burst_is_not_counted() {
         let sent = [ms(0), ms(500)];
@@ -339,8 +331,6 @@ mod tests {
 
     /// A sound that arrives before the peer's hold could have passed cannot be
     /// an echo of anything.
-    ///
-    /// Verifies: REQ-CLI-007
     #[test]
     fn a_sound_heard_before_the_peer_hold_has_passed_is_not_counted() {
         let sent = [ms(0)];
@@ -352,8 +342,6 @@ mod tests {
 
     /// Bursts sent in the last stretch of a run had no time to come back and
     /// must not read as loss.
-    ///
-    /// Verifies: REQ-CLI-007
     #[test]
     fn bursts_sent_too_late_to_return_are_not_expected() {
         let sent = [ms(0), ms(500), ms(9000), ms(9500)];
@@ -366,7 +354,6 @@ mod tests {
         assert_eq!(report.delay, None);
     }
 
-    /// Verifies: REQ-CLI-007
     #[test]
     fn the_95th_percentile_is_the_nearest_rank() {
         let sent: Vec<Duration> = (0..20).map(|n| ms(n * 500)).collect();

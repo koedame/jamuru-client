@@ -1,4 +1,4 @@
-//! Which audio links have gone quiet, and on whose side of the line (ADR-112).
+//! Which audio links have gone quiet, and on whose side of the line.
 //!
 //! A participant's audio that stops arriving, with no word that they left, is one of three
 //! things: this app's own line broke, theirs did, or the path between the two did. The first is
@@ -537,14 +537,12 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-162
     #[test]
     fn when_a_link_has_received_nothing_for_less_than_one_and_a_half_seconds_it_is_not_quiet() {
         let mut room = Room::of(&[2]);
         assert_eq!(room.side(2, 1499), None);
     }
 
-    /// Verifies: REQ-CON-162
     #[test]
     fn when_a_link_has_received_nothing_for_one_and_a_half_seconds_it_is_quiet_for_that_long() {
         let mut room = Room::of(&[2]);
@@ -552,7 +550,6 @@ mod tests {
         assert_eq!(quiet.silent_for, ms(4000));
     }
 
-    /// Verifies: REQ-CON-162
     #[test]
     fn when_a_link_never_received_anything_it_is_being_set_up_and_not_quiet() {
         let mut room = Room::of(&[2]);
@@ -560,7 +557,6 @@ mod tests {
         assert_eq!(room.side(2, 60_000), None);
     }
 
-    /// Verifies: REQ-CON-162
     #[test]
     fn when_a_quiet_link_is_heard_again_it_is_no_longer_quiet() {
         let mut room = Room::of(&[2]);
@@ -569,7 +565,6 @@ mod tests {
         assert_eq!(room.side(2, 2600), None);
     }
 
-    /// Verifies: REQ-CON-162
     #[test]
     fn when_a_link_went_quiet_twice_within_fifteen_minutes_it_is_unstable() {
         let mut room = Room::of(&[2]);
@@ -581,7 +576,6 @@ mod tests {
         assert!(room.tick(6100).standing[&id(2)].unstable);
     }
 
-    /// Verifies: REQ-CON-162
     #[test]
     fn when_the_second_dropout_is_more_than_fifteen_minutes_after_the_first_it_is_not_unstable() {
         let mut room = Room::of(&[2]);
@@ -592,7 +586,6 @@ mod tests {
         assert!(!room.tick(later).standing[&id(2)].unstable);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_every_participant_goes_quiet_together_the_line_that_broke_is_this_apps() {
         let mut room = Room::of(&[2, 3, 4]);
@@ -604,7 +597,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_one_of_three_goes_quiet_and_the_other_hears_them_the_path_between_the_two_broke() {
         let mut room = Room::of(&[2, 3]);
@@ -615,7 +607,6 @@ mod tests {
         assert_eq!(room.side(3, 3100), None);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_one_of_three_goes_quiet_and_the_other_stopped_hearing_them_too_their_line_broke() {
         let mut room = Room::of(&[2, 3]);
@@ -625,7 +616,6 @@ mod tests {
         assert_eq!(room.side(2, 3100), Some(Side::Theirs));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_the_other_participants_say_what_they_heard_before_the_audio_could_show_it_they_are_not_believed(
     ) {
@@ -636,7 +626,6 @@ mod tests {
         assert_eq!(room.side(2, 3100), Some(Side::Checking));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_the_participants_split_on_whether_they_hear_them_the_majority_decides_and_a_tie_is_theirs(
     ) {
@@ -650,7 +639,6 @@ mod tests {
         assert_eq!(room.side(2, 3300), Some(Side::Between));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_in_a_room_of_two_the_participant_goes_quiet_the_server_is_asked() {
         let mut room = Room::of(&[2]);
@@ -660,7 +648,6 @@ mod tests {
         assert_eq!(tick.standing[&id(2)].dropout.unwrap().side, Side::Checking);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_in_a_room_of_two_the_server_has_heard_from_them_since_the_audio_stopped_the_path_between_broke(
     ) {
@@ -671,7 +658,6 @@ mod tests {
         assert_eq!(room.side(2, 5000), Some(Side::Between));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_in_a_room_of_two_the_server_last_heard_from_them_before_the_audio_stopped_the_answer_waits(
     ) {
@@ -682,7 +668,6 @@ mod tests {
         assert!(room.tick(7000).ask_presence);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_in_a_room_of_two_the_server_has_not_heard_from_them_for_longer_than_a_ping_is_late_their_line_broke(
     ) {
@@ -693,7 +678,6 @@ mod tests {
         assert_eq!(room.side(2, late + 500), Some(Side::Theirs));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_in_a_room_of_two_their_line_broke_the_side_is_named_before_the_audio_link_gives_up() {
         // The link gives up after 10 s and the room is entered again, which starts the
@@ -702,7 +686,6 @@ mod tests {
         assert!(SERVER_PING_EVERY + SERVER_PING_SLACK + PRESENCE_EVERY < gives_up);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_in_a_room_of_two_the_server_no_longer_lists_them_their_line_broke() {
         let mut room = Room::of(&[2]);
@@ -711,7 +694,6 @@ mod tests {
         assert_eq!(room.side(2, 2600), Some(Side::Theirs));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_in_a_room_of_two_the_server_does_not_answer_this_apps_own_line_broke() {
         let mut room = Room::of(&[2]);
@@ -720,7 +702,6 @@ mod tests {
         assert_eq!(room.side(2, 5100), Some(Side::Mine));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_the_server_answers_after_not_answering_the_side_is_decided_again() {
         let mut room = Room::of(&[2]);
@@ -730,7 +711,6 @@ mod tests {
         assert_eq!(room.side(2, 5300), Some(Side::Between));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_the_signaling_connection_is_down_this_apps_own_line_broke_whoever_is_quiet() {
         let mut room = Room::of(&[2, 3]);
@@ -739,7 +719,6 @@ mod tests {
         assert_eq!(room.side(2, 3000), Some(Side::Mine));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_the_system_says_the_machine_is_offline_this_apps_own_line_broke() {
         let mut room = Room::of(&[2]);
@@ -747,7 +726,6 @@ mod tests {
         assert_eq!(room.side(2, 2000), Some(Side::Mine));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_nothing_can_tell_the_side_for_a_long_time_it_is_given_as_unknown() {
         let mut room = Room::of(&[2]);
@@ -758,7 +736,6 @@ mod tests {
         assert_eq!(room.side(2, 41_000), Some(Side::Unknown));
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_a_participant_is_heard_the_side_is_no_longer_asked_after() {
         let mut room = Room::of(&[2]);
@@ -768,7 +745,6 @@ mod tests {
         assert!(room.dropouts.asked_at.is_none());
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_someone_goes_quiet_the_room_is_told_what_this_app_hears_and_asked_to_say_the_same() {
         let mut room = Room::of(&[2, 3]);
@@ -780,7 +756,6 @@ mod tests {
         assert_eq!(ages[&id(3)], 100);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_everyone_is_heard_the_room_is_told_nothing() {
         let mut room = Room::of(&[2, 3]);
@@ -788,7 +763,6 @@ mod tests {
         assert_eq!(room.tick(1000).share, None);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_someone_stays_quiet_the_room_is_told_again_every_two_seconds_and_no_more_often() {
         let mut room = Room::of(&[2, 3]);
@@ -800,7 +774,6 @@ mod tests {
         assert!(room.tick(4000).share.is_some());
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_the_quiet_one_is_heard_again_the_room_is_told_so_once_without_asking() {
         let mut room = Room::of(&[2, 3]);
@@ -813,7 +786,6 @@ mod tests {
         assert_eq!(room.tick(3200).share, None);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_a_participant_asks_what_this_app_hears_it_answers_at_once_but_not_more_than_once_a_second(
     ) {
@@ -832,7 +804,6 @@ mod tests {
         assert!(room.tick(1400).share.is_some());
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_a_view_names_more_participants_than_a_room_holds_the_rest_are_ignored() {
         let mut room = Room::of(&[2]);
@@ -847,7 +818,6 @@ mod tests {
         assert_eq!(room.dropouts.told[&id(3)].ago.len(), MAX_VIEW_LINKS);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_a_link_ends_what_was_known_of_it_is_forgotten() {
         let mut room = Room::of(&[2, 3]);
@@ -859,7 +829,6 @@ mod tests {
         assert!(room.dropouts.told.is_empty());
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn a_link_view_travels_as_a_peer_message_body_under_its_own_topic() {
         use crate::network::settings_help::PeerBody;
@@ -878,7 +847,6 @@ mod tests {
         assert_eq!(serde_json::from_value::<PeerBody>(json).unwrap(), body);
     }
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn a_link_view_that_asks_nothing_leaves_the_flag_out() {
         let view = LinkView {

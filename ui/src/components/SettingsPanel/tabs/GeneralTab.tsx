@@ -26,15 +26,15 @@ export interface GeneralTabProps {
   askNameOnEntry?: boolean;
   /** Called when the person turns the name confirmation on or off; the switch is left out when absent */
   onAskNameOnEntryChange?: (enabled: boolean) => void;
-  /** Whether the router is asked to open the audio port, so peers behind a NAT can reach this app (ADR-113) */
+  /** Whether the router is asked to open the audio port, so peers behind a NAT can reach this app */
   openRouterPort?: boolean;
   /** Called when the person turns it on or off; the switch is left out when absent */
   onOpenRouterPortChange?: (enabled: boolean) => void;
-  /** Whether the audio packets are marked as voice, so a Wi-Fi sends them ahead of other traffic (ADR-110) */
+  /** Whether the audio packets are marked as voice, so a Wi-Fi sends them ahead of other traffic */
   voicePriority?: boolean;
   /** Called when the person turns the marking on or off; the switch is left out when absent */
   onVoicePriorityChange?: (enabled: boolean) => void;
-  /** Whether asks to buffer a participant's audio for longer are put to the person or turned down (ADR-097) */
+  /** Whether asks to buffer a participant's audio for longer are put to the person or turned down */
   bufferAsks?: BufferAskPolicy;
   /** Called when the person chooses; the section is left out when absent */
   onBufferAsksChange?: (policy: BufferAskPolicy) => void;

@@ -57,7 +57,7 @@ pub struct AudioConfig {
     pub channels: u16,
     /// Frame size in samples
     pub frame_size: u32,
-    /// How a WASAPI device is opened (Windows; ADR-088)
+    /// How a WASAPI device is opened (Windows)
     pub wasapi_mode: WasapiMode,
 }
 
@@ -493,7 +493,7 @@ impl AudioEngine {
     }
 
     /// Start playback that pulls each frame from `fill_frame` at the device's
-    /// clock (ADR-028).
+    /// clock.
     ///
     /// The callback asks for exactly the audio it is about to play, when it is
     /// about to play it, rather than draining a queue another thread has to
@@ -1178,7 +1178,6 @@ mod tests {
         played
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_the_device_runs_at_half_the_session_rate_the_tone_keeps_its_pitch_and_its_channel() {
         let mut puller = FramePuller::converting(128, left_tone(128), 48000, 24000).unwrap();
@@ -1198,7 +1197,6 @@ mod tests {
         assert!(right.into_iter().all(|x| x.abs() < 1e-6));
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_the_device_runs_above_the_session_rate_the_tone_keeps_its_pitch() {
         let mut puller = FramePuller::converting(128, left_tone(128), 48000, 96000).unwrap();
@@ -1216,7 +1214,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_the_source_makes_less_than_a_conversion_chunk_the_device_still_gets_the_audio() {
         // 3 frames a call: the resampler needs 8 to produce anything
@@ -1232,7 +1229,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_the_source_has_nothing_to_say_the_converted_device_is_left_silent() {
         let mut puller = FramePuller::converting(128, |_: &mut [f32]| 0, 48000, 24000).unwrap();
@@ -1243,7 +1239,6 @@ mod tests {
         assert!(data.iter().all(|x| *x == 0.0));
     }
 
-    /// Verifies: REQ-AUD-127
     #[test]
     fn when_playing_through_a_conversion_the_device_callback_does_not_grow_its_buffers() {
         let mut puller = FramePuller::converting(128, left_tone(128), 48000, 44100).unwrap();
@@ -1257,7 +1252,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn opening_capture_on_a_driver_that_hangs_gives_up_at_the_limit_and_says_so() {
         let mut engine = AudioEngine::new(AudioConfig::default());
@@ -1273,7 +1267,6 @@ mod tests {
         assert!(!engine.is_capture_running());
     }
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn opening_playback_on_a_driver_that_hangs_gives_up_at_the_limit_and_says_so() {
         let mut engine = AudioEngine::new(AudioConfig::default());
@@ -1291,8 +1284,6 @@ mod tests {
 
     /// PipeWire's ALSA plugin raises no POLLOUT for a period under 64 frames,
     /// so a stream opened at 32 or 48 never plays (cpal 0.18, pipewire 1.4.2).
-    ///
-    /// Verifies: REQ-AUD-036
     #[cfg(target_os = "linux")]
     #[test]
     fn on_linux_an_output_period_is_never_under_64_frames() {
@@ -1312,8 +1303,6 @@ mod tests {
     /// system's default output at a frame size of 32 and counts how often the
     /// device asks for samples. Skipped where there is no output device to
     /// open (CI without PipeWire).
-    ///
-    /// Verifies: REQ-AUD-036
     #[cfg(target_os = "linux")]
     #[test]
     fn on_linux_playback_at_a_frame_size_of_32_is_asked_for_samples() {
@@ -1369,8 +1358,6 @@ mod tests {
     /// The device's request size has no reason to match the frame length. What
     /// a request leaves over of a frame must open the next request, or samples
     /// are lost or repeated - which is an audible glitch.
-    ///
-    /// Verifies: REQ-AUD-031
     #[test]
     fn test_device_requests_of_any_size_receive_the_source_in_order() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1390,8 +1377,6 @@ mod tests {
     /// A peer runs at its own buffer size, so its frames can be several times
     /// the length of ours. The source has to be given room for one, or the
     /// end of every frame is cut off.
-    ///
-    /// Verifies: REQ-AUD-038
     #[test]
     fn a_source_frame_several_times_the_nominal_length_reaches_the_device_whole() {
         const NOMINAL: usize = 4;
@@ -1414,9 +1399,7 @@ mod tests {
     }
 
     /// Audio fetched before the device needs it is audio that waits, and
-    /// waiting is the delay the play-out buffer was meant to remove (ADR-028).
-    ///
-    /// Verifies: REQ-AUD-031
+    /// waiting is the delay the play-out buffer was meant to remove.
     #[test]
     fn test_source_is_asked_only_when_the_device_has_used_up_the_last_frame() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1447,8 +1430,6 @@ mod tests {
 
     /// A source that has nothing must still leave the device with samples, and
     /// they must be silence rather than what an earlier frame left behind.
-    ///
-    /// Verifies: REQ-AUD-031
     #[test]
     fn test_a_source_with_nothing_to_say_plays_silence() {
         let mut puller = FramePuller::new(4, |_: &mut [f32]| 0);
@@ -1462,8 +1443,6 @@ mod tests {
     /// What the device asks for is stereo spread over its own channels: the
     /// source is asked for two samples per device frame, whatever the device's
     /// width, and they land on the channels the route names.
-    ///
-    /// Verifies: REQ-AUD-119
     #[test]
     fn test_a_device_wider_than_stereo_is_played_on_the_selected_channels() {
         // A delay measurement under way would put its own sound in the output

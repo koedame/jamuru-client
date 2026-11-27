@@ -1,4 +1,4 @@
-//! A peak limiter that adds no delay (ADR-094).
+//! A peak limiter that adds no delay.
 //!
 //! It keeps what it is given at or under [`CEILING`] (0 dBFS, the loudest a sample
 //! can be on the wire and on a device). It does not look ahead: a peak is brought
@@ -166,7 +166,6 @@ mod tests {
             .collect()
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn audio_at_or_under_the_ceiling_comes_out_bit_for_bit() {
         let mut limiter = Limiter::new(RATE);
@@ -177,7 +176,6 @@ mod tests {
         assert_eq!(limiter.limited_frames(), 0);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn audio_over_the_ceiling_never_comes_out_over_it() {
         let mut limiter = Limiter::new(RATE);
@@ -187,7 +185,6 @@ mod tests {
         assert!(limiter.limited_frames() > 0);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn a_single_loud_sample_is_brought_down_on_that_sample() {
         let mut limiter = Limiter::new(RATE);
@@ -197,7 +194,6 @@ mod tests {
         assert_eq!(samples[10 * 2], CEILING);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn the_channels_of_a_frame_keep_their_balance() {
         let mut limiter = Limiter::new(RATE);
@@ -207,7 +203,6 @@ mod tests {
         assert!((samples[1] - 0.25).abs() < 1e-6);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn after_a_peak_the_gain_comes_back_to_leave_the_audio_untouched() {
         let mut limiter = Limiter::new(RATE);
@@ -222,7 +217,6 @@ mod tests {
         assert_eq!(again, quiet);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn the_gain_climbs_back_within_the_release_time() {
         let mut limiter = Limiter::new(RATE);
@@ -240,7 +234,6 @@ mod tests {
         assert!(last <= 0.5);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn a_switched_off_limiter_leaves_loud_audio_as_it_is() {
         let on = Arc::new(AtomicBool::new(false));
@@ -257,7 +250,6 @@ mod tests {
         assert_eq!(count.load(Ordering::Relaxed), 1);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn switching_the_limiter_off_and_on_forgets_the_peak_before() {
         let on = Arc::new(AtomicBool::new(true));
@@ -272,7 +264,6 @@ mod tests {
         assert_eq!(quiet, vec![0.5, -0.5]);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn samples_that_are_not_numbers_or_are_infinite_come_out_as_silence_and_hold_nothing_down() {
         let mut limiter = Limiter::new(RATE);
@@ -282,7 +273,6 @@ mod tests {
         assert_eq!(limiter.limited_frames(), 0);
     }
 
-    // Verifies: REQ-AUD-048
     #[test]
     fn a_mono_stream_is_limited_too() {
         let mut limiter = Limiter::new(RATE);

@@ -1,5 +1,4 @@
-//! Takes one sample frame out of the played audio, or puts one in, slowly
-//! (ADR-122).
+//! Takes one sample frame out of the played audio, or puts one in, slowly.
 //!
 //! The receive buffer is kept at its target by playing a little faster when it
 //! holds too much and a little slower when it holds too little. The speed is
@@ -47,7 +46,7 @@ const MIN_BLOCK_FRAMES: usize = 2 * LEFT + 2;
 const PHASES: usize = 256;
 
 /// Shape of the Kaiser window the weights are cut with. Chosen from the error of
-/// the interpolation against a tone at 1 to 18 kHz (ADR-122).
+/// the interpolation against a tone at 1 to 18 kHz.
 const KAISER_BETA: f64 = 8.0;
 
 /// The most that is owed at a time, in sample frames. A rate that asks for more
@@ -360,7 +359,6 @@ mod tests {
         (played, stretcher)
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn when_a_stretcher_is_made_the_interpolation_weights_are_already_built() {
         let _stretcher = Stretcher::new(RATE, 4096);
@@ -370,7 +368,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn when_no_rate_is_asked_for_the_audio_passes_on_untouched() {
         let (played, stretcher) = through(0.0, 100);
@@ -381,7 +378,6 @@ mod tests {
         assert_eq!(stretcher.stats(), StretchStats::default());
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn when_the_rate_asks_to_play_faster_a_sample_frame_goes_out_every_so_often() {
         // 500 ppm is one sample frame in 2000: over 60000 sample frames, 30 out
@@ -397,7 +393,6 @@ mod tests {
         assert_eq!(stretcher.stats().insertions, 0);
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn when_the_rate_asks_to_play_slower_a_sample_frame_comes_in_every_so_often() {
         let blocks = 60_000 / BLOCK;
@@ -412,7 +407,6 @@ mod tests {
         assert_eq!(stretcher.stats().removals, 0);
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn a_ramp_stays_a_ramp_and_no_step_in_it_is_bigger_than_the_stretch_makes() {
         // The ramp rises by RISE per sample frame, so the stretch can only make the
@@ -433,7 +427,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn every_sample_frame_of_the_ramp_is_played_once_in_order_after_a_stretch_ends() {
         // After the stretch the audio is the ramp again, shifted by one sample frame
@@ -446,7 +439,6 @@ mod tests {
         assert!(last > 6.0 && last <= 6.4, "last {last}");
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn a_stretch_given_up_on_a_cut_passes_on_what_it_held_back_and_then_the_block_as_it_is() {
         let mut stretcher = Stretcher::new(RATE, 4096);
@@ -494,7 +486,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn a_block_with_no_room_for_a_stretch_passes_as_it_is() {
         let mut stretcher = Stretcher::new(RATE, 4096);

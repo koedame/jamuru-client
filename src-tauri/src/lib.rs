@@ -123,7 +123,7 @@ fn open_app(app: &tauri::AppHandle, self_updating: bool, checked_at_start: bool)
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // A watcher of an update being tried is this program run from the copy
-    // of the version the update replaced (ADR-089). It does nothing else, so
+    // of the version the update replaced. It does nothing else, so
     // it comes before everything.
     if let Some((store, id)) = updater::trial::watcher_args(std::env::args_os()) {
         std::process::exit(updater::trial::run_watcher(store, id));
@@ -144,14 +144,14 @@ pub fn run() {
     });
 
     let context = tauri::generate_context!();
-    // Only the release build is given updater settings (`tauri.updater.conf.json`,
-    // ADR-041), so a build made from source never replaces itself with a release.
+    // Only the release build is given updater settings (`tauri.updater.conf.json`),
+    // so a build made from source never replaces itself with a release.
     let self_updating = context.config().plugins.0.contains_key("updater");
     let version = context.package_info().version.to_string();
     #[cfg(feature = "update-drill")]
     update_drill::at(update_drill::Stage::BeforeStart, &version);
     // Before anything of the app runs: a start while the version an update
-    // replaced is put back ends here (ADR-089).
+    // replaced is put back ends here.
     let began = if self_updating {
         updater::startup::begin(&version)
     } else {
@@ -164,15 +164,15 @@ pub fn run() {
     update_drill::at(update_drill::Stage::Started, &version);
 
     let mut builder = tauri::Builder::default();
-    // Before every other plugin: a second copy exits while they start (ADR-085).
+    // Before every other plugin: a second copy exits while they start.
     if let Some(plugin) = single_instance::plugin() {
         builder = builder.plugin(plugin);
     }
     let mut builder = builder
-        // The logger exists before anything below can log (ADR-036).
+        // The logger exists before anything below can log.
         .plugin(logging::init(log_spec.clone()))
         .plugin(tauri_plugin_shell::init())
-        // Hands `jamuru://join/<code>` links from the OS to the app (REQ-CON-103).
+        // Hands `jamuru://join/<code>` links from the OS to the app.
         // The scheme is declared in tauri.conf.json under plugins.deep-link.
         .plugin(tauri_plugin_deep_link::init())
         // The menu is made in `menu::install`, in the app's language.
@@ -199,7 +199,7 @@ pub fn run() {
                     software_render_limits
                 );
             }
-            // GUI E2E control channel (ADR-025). Compiled out entirely
+            // GUI E2E control channel. Compiled out entirely
             // without the `e2e-control` feature, and inert unless the
             // harness sets JAMJAM_E2E_CONTROL_PORT.
             #[cfg(feature = "e2e-control")]
@@ -226,7 +226,7 @@ pub fn run() {
     app.manage(SettingsState::new());
     let config_state = ConfigState::new();
     // Loads (or generates on first launch) this installation's device
-    // identity once at startup - ADR-024, replaces account sign-in.
+    // identity once at startup; it replaces account sign-in.
     app.manage(DeviceIdentityState::load());
 
     // Usage reporting is off unless the user turned it on (`usage_reporting`).
@@ -239,7 +239,7 @@ pub fn run() {
     // Read before the watchdog below writes this launch's own running
     // marker, which would otherwise overwrite what the previous one left.
     // Local and unconditional: whether it is sent depends on
-    // `usage_reporting`, decided inside (usage.rs, ADR-056).
+    // `usage_reporting`, decided inside (usage.rs).
     let previous_incident = watchdog::previous_incident(usage.reporter());
     usage.apply_previous_incident(previous_incident);
     let watchdog = watchdog::Watchdog::install(usage.reporter().clone());
@@ -283,7 +283,7 @@ pub fn run() {
     app.run(move |handle, event| match event {
         // Tauri does not make the main window (`create: false`): a start that
         // updates first opens it afterwards, or never, when it restarts into
-        // the update (ADR-089).
+        // the update.
         tauri::RunEvent::Ready => {
             if let Some(began) = began.take() {
                 updater::startup::run(handle.clone(), began, move |app, checked| {

@@ -358,7 +358,7 @@
   color: var(--color-accent);
 }
 
-/* Device delay measurement (REQ-GUI-034). */
+/* Device delay measurement. */
 .delay-meter {
   display: flex;
   flex-direction: column;

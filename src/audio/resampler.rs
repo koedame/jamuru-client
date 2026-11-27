@@ -1,7 +1,7 @@
-//! Audio resampling module (ADR-013)
+//! Audio resampling module
 //!
 //! Provides sample rate conversion for receive-side audio processing.
-//! Per ADR-013: Resampling is performed on the receive side only.
+//! Resampling is performed on the receive side only.
 //! The sender transmits at their native sample rate, and the receiver
 //! converts to their local sample rate if necessary.
 
@@ -385,7 +385,6 @@ mod tests {
         20.0 * (rms / (0.5 / 2f32.sqrt())).log10()
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn a_capture_converted_from_44100_to_48000_keeps_the_level_of_music_up_to_15khz() {
         for (hz, within_db) in [
@@ -402,7 +401,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn a_capture_converted_to_another_rate_has_the_length_of_the_rate_ratio() {
         let mut resampler = CaptureResampler::new(44100, 48000, 1).unwrap();
@@ -411,7 +409,6 @@ mod tests {
         assert!((0..=16).contains(&shortfall), "{} frames out", out.len());
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn a_capture_gives_the_same_audio_however_the_device_cuts_it_into_callbacks() {
         let input = tone(1000.0, 44100, 4410);
@@ -430,7 +427,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn the_conversion_delays_a_sound_by_under_a_third_of_a_millisecond() {
         let mut resampler = CaptureResampler::new(44100, 48000, 1).unwrap();
@@ -452,7 +448,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-124
     #[test]
     fn a_stereo_capture_keeps_each_channel_to_itself() {
         let mut resampler = CaptureResampler::new(44100, 48000, 2).unwrap();

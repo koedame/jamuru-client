@@ -1,4 +1,4 @@
-//! Listening to and feeding the audio path of a running session (ADR-044).
+//! Listening to and feeding the audio path of a running session.
 //!
 //! `debug.audio_record` records what passes one of three points, and
 //! `debug.audio_tone` puts a sine wave in place of what passes one of two, so
@@ -66,7 +66,7 @@ pub fn install() {
     jamjam::audio::set_taps(&CoreTaps);
 }
 
-/// The longest recording. The method runs at most 25 seconds (ADR-044 §4).
+/// The longest recording. The method runs at most 25 seconds.
 pub const MAX_RECORD_SECONDS: f32 = 20.0;
 
 /// The largest WAV a recording may come back as. A frame carries 1 MiB and the
@@ -427,8 +427,6 @@ mod tests {
 
     /// The tones armed here are shared by the whole process, so one test
     /// covers both shapes in turn.
-    ///
-    /// Verifies: REQ-RMT-027
     #[test]
     fn a_tone_on_one_channel_leaves_the_other_silent_and_a_tone_without_one_fills_both() {
         let _armed = ARMED.blocking_lock();
@@ -463,8 +461,6 @@ mod tests {
     /// whose tone was skipped went out as what the microphone had captured, and
     /// where the microphone hears the speakers the far end heard the tone
     /// grow to many times the full scale.
-    ///
-    /// Verifies: REQ-RMT-027
     #[test]
     fn a_tone_is_put_in_every_frame_while_other_points_are_being_recorded_or_injected() {
         let _armed = ARMED.blocking_lock();

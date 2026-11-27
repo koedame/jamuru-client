@@ -77,7 +77,7 @@ export function SettingsPanelAdapter({
   const update = useAppUpdate(updateCheckRequest);
 
   // State
-  // Audio settings as the backend has them in effect (ADR-043). Replaced
+  // Audio settings as the backend has them in effect. Replaced
   // wholesale after each change - including one made from outside this
   // window - rather than patched field by field.
   const [audio, setAudio] = useState<AudioSettings | null>(null);
@@ -125,7 +125,7 @@ export function SettingsPanelAdapter({
   // Whether the audio packets are marked as voice (on until turned off)
   const [voicePriority, setVoicePriority] = useState(true);
 
-  // Whether asks to buffer someone's audio for longer are put to the person (ADR-097)
+  // Whether asks to buffer someone's audio for longer are put to the person
   const [bufferAsks, setBufferAsks] = useState<BufferAskPolicy>("ask");
   const bufferAsksRef = useRef(bufferAsks);
   bufferAsksRef.current = bufferAsks;
@@ -141,10 +141,10 @@ export function SettingsPanelAdapter({
   // short confirmation instead of the section just disappearing.
   const [previousHang, setPreviousHang] = useState<Hang | null | undefined>(undefined);
   const [previousHangAnswered, setPreviousHangAnswered] = useState(false);
-  // Whether sending it also attaches jamuru.log (ADR-059: true before 1.0.0).
+  // Whether sending it also attaches jamuru.log (true before 1.0.0).
   const [previousHangAttachesLog, setPreviousHangAttachesLog] = useState(false);
 
-  // Report a problem (ADR-058): a manual, one-off send, independent of
+  // Report a problem: a manual, one-off send, independent of
   // usage reporting. `idle` until the user starts it.
   const [reportProblemState, setReportProblemState] = useState<ReportProblemState>("idle");
   const [reportProblemPreview, setReportProblemPreview] = useState<string | null>(null);

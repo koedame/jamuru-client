@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The update drill: installs real packages over each other and checks that an
-update that cannot start is taken out again (ADR-089).
+update that cannot start is taken out again.
 
 Two builds of this source are made with the `update-drill` feature: version A
 (0.0.1) and version B (0.0.2), both trusting a key made for the drill and
@@ -165,7 +165,7 @@ def terms_version(source: Path) -> int:
 
 def keeps_previous_version(source: Path) -> bool:
     """Whether the app of this source keeps the version it replaces until the
-    new one has started (ADR-089): it is the one that reads `reports_started`
+    new one has started: it is the one that reads `reports_started`
     from the release."""
     return any(
         "reports_started" in path.read_text(encoding="utf-8", errors="replace")

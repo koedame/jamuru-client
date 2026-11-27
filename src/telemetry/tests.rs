@@ -124,7 +124,6 @@ fn audio_env() -> EventBody {
 
 // -- off by default -----------------------------------------------------
 
-/// Verifies: REQ-TEL-001
 #[tokio::test]
 async fn when_usage_reporting_is_off_nothing_is_collected_or_sent() {
     let dir = tempfile::tempdir().unwrap();
@@ -142,7 +141,6 @@ async fn when_usage_reporting_is_off_nothing_is_collected_or_sent() {
     assert!(transport.batches().is_empty(), "something was sent");
 }
 
-/// Verifies: REQ-TEL-001
 #[test]
 fn when_usage_reporting_is_off_no_install_id_is_made() {
     let dir = tempfile::tempdir().unwrap();
@@ -152,7 +150,6 @@ fn when_usage_reporting_is_off_no_install_id_is_made() {
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 
-/// Verifies: REQ-TEL-001
 #[test]
 fn when_the_user_config_defaults_are_used_usage_reporting_is_off() {
     assert!(!AppConfig::default().usage_reporting);
@@ -162,7 +159,6 @@ fn when_the_user_config_defaults_are_used_usage_reporting_is_off() {
     assert!(!config.usage_reporting);
 }
 
-/// Verifies: REQ-TEL-001
 #[test]
 fn when_there_is_no_place_to_keep_the_install_id_reporting_stays_off() {
     let reporter = UsageReporter::new(None, "0.1.2", RecordingTransport::new(true), true);
@@ -178,7 +174,6 @@ fn install_id_of(reporter: &UsageReporter) -> String {
     lines(&body)[0]["install_id"].as_str().unwrap().to_string()
 }
 
-/// Verifies: REQ-TEL-002
 #[test]
 fn when_reporting_is_turned_on_a_random_16_byte_install_id_is_stored() {
     let dir = tempfile::tempdir().unwrap();
@@ -193,7 +188,6 @@ fn when_reporting_is_turned_on_a_random_16_byte_install_id_is_stored() {
     assert_eq!(stored.trim(), id);
 }
 
-/// Verifies: REQ-TEL-002
 #[test]
 fn when_the_app_starts_with_reporting_still_on_the_same_install_id_is_kept() {
     let dir = tempfile::tempdir().unwrap();
@@ -203,7 +197,6 @@ fn when_the_app_starts_with_reporting_still_on_the_same_install_id_is_kept() {
     assert_eq!(install_id_of(&first), install_id_of(&second));
 }
 
-/// Verifies: REQ-TEL-002
 #[test]
 fn when_the_install_id_is_kept_it_is_not_in_the_settings_file_directory() {
     let usage_dir = state_dir().expect("a data directory");
@@ -215,7 +208,6 @@ fn when_the_install_id_is_kept_it_is_not_in_the_settings_file_directory() {
     );
 }
 
-/// Verifies: REQ-TEL-002
 #[test]
 fn when_reporting_is_turned_off_the_unsent_events_and_the_install_id_are_thrown_away() {
     let dir = tempfile::tempdir().unwrap();
@@ -235,7 +227,6 @@ fn when_reporting_is_turned_off_the_unsent_events_and_the_install_id_are_thrown_
     assert_ne!(install_id_of(&reporter), before);
 }
 
-/// Verifies: REQ-TEL-002
 #[test]
 fn when_the_app_starts_with_reporting_off_a_leftover_install_id_is_removed() {
     let dir = tempfile::tempdir().unwrap();
@@ -305,7 +296,6 @@ fn every_event() -> Vec<EventBody> {
     ]
 }
 
-/// Verifies: REQ-TEL-003
 #[test]
 fn when_any_event_is_recorded_its_line_satisfies_schema_json() {
     let dir = tempfile::tempdir().unwrap();
@@ -323,7 +313,6 @@ fn when_any_event_is_recorded_its_line_satisfies_schema_json() {
     }
 }
 
-/// Verifies: REQ-TEL-003
 #[test]
 fn when_a_line_is_written_it_carries_the_whole_envelope() {
     let dir = tempfile::tempdir().unwrap();
@@ -354,7 +343,6 @@ fn when_a_line_is_written_it_carries_the_whole_envelope() {
     assert_eq!(line["arch"], std::env::consts::ARCH);
 }
 
-/// Verifies: REQ-TEL-003
 #[test]
 fn when_events_are_recorded_seq_counts_up_within_the_launch() {
     let dir = tempfile::tempdir().unwrap();
@@ -371,7 +359,6 @@ fn when_events_are_recorded_seq_counts_up_within_the_launch() {
     assert_eq!(seqs, [0, 1, 2]);
 }
 
-/// Verifies: REQ-TEL-003
 #[test]
 fn when_a_line_has_a_value_outside_the_schema_it_is_refused() {
     let dir = tempfile::tempdir().unwrap();
@@ -425,7 +412,6 @@ fn when_a_line_has_a_value_outside_the_schema_it_is_refused() {
     );
 }
 
-/// Verifies: REQ-TEL-003
 #[test]
 fn when_a_device_or_a_session_end_has_a_value_outside_the_schema_it_is_refused() {
     let dir = tempfile::tempdir().unwrap();
@@ -458,7 +444,6 @@ fn when_a_device_or_a_session_end_has_a_value_outside_the_schema_it_is_refused()
     assert!(!is_valid(&bad), "the schema accepted a line it must refuse");
 }
 
-/// Verifies: REQ-TEL-003
 #[test]
 fn when_a_line_of_another_event_is_mixed_in_the_fields_of_one_event_are_refused() {
     let dir = tempfile::tempdir().unwrap();
@@ -477,7 +462,6 @@ fn when_a_line_of_another_event_is_mixed_in_the_fields_of_one_event_are_refused(
     );
 }
 
-/// Verifies: REQ-TEL-003
 #[test]
 fn when_the_real_machine_is_described_the_lines_satisfy_schema_json() {
     let dir = tempfile::tempdir().unwrap();
@@ -506,7 +490,6 @@ fn settings_line_for(config: &AppConfig) -> (String, Value) {
     (body, line)
 }
 
-/// Verifies: REQ-TEL-004
 #[test]
 fn when_settings_are_sent_the_name_is_not_in_the_line() {
     let config = AppConfig {
@@ -529,7 +512,6 @@ fn when_settings_are_sent_the_name_is_not_in_the_line() {
     assert_valid(&line);
 }
 
-/// Verifies: REQ-TEL-004
 #[test]
 fn when_the_left_out_list_is_read_it_is_exactly_the_three_named_items() {
     let mut names = settings::LEFT_OUT.to_vec();
@@ -538,7 +520,6 @@ fn when_the_left_out_list_is_read_it_is_exactly_the_three_named_items() {
     assert_eq!(names, ["input_device_id", "output_device_id", "peer_name"]);
 }
 
-/// Verifies: REQ-TEL-004
 #[test]
 fn when_the_server_url_is_set_only_its_scheme_host_and_port_are_sent() {
     // Built from parts: the distribution test flags any literal server URL.
@@ -563,7 +544,6 @@ fn when_the_server_url_is_set_only_its_scheme_host_and_port_are_sent() {
     assert_valid(&line);
 }
 
-/// Verifies: REQ-TEL-004
 #[test]
 fn when_the_server_url_has_no_host_nothing_of_it_is_sent() {
     for url in ["not a url", concat!("https", "://user:pw@"), "://host"] {
@@ -578,7 +558,6 @@ fn when_the_server_url_has_no_host_nothing_of_it_is_sent() {
     }
 }
 
-/// Verifies: REQ-TEL-005
 #[test]
 fn when_audio_devices_are_chosen_their_ids_are_sent_in_audio_env_and_not_in_the_settings() {
     let config = AppConfig {
@@ -605,7 +584,6 @@ fn when_audio_devices_are_chosen_their_ids_are_sent_in_audio_env_and_not_in_the_
     assert_valid(&env_line);
 }
 
-/// Verifies: REQ-TEL-005
 #[test]
 fn when_a_device_is_left_on_the_os_default_no_id_is_in_audio_env() {
     let dir = tempfile::tempdir().unwrap();
@@ -619,7 +597,6 @@ fn when_a_device_is_left_on_the_os_default_no_id_is_in_audio_env() {
     assert_valid(&line);
 }
 
-/// Verifies: REQ-TEL-018
 #[test]
 fn when_the_server_is_the_one_the_app_was_built_for_the_start_says_so() {
     let (_, default_line) = settings_line_for(&AppConfig::default());
@@ -634,7 +611,6 @@ fn when_the_server_is_the_one_the_app_was_built_for_the_start_says_so() {
     assert_valid(&own_line);
 }
 
-/// Verifies: REQ-TEL-004
 #[test]
 fn when_a_setting_is_added_it_is_sent_unless_it_is_left_out() {
     // Whatever the settings file can hold (every item, set or not) is what is
@@ -665,7 +641,6 @@ fn when_a_setting_is_added_it_is_sent_unless_it_is_left_out() {
     }
 }
 
-/// Verifies: REQ-TEL-004
 #[test]
 fn when_a_setting_is_a_string_the_value_is_sent_as_it_is() {
     let config = AppConfig {
@@ -681,7 +656,6 @@ fn when_a_setting_is_a_string_the_value_is_sent_as_it_is() {
 
 // -- device names -------------------------------------------------------
 
-/// Verifies: REQ-TEL-005
 #[test]
 fn when_a_device_is_reported_its_name_is_sent_exactly_as_the_os_gave_it() {
     let dir = tempfile::tempdir().unwrap();
@@ -708,7 +682,6 @@ fn when_a_device_is_reported_its_name_is_sent_exactly_as_the_os_gave_it() {
 
 // -- batches ------------------------------------------------------------
 
-/// Verifies: REQ-TEL-006
 #[tokio::test]
 async fn when_more_events_wait_than_fit_in_one_send_only_200_lines_go_out() {
     let dir = tempfile::tempdir().unwrap();
@@ -728,7 +701,6 @@ async fn when_more_events_wait_than_fit_in_one_send_only_200_lines_go_out() {
     assert_eq!(reporter.pending_count(), 0);
 }
 
-/// Verifies: REQ-TEL-006
 #[tokio::test]
 async fn when_the_lines_are_long_one_send_stays_within_64_kilobytes() {
     let dir = tempfile::tempdir().unwrap();
@@ -753,7 +725,6 @@ async fn when_the_lines_are_long_one_send_stays_within_64_kilobytes() {
     }
 }
 
-/// Verifies: REQ-TEL-006
 #[tokio::test]
 async fn when_the_server_does_not_take_a_batch_it_is_dropped_and_not_sent_again() {
     let dir = tempfile::tempdir().unwrap();
@@ -772,7 +743,6 @@ async fn when_the_server_does_not_take_a_batch_it_is_dropped_and_not_sent_again(
     assert_eq!(reporter.pending_count(), 0);
 }
 
-/// Verifies: REQ-TEL-006
 #[tokio::test]
 async fn when_nothing_is_waiting_nothing_is_sent() {
     let dir = tempfile::tempdir().unwrap();
@@ -783,7 +753,6 @@ async fn when_nothing_is_waiting_nothing_is_sent() {
     assert!(transport.batches().is_empty());
 }
 
-/// Verifies: REQ-TEL-006
 #[tokio::test]
 async fn when_an_error_happens_it_waits_for_the_next_send_and_goes_with_it() {
     let dir = tempfile::tempdir().unwrap();
@@ -802,7 +771,6 @@ async fn when_an_error_happens_it_waits_for_the_next_send_and_goes_with_it() {
     assert_eq!(events, ["error", "app_start"]);
 }
 
-/// Verifies: REQ-TEL-006
 #[test]
 fn when_the_same_error_repeats_before_the_next_send_it_is_counted_once() {
     let dir = tempfile::tempdir().unwrap();
@@ -824,7 +792,6 @@ fn when_the_same_error_repeats_before_the_next_send_it_is_counted_once() {
     }
 }
 
-/// Verifies: REQ-TEL-006
 #[test]
 fn when_the_same_error_happens_in_another_session_it_is_counted_apart() {
     let dir = tempfile::tempdir().unwrap();
@@ -845,7 +812,6 @@ fn when_the_same_error_happens_in_another_session_it_is_counted_apart() {
 
 // -- preview ------------------------------------------------------------
 
-/// Verifies: REQ-TEL-009
 #[tokio::test]
 async fn when_the_preview_is_read_it_is_the_body_the_next_send_will_carry() {
     let dir = tempfile::tempdir().unwrap();
@@ -866,7 +832,6 @@ async fn when_the_preview_is_read_it_is_the_body_the_next_send_will_carry() {
 
 // -- sessions -----------------------------------------------------------
 
-/// Verifies: REQ-TEL-010
 #[test]
 fn when_a_session_runs_its_events_carry_its_id_and_the_end_carries_the_totals() {
     let dir = tempfile::tempdir().unwrap();
@@ -907,7 +872,6 @@ fn when_a_session_runs_its_events_carry_its_id_and_the_end_carries_the_totals() 
     }
 }
 
-/// Verifies: REQ-TEL-010
 #[test]
 fn when_a_figure_was_never_measured_it_is_left_out_of_session_end() {
     let end = SessionTally::new().finish(EndReason::Disconnected);
@@ -924,7 +888,6 @@ fn when_a_figure_was_never_measured_it_is_left_out_of_session_end() {
     }
 }
 
-/// Verifies: REQ-TEL-010
 #[test]
 fn when_readings_arrive_the_percentiles_are_nearest_rank_and_the_duration_is_the_elapsed_time() {
     let mut tally = SessionTally::started_at(Instant::now());
@@ -942,7 +905,6 @@ fn when_readings_arrive_the_percentiles_are_nearest_rank_and_the_duration_is_the
     assert_eq!(end.loss_pct_max, Some(50.0));
 }
 
-/// Verifies: REQ-TEL-010
 #[test]
 fn when_fec_rebuilt_packets_in_some_readings_the_share_of_those_readings_is_reported() {
     let mut tally = SessionTally::new();
@@ -956,7 +918,6 @@ fn when_fec_rebuilt_packets_in_some_readings_the_share_of_those_readings_is_repo
     assert_eq!(end.fec_active_pct, Some(50.0));
 }
 
-/// Verifies: REQ-TEL-010
 #[test]
 fn when_fec_never_rebuilt_a_packet_the_share_is_zero_not_absent() {
     let mut tally = SessionTally::new();
@@ -966,7 +927,6 @@ fn when_fec_never_rebuilt_a_packet_the_share_is_zero_not_absent() {
     assert_eq!(tally.finish(EndReason::Left).fec_active_pct, Some(0.0));
 }
 
-/// Verifies: REQ-TEL-010
 #[test]
 fn when_the_connection_restarts_its_fec_count_the_new_count_is_new_recoveries() {
     let mut tally = SessionTally::new();
@@ -978,7 +938,6 @@ fn when_the_connection_restarts_its_fec_count_the_new_count_is_new_recoveries() 
     assert_eq!(tally.finish(EndReason::Left).fec_active_pct, Some(66.7));
 }
 
-/// Verifies: REQ-TEL-003
 #[test]
 fn when_a_session_end_carries_the_fec_share_the_line_satisfies_schema_json() {
     let dir = tempfile::tempdir().unwrap();
@@ -999,7 +958,6 @@ fn when_a_session_end_carries_the_fec_share_the_line_satisfies_schema_json() {
     }
 }
 
-/// Verifies: REQ-TEL-015
 #[test]
 fn when_the_link_came_up_the_session_end_says_which_kind_of_route_and_how_long_it_took() {
     let end = session_end_with_link_and_addresses();
@@ -1011,7 +969,6 @@ fn when_the_link_came_up_the_session_end_says_which_kind_of_route_and_how_long_i
     assert!(json["first_audio_ms"].is_u64());
 }
 
-/// Verifies: REQ-TEL-015
 #[test]
 fn when_no_link_came_up_the_route_and_the_times_are_left_out_of_session_end() {
     let json = serde_json::to_value(SessionTally::new().finish(EndReason::Disconnected)).unwrap();
@@ -1021,7 +978,6 @@ fn when_no_link_came_up_the_route_and_the_times_are_left_out_of_session_end() {
     }
 }
 
-/// Verifies: REQ-TEL-015
 #[test]
 fn when_no_audio_ever_arrived_the_first_audio_time_is_left_out() {
     let facts = LinkFacts::new();
@@ -1036,7 +992,6 @@ fn when_no_audio_ever_arrived_the_first_audio_time_is_left_out() {
     assert!(json.get("first_audio_ms").is_none(), "{json}");
 }
 
-/// Verifies: REQ-TEL-015
 #[test]
 fn when_a_reading_has_no_link_the_last_real_one_is_kept() {
     let facts = LinkFacts::new();
@@ -1050,7 +1005,6 @@ fn when_a_reading_has_no_link_the_last_real_one_is_kept() {
     assert_eq!(json["route"], "lan");
 }
 
-/// Verifies: REQ-TEL-016
 #[test]
 fn when_the_user_offered_addresses_their_ips_are_in_the_session_end_without_the_ports() {
     let json = serde_json::to_value(session_end_with_link_and_addresses()).unwrap();
@@ -1066,7 +1020,6 @@ fn when_the_user_offered_addresses_their_ips_are_in_the_session_end_without_the_
     }
 }
 
-/// Verifies: REQ-TEL-016
 #[tokio::test]
 async fn when_a_session_ends_the_peers_address_is_nowhere_in_the_line() {
     let dir = tempfile::tempdir().unwrap();
@@ -1098,7 +1051,6 @@ async fn when_a_session_ends_the_peers_address_is_nowhere_in_the_line() {
     }
 }
 
-/// Verifies: REQ-TEL-016
 #[test]
 fn when_more_addresses_are_offered_than_a_line_may_carry_only_the_first_sixteen_are_kept() {
     let candidates: Vec<AddressCandidate> = (1..=20)
@@ -1113,7 +1065,6 @@ fn when_more_addresses_are_offered_than_a_line_may_carry_only_the_first_sixteen_
     assert!(json.get("public_ip").is_none(), "{json}");
 }
 
-/// Verifies: REQ-TEL-016
 #[test]
 fn when_the_same_address_is_offered_on_two_ports_it_is_listed_once() {
     let mut tally = SessionTally::new();
@@ -1127,7 +1078,6 @@ fn when_the_same_address_is_offered_on_two_ports_it_is_listed_once() {
     assert_eq!(json["local_ips"], serde_json::json!(["192.168.1.20"]));
 }
 
-/// Verifies: REQ-TEL-016
 #[test]
 fn when_the_addresses_are_not_addresses_the_schema_refuses_the_line() {
     let dir = tempfile::tempdir().unwrap();
@@ -1147,7 +1097,6 @@ fn when_the_addresses_are_not_addresses_the_schema_refuses_the_line() {
     assert!(!is_valid(&bad), "the schema accepted a line it must refuse");
 }
 
-/// Verifies: REQ-TEL-017
 #[test]
 fn when_a_new_kind_of_failure_is_recorded_its_word_is_the_one_the_schema_lists() {
     let words = [
@@ -1182,7 +1131,6 @@ fn when_a_new_kind_of_failure_is_recorded_its_word_is_the_one_the_schema_lists()
     }
 }
 
-/// Verifies: REQ-TEL-010
 #[test]
 fn when_a_session_is_still_open_a_new_one_closes_it_first() {
     let dir = tempfile::tempdir().unwrap();
@@ -1198,7 +1146,6 @@ fn when_a_session_is_still_open_a_new_one_closes_it_first() {
     assert_eq!(events, ["session_start", "session_end", "session_start"]);
 }
 
-/// Verifies: REQ-TEL-010
 #[test]
 fn when_no_session_is_open_ending_one_records_nothing() {
     let dir = tempfile::tempdir().unwrap();
@@ -1228,7 +1175,6 @@ fn saved_crash(dir: &Path, launch_id: &str, file: &str) {
     .unwrap();
 }
 
-/// Verifies: REQ-TEL-008
 #[test]
 fn when_the_last_launch_crashed_the_next_one_records_where_with_the_old_launch_id() {
     let dir = tempfile::tempdir().unwrap();
@@ -1253,7 +1199,6 @@ fn when_the_last_launch_crashed_the_next_one_records_where_with_the_old_launch_i
     assert_eq!(reporter.pending_count(), 1);
 }
 
-/// Verifies: REQ-TEL-008
 #[test]
 fn when_a_crash_record_names_something_that_is_not_a_source_location_nothing_is_sent() {
     let dir = tempfile::tempdir().unwrap();
@@ -1270,7 +1215,6 @@ fn when_a_crash_record_names_something_that_is_not_a_source_location_nothing_is_
     assert!(!dir.path().join("crash.json").exists());
 }
 
-/// Verifies: REQ-TEL-008
 #[test]
 fn when_reporting_is_off_a_crash_record_is_removed_and_not_sent() {
     let dir = tempfile::tempdir().unwrap();
@@ -1319,7 +1263,6 @@ fn a_hang_written_by_the_watchdog_is_read_back_once_by_the_next_launch() {
     assert!(reporter.previous_hang().is_none(), "read once, then gone");
 }
 
-/// Verifies: REQ-TEL-019
 #[test]
 fn when_the_last_launch_left_a_stalled_stage_the_next_one_records_it_with_the_old_launch_id() {
     let dir = tempfile::tempdir().unwrap();
@@ -1362,7 +1305,6 @@ fn a_hang_with_no_known_stage_has_no_stalled_time() {
     assert_valid(&parsed[0]);
 }
 
-/// Verifies: REQ-TEL-019
 #[test]
 fn previous_hang_reads_and_removes_the_record_even_while_reporting_is_off() {
     let dir = tempfile::tempdir().unwrap();
@@ -1388,7 +1330,6 @@ fn when_there_is_no_saved_hang_previous_hang_is_none() {
     assert!(reporter.previous_hang().is_none());
 }
 
-/// Verifies: REQ-TEL-020
 #[tokio::test]
 async fn a_one_off_hang_is_sent_while_reporting_stays_off() {
     let dir = tempfile::tempdir().unwrap();
@@ -1509,7 +1450,6 @@ async fn capturing_server(status: &'static str) -> (String, Arc<Mutex<Vec<Captur
     (url, captured)
 }
 
-/// Verifies: REQ-TEL-007
 #[tokio::test]
 async fn when_a_batch_is_sent_it_is_one_anonymous_ndjson_post_to_the_usage_logs_path() {
     let (server, captured) = capturing_server("204 No Content").await;
@@ -1548,7 +1488,6 @@ async fn when_a_batch_is_sent_it_is_one_anonymous_ndjson_post_to_the_usage_logs_
     }
 }
 
-/// Verifies: REQ-TEL-007
 #[tokio::test]
 async fn when_the_server_answers_204_the_batch_counts_as_delivered() {
     let (server, _) = capturing_server("204 No Content").await;
@@ -1561,7 +1500,6 @@ async fn when_the_server_answers_204_the_batch_counts_as_delivered() {
     assert!(delivered);
 }
 
-/// Verifies: REQ-TEL-007
 #[tokio::test]
 async fn when_the_server_answers_anything_but_204_the_batch_does_not_count_as_delivered() {
     for status in ["200 OK", "400 Bad Request", "503 Service Unavailable"] {
@@ -1576,7 +1514,6 @@ async fn when_the_server_answers_anything_but_204_the_batch_does_not_count_as_de
     }
 }
 
-/// Verifies: REQ-TEL-007
 #[tokio::test]
 async fn when_the_server_redirects_the_batch_is_not_sent_on() {
     let (server, captured) = capturing_server("307 Temporary Redirect").await;
@@ -1590,7 +1527,6 @@ async fn when_the_server_redirects_the_batch_is_not_sent_on() {
     assert_eq!(captured.lock().unwrap().len(), 1);
 }
 
-/// Verifies: REQ-TEL-007
 #[tokio::test]
 async fn when_nobody_answers_the_batch_does_not_count_as_delivered() {
     // Bound and dropped, so the port is closed.
@@ -1607,7 +1543,6 @@ async fn when_nobody_answers_the_batch_does_not_count_as_delivered() {
     assert!(!delivered);
 }
 
-/// Verifies: REQ-TEL-007
 #[test]
 fn when_the_server_url_is_not_http_there_is_no_transport() {
     assert!(HttpTransport::new("").is_none());

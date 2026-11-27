@@ -1,6 +1,6 @@
 /**
  * The audio settings of the app a screen is connected to, as the settings panel
- * of a settings help shows and changes them (ADR-044 §5).
+ * of a settings help shows and changes them.
  *
  * The helper's window is connected to the helped app, so these are the helped
  * person's settings; the helped person's own screen is connected to its own app,

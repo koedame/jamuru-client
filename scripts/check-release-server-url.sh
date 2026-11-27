@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks a built release against REQ-DIST-005 (ADR-030): the app must use the
+# Checks a built release: the app must use the
 # jamuru server it was built with, and nothing in what ships may point at a
 # server on the user's own machine.
 #

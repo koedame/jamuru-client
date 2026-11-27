@@ -34,10 +34,10 @@ pub struct StreamingState {
     shared: Shared,
     /// Current buffer size (frame_size) for latency calculations
     buffer_size: Mutex<u32>,
-    /// Current sample rate in Hz (ADR-013: user-selectable)
+    /// Current sample rate in Hz (user-selectable)
     sample_rate: Arc<AtomicU32>,
     /// UDP socket bound ahead of streaming so its port can be advertised to
-    /// peers before any audio flows (ADR-026).
+    /// peers before any audio flows.
     ///
     /// Held as `std::net::UdpSocket`, not a `UdpMux`: the audio thread
     /// runs its own Tokio runtime, and a Tokio socket only receives wakeups on
@@ -56,16 +56,16 @@ pub struct StreamingState {
     /// The IP families of the audio socket last prepared. Kept after the socket is handed to
     /// the session, so the addresses offered to the room stay those the socket can use.
     audio_families: std::sync::Mutex<jamjam::network::IpFamilies>,
-    /// The port the router forwards to the audio socket, when it was asked to (ADR-113). Kept
+    /// The port the router forwards to the audio socket, when it was asked to. Kept
     /// until the audio session stops, so the address the room was told stays open for as long
     /// as the socket is in use.
     port_mapping: std::sync::Mutex<Option<jamjam::network::PortMapping>>,
-    /// While the microphone is held muted behind a question put to the person
-    /// (REQ-CON-138), what lifting the hold goes back to. `None` when nothing
+    /// While the microphone is held muted behind a question put to the person,
+    /// what lifting the hold goes back to. `None` when nothing
     /// holds it.
     mute_hold: std::sync::Mutex<Option<MuteHold>>,
     /// Which links are quiet and whose line it is, as the signaling side last worked it out
-    /// (REQ-CON-162)
+    ///
     standing: std::sync::Mutex<HashMap<Uuid, Standing>>,
     /// What a session started by a test captures and plays in place of the
     /// devices: the machine the tests run on may have none, and a test must
@@ -74,7 +74,7 @@ pub struct StreamingState {
     stand_ins: std::sync::Mutex<Option<(jamjam::audio_session::InputSignal, std::path::PathBuf)>>,
 }
 
-/// What the person had before a question silenced their room (REQ-CON-138).
+/// What the person had before a question silenced their room.
 struct MuteHold {
     /// Whether the microphone was muted
     microphone_muted: bool,
@@ -84,7 +84,7 @@ struct MuteHold {
 }
 
 impl StreamingState {
-    /// Records the room (ADR-095)
+    /// Records the room
     pub fn recorder(&self) -> &jamjam::audio::RoomRecorder {
         &self.shared.recorder
     }
@@ -102,7 +102,7 @@ impl StreamingState {
             cmd_tx: Mutex::new(None),
             shared: Shared::new(),
             buffer_size: Mutex::new(jamjam::config::DEFAULT_BUFFER_SIZE),
-            // Until a session starts from the saved settings (ADR-013)
+            // Until a session starts from the saved settings
             sample_rate: Arc::new(AtomicU32::new(jamjam::config::DEFAULT_SAMPLE_RATE)),
             prepared_socket: Mutex::new(None),
             prepared_addr: Mutex::new(None),
@@ -156,7 +156,7 @@ impl StreamingState {
     /// asked something that they may walk away from: nothing of their room is
     /// sent while the question stands, and since a muted microphone looks the
     /// same as an open one to the person, hearing nothing of the others
-    /// keeps them from talking on as if they were heard (REQ-CON-138).
+    /// keeps them from talking on as if they were heard.
     /// Lifting the hold puts both back as they were before. Holding twice, or
     /// lifting what is not held, does nothing.
     pub async fn hold_mute(&self, hold: bool) {
@@ -205,7 +205,7 @@ impl StreamingState {
     }
 
     /// Forgets what was chosen for the receive buffer of everyone but `peers`, and what
-    /// anyone asked of it, so one who left leaves nothing behind (ADR-097).
+    /// anyone asked of it, so one who left leaves nothing behind.
     pub fn keep_peer_buffers(&self, peers: &[Uuid]) {
         self.shared
             .peer_buffers
@@ -465,8 +465,8 @@ impl StreamingState {
     /// Address candidates for the prepared audio socket, with the public
     /// address STUN reports for that socket itself.
     ///
-    /// With `ask_router`, the router is also asked to forward the socket's port (UPnP,
-    /// ADR-113), and the forward is kept until [`Self::close_port_mapping`].
+    /// With `ask_router`, the router is also asked to forward the socket's port
+    /// (UPnP), and the forward is kept until [`Self::close_port_mapping`].
     ///
     /// Returns `None` if there is no prepared socket to ask through - none was
     /// prepared, or the audio session already took it.
@@ -517,7 +517,7 @@ impl StreamingState {
 
         // `from_audio_config` leaves the jitter buffer at 0 because it only knows
         // the audio configuration. Without this the breakdown shown to the user
-        // omits the buffer entirely - up to 21.33ms on high-quality (ADR-019, ADR-070).
+        // omits the buffer entirely - up to 21.33ms on high-quality.
         info.set_jitter_buffer_ms(jitter_buffer_delay_us as f32 / 1000.0);
 
         // Nor does it know how often the system hands the devices their
@@ -560,19 +560,18 @@ pub enum SessionSetting {
     OutputChannels(u32, Option<u32>),
     /// 1 (mono) or 2 (stereo)
     TransmitChannels(u32),
-    /// Whether what is sent is held at 0 dBFS (ADR-094)
+    /// Whether what is sent is held at 0 dBFS
     InputLimiter(bool),
-    /// Whether what is played is held at 0 dBFS (ADR-094)
+    /// Whether what is played is held at 0 dBFS
     OutputLimiter(bool),
-    /// Receive jitter buffer depth (ADR-020)
+    /// Receive jitter buffer depth
     JitterBufferFrames(u32),
 }
 
 impl StreamingState {
     /// Mutes the microphone for a room entered by an invite link from another
     /// app, and for the session that starts in it: the person pressed nothing
-    /// in this app, so nothing of theirs is sent until they unmute
-    /// (REQ-CON-139).
+    /// in this app, so nothing of theirs is sent until they unmute.
     pub(crate) async fn mute_on_entry(&self) {
         self.shared.muted_at_start.store(true, Ordering::SeqCst);
         self.set_mute(true).await;
@@ -712,7 +711,7 @@ impl StreamingState {
     ///
     /// Only what can change live is here. The frame size and the sample rate
     /// are fixed for the lifetime of the audio engines, so a new one replaces
-    /// the session instead (`Plan::new_session`, REQ-GUI-024).
+    /// the session instead (`Plan::new_session`).
     pub async fn apply_setting(&self, setting: SessionSetting) {
         if !self.shared.is_active.load(Ordering::SeqCst) {
             return;
@@ -744,14 +743,14 @@ impl StreamingState {
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkStats {
     /// Round-trip time in milliseconds, or `None` before the first sample
-    /// arrives (REQ-LAT-130)
+    /// arrives
     pub rtt_ms: Option<f32>,
     /// Jitter in milliseconds
     pub jitter_ms: f32,
     /// Packet loss percentage (0-100)
     pub packet_loss_percent: f32,
     /// Connection quality band: "good" | "fair" | "poor", or `None` before
-    /// the first RTT sample arrives (REQ-LAT-121, REQ-LAT-130)
+    /// the first RTT sample arrives
     ///
     /// Classified in the core library so the UI cannot drift from the
     /// thresholds in latency.feature.
@@ -764,7 +763,7 @@ pub struct NetworkStats {
     /// "sufficient" | "marginal" | "insufficient", or None before measurement
     ///
     /// Bitrate adaptation needs a variable-rate codec, which no preset uses, so
-    /// this is a warning signal rather than an input to adaptation (ADR-021).
+    /// this is a warning signal rather than an input to adaptation.
     pub bandwidth_status: Option<String>,
     /// Connection uptime in seconds
     pub uptime_seconds: u64,
@@ -791,7 +790,7 @@ pub struct AudioQuality {
     /// Number of frames the limiter on what is played brought down this session
     pub output_limited_frames: u64,
     /// Number of times the play-out delay was grown automatically. The UI
-    /// tells the user when this goes up (REQ-LAT-108).
+    /// tells the user when this goes up.
     pub delay_adjustments: u64,
     /// The play-out delay, in milliseconds, the latest of those growths
     /// left the grown link with
@@ -851,7 +850,7 @@ pub struct PeerLinkStatus {
     /// The participant's id in the room
     pub peer_id: String,
     /// Connection state: "connecting" | "checkingconnectivity" | "connected" |
-    /// "reconnecting" | "failed" (ADR-022)
+    /// "reconnecting" | "failed"
     pub connection_state: Option<String>,
     /// Why the link failed, when `connection_state` is "failed" and the
     /// reason is known
@@ -865,11 +864,11 @@ pub struct PeerLinkStatus {
     /// Level of what is played of them, after their fader (0-100)
     pub level: u32,
     /// The buffer their audio is played from: what the user chose for it, what
-    /// another participant asked of it, and what it stands at (ADR-097)
+    /// another participant asked of it, and what it stands at
     pub buffer: PeerBufferStatus,
-    /// Set while nothing arrives from them and they have not left (REQ-CON-161)
+    /// Set while nothing arrives from them and they have not left
     pub dropout: Option<PeerDropout>,
-    /// Went quiet twice or more in the last quarter of an hour (REQ-CON-162)
+    /// Went quiet twice or more in the last quarter of an hour
     pub unstable: bool,
 }
 
@@ -878,7 +877,7 @@ pub struct PeerLinkStatus {
 pub struct PeerDropout {
     /// How long nothing has arrived, in seconds
     pub silent_secs: u64,
-    /// Whose line is cut: "mine" | "theirs" | "between" | "checking" | "unknown" (REQ-CON-163)
+    /// Whose line is cut: "mine" | "theirs" | "between" | "checking" | "unknown"
     pub side: Side,
 }
 
@@ -908,7 +907,7 @@ pub struct StreamingStatus {
     pub peers: Vec<PeerLinkStatus>,
     /// Whether microphone is muted
     pub is_muted: bool,
-    /// Whether the user hears their own input directly (ADR-033)
+    /// Whether the user hears their own input directly
     pub is_monitoring: bool,
     /// Current input audio level (0-100)
     pub input_level: u32,
@@ -922,14 +921,14 @@ pub struct StreamingStatus {
     pub audio_quality: Option<AudioQuality>,
     /// Peer's audio configuration (if received via LatencyInfoMessage)
     pub peer_audio: Option<PeerAudioInfo>,
-    /// Connection state: "connected" | "reconnecting" | "failed" | ... (ADR-022)
+    /// Connection state: "connected" | "reconnecting" | "failed" | ...
     pub connection_state: Option<String>,
     /// Why the connection failed, when `connection_state` is "failed"
     pub connection_error: Option<String>,
     /// Devices that could not be opened. Read whether or not a session is
     /// active: one that could not open its device never became active.
     pub device_problems: Vec<DeviceProblem>,
-    /// How the session's WASAPI devices are open (Windows, ADR-088): a way
+    /// How the session's WASAPI devices are open (Windows): a way
     /// the settings ask for that did not open a device says so here
     pub wasapi_opened: OpenedWays,
 }
@@ -938,7 +937,7 @@ pub struct StreamingStatus {
 ///
 /// Called when the user enters a room, before anyone knows where to send
 /// audio. Two apps cannot start streaming to each other otherwise: each waits
-/// for the other's address, and neither has one to give (ADR-026).
+/// for the other's address, and neither has one to give.
 ///
 /// Idempotent - repeated calls report the same address, so a rejoin or a
 /// double-invoke does not move the port out from under a peer that already
@@ -1064,30 +1063,30 @@ async fn start_session(
     // meanwhile would be saved and shown but miss this session.
     let changes_held = settings_state.hold_changes().await;
     // The session runs with the audio settings as saved: the one store every
-    // change goes through (ADR-043), so what the settings show is what the
+    // change goes through, so what the settings show is what the
     // session gets - the sample rate once never reached it, because the
     // caller had to pass it and did not.
     let config = config_state.get()?;
     let input_device_id = config.input_device_id.clone();
     let output_device_id = config.output_device_id.clone();
     let buffer_size = config.buffer_size;
-    // User-selectable (ADR-013)
+    // User-selectable
     let sample_rate = config.sample_rate;
-    // Jitter buffer depth comes from the selected preset (ADR-019/ADR-020).
+    // Jitter buffer depth comes from the selected preset.
     // The frame *duration* comes from the buffer_size actually in use, so the
     // resulting delay is correct even if the two were configured separately.
     let preset = config.preset.clone();
     // Transmit channel count, told to the peers so their mixers can show
     // whether we're sending mono or stereo.
     let transmit_channels = config.transmit_channels;
-    // Whether what is sent and what is played are held at 0 dBFS (ADR-094)
+    // Whether what is sent and what is played are held at 0 dBFS
     let (input_limiter, output_limiter) = (config.input_limiter, config.output_limiter);
-    // Whether the audio packets are marked as voice (ADR-110)
+    // Whether the audio packets are marked as voice
     let voice_priority = config.voice_priority;
     // Which channels of a multi-channel interface are read and played on
     let input_channels = (config.input_channel_l, config.input_channel_r);
     let output_channels = (config.output_channel_l, config.output_channel_r);
-    // How a WASAPI device is opened (Windows, ADR-088)
+    // How a WASAPI device is opened (Windows)
     let wasapi_mode = config.wasapi_mode;
 
     let redact = crate::logging::redaction_enabled();
@@ -1113,7 +1112,7 @@ async fn start_session(
         *bs = buffer_size;
     }
 
-    // Store sample rate (ADR-013)
+    // Store sample rate
     state.sample_rate.store(sample_rate, Ordering::SeqCst);
     #[cfg(feature = "debug-tools")]
     crate::audio_tap::set_sample_rate(sample_rate);
@@ -1221,7 +1220,7 @@ fn state_rank(state: Option<&str>) -> u8 {
 }
 
 /// Chooses the receive buffer of `peer_id`: `ms10` tenths of a millisecond, held whatever the link
-/// does, or `None` for the preset's own, which follows the link (ADR-097).
+/// does, or `None` for the preset's own, which follows the link.
 #[tauri::command]
 pub fn streaming_set_peer_buffer(
     peer_id: String,
@@ -1274,7 +1273,7 @@ pub async fn streaming_status(
                 }
                 None => (None, None),
             };
-            // Peer audio info (ADR-013: sample rate communication)
+            // Peer audio info (sample rate communication)
             let peer_audio = report.latency_info.read().ok().and_then(|info| {
                 info.as_ref().map(|p| PeerAudioInfo {
                     sample_rate: p.sample_rate,
@@ -1456,7 +1455,7 @@ fn detailed_latency(
 /// Retry every link automatic recovery gave up on
 ///
 /// Backs the "reconnect?" prompt the UI shows when a link's
-/// `connection_state` reads "failed" (REQ-CON-110). A no-op when no session
+/// `connection_state` reads "failed". A no-op when no session
 /// is active.
 #[tauri::command]
 pub async fn streaming_reconnect(state: tauri::State<'_, StreamingState>) -> Result<(), String> {
@@ -1488,7 +1487,7 @@ pub async fn streaming_set_mute(
 }
 
 /// Holds the microphone muted and the room silent while a question is on the
-/// screen, or lifts the hold and puts both back as they were (REQ-CON-138).
+/// screen, or lifts the hold and puts both back as they were.
 #[tauri::command]
 pub async fn streaming_hold_mute(
     hold: bool,
@@ -1499,7 +1498,7 @@ pub async fn streaming_hold_mute(
 }
 
 /// Switch local monitoring: hearing your own input directly, without the
-/// network delay (ADR-033). Applies to the running session, if there is one.
+/// network delay. Applies to the running session, if there is one.
 #[tauri::command]
 pub async fn streaming_set_monitoring(
     enabled: bool,
@@ -1556,7 +1555,6 @@ mod tests {
     use jamjam::audio::{AudioPreset, PlayoutConfig};
     use tauri::Manager;
 
-    /// Verifies: REQ-CON-138
     #[tokio::test]
     async fn when_the_mute_is_held_the_microphone_is_muted_until_the_hold_is_lifted() {
         let state = StreamingState::new();
@@ -1576,7 +1574,6 @@ mod tests {
             .any(|c| matches!(c, StreamingCommand::SetMute(false))));
     }
 
-    /// Verifies: REQ-CON-138
     #[tokio::test]
     async fn when_the_mute_is_held_the_room_is_silent_until_the_hold_is_lifted() {
         let state = StreamingState::new();
@@ -1597,7 +1594,6 @@ mod tests {
             .any(|c| matches!(c, StreamingCommand::SetMasterVolume(v) if v == 0.8)));
     }
 
-    /// Verifies: REQ-CON-138
     #[tokio::test]
     async fn when_the_volume_is_changed_during_the_hold_the_room_stays_silent_until_it_is_lifted() {
         let state = StreamingState::new();
@@ -1610,7 +1606,6 @@ mod tests {
         assert_eq!(state.shared.master_volume.load(Ordering::SeqCst), 150);
     }
 
-    /// Verifies: REQ-CON-138
     #[tokio::test]
     async fn when_the_mute_is_held_twice_the_room_goes_back_to_the_volume_before_the_first() {
         let state = StreamingState::new();
@@ -1623,7 +1618,6 @@ mod tests {
         assert_eq!(state.shared.master_volume.load(Ordering::SeqCst), 60);
     }
 
-    /// Verifies: REQ-CON-138
     #[tokio::test]
     async fn when_the_microphone_was_muted_before_the_hold_lifting_it_keeps_it_muted() {
         let state = StreamingState::new();
@@ -1635,7 +1629,6 @@ mod tests {
         assert!(state.shared.is_muted.load(Ordering::SeqCst));
     }
 
-    /// Verifies: REQ-CON-138
     #[tokio::test]
     async fn when_the_mute_is_held_twice_lifting_it_goes_back_to_what_it_was_before_the_first() {
         let state = StreamingState::new();
@@ -1647,7 +1640,6 @@ mod tests {
         assert!(!state.shared.is_muted.load(Ordering::SeqCst));
     }
 
-    /// Verifies: REQ-CON-138
     #[tokio::test]
     async fn when_nothing_is_held_lifting_the_hold_leaves_the_mute_as_it_is() {
         let state = StreamingState::new();
@@ -1661,8 +1653,6 @@ mod tests {
     /// The bug this guards: stopping waited a fixed 100 ms, and a thread that
     /// took longer to end cleared `is_active` after the next session had set
     /// it, which ended that session as soon as it connected.
-    ///
-    /// Verifies: REQ-CON-134
     #[tokio::test]
     async fn stopping_waits_until_the_audio_thread_has_ended() {
         let app = tauri::test::mock_app();
@@ -1688,8 +1678,6 @@ mod tests {
 
     /// A link that came up on an address that never answered reports itself
     /// connected. Only packets from the peer make it one that hears them.
-    ///
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_link_is_heard_only_once_packets_of_its_peer_have_arrived() {
         let state = StreamingState::new();
@@ -1714,8 +1702,6 @@ mod tests {
     /// The bug this guards: the status had the state and statistics of one
     /// link, so the screen showed every participant the same latency and
     /// could not say whom the app was not connected to.
-    ///
-    /// Verifies: REQ-LAT-102
     #[tokio::test]
     async fn the_status_has_the_state_and_the_latency_of_the_link_to_each_participant() {
         let app = tauri::test::mock_app();
@@ -1750,8 +1736,6 @@ mod tests {
     /// The bug this guards: the breakdown counted only the frame in each
     /// buffer, so the screen said the same few milliseconds in every WASAPI
     /// mode while a round trip was 30 ms longer in the standard one.
-    ///
-    /// Verifies: REQ-AUD-043
     #[test]
     fn when_the_system_period_is_longer_than_the_frame_the_breakdown_counts_the_period() {
         let stats = ConnectionStats {
@@ -1789,8 +1773,6 @@ mod tests {
 
     /// The status says what each participant told of their own audio side, so
     /// the screen can show the layers beyond the network per participant.
-    ///
-    /// Verifies: REQ-LAT-102
     #[tokio::test]
     async fn the_status_has_the_buffers_each_participant_told_of_their_own_side() {
         let app = tauri::test::mock_app();
@@ -1849,8 +1831,6 @@ mod tests {
     /// A room entered by a link from another app is entered muted, and the
     /// audio session that starts in it starts muted too: the reset a new
     /// session makes must not unmute the person.
-    ///
-    /// Verifies: REQ-CON-139
     #[tokio::test]
     async fn a_room_is_entered_by_a_link_mutes_the_microphone_and_the_session_that_starts_in_it() {
         let state = StreamingState::new();
@@ -1862,7 +1842,6 @@ mod tests {
         assert!(state.shared.is_muted.load(Ordering::SeqCst));
     }
 
-    /// Verifies: REQ-CON-139
     #[tokio::test]
     async fn the_person_unmutes_before_the_session_starts_the_session_starts_unmuted() {
         let app = tauri::test::mock_app();
@@ -1878,8 +1857,6 @@ mod tests {
 
     /// The room that was muted for was not entered, or has been left: the next
     /// one, entered by typing a code, is not muted for it.
-    ///
-    /// Verifies: REQ-CON-139
     #[tokio::test]
     async fn the_room_muted_for_is_not_entered_the_next_session_starts_unmuted() {
         let state = StreamingState::new();
@@ -1893,8 +1870,6 @@ mod tests {
 
     /// A session that is running keeps the mute the person gave it: choosing
     /// while it runs is not a choice for the next one.
-    ///
-    /// Verifies: REQ-CON-139
     #[tokio::test]
     async fn the_person_mutes_while_a_session_runs_the_next_session_starts_unmuted() {
         let app = tauri::test::mock_app();
@@ -1925,8 +1900,6 @@ mod tests {
     /// The status goes to the screen of someone who helps, too. Nothing in
     /// it may be the address of a participant; a field added to it has to be
     /// added here, which is the moment to ask whether it is one.
-    ///
-    /// Verifies: REQ-RMT-006
     #[tokio::test]
     async fn the_status_names_the_fields_it_always_has_and_none_of_them_is_an_address() {
         let app = tauri::test::mock_app();
@@ -1996,7 +1969,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-031
     #[test]
     fn the_fader_of_a_participant_is_kept_until_they_are_no_longer_in_the_room() {
         let state = StreamingState::new();
@@ -2012,8 +1984,6 @@ mod tests {
 
     /// A session started on a socket the room was never told of would send
     /// and hear no one, with nothing on the screen to say why.
-    ///
-    /// Verifies: REQ-CON-024
     #[tokio::test]
     async fn a_link_asked_for_when_no_socket_was_prepared_is_refused_and_starts_no_session() {
         let app = tauri::test::mock_app();
@@ -2122,9 +2092,7 @@ mod tests {
     }
 
     /// Switching preset changes the play-out delay, and zero-latency must
-    /// resolve to no delay at all - the preset promises 0ms (ADR-008).
-    ///
-    /// Verifies: REQ-LAT-106
+    /// resolve to no delay at all - the preset promises 0ms.
     #[test]
     fn switching_to_zero_latency_selects_a_passthrough_delay() {
         let zero_latency = AudioPreset::ZeroLatency;
@@ -2145,8 +2113,6 @@ mod tests {
 
     /// Every preset must map to a play-out delay that matches what it
     /// promises, so a switch cannot silently land on a different latency.
-    ///
-    /// Verifies: REQ-LAT-106
     #[test]
     fn every_preset_maps_to_a_matching_delay() {
         for preset in AudioPreset::all() {

@@ -1,6 +1,5 @@
 /**
- * Where a person of a settings help is looking, as a screen can tell it
- * (ADR-044 §5, REQ-RMT-034).
+ * Where a person of a settings help is looking, as a screen can tell it.
  *
  * Both people see the same screen, so each one's screen marks the part the other
  * is pointing at and the part the other has focused. Only parts that can be

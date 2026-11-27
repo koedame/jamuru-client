@@ -276,7 +276,6 @@ fn ledger_markdown() -> String {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-MNU-009
     #[test]
     fn a_difference_between_the_systems_is_in_the_ledger_with_a_reason() {
         let in_the_menu: Vec<Key> = all_keys().into_iter().filter(|k| differs(*k)).collect();
@@ -303,7 +302,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-009
     #[test]
     fn a_row_of_the_ledger_says_where_the_entry_is_and_whether_the_name_differs() {
         for row in DIFFERENCES {
@@ -314,7 +312,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-009
     #[test]
     fn the_ledger_has_one_row_for_an_entry() {
         for (i, row) in DIFFERENCES.iter().enumerate() {
@@ -328,7 +325,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-009
     #[test]
     fn entries_on_both_systems_come_in_the_same_order() {
         let order = |os: Os, title: Title| -> Vec<Key> {
@@ -357,7 +353,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-009
     #[test]
     fn every_entry_is_in_the_menu_bar_of_at_least_one_system() {
         for item in Item::ALL {

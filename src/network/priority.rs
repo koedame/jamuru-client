@@ -1,4 +1,4 @@
-//! Marking the audio packets as time-critical (ADR-110)
+//! Marking the audio packets as time-critical
 //!
 //! An IP header has a six-bit priority field (DSCP; the upper bits of IPv4's ToS byte and
 //! IPv6's Traffic Class). A home Wi-Fi access point, and the Wi-Fi adapter of the sending PC,
@@ -11,10 +11,10 @@
 //! - Linux: `IP_TOS` / `IPV6_TCLASS` to EF, and `SO_PRIORITY` 6 for the local queue.
 //! - macOS: not marked. `IP_TOS` / `IPV6_TCLASS` leave the header unmarked on a dual-stack
 //!   socket, and `SO_NET_SERVICE_TYPE` (voice), the system's own way, made the sent audio drop
-//!   out in a measured session (ADR-110).
+//!   out in a measured session.
 //! - Windows: `IP_TOS` / `IPV6_TCLASS`. qWAVE, the system's QoS service, cannot do this job: it
 //!   marks a flow per destination, refuses an IPv6 socket that sends to an IPv4 address (the
-//!   audio socket is dual-stack, ADR-093), and gives voice 56 (CS7), not 46.
+//!   audio socket is dual-stack), and gives voice 56 (CS7), not 46.
 //!
 //! The mark is a request: a network may clear it or, rarely, drop what is marked. That is
 //! why it is a setting (`voice_priority`).
@@ -198,7 +198,6 @@ mod tests {
         socket
     }
 
-    /// Verifies: REQ-CON-160
     #[test]
     fn when_the_audio_socket_is_marked_an_ipv4_peer_reads_expedited_forwarding() {
         let socket = crate::network::bind_audio_std(0).unwrap();
@@ -212,7 +211,6 @@ mod tests {
         assert_eq!(received_traffic_class(&peer, false), EF_TRAFFIC_CLASS as u8);
     }
 
-    /// Verifies: REQ-CON-160
     #[test]
     fn when_the_audio_socket_is_marked_an_ipv6_peer_reads_expedited_forwarding() {
         if std::net::UdpSocket::bind("[::1]:0").is_err() {
@@ -229,7 +227,6 @@ mod tests {
         assert_eq!(received_traffic_class(&peer, true), EF_TRAFFIC_CLASS as u8);
     }
 
-    /// Verifies: REQ-CON-160
     #[test]
     fn when_the_audio_socket_is_not_marked_a_peer_reads_no_priority() {
         let socket = crate::network::bind_audio_std(0).unwrap();

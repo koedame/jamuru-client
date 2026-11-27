@@ -1,6 +1,6 @@
 /**
  * SettingsHelpPanel - the helped participant's audio settings, as the helper
- * sees and changes them in their window (ADR-044 §5). The same Devices tab as the
+ * sees and changes them in their window. The same Devices tab as the
  * settings window; every choice is applied to the other person's app, and what
  * is shown is always what their app reports.
  */

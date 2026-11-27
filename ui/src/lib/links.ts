@@ -34,14 +34,14 @@ export function linkTrouble(link: PeerLinkStatus | undefined): LinkTrouble | nul
 /**
  * The latency to show of a link: its breakdown once the link hears its peer
  * and has measured a round trip. A breakdown with no measurement behind it is
- * not a latency (REQ-LAT-130).
+ * not a latency.
  */
 export function measuredLatency(link: PeerLinkStatus | undefined): DetailedLatency | null {
   if (!link || linkTrouble(link) !== null || link.network?.rtt_ms == null) return null;
   return link.latency;
 }
 
-/** This machine's side of a link, as the latency breakdown has it (REQ-LAT-122) */
+/** This machine's side of a link, as the latency breakdown has it */
 export interface LocalBuffers {
   /** Capture (microphone side) delay in ms */
   input: number;
@@ -99,7 +99,7 @@ export function overallLink(links: PeerLinkStatus[]): OverallLink {
 
 /**
  * The participant whose audio takes longest to go there and back, when there
- * are at least two to compare (REQ-LAT-102). Null with one link or none.
+ * are at least two to compare. Null with one link or none.
  */
 export function slowestPeerId(links: PeerLinkStatus[]): string | null {
   const measured = links

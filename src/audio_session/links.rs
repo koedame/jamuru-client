@@ -34,7 +34,7 @@ pub(super) struct Link {
     pub(super) report: Arc<LinkReport>,
     /// Where their fader and pan stand, the one the mix reads
     pub(super) gain: Arc<PeerGain>,
-    /// What the owner chose for their receive buffer and what they asked of it (ADR-097)
+    /// What the owner chose for their receive buffer and what they asked of it
     pub(super) buffer: Arc<PeerBufferControl>,
     buffer_driver: PeerBufferDriver,
     /// Their audio, from payload to the mix
@@ -47,7 +47,7 @@ pub(super) struct Link {
     /// Reports quality changes on the edge rather than on every stats poll
     quality_monitor: QualityMonitor,
     /// Measures what the link actually carries, so one too narrow for PCM can
-    /// be reported instead of silently dropping audio (REQ-LAT-120's manual mode)
+    /// be reported instead of silently dropping audio (the manual mode)
     bandwidth_estimator: BandwidthEstimator,
     bandwidth_verdict: BandwidthVerdict,
     last_bandwidth_status: Option<BandwidthStatus>,
@@ -56,7 +56,7 @@ pub(super) struct Link {
     /// The play-out delay the display and the peer have been told about. The
     /// loop compares it with the buffer's own and reports the difference, so
     /// a preset switch, an adaptation and a reconnect all reach the display
-    /// the same way (ADR-031).
+    /// the same way.
     pub(super) announced_delay_frames: u32,
     /// The channel count the peer has been told we send
     pub(super) announced_channel_count: u8,
@@ -146,7 +146,7 @@ impl LinkSetup<'_> {
                     }
 
                     // Publish the transition so the UI can show reconnection progress
-                    // and prompt once recovery gives up (REQ-CON-110).
+                    // and prompt once recovery gives up.
                     report_for_state.set_state(&format!("{:?}", state).to_lowercase(), None);
                 },
             )
@@ -156,7 +156,7 @@ impl LinkSetup<'_> {
         }
 
         // Race all their candidates, so a peer on the same network is reached
-        // directly rather than only through its public address (REQ-CON-113).
+        // directly rather than only through its public address.
         let candidates = target.candidates;
         let checking = tokio::spawn(async move {
             connection
@@ -293,9 +293,9 @@ impl Link {
         }
         let conn_stats = conn.stats();
 
-        // Log quality transitions once, on the edge (REQ-LAT-107). Held
+        // Log quality transitions once, on the edge. Held
         // back until the first RTT sample arrives, so a link nobody has
-        // measured yet is never logged as "good" (REQ-LAT-130).
+        // measured yet is never logged as "good".
         if let Some(rtt_ms) = conn_stats.rtt_ms {
             if let Some(change) = self
                 .quality_monitor
@@ -322,7 +322,7 @@ impl Link {
         }
 
         // Warn once when the link stops carrying what the preset needs, and once
-        // when the peer stops sending anything at all (REQ-LAT-127). The snapshot
+        // when the peer stops sending anything at all. The snapshot
         // is published on every completed interval, not only when a status is
         // classified, so a zero-byte interval overwrites (rather than leaves in
         // place) whatever verdict was measured before the peer went quiet.
@@ -333,7 +333,7 @@ impl Link {
         // perfectly healthy link, and a peer that has only just connected (a
         // test peer that replies after a deliberate delay, or plain connection
         // setup) reads as insufficient rather than idle for its first few
-        // seconds (REQ-LAT-128, REQ-LAT-129).
+        // seconds.
         self.bandwidth_estimator.note_audio(
             conn_stats.audio_packets_received,
             conn_stats.audio_packets_lost,
@@ -396,7 +396,7 @@ impl Link {
         if let Ok(mut addr) = self.report.remote_addr.write() {
             *addr = Some(conn.remote_addr());
         }
-        // Update peer latency info (ADR-013: sample rate from remote peer)
+        // Update peer latency info (sample rate from remote peer)
         if let Some(peer_info) = conn.peer_latency_info() {
             self.receive.follow_peer(&peer_info).log(&peer, sample_rate);
             if let Ok(mut info) = self.report.latency_info.write() {
@@ -423,8 +423,6 @@ mod tests {
     /// The delay shown for a peer is its play-out buffer's depth in packets
     /// times how long a packet of *theirs* lasts. Counted in ours, a peer at
     /// twice our buffer size showed half the delay it had.
-    ///
-    /// Verifies: REQ-AUD-038
     #[test]
     fn a_peers_packet_lasts_as_long_as_its_own_buffer_size_says_and_as_ours_until_it_has_told() {
         let ours = audio_packet_duration_ms(64, WIRE_CHANNELS, 48_000);
@@ -443,7 +441,7 @@ mod tests {
         assert_eq!(peer_packet_ms(None, ours), ours);
         assert_eq!(peer_packet_ms(Some(&told(64, 48_000)), ours), ours);
         assert_eq!(peer_packet_ms(Some(&told(128, 48_000)), ours), ours * 2.0);
-        // 256 frames go as two packets of 128 (ADR-070)
+        // 256 frames go as two packets of 128
         assert_eq!(peer_packet_ms(Some(&told(256, 48_000)), ours), ours * 2.0);
         assert_eq!(peer_packet_ms(Some(&told(0, 0)), ours), ours);
     }
@@ -481,8 +479,6 @@ mod tests {
     /// A link that is still being checked is not one the captured audio goes to, so what is
     /// captured meanwhile is not held for it and cannot reach the peer as a burst of old audio
     /// when the check ends. It is sent to from the moment its check has ended.
-    ///
-    /// Verifies: REQ-CLI-009
     #[tokio::test]
     async fn audio_captured_while_a_link_is_checked_is_not_held_for_it_and_goes_to_it_once_it_is_up(
     ) {
@@ -534,9 +530,7 @@ mod tests {
     }
 
     /// The delay told to the peer counts packets, not frames: a frame too big for one packet
-    /// goes as several, so the buffer's depth lasts packets long (ADR-070).
-    ///
-    /// Verifies: REQ-CLI-010
+    /// goes as several, so the buffer's depth lasts packets long.
     #[tokio::test]
     async fn jitter_buffer_told_to_the_peer_counts_packets_not_frames() {
         let mux = UdpMux::bind("127.0.0.1:0").await.expect("a socket");

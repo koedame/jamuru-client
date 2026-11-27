@@ -1,4 +1,4 @@
-//! Diagnostic log file (ADR-036).
+//! Diagnostic log file.
 //!
 //! Every build, including the one users install, writes `jamuru.log` to the
 //! OS log directory. A release app has no console and no developer tools, so
@@ -260,7 +260,7 @@ fn builder(spec: &LogSpec) -> tauri_plugin_log::Builder {
         file_name: Some(LOG_FILE_STEM.to_string()),
     });
     // A console exists for `cargo tauri dev` and for the GUI E2E harness, which
-    // reads the app's stderr when a scenario fails (ADR-025).
+    // reads the app's stderr when a scenario fails.
     #[cfg(any(debug_assertions, feature = "e2e-control"))]
     let targets = vec![file, Target::new(TargetKind::Stderr)];
     #[cfg(not(any(debug_assertions, feature = "e2e-control")))]
@@ -551,8 +551,8 @@ fn run_end(text: &str, start: usize, pred: impl Fn(char) -> bool) -> usize {
 }
 
 /// What the app has learned about the people and rooms it is talking to, so
-/// that the file can leave their values out wherever they turn up in a line
-/// (ADR-065). The log sites do not have to know which of their arguments are
+/// that the file can leave their values out wherever they turn up in a line.
+/// The log sites do not have to know which of their arguments are
 /// somebody's: a value registered here is replaced wherever it appears.
 #[derive(Default)]
 struct Known {
@@ -901,7 +901,6 @@ mod tests {
             .unwrap_or(spec.default)
     }
 
-    /// Verifies: REQ-GUI-019
     #[test]
     fn env_var_unset_logs_own_code_at_debug_and_dependencies_at_info() {
         let spec = LogSpec::parse(None);
@@ -912,7 +911,6 @@ mod tests {
         assert_eq!(level_of(&spec, "tao"), LevelFilter::Info);
     }
 
-    /// Verifies: REQ-GUI-019
     #[test]
     fn env_var_is_a_bare_level_applies_to_own_code_and_dependencies() {
         let spec = LogSpec::parse(Some("trace"));
@@ -921,7 +919,6 @@ mod tests {
         assert_eq!(level_of(&spec, "tao"), LevelFilter::Trace);
     }
 
-    /// Verifies: REQ-GUI-019
     #[test]
     fn env_var_names_a_target_only_that_target_changes() {
         let spec = LogSpec::parse(Some("info, tao=debug"));
@@ -931,7 +928,6 @@ mod tests {
         assert_eq!(level_of(&spec, "jamuru"), LevelFilter::Info);
     }
 
-    /// Verifies: REQ-GUI-019
     #[test]
     fn env_var_names_a_target_and_a_bare_level_the_target_wins_in_either_order() {
         for spec in ["jamuru=trace,info", "info,jamuru=trace"] {
@@ -943,7 +939,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-GUI-019
     #[test]
     fn env_var_has_an_invalid_part_the_rest_still_applies_and_the_part_is_reported() {
         let spec = LogSpec::parse(Some("loud,jamuru=trace,tao=,=debug"));
@@ -1031,7 +1026,6 @@ mod tests {
         assert_eq!(written.lock().unwrap().len(), 20);
     }
 
-    /// Verifies: REQ-GUI-018
     #[test]
     fn webview_message_holds_a_room_password_the_file_line_does_not() {
         let line = webview_line(
@@ -1079,7 +1073,6 @@ mod tests {
         assert!(line.len() < MAX_WEBVIEW_MESSAGE_BYTES + 64);
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_global_ipv4_address_is_in_the_line_only_the_last_octet_is_masked() {
         let line =
@@ -1088,7 +1081,6 @@ mod tests {
         assert_eq!(line, "STUN discovered public address: 203.0.113.x:61711");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_lan_ipv4_address_is_in_the_line_it_is_still_recognisable_as_lan() {
         let line = redact_network_identifiers("Added host candidate: 192.168.1.186:61711", true);
@@ -1096,7 +1088,6 @@ mod tests {
         assert_eq!(line, "Added host candidate: 192.168.1.x:61711");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_link_local_ipv6_address_is_in_the_line_the_eui_64_interface_id_is_masked() {
         let line = redact_network_identifiers(
@@ -1115,7 +1106,6 @@ mod tests {
         assert_eq!(redact_network_identifiers(text, true), text);
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn redaction_is_disabled_addresses_reach_the_line_unmasked() {
         let text = "STUN discovered public address: 203.0.113.67:61711";
@@ -1130,7 +1120,6 @@ mod tests {
         assert!(parse_redact_flag(None));
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_device_id_holds_a_serial_number_only_the_product_name_survives() {
         let name = redact_device_id(
@@ -1146,7 +1135,6 @@ mod tests {
         assert_eq!(redact_device_id("system default", true), "system default");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn device_id_redaction_is_disabled_the_raw_id_survives() {
         let raw = "coreaudio:AppleUSBAudioEngine:Yamaha Corporation:AG06/AG03:20221310:1,2";
@@ -1161,7 +1149,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_room_id_or_invite_code_is_in_a_line_only_its_first_two_characters_survive() {
         let known = known_with(&["ABC234XYZ"], &[]);
@@ -1171,7 +1158,6 @@ mod tests {
         assert_eq!(line, "Created room AB*** as host");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_display_name_is_in_a_line_it_becomes_a_numbered_peer() {
         let known = known_with(&[], &["Taro", "花子"]);
@@ -1181,7 +1167,6 @@ mod tests {
         assert_eq!(line, "peer1 joined; peer2さん left; peer1 again");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_display_name_is_part_of_another_word_the_word_is_left_alone() {
         let known = known_with(&[], &["ann"]);
@@ -1191,7 +1176,6 @@ mod tests {
         assert_eq!(line, "channel 2, peer1, Joann");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_name_contains_another_name_the_longer_one_is_replaced_whole() {
         let known = known_with(&[], &["Taro", "Taro Yamada"]);
@@ -1201,7 +1185,6 @@ mod tests {
         assert_eq!(line, "peer2 joined");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_peer_id_is_in_a_line_only_its_first_four_characters_survive() {
         let known = known_with(&[], &[]);
@@ -1214,7 +1197,6 @@ mod tests {
         assert_eq!(line, "Peer 3f2a… joined the room");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_device_identifier_is_in_a_line_only_its_first_four_characters_survive() {
         let known = known_with(&[], &[]);
@@ -1224,7 +1206,6 @@ mod tests {
         assert_eq!(line, "this device is ZV55… (beta)");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn text_that_only_looks_like_a_device_identifier_it_is_left_alone() {
         let known = known_with(&[], &[]);
@@ -1239,7 +1220,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn text_that_only_looks_like_a_peer_id_it_is_left_alone() {
         let known = known_with(&[], &[]);
@@ -1254,7 +1234,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_path_is_in_a_home_folder_the_user_name_becomes_a_tilde() {
         let known = known_with(&[], &[]);
@@ -1278,7 +1257,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_device_name_has_an_owner_the_owner_is_hidden_and_the_product_stays() {
         assert_eq!(
@@ -1289,7 +1267,6 @@ mod tests {
         assert_eq!(redact_device_owner("Yamaha AG06/AG03"), "Yamaha AG06/AG03");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_device_name_is_the_names_of_a_built_in_device_it_is_left_alone() {
         assert_eq!(
@@ -1299,7 +1276,6 @@ mod tests {
         assert_eq!(redact_device_owner("iPhoneのマイク"), "iPhoneのマイク");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_device_id_names_its_owner_the_owner_is_hidden_with_the_serial() {
         assert_eq!(
@@ -1308,7 +1284,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn personal_redaction_is_turned_off_the_line_is_unchanged() {
         let line = "/Users/taro/x 3f2a9c10-7b1e-4d55-9a02-0c6d5e8f1a77";
@@ -1316,7 +1291,6 @@ mod tests {
         assert_eq!(redact_personal_identifiers(line, false), line);
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_registered_value_is_logged_the_line_in_the_file_does_not_hold_it() {
         register_room("QWE789RTY", None);
@@ -1334,7 +1308,6 @@ mod tests {
         assert!(line.contains("QW***"), "{line}");
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn a_device_is_logged_before_it_is_registered_the_line_in_the_file_holds_its_id() {
         let line = redact_personal_identifiers(
@@ -1410,7 +1383,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-020
     #[test]
     fn opener_is_missing_the_error_names_the_log_folder() {
         let err =
@@ -1420,7 +1392,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-    /// Verifies: REQ-GUI-020
     #[test]
     fn opener_starts_the_result_is_the_log_folder_path() {
         let opened = open_dir_with("true", Path::new("/logs/me.koeda.jamuru"));
@@ -1428,7 +1399,6 @@ mod tests {
         assert_eq!(opened, Ok("/logs/me.koeda.jamuru".to_string()));
     }
 
-    /// Verifies: REQ-GUI-018
     #[test]
     fn config_summary_lists_the_settings_and_omits_the_credentials_in_the_server_url() {
         let config = AppConfig {
@@ -1450,7 +1420,6 @@ mod tests {
         assert!(!summary.contains("hunter2"), "{}", summary);
     }
 
-    /// Verifies: REQ-GUI-022
     #[test]
     fn config_summary_has_a_device_serial_number_only_the_product_name_survives() {
         let config = AppConfig {
@@ -1483,8 +1452,6 @@ mod tests {
     /// has to say goes through `tracing`, whose lines pass the redaction above.
     /// This file is the exception: it reports that the logger itself could not
     /// start, before there is one, and says nothing about a peer.
-    ///
-    /// Verifies: REQ-GUI-022
     #[test]
     fn the_app_writes_to_the_console_only_from_the_logger_that_cannot_start() {
         const CONSOLE_MACROS: [&str; 5] = ["println!", "eprintln!", "print!", "eprint!", "dbg!"];

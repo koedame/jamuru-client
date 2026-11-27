@@ -1,6 +1,6 @@
 //! The audio session of a client: the devices, the thread that serves them, the send thread and
 //! the audio links to the other participants. The app and the CLI run the same one; they differ
-//! in who steers it and what they show of it (ADR-077).
+//! in who steers it and what they show of it.
 //!
 //! A session runs on a thread of its own, with its own current-thread runtime that carries the
 //! network as well, at real-time priority. It is started with [`start`], steered with
@@ -42,8 +42,7 @@ pub const PEER_APP_TOO_OLD: &str = "peer_app_too_old";
 pub struct LinkTarget {
     pub peer: Uuid,
     /// Their addresses, best first. All are raced, so one on the same network
-    /// is reached directly instead of only through its public address
-    /// (REQ-CON-113).
+    /// is reached directly instead of only through its public address.
     pub candidates: Vec<SocketAddr>,
     /// Our key in the room and the key the server gave for them: with them
     /// the link is checked to be theirs (`Connection::verify_peer`). A peer
@@ -73,18 +72,18 @@ pub enum Command {
     /// Play on these output device channels (1-based settings) from now on
     SetOutputChannels(u32, Option<u32>),
     SetOutputDevice(Option<String>),
-    /// Hold what is sent at 0 dBFS, or stop doing so (ADR-094)
+    /// Hold what is sent at 0 dBFS, or stop doing so
     SetInputLimiter(bool),
-    /// Hold what is played at 0 dBFS, or stop doing so (ADR-094)
+    /// Hold what is played at 0 dBFS, or stop doing so
     SetOutputLimiter(bool),
     SetMute(bool),
     SetMonitoring(bool),
     SetMasterVolume(f32),
     SetLocalVolume(f32),
     SetLocalPan(i32),
-    /// Rebuild the receive jitter buffer at a new depth (ADR-020)
+    /// Rebuild the receive jitter buffer at a new depth
     SetJitterBufferFrames(u32),
-    /// Resume probing on every link automatic recovery gave up on (REQ-CON-110)
+    /// Resume probing on every link automatic recovery gave up on
     Reconnect,
     /// Open an audio link to a participant
     Link(Box<LinkTarget>),
@@ -125,11 +124,11 @@ pub struct Params {
     pub wasapi_mode: WasapiMode,
     /// How many channels are sent: 1 (mono) or 2 (stereo)
     pub transmit_channels: u32,
-    /// Whether what is sent is held at 0 dBFS (ADR-094)
+    /// Whether what is sent is held at 0 dBFS
     pub input_limiter: bool,
-    /// Whether what is played is held at 0 dBFS (ADR-094)
+    /// Whether what is played is held at 0 dBFS
     pub output_limiter: bool,
-    /// Whether the audio packets are marked as voice (ADR-110)
+    /// Whether the audio packets are marked as voice
     pub voice_priority: bool,
     /// Which channels of a multi-channel interface are read (1-based)
     pub input_channels: (u32, Option<u32>),

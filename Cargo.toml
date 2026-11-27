@@ -29,7 +29,7 @@ device-loop = []
 # Audio I/O
 cpal = "0.18"
 
-# Audio resampling (ADR-013: receive-side resampling)
+# Audio resampling (receive-side resampling)
 rubato = "5.0"
 
 # Audio codec (optional; builds a bundled libopus, which needs cmake)
@@ -54,7 +54,7 @@ rtrb = "0.4"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 
-# Configuration file shared by the CLI and the GUI (ADR-027)
+# Configuration file shared by the CLI and the GUI
 toml = "1.1"
 directories = "6"
 chrono = { version = "0.4", features = ["serde"] }
@@ -66,7 +66,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Random number generation
 rand = "0.10"
 
-# Asking the router to open the audio port (UPnP IGD, ADR-113)
+# Asking the router to open the audio port (UPnP IGD)
 igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }
 
 # WebSocket for signaling
@@ -86,7 +86,7 @@ x25519-dalek = { version = "3", features = ["static_secrets"] }
 sha2 = "0.11"
 hkdf = "0.13"
 
-# Device identity signing (ADR-024). Shares curve25519-dalek 5 with
+# Device identity signing. Shares curve25519-dalek 5 with
 # x25519-dalek above, so no second copy of the curve arithmetic is linked in.
 ed25519-dalek = "3"
 
@@ -188,7 +188,7 @@ workspace = true
 name = "jamuru"
 path = "src/main.rs"
 
-# Tries the app on simulated bad lines and prints a table; takes condition names (ADR-124)
+# Tries the app on simulated bad lines and prints a table; takes condition names
 [[test]]
 name = "line_trial"
 harness = false

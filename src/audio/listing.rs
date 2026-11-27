@@ -1,4 +1,4 @@
-//! The audio devices on offer, listed the way the app and the CLI both need them (ADR-043).
+//! The audio devices on offer, listed the way the app and the CLI both need them.
 //!
 //! A driver that has hung never answers a listing, so a listing is made on a thread of its own
 //! and waited for a limited time. What the last successful listing said is given instead.
@@ -249,7 +249,6 @@ mod tests {
         }])
     }
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn when_the_driver_hangs_the_devices_are_shown_as_last_listed_and_not_asked_again() {
         static LISTING: Listing = Listing::new(Duration::from_millis(100));
@@ -279,7 +278,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-123, REQ-CLI-008
     #[test]
     fn when_the_driver_hangs_before_any_listing_it_says_so_instead_of_showing_no_devices() {
         static LISTING: Listing = Listing::new(Duration::from_millis(100));

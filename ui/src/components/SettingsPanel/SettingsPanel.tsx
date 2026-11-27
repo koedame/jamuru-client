@@ -100,7 +100,7 @@ export interface SettingsPanelProps {
   onServerUrlChange?: (url: string) => void;
   /** Opens the terms of use, the license and the published pages (About tab, left out when absent) */
   legal?: LegalSectionProps;
-  /** The update check shown on the About tab (ADR-082); not shown when absent */
+  /** The update check shown on the About tab; not shown when absent */
   update?: UpdateSectionProps;
   /** Display name change handler */
   onDisplayNameChange: (name: string) => void;
@@ -158,7 +158,7 @@ export interface SettingsPanelProps {
   onSendPreviousHang?: (send: boolean) => void;
   /** Set once the pending hang report has been answered */
   previousHangAnswered?: boolean;
-  /** Whether "send" also attaches jamuru.log (ADR-059: true before 1.0.0) */
+  /** Whether "send" also attaches jamuru.log (true before 1.0.0) */
   previousHangAttachesLog?: boolean;
   /** Whether usage reporting is on */
   usageReporting?: boolean;
@@ -170,7 +170,7 @@ export interface SettingsPanelProps {
   onShowUsagePreview?: () => void;
   /** Why what would be sent could not be read */
   usagePreviewError?: string | null;
-  /** "Report a problem" (ADR-058) */
+  /** "Report a problem" */
   reportProblemState?: ReportProblemState;
   reportProblemPreview?: string | null;
   reportProblemComment?: string;

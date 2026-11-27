@@ -21,7 +21,7 @@ const BUFFER_HINT_KEY = 'jamuru.hint.peerBuffer';
 export interface PeerLinkDialogProps extends Omit<PeerLinkDetailProps, 'id'> {
   /** The participant's id in the room */
   peerId: string;
-  /** Whether the participant's app takes asks to buffer longer (ADR-097) */
+  /** Whether the participant's app takes asks to buffer longer */
   askable: boolean;
   /** The asks made and received, and what is done with them; without it the buffer is not offered (a helper's window) */
   requests?: BufferRequests;

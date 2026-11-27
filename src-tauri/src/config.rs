@@ -1,8 +1,8 @@
 //! Configuration Tauri commands
 //!
 //! The configuration model and its file I/O live in the core library
-//! (`jamjam::config`) so the CLI shares one config file with the GUI
-//! (ADR-027). This module is the IPC surface over it.
+//! (`jamjam::config`) so the CLI shares one config file with the GUI.
+//! This module is the IPC surface over it.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -73,7 +73,7 @@ impl ConfigState {
             .map_err(|e| format!("Failed to lock config: {}", e))
     }
 
-    /// The jamuru server to connect through (ADR-030)
+    /// The jamuru server to connect through
     ///
     /// Falls back to the build default when the config cannot be read, so the
     /// connection screen and diagnostics always use the same server.
@@ -146,7 +146,7 @@ pub fn config_load(state: tauri::State<'_, ConfigState>) -> Result<AppConfig, St
     state.get()
 }
 
-/// Turn usage reporting on or off (ADR-037)
+/// Turn usage reporting on or off
 #[tauri::command]
 pub fn config_set_usage_reporting(
     enabled: bool,
@@ -321,7 +321,7 @@ pub fn config_set_language(
 }
 
 // =============================================================================
-// Sample Rate Commands (ADR-013)
+// Sample Rate Commands
 // =============================================================================
 
 /// Get the configured sample rate
@@ -333,7 +333,7 @@ pub fn config_get_sample_rate(state: tauri::State<'_, ConfigState>) -> Result<u3
     Ok(config.sample_rate)
 }
 
-/// A sample rate the app offers (ADR-013)
+/// A sample rate the app offers
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SampleRateInfo {
     /// Sample rate in Hz

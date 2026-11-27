@@ -1,5 +1,5 @@
 //! Finds out, while a link hears nothing, whether the router now gives the audio socket another
-//! address than the room was told (ADR-129)
+//! address than the room was told
 //!
 //! The room is told the address STUN saw when the app entered it. A router can give the socket
 //! another one by the time a link to someone who came later is started: it forgot the mapping
@@ -227,7 +227,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-177
     #[tokio::test]
     async fn when_a_link_has_waited_long_enough_then_the_address_stun_sees_is_kept() {
         let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
@@ -242,7 +241,6 @@ mod tests {
         assert_eq!(*seen.read().unwrap(), vec![mux.local_addr()]);
     }
 
-    /// Verifies: REQ-CON-177
     #[tokio::test]
     async fn when_no_link_has_waited_long_enough_then_stun_is_not_asked() {
         let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
@@ -258,7 +256,6 @@ mod tests {
         assert_eq!(watch.asked, 0);
     }
 
-    /// Verifies: REQ-CON-177
     #[tokio::test]
     async fn when_every_link_stays_silent_then_stun_is_asked_a_few_times_and_no_more() {
         let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
@@ -274,7 +271,6 @@ mod tests {
         assert_eq!(watch.asked, 2);
     }
 
-    /// Verifies: REQ-CON-177
     #[tokio::test]
     async fn when_the_links_are_heard_and_one_goes_quiet_later_then_the_questions_start_over() {
         let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
@@ -296,7 +292,6 @@ mod tests {
         assert_eq!(watch.asked, 2);
     }
 
-    /// Verifies: REQ-CON-177
     #[test]
     fn when_stun_sees_an_address_the_room_was_not_told_then_it_is_untold() {
         let told = [addr("203.0.113.5:4000")];

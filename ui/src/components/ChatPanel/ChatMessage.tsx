@@ -13,7 +13,7 @@ import "./ChatMessage.css";
 
 export type ChatMessageType = "own" | "other" | "system";
 
-/** What a system line is about: someone joining or leaving, or help with settings (ADR-043) */
+/** What a system line is about: someone joining or leaving, or help with settings */
 export type ChatSystemKind =
   | "join"
   | "leave"

@@ -11,11 +11,11 @@ use serde::{Deserialize, Serialize};
 
 /// Protocol version
 ///
-/// 2: PCM audio is 24-bit integers, not 32-bit floats (ADR-096). The two have no
+/// 2: PCM audio is 24-bit integers, not 32-bit floats. The two have no
 /// marker on the wire, and a payload of one read as the other is loud noise, so a
 /// peer of the other version has to be refused rather than decoded.
 ///
-/// 3: the 24-bit integers of a packet are packed without loss (ADR-111). A payload
+/// 3: the 24-bit integers of a packet are packed without loss. A payload
 /// of version 2 has no format byte in front, so it too has to be refused.
 pub const PROTOCOL_VERSION: u8 = 3;
 
@@ -151,7 +151,7 @@ impl Packet {
     /// Create a new FEC packet
     ///
     /// `payload` is a serialised `FecPacket`. The group number it belongs to is
-    /// derivable from the audio sequence numbers on both sides (ADR-021), so it
+    /// derivable from the audio sequence numbers on both sides, so it
     /// is not repeated in the header.
     pub fn fec(sequence: u32, timestamp: u32, payload: Vec<u8>) -> Self {
         Self {
@@ -371,7 +371,7 @@ pub struct LatencyPing {
     /// Sequence number for this ping
     pub ping_sequence: u32,
     /// The sender's clock when the ping was sent, `None` from a peer that does not send it
-    /// (REQ-LAT-132)
+    ///
     pub sent_wall_us: Option<u64>,
 }
 
@@ -432,7 +432,7 @@ pub struct LatencyPong {
     /// Ping sequence number (echoed back)
     pub ping_sequence: u32,
     /// The clock times that give the two ways of the round trip, `None` when the ping
-    /// did not carry its time (REQ-LAT-132)
+    /// did not carry its time
     pub wall: Option<PongWall>,
 }
 
@@ -715,8 +715,6 @@ mod tests {
     /// A peer that predates the clock times sends the 12 fixed bytes; they read as no time
     /// rather than as a refused packet, and a newer peer's trailing bytes are ignored by an
     /// older one (it reads only the fixed part).
-    ///
-    /// Verifies: REQ-LAT-132
     #[test]
     fn when_a_ping_or_pong_has_no_clock_times_they_are_none_and_the_rest_is_read() {
         let ping = LatencyPing {
@@ -738,7 +736,6 @@ mod tests {
         assert_eq!(LatencyPong::from_bytes(&bytes), Some(pong));
     }
 
-    /// Verifies: REQ-LAT-132
     #[test]
     fn when_a_ping_carries_its_clock_time_an_older_reader_still_reads_the_fixed_part() {
         let ping = LatencyPing {
@@ -755,8 +752,6 @@ mod tests {
     }
 
     /// A pong cut short in the middle of the clock times has none of them, not half
-    ///
-    /// Verifies: REQ-LAT-132
     #[test]
     fn when_a_pong_is_cut_short_inside_its_clock_times_it_has_none_of_them() {
         let pong = LatencyPong {
@@ -886,8 +881,6 @@ mod tests {
     }
 
     /// A peer that sends 32-bit float audio has to be refused, not decoded as 24-bit.
-    ///
-    /// Verifies: REQ-AUD-044
     #[test]
     fn a_packet_of_the_version_that_sent_32_bit_float_is_refused() {
         let mut data = Packet::audio(1, 0, vec![0u8; 12]).to_bytes();

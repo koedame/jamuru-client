@@ -23,8 +23,8 @@ use super::port_mapping::{self, PortMapping, PortMappingError};
 use super::transport::IpFamilies;
 use crate::telemetry::{AppStart, AudioEnv};
 
-/// The four `X-Device-*` handshake headers proving `identity` to a server
-/// (ADR-024), signed for the current time.
+/// The four `X-Device-*` handshake headers proving `identity` to a server,
+/// signed for the current time.
 pub(super) fn signed_device_headers(identity: &DeviceIdentity) -> [(&'static str, String); 4] {
     let timestamp = now_unix_secs();
     [
@@ -52,17 +52,17 @@ pub const MAX_PEER_CANDIDATES: usize = 32;
 
 /// How many ports besides the first one STUN saw are offered when the servers see the audio
 /// socket at different ports: three ports tell a NAT that gives each destination a port from one
-/// that gives them at random (ADR-115)
+/// that gives them at random
 const OTHER_VIEWS: usize = 2;
 
 /// The feature an app announces when it creates or joins a room to say it
-/// takes [`SignalingMessage::PeerMessage`]s (ADR-043). The server relays peer
+/// takes [`SignalingMessage::PeerMessage`]s. The server relays peer
 /// messages only to apps that announced it, so an older app never receives
 /// one, and lists each participant's features in its [`PeerInfo`].
 pub const PEER_MESSAGE_FEATURE: &str = "peer_message";
 
-/// WebSocket handshake headers carrying a client's device identity
-/// (ADR-024). [`SignalingClient::connect`] always sends all four: the server
+/// WebSocket handshake headers carrying a client's device identity.
+/// [`SignalingClient::connect`] always sends all four: the server
 /// refuses a connection without them.
 pub const DEVICE_ID_HEADER: &str = "x-device-id";
 pub const DEVICE_PUBKEY_HEADER: &str = "x-device-pubkey";
@@ -110,7 +110,7 @@ impl AddressCandidate {
     }
 
     /// Create a candidate for an address the router forwards to this app because it was asked
-    /// to (UPnP, ADR-113). On the wire it is a server reflexive candidate - a peer treats it
+    /// to (UPnP). On the wire it is a server reflexive candidate - a peer treats it
     /// as a public address to send to, whatever the way it was found - but ranked above the
     /// ones STUN found: a symmetric NAT gives STUN's address to the server alone, while a
     /// mapping the router was asked for takes anyone's packets.
@@ -391,8 +391,8 @@ pub enum SignalingMessage {
         local_addr: Option<SocketAddr>,
     },
     ListRooms,
-    /// Asks how long ago the server last heard from each of the other participants' connections
-    /// (REQ-CON-164). Answered with [`SignalingMessage::Presence`].
+    /// Asks how long ago the server last heard from each of the other participants' connections.
+    /// Answered with [`SignalingMessage::Presence`].
     GetPresence,
 
     // Server -> Client
@@ -447,7 +447,7 @@ pub enum SignalingMessage {
     },
 
     /// A message from one app to another in the same room, relayed by the
-    /// server (ADR-043). Sent with `to` naming one participant, or without it
+    /// server. Sent with `to` naming one participant, or without it
     /// for everyone in the room who takes peer messages (the sender too, when
     /// it announced that it takes them). It arrives with `from` and
     /// `from_name` set by the server to the sending participant, whatever the
@@ -480,7 +480,7 @@ pub struct PeerPresence {
 }
 
 /// The text an app sends the server to show its connection is alive, and the server answers
-/// without waking the room (REQ-CON-164).
+/// without waking the room.
 pub const PING_TEXT: &str = "ping";
 
 /// What the server answers [`PING_TEXT`] with.
@@ -592,7 +592,7 @@ pub const INVITE_URL_SCHEME: &str = "jamuru";
 /// Path segment that identifies a join link
 const INVITE_URL_PATH: &str = "join";
 
-/// Build the invite URL for a room code (REQ-CON-101)
+/// Build the invite URL for a room code
 ///
 /// ```
 /// use jamjam::network::invite_url;
@@ -605,7 +605,7 @@ pub fn invite_url(invite_code: &str) -> String {
     )
 }
 
-/// Extract the invite code from an invite URL (REQ-CON-103)
+/// Extract the invite code from an invite URL
 ///
 /// Returns `None` unless the URL uses the `jamuru` scheme, names the `join`
 /// path, and carries a code that parses as an [`InviteCode`]. Rejecting a
@@ -647,7 +647,7 @@ pub fn parse_invite_url(url: &str) -> Option<String> {
 ///
 /// Knows the jamuru server, not the signaling server: [`Self::connect`] asks
 /// the server where its signaling is (`GET /api/v1/signaling`) and connects
-/// there, proving the device identity (ADR-024). There is no anonymous
+/// there, proving the device identity. There is no anonymous
 /// connection.
 pub struct SignalingClient {
     server_url: String,
@@ -766,7 +766,7 @@ impl SignalingConnection {
     /// enough to hit an edge/proxy idle timeout. The host calls this on a timer to keep the
     /// connection alive regardless of application traffic, and the answer shows the connection
     /// is carrying something both ways ([`Self::quiet_for`]). The server also keeps when it last
-    /// heard one, and tells the others in the room (REQ-CON-164).
+    /// heard one, and tells the others in the room.
     pub async fn send_ping(&mut self) -> Result<(), NetworkError> {
         self.ws_stream
             .send(Message::Text(PING_TEXT.into()))
@@ -887,7 +887,7 @@ pub struct Gathered {
 /// mapping - and leaves `socket` untouched for whatever will read it afterwards (a
 /// [`UdpMux`](super::UdpMux), which would swallow the reply). `None` if no duplicate could be made.
 ///
-/// With `ask_router`, the router is also asked to forward the socket's port (UPnP, ADR-113)
+/// With `ask_router`, the router is also asked to forward the socket's port (UPnP)
 /// while STUN is asked; keep the returned [`Gathered::port_mapping`] as long as the socket is
 /// in use.
 pub async fn gather_candidates_on(
@@ -991,7 +991,7 @@ pub async fn gather_candidates_using(
 
     // A NAT that gives each destination its own port (such as the one in front of a peer on a
     // MAP-E line) sends a peer's packets to a port STUN did not see. The ports other servers see
-    // are told to the peer too, and it guesses from them where to send (ADR-115). A NAT that
+    // are told to the peer too, and it guesses from them where to send. A NAT that
     // keeps one port reports the same to every server, and nothing is added.
     if let Some(first) = reflexive.iter().find(|r| r.mapped_address.is_ipv4()) {
         let before = candidates.len();
@@ -1026,7 +1026,7 @@ pub async fn gather_candidates_using(
 }
 
 /// `told`, with the addresses STUN saw the audio socket at since (`seen`) that it does not have
-/// added as server-reflexive candidates, ahead of the ones STUN gave before (ADR-129)
+/// added as server-reflexive candidates, ahead of the ones STUN gave before
 ///
 /// The older ones stay, up to [`super::MAX_TOLD_MAPPINGS`]: the router may have given other
 /// links the address the room was first told. The oldest go first.
@@ -1142,7 +1142,6 @@ mod tests {
         candidates.iter().map(|c| c.address.to_string()).collect()
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_the_socket_is_dual_stack_the_global_ipv6_addresses_are_host_candidates_too() {
         let candidates = host_candidates_of(
@@ -1157,7 +1156,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_an_ipv6_address_cannot_be_sent_to_from_elsewhere_it_is_not_a_host_candidate() {
         let candidates = host_candidates_of(
@@ -1177,7 +1175,6 @@ mod tests {
         assert!(candidates.is_empty(), "{:?}", addresses(&candidates));
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_the_socket_is_ipv4_only_no_ipv6_address_is_a_host_candidate() {
         let candidates = host_candidates_of(
@@ -1189,7 +1186,6 @@ mod tests {
         assert_eq!(addresses(&candidates), vec!["192.168.1.10:5000"]);
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_stun_saw_an_ipv6_address_the_other_ipv6_host_addresses_are_dropped() {
         let host = |a: &str| AddressCandidate::host(a.parse().unwrap());
@@ -1214,7 +1210,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_stun_saw_no_ipv6_address_every_ipv6_host_address_stays() {
         let host = |a: &str| AddressCandidate::host(a.parse().unwrap());
@@ -1229,7 +1224,6 @@ mod tests {
         assert_eq!(candidates.len(), 3);
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_a_peer_publishes_ipv6_candidates_they_are_used_in_the_order_given() {
         let usable = usable_candidates(vec![
@@ -1246,7 +1240,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_a_peer_publishes_an_ipv4_mapped_address_it_is_the_ipv4_address_once() {
         let usable = usable_candidates(vec![
@@ -1260,7 +1253,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_a_peer_publishes_a_link_local_ipv6_address_it_is_not_sent_to() {
         let usable = usable_candidates(vec![
@@ -1315,7 +1307,6 @@ mod tests {
             .expect("the server refuses the connection")
     }
 
-    /// Verifies: REQ-IDT-009
     #[tokio::test]
     async fn when_the_clock_is_minutes_off_and_the_server_refuses_the_identity_the_error_is_the_clock_with_its_size(
     ) {
@@ -1333,7 +1324,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-IDT-009
     #[tokio::test]
     async fn when_the_clock_is_behind_and_the_server_refuses_the_identity_the_error_says_behind() {
         let server = refusing_server(-900).await;
@@ -1346,7 +1336,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-IDT-009
     #[tokio::test]
     async fn when_the_clock_is_right_and_the_server_refuses_the_identity_it_is_still_a_4xx() {
         let server = refusing_server(0).await;
@@ -1365,7 +1354,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-IDT-009
     #[tokio::test]
     async fn when_asked_the_server_says_how_far_the_clock_is_from_its_own() {
         let server = refusing_server(375).await;
@@ -1398,7 +1386,6 @@ mod tests {
         assert_eq!(rooms[0].invite_code.as_str(), "ABC234XYZ");
     }
 
-    /// Verifies: REQ-CON-030
     #[test]
     fn a_message_of_a_type_the_protocol_gained_later_is_classified_as_unknown() {
         assert!(is_of_unknown_type(
@@ -1409,8 +1396,6 @@ mod tests {
 
     /// A known type that does not parse is an incompatibility to report, not
     /// a newer message to skip.
-    ///
-    /// Verifies: REQ-CON-030
     #[test]
     fn a_known_message_type_with_a_malformed_field_is_not_classified_as_unknown() {
         let malformed = r#"{"type":"PeerLeft","data":{"peer_id":"not-a-uuid"}}"#;
@@ -1421,8 +1406,6 @@ mod tests {
     /// An unknown value inside a known message reads, to serde, exactly like an
     /// unknown message type. It must still be reported: skipping it would drop
     /// a peer's arrival without a trace.
-    ///
-    /// Verifies: REQ-CON-030
     #[test]
     fn a_known_message_carrying_an_unknown_value_deep_inside_is_not_classified_as_unknown() {
         let peer_id = Uuid::new_v4();
@@ -1444,8 +1427,6 @@ mod tests {
 
     /// An app with nothing to announce sends the message as an app from
     /// before features did, so an older server reads it unchanged.
-    ///
-    /// Verifies: REQ-CON-031
     #[test]
     fn an_app_that_announces_no_features_sends_no_features_field() {
         let json = serde_json::to_value(SignalingMessage::JoinRoom {
@@ -1499,8 +1480,6 @@ mod tests {
     /// The app's own information goes in the entering message beside the other
     /// fields as a flat object, and a message without it (one from an app that
     /// predates it) carries no such field.
-    ///
-    /// Verifies: REQ-CON-032
     #[test]
     fn the_app_information_is_sent_in_the_entering_message_and_left_out_when_there_is_none() {
         let json = serde_json::to_value(SignalingMessage::JoinRoom {
@@ -1537,8 +1516,6 @@ mod tests {
     /// The server refuses a message whose information is outside its
     /// definition, and then the room cannot be entered. What the app cannot
     /// control the length of is cut to what the definition allows.
-    ///
-    /// Verifies: REQ-CON-032
     #[test]
     fn app_information_with_text_longer_than_the_server_accepts_is_cut_to_the_limit() {
         let long = "x".repeat(300);
@@ -1599,8 +1576,6 @@ mod tests {
 
     /// What the server hands to the other participants has no place for the
     /// app's information, so it cannot reach another app through it.
-    ///
-    /// Verifies: REQ-CON-032
     #[test]
     fn a_participant_as_the_others_receive_it_has_no_app_information() {
         let peer = PeerInfo {
@@ -1637,8 +1612,6 @@ mod tests {
 
     /// A participant listed by a server, or joined from an app, that predates
     /// features takes no peer messages - so none is offered to it.
-    ///
-    /// Verifies: REQ-CON-031
     #[test]
     fn a_participant_listed_without_features_takes_no_peer_messages() {
         let id = Uuid::new_v4();
@@ -1659,8 +1632,6 @@ mod tests {
 
     /// Sent, a peer message carries only the addressee and the body; relayed,
     /// it arrives with the sender the server stamped.
-    ///
-    /// Verifies: REQ-CON-031
     #[test]
     fn a_peer_message_is_sent_without_a_sender_and_arrives_with_the_one_the_server_stamped() {
         let to = Uuid::new_v4();
@@ -1736,7 +1707,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-021
     #[test]
     fn test_generate_invite_code_length() {
         let code = InviteCode::generate();
@@ -1806,7 +1776,6 @@ mod tests {
         assert!(is_code("TUVWXY789"));
     }
 
-    /// Verifies: REQ-CON-021
     #[test]
     fn test_an_invite_code_of_six_characters_does_not_parse() {
         assert!(!is_code("HJK567"));
@@ -1899,7 +1868,6 @@ mod tests {
         assert!(srflx_v6.priority > srflx_v4.priority);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_the_interfaces_are_listed_overlay_first_the_lan_candidate_is_still_probed_first() {
         let mut peer = PeerInfo {
@@ -1956,7 +1924,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-144
     #[test]
     fn when_a_candidate_names_no_one_host_and_port_it_is_not_a_destination() {
         let peer = peer_with(&[
@@ -1976,7 +1943,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-144
     #[test]
     fn when_a_candidate_is_on_this_machine_or_a_private_network_it_stays_a_destination() {
         let peer = peer_with(&[
@@ -1992,7 +1958,6 @@ mod tests {
         assert_eq!(peer.get_sorted_candidates().len(), 7);
     }
 
-    /// Verifies: REQ-CON-144
     #[test]
     fn when_a_peer_publishes_many_candidates_the_best_ones_are_kept_up_to_the_limit() {
         let addrs: Vec<String> = (0..250)
@@ -2014,7 +1979,6 @@ mod tests {
         assert!(!sorted.contains(&"203.0.113.10:1".parse().unwrap()));
     }
 
-    /// Verifies: REQ-CON-144
     #[test]
     fn when_a_candidate_is_published_twice_it_is_a_destination_once() {
         let peer = peer_with(&[
@@ -2088,7 +2052,6 @@ mod tests {
         text.parse().unwrap()
     }
 
-    /// Verifies: REQ-CON-177
     #[test]
     fn when_stun_sees_a_new_address_then_it_is_told_ahead_of_the_one_the_room_had() {
         let told = vec![
@@ -2109,7 +2072,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-177
     #[test]
     fn when_stun_sees_only_what_the_room_was_told_then_the_candidates_stay_as_they_were() {
         let told = vec![AddressCandidate::server_reflexive(sock("203.0.113.5:5000"))];
@@ -2120,7 +2082,6 @@ mod tests {
         assert_eq!(now[0].address, sock("203.0.113.5:5000"));
     }
 
-    /// Verifies: REQ-CON-177
     #[test]
     fn when_the_address_keeps_moving_then_the_oldest_ones_are_dropped_and_a_forwarded_port_stays() {
         let mut told = vec![AddressCandidate::port_mapped(sock("203.0.113.5:7000"))];
@@ -2137,7 +2098,6 @@ mod tests {
         assert!(!addrs.contains(&sock("203.0.113.5:5000")));
     }
 
-    /// Verifies: REQ-CON-177
     #[test]
     fn when_stun_sees_more_addresses_than_are_kept_then_after_telling_none_is_untold() {
         let seen: Vec<SocketAddr> = (1..=5)

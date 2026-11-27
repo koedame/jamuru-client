@@ -2,7 +2,7 @@
 # Deletes every release of the same channel as <tag> that is older than <tag>,
 # so only the newest beta (and, once there is one, the newest stable release)
 # stays on the releases page and an old build with a known flaw cannot be
-# downloaded and installed (REQ-UPD-020, ADR-092).
+# downloaded and installed.
 #
 # Usage: scripts/prune-old-releases.sh <tag>     (needs `gh` and a token)
 #   DRY_RUN=1 prints what would be deleted and deletes nothing.
@@ -12,7 +12,7 @@
 # - Only releases with a lower version than <tag> are deleted, so a run that
 #   finishes late never deletes a newer release.
 # - The release `beta-channel` is not a version: it is where the betas read
-#   their update manifest (ADR-045), and its name matches neither channel.
+#   their update manifest, and its name matches neither channel.
 # - The release and its assets are deleted. The git tag stays: the update
 #   drill builds "the release before" from it, and the servers are released
 #   under the same tag.

@@ -37,7 +37,7 @@ const LEARNED_ADDRS: usize = 4;
 
 /// Datagrams from an address no link expects that are handed on at once, and how many more per
 /// second. A link follows a peer to a new address by the first packet it opens from there, so a few
-/// are enough; the rest is what anyone on the internet can send to an open port (ADR-113).
+/// are enough; the rest is what anyone on the internet can send to an open port.
 const UNKNOWN_BURST: f64 = 64.0;
 const UNKNOWN_PER_SEC: f64 = 32.0;
 
@@ -279,7 +279,7 @@ fn put(lane: &LaneShared, bytes: Vec<u8>, from: SocketAddr) {
 /// A UDP socket that several connections send and receive through, each to its own peer
 ///
 /// Make one connection per peer with [`super::Connection::on`]. Must be created, and its
-/// connections used, on the Tokio runtime that will drive it (ADR-026).
+/// connections used, on the Tokio runtime that will drive it.
 pub struct UdpMux {
     socket: Arc<UdpSocket>,
     local_addr: SocketAddr,
@@ -487,7 +487,6 @@ mod tests {
             .collect()
     }
 
-    /// Verifies: REQ-CON-033
     #[test]
     fn a_datagram_from_a_peers_address_goes_to_that_peers_lane_only() {
         let lanes = vec![
@@ -506,7 +505,6 @@ mod tests {
         assert_eq!(waiting(&lanes[1]), vec![vec![7]]);
     }
 
-    /// Verifies: REQ-CON-033
     #[test]
     fn a_datagram_from_any_of_a_peers_addresses_goes_to_its_lane() {
         let lanes = vec![lane(Some(&["192.168.1.20:5000", "203.0.113.7:6000"]))];
@@ -529,8 +527,6 @@ mod tests {
 
     /// Two participants at home behind different routers can publish the same private
     /// address. Which of them a packet from it is, only the keys of the links can tell.
-    ///
-    /// Verifies: REQ-CON-033
     #[test]
     fn a_datagram_from_an_address_two_peers_both_published_goes_to_both_lanes() {
         let lanes = vec![
@@ -549,7 +545,6 @@ mod tests {
         assert_eq!(waiting(&lanes[1]), vec![vec![7]]);
     }
 
-    /// Verifies: REQ-CON-033
     #[test]
     fn a_datagram_from_an_address_no_peer_published_is_offered_to_every_lane() {
         let lanes = vec![
@@ -568,7 +563,6 @@ mod tests {
         assert_eq!(waiting(&lanes[1]), vec![vec![7]]);
     }
 
-    /// Verifies: REQ-CON-033
     #[test]
     fn a_lane_whose_connection_has_not_started_or_has_ended_takes_nothing() {
         let lanes = vec![lane(None), lane(Some(&["192.0.2.3:5000"]))];
@@ -602,7 +596,6 @@ mod tests {
         assert_eq!(held[0], vec![0]);
     }
 
-    /// Verifies: REQ-CON-033
     #[tokio::test]
     async fn a_lane_with_a_backlog_lets_the_other_links_on_its_thread_run() {
         let backlog = 1000;
@@ -713,7 +706,6 @@ mod tests {
         (addr, task)
     }
 
-    /// Verifies: REQ-CON-177
     #[tokio::test]
     async fn when_a_stun_server_is_asked_through_the_shared_socket_then_its_answer_is_the_sockets_address_and_no_link_is_handed_it(
     ) {
@@ -732,7 +724,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-177
     #[tokio::test]
     async fn when_a_stun_server_does_not_answer_then_the_query_ends_with_nothing_found() {
         let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
@@ -746,7 +737,6 @@ mod tests {
         assert!(mux.stun.lock().is_empty(), "the request is not waited for");
     }
 
-    /// Verifies: REQ-CON-177
     #[tokio::test]
     async fn when_another_address_sends_what_looks_like_the_answer_then_it_is_not_taken_for_one() {
         let (pending, _answers) = {
@@ -777,7 +767,6 @@ mod tests {
         assert!(take_stun_answer(&pending, &reply, addr("192.0.2.9:3478")));
     }
 
-    /// Verifies: REQ-CON-165
     #[test]
     fn when_datagrams_from_unknown_addresses_keep_coming_then_only_a_few_are_handed_on() {
         let lanes = vec![lane(Some(&["192.0.2.2:5000"]))];
@@ -796,7 +785,6 @@ mod tests {
         assert!((64..=66).contains(&handed_on), "{handed_on}");
     }
 
-    /// Verifies: REQ-CON-165
     #[test]
     fn when_unknown_addresses_have_used_up_the_allowance_then_a_peers_datagrams_still_come() {
         let lanes = vec![lane(Some(&["192.0.2.2:5000"]))];
@@ -827,7 +815,6 @@ mod tests {
         assert!(unknown.allow(start + std::time::Duration::from_secs(1)));
     }
 
-    /// Verifies: REQ-CON-165
     #[test]
     fn when_a_packet_got_through_from_a_new_address_then_its_datagrams_are_no_longer_limited() {
         let shared = lane(Some(&["192.0.2.2:5000"]));
@@ -872,7 +859,6 @@ mod tests {
         assert!(addrs.contains(&addr("198.51.100.4:7005")));
     }
 
-    /// Verifies: REQ-CON-165
     #[test]
     fn when_the_link_moved_its_route_to_an_address_then_its_datagrams_are_not_limited_however_many_are_learned_after(
     ) {

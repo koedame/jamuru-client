@@ -1,5 +1,5 @@
 /**
- * Invite link handling (REQ-CON-103)
+ * Invite link handling
  *
  * The OS hands `jamuru://join/<code>` to the app via the deep-link plugin. The
  * scheme is declared in `src-tauri/tauri.conf.json` under `plugins.deep-link`.

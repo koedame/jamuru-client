@@ -1,4 +1,4 @@
-//! Updating before the app opens (ADR-089).
+//! Updating before the app opens.
 //!
 //! A start of a build that installs releases itself first looks for a newer
 //! release, before the main window opens. One that is found is downloaded and
@@ -530,7 +530,6 @@ pub(crate) fn exiting() {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_version_being_tried_that_ends_counts_as_started_only_once_its_screen_came_up() {
         assert_eq!(at_exit(true, false, false), AtExit::Confirm);
@@ -541,7 +540,6 @@ mod tests {
         assert_eq!(at_exit(false, false, true), AtExit::Nothing);
     }
 
-    /// Verifies: REQ-UPD-025
     #[test]
     fn when_a_build_that_installs_releases_starts_as_usual_it_updates_before_it_opens() {
         assert_eq!(
@@ -550,7 +548,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-025
     #[test]
     fn when_nothing_may_update_the_app_opens_at_once() {
         let normal = Began::Normal;
@@ -590,7 +587,6 @@ mod tests {
         SKIPPED.store(false, Ordering::SeqCst);
     }
 
-    /// Verifies: REQ-UPD-025
     #[test]
     fn while_checking_or_downloading_the_person_can_skip_the_update() {
         let _serial = lock(&SERIAL);
@@ -608,7 +604,6 @@ mod tests {
         at(None);
     }
 
-    /// Verifies: REQ-UPD-025
     #[test]
     fn once_the_install_has_begun_or_when_nothing_is_updating_a_skip_does_nothing() {
         let _serial = lock(&SERIAL);
@@ -620,7 +615,6 @@ mod tests {
         at(None);
     }
 
-    /// Verifies: REQ-UPD-025
     #[test]
     fn closing_the_updating_window_skips_the_update_and_other_windows_close_as_usual() {
         let _serial = lock(&SERIAL);
@@ -632,7 +626,6 @@ mod tests {
         at(None);
     }
 
-    /// Verifies: REQ-UPD-025
     #[test]
     fn a_skip_ends_the_wait_for_what_is_being_waited_for() {
         let _serial = lock(&SERIAL);
@@ -659,7 +652,6 @@ mod tests {
         });
     }
 
-    /// Verifies: REQ-UPD-025
     #[test]
     fn the_download_is_shown_by_whole_percent_or_by_mebibyte() {
         let mut meter = Meter::default();
@@ -692,8 +684,6 @@ mod tests {
 
     /// The window shown while updating reads this shape
     /// (`ui/src/lib/tauri.ts`).
-    ///
-    /// Verifies: REQ-UPD-025
     #[test]
     fn the_updating_window_reads_a_phase_and_the_download_counts() {
         use serde_json::json;

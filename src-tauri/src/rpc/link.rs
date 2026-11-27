@@ -1,4 +1,4 @@
-//! What a remote portal says over the relay's WebSocket (ADR-044 §4).
+//! What a remote portal says over the relay's WebSocket.
 //!
 //! The app being operated speaks first with a `hello` and again whenever the
 //! relay says a pair has formed; after that the other end sends requests, each
@@ -308,7 +308,6 @@ mod tests {
         serde_json::from_str(&text).unwrap()
     }
 
-    /// Verifies: REQ-RMT-021
     #[tokio::test]
     async fn when_the_relay_goes_silent_serving_it_ends_so_the_caller_can_reconnect() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -343,7 +342,6 @@ mod tests {
         assert!(matches!(ended, Ended::ReadFailed(_)), "{:?}", ended);
     }
 
-    /// Verifies: REQ-RMT-024
     #[tokio::test]
     async fn the_app_speaks_first_and_names_what_its_portal_may_call() {
         let (_to_app, mut from_app, _app) = serve(Portal::Help).await;
@@ -357,7 +355,6 @@ mod tests {
         assert!(!methods.iter().any(|m| m == "signaling_send_chat"));
     }
 
-    /// Verifies: REQ-RMT-024
     #[tokio::test]
     async fn when_a_pair_forms_the_app_says_hello_again() {
         let (to_app, mut from_app, _app) = serve(Portal::Help).await;
@@ -372,8 +369,6 @@ mod tests {
     }
 
     /// The answer carries the request's id, so answers may come in any order.
-    ///
-    /// Verifies: REQ-RMT-024
     #[tokio::test]
     async fn a_request_is_answered_with_its_id() {
         let (to_app, mut from_app, _app) = serve(Portal::Help).await;
@@ -391,8 +386,6 @@ mod tests {
 
     /// The table is asked for every request, so what a portal may not call is
     /// refused however the other end asks.
-    ///
-    /// Verifies: REQ-RMT-025
     #[tokio::test]
     async fn a_request_the_portal_may_not_make_is_denied() {
         let (to_app, mut from_app, _app) = serve(Portal::Help).await;
@@ -410,8 +403,6 @@ mod tests {
 
     /// A helper hears the events its portal may hear and no others, and the
     /// settings one announces name devices by their handles.
-    ///
-    /// Verifies: REQ-RMT-024, REQ-RMT-006
     #[tokio::test]
     async fn a_helper_hears_only_the_events_its_portal_may_hear_with_devices_by_handle() {
         use tauri::Emitter;
