@@ -478,9 +478,7 @@ async fn fec_recovers_a_dropped_frame_over_the_transport() {
     use std::sync::{Arc, Mutex};
 
     let preset = AudioPreset::Balanced;
-    let group_size = preset
-        .fec_group_size()
-        .expect("balanced must enable FEC");
+    let group_size = preset.fec_group_size().expect("balanced must enable FEC");
     let frame_size = preset.frame_size() as usize;
 
     // Receiver: collect every sequence the callback is handed.
@@ -639,9 +637,7 @@ async fn fec_recovers_a_dropped_frame_when_the_fec_packet_arrives_before_the_las
     use std::sync::{Arc, Mutex};
 
     let preset = AudioPreset::Balanced;
-    let group_size = preset
-        .fec_group_size()
-        .expect("balanced must enable FEC");
+    let group_size = preset.fec_group_size().expect("balanced must enable FEC");
     assert!(
         group_size >= 2,
         "a group needs a packet to arrive after FEC"
