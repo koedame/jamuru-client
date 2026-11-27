@@ -20,6 +20,58 @@ use super::udp_mux::Lane;
 /// rather than played with its end missing.
 pub(super) const RECV_BUFFER_SIZE: usize = 4096;
 
+/// What Windows answers a read with when the datagram was larger than the buffer
+/// (`WSAEMSGSIZE`). The part that fit is in the buffer and the rest is gone.
+#[cfg(windows)]
+const DATAGRAM_TOO_LARGE: i32 = 10040;
+
+/// Reads one datagram from `socket` into `buf`
+///
+/// `Ok(None)` when it may have been cut short, and so was dropped: it filled `buf`, or the system
+/// said it did not fit (Windows reports that as an error; Linux and macOS hand over the part that
+/// fit). Every OS drops it the same way, logged at debug: anyone can send a datagram that large.
+pub(super) async fn recv_whole(
+    socket: &UdpSocket,
+    buf: &mut [u8],
+) -> io::Result<Option<(usize, SocketAddr)>> {
+    let capacity = buf.len();
+    whole(socket.recv_from(buf).await, capacity)
+}
+
+/// [`recv_whole`] if a datagram is already waiting; `Err` of kind `WouldBlock` if none is
+fn try_recv_whole(socket: &UdpSocket, buf: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
+    let capacity = buf.len();
+    whole(socket.try_recv_from(buf), capacity)
+}
+
+fn whole(
+    read: io::Result<(usize, SocketAddr)>,
+    capacity: usize,
+) -> io::Result<Option<(usize, SocketAddr)>> {
+    match read {
+        Ok((len, from)) if len >= capacity => {
+            debug!("Dropping a datagram from {from} that fills the receive buffer");
+            Ok(None)
+        }
+        Ok(read) => Ok(Some(read)),
+        Err(e) if is_too_large(&e) => {
+            debug!("Dropping a datagram larger than the receive buffer");
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+#[cfg(windows)]
+fn is_too_large(e: &io::Error) -> bool {
+    e.raw_os_error() == Some(DATAGRAM_TOO_LARGE)
+}
+
+#[cfg(not(windows))]
+fn is_too_large(_: &io::Error) -> bool {
+    false
+}
+
 /// Held for reading by every send through a socket, and for writing while a socket sends with a
 /// hop limit other than its own ([`send_with_hop_limit`]). The hop limit belongs to the socket, and
 /// one socket carries the audio of every link in a room: a packet of another link sent meanwhile
@@ -323,11 +375,9 @@ impl UdpTransport {
             Some(lane) => lane.recv().await.ok_or(NetworkError::NotConnected)?,
             None => {
                 let mut buf = vec![0u8; RECV_BUFFER_SIZE];
-                let (len, addr) = self.socket.recv_from(&mut buf).await?;
-                if len == RECV_BUFFER_SIZE {
-                    debug!("Dropping a datagram from {addr} that fills the receive buffer");
-                    return Err(NetworkError::InvalidPacket);
-                }
+                let (len, addr) = recv_whole(&self.socket, &mut buf)
+                    .await?
+                    .ok_or(NetworkError::InvalidPacket)?;
                 buf.truncate(len);
                 (buf, canonical_addr(addr))
             }
@@ -340,12 +390,18 @@ impl UdpTransport {
     }
 
     /// Receive raw bytes (for connectivity probing without packet parsing)
+    ///
+    /// A datagram that may have been cut short is dropped and the next one read.
     pub async fn recv_raw(&self) -> Result<(Vec<u8>, SocketAddr), NetworkError> {
         if let Some(lane) = &self.lane {
             return lane.recv().await.ok_or(NetworkError::NotConnected);
         }
         let mut buf = vec![0u8; RECV_BUFFER_SIZE];
-        let (len, addr) = self.socket.recv_from(&mut buf).await?;
+        let (len, addr) = loop {
+            if let Some(read) = recv_whole(&self.socket, &mut buf).await? {
+                break read;
+            }
+        };
         buf.truncate(len);
         trace!("Received {} raw bytes from {}", len, addr);
         Ok((buf, canonical_addr(addr)))
@@ -357,7 +413,11 @@ impl UdpTransport {
             return lane.try_recv();
         }
         let mut buf = vec![0u8; RECV_BUFFER_SIZE];
-        let (len, addr) = self.socket.try_recv_from(&mut buf).ok()?;
+        let (len, addr) = loop {
+            if let Some(read) = try_recv_whole(&self.socket, &mut buf).ok()? {
+                break read;
+            }
+        };
         buf.truncate(len);
         Some((buf, canonical_addr(addr)))
     }
@@ -384,6 +444,9 @@ impl UdpTransport {
                     Err(NetworkError::NotConnected) => {
                         debug!("The transport takes no more datagrams, stopping receive loop");
                         break;
+                    }
+                    Err(NetworkError::InvalidPacket) => {
+                        debug!("Dropping a datagram that is not a whole packet");
                     }
                     Err(e) => {
                         error!("Receive error: {}", e);
@@ -480,6 +543,10 @@ impl HopLimitReceiver {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tokio::time::timeout;
+
     use super::*;
 
     #[tokio::test]
@@ -537,6 +604,67 @@ mod tests {
             transport2.recv_from().await,
             Err(NetworkError::InvalidPacket)
         ));
+    }
+
+    /// Sends `sizes.len()` datagrams of those sizes and then `b"whole"` from a socket of its own to `to`
+    fn send_after_datagrams_of(sizes: &[usize], to: SocketAddr) -> SocketAddr {
+        let sender = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        for &size in sizes {
+            sender.send_to(&vec![7u8; size], to).unwrap();
+        }
+        sender.send_to(b"whole", to).unwrap();
+        sender.local_addr().unwrap()
+    }
+
+    #[tokio::test]
+    async fn when_datagrams_that_may_have_been_cut_short_come_first_then_a_raw_read_skips_them_for_the_next_whole_one(
+    ) {
+        let receiver = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+        let sender = send_after_datagrams_of(
+            &[RECV_BUFFER_SIZE, RECV_BUFFER_SIZE * 2],
+            receiver.local_addr(),
+        );
+
+        let (bytes, from) = timeout(Duration::from_secs(2), receiver.recv_raw())
+            .await
+            .expect("the whole datagram is read")
+            .unwrap();
+
+        assert_eq!((bytes.as_slice(), from), (&b"whole"[..], sender));
+    }
+
+    #[tokio::test]
+    async fn when_datagrams_that_may_have_been_cut_short_are_waiting_then_a_raw_read_without_waiting_skips_them(
+    ) {
+        let receiver = UdpTransport::bind("127.0.0.1:0").await.unwrap();
+        send_after_datagrams_of(
+            &[RECV_BUFFER_SIZE, RECV_BUFFER_SIZE * 2],
+            receiver.local_addr(),
+        );
+
+        let read = timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some((bytes, _)) = receiver.try_recv_raw() {
+                    return bytes;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("a datagram is read");
+
+        assert_eq!(read, b"whole");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn when_windows_says_a_datagram_did_not_fit_then_it_is_dropped_rather_than_an_error() {
+        let read = whole(
+            Err(io::Error::from_raw_os_error(DATAGRAM_TOO_LARGE)),
+            RECV_BUFFER_SIZE,
+        );
+
+        assert!(matches!(read, Ok(None)));
     }
 
     /// Test SO_REUSEADDR allows rebinding to same port after drop
