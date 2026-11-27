@@ -1,8 +1,7 @@
 //! Metric liveness checks
 //!
-//! The traceability checks catch a *test* that asserts nothing. They
-//! cannot catch a *product* value that looks measured but is a constant, and two
-//! of those shipped:
+//! A *test* that asserts nothing is easy to spot. A *product* value that looks
+//! measured but is a constant is not, and two of those shipped:
 //!
 //! | Field | Was | Effect |
 //! |-------|-----|--------|
