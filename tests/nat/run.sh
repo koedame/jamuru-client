@@ -142,6 +142,14 @@ run_case() {
   if [ "${recv_a:-0}" -gt 0 ] && [ "${recv_b:-0}" -gt 0 ]; then got=heard; fi
   local verdict=ok
   if [ "$got" != "$expected" ]; then verdict="UNEXPECTED(want $expected)"; fail=1; fi
+  # A moved case says something only when the app was told the port it had before the move: a
+  # client that started late (a loaded machine) asks STUN after it and offers the new port
+  if [ "$moved" != - ]; then
+    local moved_log=$log_a; [ "$moved" = b ] && moved_log=$log_b
+    if grep -Eq '^CANDIDATE reflexive .*:500[0-9][0-9]$' <<<"$moved_log"; then
+      verdict="MOVED-BEFORE-GATHER(run it again)"; fail=1
+    fi
+  fi
   # Heard is not enough when audio was sent: a route that lets a few packets a second through
   # is heard, and nobody could play over it
   if [ "$verdict" = ok ] && [ "$got" = heard ] && [ "$audio" -gt 0 ]; then
