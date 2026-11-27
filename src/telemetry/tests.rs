@@ -538,8 +538,8 @@ fn when_the_server_url_is_set_only_its_scheme_host_and_port_are_sent() {
         line["settings"]["server_url"],
         concat!("https", "://my-own-server.example:8443")
     );
-    for secret in ["user", "hunter2", "rooms", "token", "frag"] {
-        assert!(!body.contains(secret), "{secret} reached the line: {body}");
+    for part in ["user", "hunter2", "rooms", "token", "frag"] {
+        assert!(!body.contains(part), "{part} reached the line: {body}");
     }
     assert_valid(&line);
 }

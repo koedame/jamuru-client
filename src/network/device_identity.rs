@@ -147,12 +147,14 @@ mod tests {
     fn test_device_id_is_26_base32_characters() {
         let device_id = DeviceIdentity::generate().device_id().to_string();
         assert_eq!(device_id.len(), DEVICE_ID_LEN);
-        assert!(
-            device_id
-                .chars()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
-            "unexpected characters in {}",
-            device_id
+        // The message leaves the identifier out: it is derived from a key.
+        let unexpected = device_id
+            .chars()
+            .filter(|c| !(c.is_ascii_uppercase() || c.is_ascii_digit()))
+            .count();
+        assert_eq!(
+            unexpected, 0,
+            "device id has {unexpected} unexpected characters"
         );
     }
 
