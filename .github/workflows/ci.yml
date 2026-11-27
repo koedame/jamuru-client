@@ -230,7 +230,7 @@ jobs:
   # Opus lives behind the opus-codec feature and builds a bundled libopus with
   # cmake (preinstalled on the runner), so the default jobs above never compile
   # it. Without this job the Opus path in the balanced and high-quality presets
-  # is unverified (REQ-AUD-102, ADR-021).
+  # is unverified.
   opus:
     name: Opus Codec
     runs-on: ubuntu-latest
@@ -271,9 +271,8 @@ jobs:
       - name: Run tests (opus-codec feature)
         run: cargo test --all-targets --features opus-codec
 
-  # The UI layer verifies the i18n requirements (REQ-I18N-*) and the ui/
-  # component specs. Without this job those tests never run, which is how the
-  # UI side of the V went unverified before ADR-018.
+  # The UI layer verifies the i18n behaviour and the UI components. Without
+  # this job those tests never run.
   ui:
     name: UI
     runs-on: ubuntu-latest
@@ -330,7 +329,7 @@ jobs:
       - name: Check dependency licenses (core library)
         run: cargo deny --all-features check licenses
 
-  # The command-line tool for ARM Linux, 32-bit and 64-bit (ADR-126, ADR-127).
+  # The command-line tool for ARM Linux, 32-bit and 64-bit.
   # Built on every change so a dependency that stops building there is caught
   # here, not on the day of a release. (Not in build.yml: that workflow is
   # switched off.)

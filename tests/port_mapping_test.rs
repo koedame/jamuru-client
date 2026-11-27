@@ -1,4 +1,4 @@
-//! Asking the router to open the audio port (UPnP IGD, ADR-113)
+//! Asking the router to open the audio port (UPnP IGD)
 //!
 //! A router that speaks UPnP is stood in for by a small server on loopback: it answers the
 //! multicast search, serves its description and takes the SOAP requests that add and remove
@@ -302,7 +302,6 @@ async fn eventually(what: &str, mut ok: impl FnMut() -> bool) {
     panic!("never happened: {what}");
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn router_forwards_the_port_then_peers_are_offered_its_public_address() {
     let router = FakeRouter::start(Mood::Accepts).await;
@@ -322,7 +321,6 @@ async fn router_forwards_the_port_then_peers_are_offered_its_public_address() {
     );
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn router_forwards_the_port_then_the_address_is_a_candidate_ahead_of_the_one_stun_saw() {
     let router = FakeRouter::start(Mood::Accepts).await;
@@ -346,7 +344,6 @@ async fn router_forwards_the_port_then_the_address_is_a_candidate_ahead_of_the_o
     );
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn router_already_gives_the_stun_address_then_it_is_offered_once() {
     let router = FakeRouter::start(Mood::Accepts).await;
@@ -365,7 +362,6 @@ async fn router_already_gives_the_stun_address_then_it_is_offered_once() {
     assert_eq!(reflexive(&gathered.candidates), vec![outside(port)]);
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn mapping_is_closed_then_the_router_no_longer_forwards() {
     let router = FakeRouter::start(Mood::Accepts).await;
@@ -377,7 +373,6 @@ async fn mapping_is_closed_then_the_router_no_longer_forwards() {
     assert!(router.forwards().is_empty());
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn mapping_is_dropped_then_the_router_stops_forwarding() {
     let router = FakeRouter::start(Mood::Accepts).await;
@@ -392,7 +387,6 @@ async fn mapping_is_dropped_then_the_router_stops_forwarding() {
     .await;
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn mapping_is_kept_then_it_is_renewed_before_the_lease_ends() {
     let router = FakeRouter::start(Mood::Accepts).await;
@@ -407,7 +401,6 @@ async fn mapping_is_kept_then_it_is_renewed_before_the_lease_ends() {
     mapping.close().await;
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn router_keeps_only_permanent_mappings_then_none_is_made() {
     let router = FakeRouter::start(Mood::KeepsOnlyPermanent).await;
@@ -421,7 +414,6 @@ async fn router_keeps_only_permanent_mappings_then_none_is_made() {
     assert!(router.forwards().is_empty());
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn router_forwards_the_port_to_another_machine_then_another_port_is_used() {
     let router = FakeRouter::start(Mood::PortTaken).await;
@@ -434,7 +426,6 @@ async fn router_forwards_the_port_to_another_machine_then_another_port_is_used()
     assert_eq!(router.forwards()[0].internal.port(), 41005);
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn router_refuses_then_only_the_candidates_stun_gave_are_offered() {
     let router = FakeRouter::start(Mood::Refuses).await;
@@ -455,7 +446,6 @@ async fn router_refuses_then_only_the_candidates_stun_gave_are_offered() {
     assert!(router.forwards().is_empty());
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn router_refuses_then_opening_says_it_was_refused() {
     let router = FakeRouter::start(Mood::Refuses).await;
@@ -468,7 +458,6 @@ async fn router_refuses_then_opening_says_it_was_refused() {
     );
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn no_router_answers_then_only_the_candidates_stun_gave_are_offered() {
     let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -491,7 +480,6 @@ async fn no_router_answers_then_only_the_candidates_stun_gave_are_offered() {
     assert_eq!(reflexive(&gathered.candidates), vec![stun_saw]);
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn no_router_answers_then_opening_says_there_is_none() {
     let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -508,7 +496,6 @@ async fn no_router_answers_then_opening_says_there_is_none() {
     );
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn router_is_behind_another_nat_then_nothing_is_forwarded() {
     let router = FakeRouter::start(Mood::BehindAnotherNat).await;
@@ -522,7 +509,6 @@ async fn router_is_behind_another_nat_then_nothing_is_forwarded() {
     assert!(router.adds().is_empty());
 }
 
-/// Verifies: REQ-CON-165
 #[tokio::test]
 async fn the_router_is_not_asked_when_the_setting_is_off() {
     let router = FakeRouter::start(Mood::Accepts).await;
@@ -547,8 +533,6 @@ async fn the_router_is_not_asked_when_the_setting_is_off() {
 
 /// Looking for the router (the connection check) only asks for its outside address: nothing is
 /// forwarded and the router is left as it was.
-///
-/// Verifies: REQ-CON-167
 #[tokio::test]
 async fn router_is_looked_for_then_it_answers_and_nothing_is_forwarded() {
     let router = FakeRouter::start(Mood::Accepts).await;
@@ -560,7 +544,6 @@ async fn router_is_looked_for_then_it_answers_and_nothing_is_forwarded() {
     assert!(router.forwards().is_empty());
 }
 
-/// Verifies: REQ-CON-167
 #[tokio::test]
 async fn no_router_answers_then_looking_for_it_says_there_is_none() {
     let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -577,7 +560,6 @@ async fn no_router_answers_then_looking_for_it_says_there_is_none() {
     );
 }
 
-/// Verifies: REQ-CON-167
 #[tokio::test]
 async fn router_is_behind_another_nat_then_looking_for_it_says_so() {
     let router = FakeRouter::start(Mood::BehindAnotherNat).await;
@@ -593,8 +575,6 @@ async fn router_is_behind_another_nat_then_looking_for_it_says_so() {
 
 /// Every server is asked from the one socket in the same round, so what each saw can be
 /// compared: this is what tells a router that maps per destination from one that does not.
-///
-/// Verifies: REQ-CON-166
 #[tokio::test]
 async fn several_servers_are_asked_then_each_says_where_it_saw_the_socket() {
     let first_saw: SocketAddr = "198.51.100.7:40000".parse().unwrap();
@@ -614,7 +594,6 @@ async fn several_servers_are_asked_then_each_says_where_it_saw_the_socket() {
     assert_eq!(seen, vec![first_saw, second_saw]);
 }
 
-/// Verifies: REQ-CON-166
 #[tokio::test]
 async fn no_server_answers_then_nothing_is_seen() {
     let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();

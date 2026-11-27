@@ -1,4 +1,4 @@
-//! Measures what playing a little faster or slower costs (ADR-122): the level and the
+//! Measures what playing a little faster or slower costs: the level and the
 //! distortion of a tone during a stretch, next to the straight-line interpolation that a stretch
 //! could have been made with, and the time one call takes in the audio callback. Run by hand to
 //! compare a change to the stretch against the version before it:

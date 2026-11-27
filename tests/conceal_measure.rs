@@ -1,4 +1,4 @@
-//! Measures how well gaps that FEC could not repair are filled (ADR-105): the sound filled in is
+//! Measures how well gaps that FEC could not repair are filled: the sound filled in is
 //! compared with the sound that was lost, and the old way (the last frame repeated and faded,
 //! silence while nothing has arrived) is run next to it on the same losses. Four kinds of sound
 //! are made here from formulas, so there is no recording to license: a plucked string, a sung

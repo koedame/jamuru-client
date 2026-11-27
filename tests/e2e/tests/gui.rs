@@ -1,5 +1,5 @@
 //! GUI E2E scenarios: everything the user can operate, and the states they
-//! can observe (ADR-025).
+//! can observe.
 //!
 //! These drive the real Tauri app - Rust backend, webview, React, IPC - via
 //! the `e2e-control` channel. That is what separates them from the UI unit
@@ -58,9 +58,6 @@ const LAUNCH_SETTLE: Duration = Duration::from_secs(30);
 // ---------------------------------------------------------------------------
 
 /// The user reaches the connection screen with no account step in between.
-///
-/// Verifies: REQ-GUI-001
-/// Verifies: REQ-IDT-003
 #[test]
 fn launching_the_app_shows_the_connection_screen() {
     let (_guard, app) = launch();
@@ -73,11 +70,9 @@ fn launching_the_app_shows_the_connection_screen() {
     );
 }
 
-/// ADR-024 removed account registration. No email or verification-code UI
+/// There is no account registration: a device is identified by its own key.
+/// No email or verification-code UI
 /// may appear anywhere on the first screen.
-///
-/// Verifies: REQ-GUI-001
-/// Verifies: REQ-IDT-003
 #[test]
 fn the_first_screen_asks_for_no_account() {
     let (_guard, app) = launch();
@@ -103,10 +98,8 @@ fn the_first_screen_asks_for_no_account() {
     );
 }
 
-/// The device identifier is internal (ADR-024 Decision 5). It must not be
+/// The device identifier is internal. It must not be
 /// rendered anywhere the user can see it.
-///
-/// Verifies: REQ-GUI-002
 #[test]
 fn the_device_identifier_is_never_shown_to_the_user() {
     let (_guard, app) = launch();
@@ -137,8 +130,6 @@ fn the_device_identifier_is_never_shown_to_the_user() {
 
 /// The screen always reports one of its defined states, so later assertions
 /// can rely on `state()` rather than guessing from which elements exist.
-///
-/// Verifies: REQ-GUI-001
 #[test]
 fn the_connection_screen_reports_a_defined_state() {
     let (_guard, app) = launch();
@@ -161,8 +152,6 @@ fn the_connection_screen_reports_a_defined_state() {
 // ---------------------------------------------------------------------------
 
 /// Typing a code updates the field the user sees.
-///
-/// Verifies: REQ-GUI-005
 #[test]
 fn typing_an_invite_code_updates_the_field() {
     let (_guard, app) = launch();
@@ -180,9 +169,6 @@ fn typing_an_invite_code_updates_the_field() {
 /// A first launch opens on the terms of use and reaches no server - not to
 /// connect, not to ask whether it is enrolled - until the user has agreed.
 /// Once they have, the app goes on as it always does.
-///
-/// Verifies: REQ-TRM-001
-/// Verifies: REQ-TRM-003
 #[test]
 fn a_first_launch_shows_the_terms_and_reaches_no_server_until_they_are_agreed_to() {
     let _guard = exclusive();
@@ -297,8 +283,6 @@ fn an_unreachable_server_names_the_url_and_disables_the_buttons() {
 // ---------------------------------------------------------------------------
 
 /// The settings button opens a real second window.
-///
-/// Verifies: REQ-GUI-007
 #[test]
 fn the_settings_button_opens_the_settings_window() {
     let (_guard, app) = launch();
@@ -322,8 +306,6 @@ fn the_settings_button_opens_the_settings_window() {
 
 /// Every tab the user can select actually selects, and the screen shows
 /// which one is active.
-///
-/// Verifies: REQ-GUI-007
 #[test]
 fn every_settings_tab_can_be_selected() {
     let (_guard, app) = launch();
@@ -356,8 +338,6 @@ fn every_settings_tab_can_be_selected() {
 /// The About tab shows the running version. The E2E build is a development
 /// build, which never looks for a release, so the section says so and offers
 /// no check.
-///
-/// Verifies: REQ-UPD-022
 #[test]
 fn the_about_tab_shows_the_version_and_says_a_development_build_does_not_check() {
     let (_guard, app) = launch();
@@ -389,8 +369,6 @@ fn the_about_tab_shows_the_version_and_says_a_development_build_does_not_check()
 }
 
 /// The settings window must not expose the device identifier either.
-///
-/// Verifies: REQ-GUI-002
 #[test]
 fn the_settings_window_does_not_show_the_device_identifier() {
     let (_guard, app) = launch();
@@ -425,8 +403,6 @@ fn the_settings_window_does_not_show_the_device_identifier() {
 /// Before this was fixed, the settings and main windows each ran their own
 /// i18next instance, so only the settings window's own text changed - the
 /// main window kept showing whatever it detected at launch until restarted.
-///
-/// Verifies: REQ-I18N-102
 #[test]
 fn changing_the_language_in_settings_updates_the_main_window_immediately() {
     let (_guard, app) = launch();
@@ -480,7 +456,7 @@ fn changing_the_language_in_settings_updates_the_main_window_immediately() {
 }
 
 // ---------------------------------------------------------------------------
-// The diagnostic log file (ADR-036)
+// The diagnostic log file
 // ---------------------------------------------------------------------------
 //
 // A release build has no console and no developer tools, so `jamuru.log` is
@@ -501,8 +477,6 @@ fn wait_for_log(app: &App, ready: impl Fn(&str) -> bool) -> String {
 
 /// The first lines say which build ran on which system with which settings,
 /// which is what a bug report needs before anything else.
-///
-/// Verifies: REQ-GUI-016
 #[test]
 fn launching_the_app_writes_a_log_file_that_names_the_build_and_the_settings() {
     let (_guard, app) = launch();
@@ -532,8 +506,6 @@ fn launching_the_app_writes_a_log_file_that_names_the_build_and_the_settings() {
 
 /// By default the app's own code and the webview log at debug, so a report
 /// carries the detail of what the app did.
-///
-/// Verifies: REQ-GUI-019
 #[test]
 fn by_default_the_apps_own_code_and_the_webview_log_at_debug() {
     let (_guard, app) = launch();
@@ -550,8 +522,6 @@ fn by_default_the_apps_own_code_and_the_webview_log_at_debug() {
 /// `JAMURU_LOG` overrides the levels: with `error`, the lines the app writes
 /// at info and debug on every start-up are gone and the failed connection's
 /// error remains.
-///
-/// Verifies: REQ-GUI-019
 #[test]
 fn jamuru_log_overrides_the_levels_the_file_is_written_at() {
     let _guard = exclusive();
@@ -583,8 +553,6 @@ fn jamuru_log_overrides_the_levels_the_file_is_written_at() {
 ///
 /// The start-up auto-connect fails here because no signaling server is
 /// listening (see [`launch`]).
-///
-/// Verifies: REQ-GUI-017
 #[test]
 fn a_failed_start_up_connection_is_written_to_the_log_file_from_both_sides() {
     let (_guard, app) = launch();
@@ -748,9 +716,6 @@ impl Drop for PlayingPeer {
 /// The app is put in a room with two peers on loopback, each playing a tone
 /// of its own pitch and loudness. It has to hear both, each on the link to
 /// that peer, and send its own audio to both.
-///
-/// Verifies: REQ-CON-133
-/// Verifies: REQ-GUI-009
 #[test]
 fn in_a_room_with_two_peers_the_app_hears_both_and_sends_its_audio_to_both() {
     let _guard = exclusive();
@@ -866,8 +831,6 @@ fn in_a_room_with_two_peers_the_app_hears_both_and_sends_its_audio_to_both() {
 /// must send that peer no audio - at most the one silent frame the sender
 /// starts with - while the link is up, and send it as soon as the person
 /// unmutes.
-///
-/// Verifies: REQ-CON-139
 #[test]
 fn a_room_entered_by_a_link_is_entered_muted_and_sends_no_audio_until_unmuted() {
     let _guard = exclusive();
@@ -922,8 +885,6 @@ fn a_room_entered_by_a_link_is_entered_muted_and_sends_no_audio_until_unmuted() 
     });
 }
 
-/// Verifies: REQ-LAT-030
-/// Verifies: REQ-LAT-031
 #[test]
 fn deciding_the_buffer_for_one_peer_changes_the_delay_to_that_peer_alone_and_deciding_it_back_restores_it(
 ) {
@@ -1280,8 +1241,6 @@ fn text_with_ipv4_addresses_the_unmasked_ones_are_found() {
 /// log masks addresses; what the app prints to the console must not carry the
 /// other end's address either. The app is put in a room with a peer on
 /// loopback and everything it printed is searched.
-///
-/// Verifies: REQ-GUI-022
 #[test]
 fn in_a_room_with_a_peer_the_apps_console_output_holds_no_ip_address() {
     let _guard = exclusive();
@@ -1324,8 +1283,6 @@ fn in_a_room_with_a_peer_the_apps_console_output_holds_no_ip_address() {
 /// The user finds the file from the settings window instead of hunting for the
 /// OS-specific folder. The button is not clicked: that would open a real file
 /// manager on the machine running the scenarios.
-///
-/// Verifies: REQ-GUI-020
 #[test]
 fn the_diagnostics_tab_offers_to_open_the_log_folder() {
     let (_guard, app) = launch();
@@ -1344,9 +1301,6 @@ fn the_diagnostics_tab_offers_to_open_the_log_folder() {
 
 /// Nobody is asked about usage reporting: it is off, nothing pops up on the
 /// first launch, and the install ID does not exist until the user turns it on.
-///
-/// Verifies: REQ-TEL-001
-/// Verifies: REQ-TEL-011
 #[test]
 fn on_the_first_launch_usage_reporting_is_off_and_nothing_asks_about_it() {
     let (_guard, app) = launch();
@@ -1378,10 +1332,6 @@ fn on_the_first_launch_usage_reporting_is_off_and_nothing_asks_about_it() {
 
 /// The user turns it on, reads exactly what would be sent (with the install ID),
 /// and turns it off again: the lines are gone, so is the ID.
-///
-/// Verifies: REQ-TEL-002
-/// Verifies: REQ-TEL-013
-/// Verifies: REQ-TEL-018
 #[test]
 fn turning_usage_reporting_on_shows_what_is_sent_and_turning_it_off_discards_it() {
     let (_guard, app) = launch();
@@ -1494,8 +1444,6 @@ fn seq_of(line: &str) -> u64 {
 
 /// Changing a setting while reporting is on sends the settings again, once,
 /// not once per save the app made.
-///
-/// Verifies: REQ-TEL-014
 #[test]
 fn changing_a_setting_while_usage_reporting_is_on_reports_the_new_settings_once() {
     let (_guard, app) = launch();
@@ -1532,8 +1480,6 @@ fn changing_a_setting_while_usage_reporting_is_on_reports_the_new_settings_once(
 
 /// Choosing another audio device while reporting is on sends the devices
 /// again, once. Needs two input devices, like the scenario that switches them.
-///
-/// Verifies: REQ-TEL-014
 #[test]
 fn choosing_another_input_device_while_usage_reporting_is_on_reports_the_devices() {
     let (_guard, app) = launch();
@@ -1585,8 +1531,6 @@ fn choosing_another_input_device_while_usage_reporting_is_on_reports_the_devices
 /// that screen connects to the signaling server as soon as it mounts, so every
 /// opening of the settings opened a second connection. The log showed it: a
 /// `[settings] [session]` line and a second `Signaling connect`.
-///
-/// Verifies: REQ-GUI-007
 #[test]
 fn opening_the_settings_window_does_not_connect_to_the_signaling_server_again() {
     let (_guard, app) = launch();
@@ -1616,7 +1560,7 @@ fn opening_the_settings_window_does_not_connect_to_the_signaling_server_again() 
 // input/output devices are enough to prove that the app enumerates them and
 // that choosing one takes effect. What they cannot prove is that the chosen
 // device's *signal* reaches the meter - that is what a loopback driver would
-// add, and it is tracked separately in Plans.md.
+// add.
 
 /// Opens settings on the Devices tab, once its dropdowns have their devices.
 ///
@@ -1648,8 +1592,6 @@ fn devices_tab(app: &App) -> jamjam_e2e_tests::pom::screens::DevicesTab<'_> {
 const DEVICE_LIST_SETTLE: Duration = Duration::from_secs(3);
 
 /// The app offers the machine's real devices, not an empty list.
-///
-/// Verifies: REQ-GUI-011
 #[test]
 fn the_devices_tab_lists_the_machines_audio_devices() {
     let (_guard, app) = launch();
@@ -1675,8 +1617,6 @@ fn the_devices_tab_lists_the_machines_audio_devices() {
 
 /// Choosing a different input device takes effect, which is the part of
 /// device switching that lives in our code rather than the OS's.
-///
-/// Verifies: REQ-GUI-011
 #[test]
 fn choosing_a_different_input_device_takes_effect() {
     let (_guard, app) = launch();
@@ -1723,8 +1663,6 @@ fn choosing_a_different_input_device_takes_effect() {
 /// A device the app does not offer must be refused rather than silently
 /// leaving the old selection - otherwise a test could "switch" to a device
 /// that does not exist and still pass.
-///
-/// Verifies: REQ-GUI-011
 #[test]
 fn choosing_a_device_that_is_not_offered_fails() {
     let (_guard, app) = launch();
@@ -1748,8 +1686,6 @@ fn choosing_a_device_that_is_not_offered_fails() {
 /// counted as a second choice, so on a machine with one microphone
 /// `choosing_a_different_input_device_takes_effect` "switched" to it and
 /// passed without switching anything.
-///
-/// Verifies: REQ-GUI-011
 #[test]
 fn the_select_device_placeholder_cannot_be_chosen() {
     let (_guard, app) = launch();
@@ -1772,7 +1708,7 @@ fn the_select_device_placeholder_cannot_be_chosen() {
 }
 
 // ---------------------------------------------------------------------------
-// Calling the app's commands (ADR-043)
+// Calling the app's commands
 // ---------------------------------------------------------------------------
 //
 // Every feature is reachable as a command, the same way the UI reaches it.
@@ -1783,9 +1719,6 @@ fn the_select_device_placeholder_cannot_be_chosen() {
 /// A change made without touching the settings window - here through the
 /// control channel, as a helping peer's would arrive - shows in the window
 /// while it stays open.
-///
-/// Verifies: REQ-GUI-024
-/// Verifies: REQ-GUI-025
 #[test]
 fn a_setting_changed_by_command_shows_in_the_open_settings_window() {
     let (_guard, app) = launch();
@@ -1820,9 +1753,6 @@ fn a_setting_changed_by_command_shows_in_the_open_settings_window() {
 
 /// A change the app refuses comes back as the app's answer and leaves the
 /// settings as they were.
-///
-/// Verifies: REQ-GUI-024
-/// Verifies: REQ-GUI-025
 #[test]
 fn a_refused_setting_change_comes_back_as_the_apps_answer_and_changes_nothing() {
     let (_guard, app) = launch();
@@ -1840,8 +1770,6 @@ fn a_refused_setting_change_comes_back_as_the_apps_answer_and_changes_nothing() 
 /// PipeWire's period is at least 64 frames, so a buffer of 32 only reaches the
 /// receiver in lumps of 64. The running app does not offer it on Linux, and
 /// refuses it from a command too.
-///
-/// Verifies: REQ-AUD-037
 #[cfg(target_os = "linux")]
 #[test]
 fn on_linux_the_running_app_offers_no_buffer_size_under_64() {
@@ -1860,11 +1788,8 @@ fn on_linux_the_running_app_offers_no_buffer_size_under_64() {
 
 /// Any command the app registers is callable, not only those a page object
 /// wraps; a name the app does not have is an error, not a silent nothing. The
-/// permission table that decides this is the one every other portal uses
-/// (ADR-044), so an unlisted command is refused before anything runs.
-///
-/// Verifies: REQ-GUI-025
-/// Verifies: REQ-RMT-023
+/// permission table that decides this is the one every other portal uses,
+/// so an unlisted command is refused before anything runs.
 #[test]
 fn any_command_the_app_registers_can_be_called_and_an_unknown_one_is_refused() {
     let (_guard, app) = launch();
@@ -1893,8 +1818,6 @@ fn any_command_the_app_registers_can_be_called_and_an_unknown_one_is_refused() {
 /// driver) hangs every call that lists or opens a device. The settings must not
 /// wait for it: each read and change answers within the limit on a listing,
 /// not once per listing that hangs.
-///
-/// Verifies: REQ-AUD-123
 #[test]
 fn when_the_audio_driver_hangs_the_settings_still_answer_within_seconds() {
     let (_guard, app) = launch();
@@ -1935,7 +1858,7 @@ fn when_the_audio_driver_hangs_the_settings_still_answer_within_seconds() {
 }
 
 // ---------------------------------------------------------------------------
-// Remote debugging through the relay (ADR-044)
+// Remote debugging through the relay
 // ---------------------------------------------------------------------------
 //
 // The app is built with `debug-remote` as well as `e2e-control`. The relay is
@@ -1966,9 +1889,6 @@ fn launch_enrolled() -> (MutexGuard<'static, ()>, FakeRelay, App, Target) {
 
 /// An enrolled app connects by itself, proves which device it is, and speaks
 /// first: what it is and which methods this portal may call.
-///
-/// Verifies: REQ-RMT-021
-/// Verifies: REQ-RMT-024
 #[test]
 fn an_enrolled_app_opens_the_relay_and_says_who_it_is() {
     let (_guard, relay, _app, target) = launch_enrolled();
@@ -2001,8 +1921,6 @@ fn an_enrolled_app_opens_the_relay_and_says_who_it_is() {
 
 /// An installation the server does not know opens nothing: enrolling is the
 /// server's decision, and the app only asks.
-///
-/// Verifies: REQ-RMT-021
 #[test]
 fn an_app_that_is_not_enrolled_never_opens_the_relay() {
     let _guard = exclusive();
@@ -2018,8 +1936,6 @@ fn an_app_that_is_not_enrolled_never_opens_the_relay() {
 }
 
 /// After the relay drops the connection the app opens a new one by itself.
-///
-/// Verifies: REQ-RMT-021
 #[test]
 fn an_app_reopens_the_relay_connection_after_it_drops() {
     let (_guard, relay, _app, target) = launch_enrolled();
@@ -2034,8 +1950,6 @@ fn an_app_reopens_the_relay_connection_after_it_drops() {
 
 /// The operator learns what the app is: version, build, OS, devices and the
 /// audio settings in effect, and where it logs.
-///
-/// Verifies: REQ-RMT-026
 #[test]
 fn the_operator_reads_what_the_app_is() {
     let (_guard, _relay, _app, target) = launch_enrolled();
@@ -2059,8 +1973,6 @@ fn the_operator_reads_what_the_app_is() {
 /// time: the process's CPU and memory, and how long the audio callbacks and
 /// the streaming loop took. With no call running the audio counts are zero,
 /// but the process is measured.
-///
-/// Verifies: REQ-RMT-032
 #[test]
 fn the_operator_measures_what_the_app_costs_the_machine() {
     let (_guard, _relay, _app, target) = launch_enrolled();
@@ -2113,8 +2025,6 @@ fn the_operator_measures_what_the_app_costs_the_machine() {
 }
 
 /// A window shorter than a second, or longer than a minute, is refused.
-///
-/// Verifies: REQ-RMT-032
 #[test]
 fn the_operator_is_refused_a_perf_window_that_is_too_short_or_too_long() {
     let (_guard, _relay, _app, target) = launch_enrolled();
@@ -2134,8 +2044,6 @@ fn the_operator_is_refused_a_perf_window_that_is_too_short_or_too_long() {
 
 /// The operator reads the app's log, and can follow it from where the last
 /// read ended.
-///
-/// Verifies: REQ-RMT-026
 #[test]
 fn the_operator_reads_the_log_and_follows_it() {
     let (_guard, _relay, _app, target) = launch_enrolled();
@@ -2174,8 +2082,6 @@ fn the_operator_reads_the_log_and_follows_it() {
 
 /// The crash record and the panics the log holds come back in a fixed shape,
 /// empty when nothing crashed.
-///
-/// Verifies: REQ-RMT-026
 #[test]
 fn the_operator_asks_for_crashes_and_gets_none_from_a_healthy_app() {
     let (_guard, _relay, _app, target) = launch_enrolled();
@@ -2190,8 +2096,6 @@ fn the_operator_asks_for_crashes_and_gets_none_from_a_healthy_app() {
 }
 
 /// The operator sees and drives the screen the way the E2E channel does.
-///
-/// Verifies: REQ-RMT-026
 #[test]
 fn the_operator_looks_at_the_screen_through_ui_methods() {
     let (_guard, _relay, _app, target) = launch_enrolled();
@@ -2240,8 +2144,6 @@ fn the_operator_looks_at_the_screen_through_ui_methods() {
 
 /// An app command called over the relay does what the same call from the screen
 /// does: the change is saved and the settings in effect are the new ones.
-///
-/// Verifies: REQ-RMT-026
 #[test]
 fn the_operator_changes_a_setting_the_way_the_screen_does() {
     let (_guard, _relay, app, target) = launch_enrolled();
@@ -2265,9 +2167,6 @@ fn the_operator_changes_a_setting_the_way_the_screen_does() {
 
 /// A method the table does not list is refused over the relay, with a
 /// code the operator can act on, and nothing runs.
-///
-/// Verifies: REQ-RMT-022
-/// Verifies: REQ-RMT-024
 #[test]
 fn a_method_that_is_not_listed_is_refused_over_the_relay() {
     let (_guard, _relay, _app, target) = launch_enrolled();
@@ -2312,8 +2211,6 @@ const MEASURE: Duration = Duration::from_millis(500);
 ///
 /// Phrased as a rise over whatever the device already holds, because it cannot
 /// be returned to silence - the module doc records the measurements.
-///
-/// Verifies: REQ-GUI-012
 #[test]
 fn the_loopback_device_returns_what_is_played_into_it() {
     let _guard = exclusive();
@@ -2341,8 +2238,6 @@ fn the_loopback_device_returns_what_is_played_into_it() {
 ///
 /// The Linux devices hold no history (BlackHole on macOS does, see the module
 /// doc of `loopback_audio`), so this asserts levels rather than a rise.
-///
-/// Verifies: REQ-GUI-012
 #[test]
 fn the_8ch_loopback_device_returns_each_channel_where_it_was_played() {
     let _guard = exclusive();
@@ -2382,8 +2277,6 @@ fn the_8ch_loopback_device_returns_each_channel_where_it_was_played() {
 /// An invite link opened while the app runs starts the program again. The
 /// second copy has to hand the link to the first and end, or the two share one
 /// config file and each joins rooms with its own idea of the settings.
-///
-/// Verifies: REQ-CON-143
 #[test]
 fn a_second_copy_started_while_the_app_runs_ends_and_leaves_the_first_running() {
     let _guard = exclusive();

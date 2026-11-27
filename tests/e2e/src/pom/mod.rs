@@ -1,4 +1,4 @@
-//! Page object model for the jamuru desktop app (ADR-025).
+//! Page object model for the jamuru desktop app.
 //!
 //! Scenarios describe what a *user* does and sees. They go through the
 //! screens in [`screens`]; they never see a CSS selector, a window label or
@@ -329,7 +329,7 @@ impl App {
         SettingsScreen::new(&self.driver)
     }
 
-    /// The window someone helping works in (ADR-044 §5), once it is open.
+    /// The window someone helping works in, once it is open.
     /// `None` while no help is going on from this app.
     pub fn helper_screen(&self) -> DriverResult<Option<HelperScreen<'_>>> {
         Ok(self
@@ -339,7 +339,7 @@ impl App {
             .map(|label| HelperScreen::new(&self.driver, label)))
     }
 
-    /// Calls one of the app's commands the way its own UI does (ADR-043):
+    /// Calls one of the app's commands the way its own UI does:
     /// any command the app registers, with its arguments named as the webview
     /// names them (camelCase: `{"connId": 1}`). The outer error is the control
     /// channel failing; the inner `Result` is the command's own answer, so a
@@ -502,7 +502,7 @@ fn seed_config(
             jamjam::config::TERMS_VERSION
         ));
         // Nor does a scenario that creates or joins a room go through the
-        // "which name to use" step the app asks before entering (REQ-CON-142):
+        // "which name to use" step the app asks before entering:
         // that is the person's first decision, not what the scenario is about.
         // A scenario that wants it asks for it in `settings`.
         if !settings.contains("ask_name_on_entry") {

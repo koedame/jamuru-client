@@ -77,7 +77,6 @@ describe("linkTrouble", () => {
     expect(linkTrouble(link("a", "connected", {}))).toBeNull();
   });
 
-  // Verifies: REQ-CON-134
   it("a link that is up but has received nothing of its peer is still connecting", () => {
     expect(linkTrouble(link("a", "connected", { packets: 0 }))).toBe("connecting");
   });
@@ -93,7 +92,6 @@ describe("measuredLatency", () => {
     expect(measuredLatency(link("a", "connected", { rtt: 12 }))?.roundtrip_total_ms).toBe(12);
   });
 
-  // Verifies: REQ-LAT-130
   it("a link with no round trip measured yet has no latency to show", () => {
     expect(measuredLatency(link("a", "connected", {}))).toBeNull();
   });
@@ -109,7 +107,6 @@ describe("overallLink", () => {
     expect(overallLink([])).toEqual({ trouble: null, quality: undefined });
   });
 
-  // Verifies: REQ-LAT-102
   it("when every link is up, shows the worst quality among them", () => {
     const overall = overallLink([
       link("a", "connected", { rtt: 8, quality: "good" }),
@@ -145,7 +142,6 @@ describe("overallLink", () => {
 });
 
 describe("slowestPeerId", () => {
-  // Verifies: REQ-LAT-102
   it("with several participants measured, names the one with the longest round trip", () => {
     const slowest = slowestPeerId([
       link("a", "connected", { rtt: 8 }),
@@ -188,7 +184,6 @@ describe("worstBandwidthLink", () => {
 });
 
 describe("localBuffers", () => {
-  // Verifies: REQ-LAT-122
   it("when the breakdown has capture, playback and jitter buffers, gives this machine's input, output and jitter delay", () => {
     const latency = {
       upstream: [

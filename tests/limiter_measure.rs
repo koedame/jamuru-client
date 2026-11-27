@@ -1,4 +1,4 @@
-//! Measures what the limiter (ADR-094) costs: the time one call takes in the audio callback and
+//! Measures what the limiter costs: the time one call takes in the audio callback and
 //! send thread, and how much it distorts a signal that goes over 0 dBFS, next to the hard clip
 //! the device would have made of the same signal. Run by hand to compare a change to the limiter
 //! against the version before it:

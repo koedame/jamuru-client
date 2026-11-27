@@ -1,5 +1,5 @@
 /**
- * DropoutNotice component tests (REQ-CON-162, REQ-CON-163)
+ * DropoutNotice component tests
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -26,7 +26,6 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("DropoutNotice", () => {
-  /** Verifies: REQ-CON-161 */
   it("shows nothing when audio arrives and the link is steady", () => {
     const { container } = render(
       <DropoutNotice dropout={null} unstable={false} variant="row" />
@@ -34,7 +33,6 @@ describe("DropoutNotice", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  /** Verifies: REQ-CON-161 */
   it("says no audio arrives and for how many seconds when the audio stopped", () => {
     render(
       <DropoutNotice dropout={{ silent_secs: 12, side: "theirs" }} unstable={false} variant="row" />
@@ -43,7 +41,6 @@ describe("DropoutNotice", () => {
     expect(screen.getByTestId("dropout-seconds")).toHaveTextContent("12 s");
   });
 
-  /** Verifies: REQ-CON-161, REQ-CON-163 */
   it.each([
     ["mine", "Your line"],
     ["theirs", "Their line"],
@@ -54,7 +51,6 @@ describe("DropoutNotice", () => {
     expect(screen.getByTestId("dropout-side")).toHaveTextContent(text);
   });
 
-  /** Verifies: REQ-CON-161, REQ-CON-163 */
   it("names no side when nobody could tell which is cut", () => {
     render(
       <DropoutNotice dropout={{ silent_secs: 45, side: "unknown" }} unstable={false} variant="row" />
@@ -63,14 +59,12 @@ describe("DropoutNotice", () => {
     expect(screen.queryByTestId("dropout-side")).not.toBeInTheDocument();
   });
 
-  /** Verifies: REQ-CON-161 */
   it("marks the link unstable when it dropped out twice or more, with no dropout going on", () => {
     render(<DropoutNotice dropout={null} unstable variant="row" />);
     expect(screen.getByTestId("dropout-unstable")).toHaveTextContent("Unstable");
     expect(screen.queryByTestId("dropout-heading")).not.toBeInTheDocument();
   });
 
-  /** Verifies: REQ-CON-161 */
   it("keeps the seconds out of what a screen reader announces when they count up", () => {
     render(
       <DropoutNotice dropout={{ silent_secs: 3, side: "mine" }} unstable={false} variant="strip" />

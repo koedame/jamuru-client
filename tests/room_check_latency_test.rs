@@ -1,5 +1,5 @@
 //! The round trip to the fixed participant of the latency room that the room check keeps for
-//! every runner (ADR-130): when each runner takes its turn, who is counted as the far end and
+//! every runner: when each runner takes its turn, who is counted as the far end and
 //! who as company, and which stays are left out of the numbers.
 //!
 //! The logic lives in `scripts/room-check.py`; these run it as the workflow does, through python.

@@ -1,5 +1,5 @@
 //! Guards which releases `scripts/prune-old-releases.sh` deletes once a new
-//! release has shipped (REQ-UPD-020): every older release of the same
+//! release has shipped: every older release of the same
 //! channel, and nothing else. In particular never the new release, the
 //! other channel's releases, `beta-channel`, or a git tag.
 //!
@@ -131,7 +131,6 @@ esac
     }
 }
 
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_a_newer_beta_is_published_every_older_beta_release_is_deleted() {
     let releases = Releases::new();
@@ -145,7 +144,6 @@ fn when_a_newer_beta_is_published_every_older_beta_release_is_deleted() {
     assert_eq!(releases.remaining(), ["v0.1.0-beta.11"]);
 }
 
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_betas_are_compared_the_number_counts_not_the_text() {
     let releases = Releases::new();
@@ -165,8 +163,6 @@ fn when_betas_are_compared_the_number_counts_not_the_text() {
 }
 
 /// A run that finishes late must not delete a newer release.
-///
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_a_newer_beta_already_exists_it_is_not_deleted() {
     let releases = Releases::new();
@@ -180,7 +176,6 @@ fn when_a_newer_beta_already_exists_it_is_not_deleted() {
     assert_eq!(releases.remaining(), ["v0.1.0-beta.6", "v0.1.0-beta.7"]);
 }
 
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_a_beta_is_published_the_beta_channel_release_is_kept() {
     let releases = Releases::new();
@@ -194,7 +189,6 @@ fn when_a_beta_is_published_the_beta_channel_release_is_kept() {
     assert_eq!(releases.remaining(), ["beta-channel", "v0.1.0-beta.2"]);
 }
 
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_a_beta_is_published_the_stable_releases_are_kept() {
     let releases = Releases::new();
@@ -208,7 +202,6 @@ fn when_a_beta_is_published_the_stable_releases_are_kept() {
     assert_eq!(releases.remaining(), ["v0.1.0", "v0.2.0-beta.1"]);
 }
 
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_a_stable_release_is_published_the_older_stable_releases_go_and_the_betas_stay() {
     let releases = Releases::new();
@@ -224,8 +217,6 @@ fn when_a_stable_release_is_published_the_older_stable_releases_go_and_the_betas
 }
 
 /// The git tag is what the update drill builds "the release before" from.
-///
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_a_release_is_deleted_its_git_tag_is_left_alone() {
     let releases = Releases::new();
@@ -239,7 +230,6 @@ fn when_a_release_is_deleted_its_git_tag_is_left_alone() {
     assert!(releases.tags_deleted().is_empty());
 }
 
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_the_tag_is_not_a_beta_or_a_stable_release_nothing_is_deleted() {
     let releases = Releases::new();
@@ -256,8 +246,6 @@ fn when_the_tag_is_not_a_beta_or_a_stable_release_nothing_is_deleted() {
 }
 
 /// Nothing may be deleted on the strength of a release that was not made.
-///
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_the_new_release_does_not_exist_nothing_is_deleted() {
     let releases = Releases::new();
@@ -270,8 +258,6 @@ fn when_the_new_release_does_not_exist_nothing_is_deleted() {
 }
 
 /// Installed betas fetch their update from where the channel manifest points.
-///
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_the_beta_channel_still_points_at_an_older_release_that_release_is_kept() {
     let releases = Releases::new();
@@ -289,7 +275,6 @@ fn when_the_beta_channel_still_points_at_an_older_release_that_release_is_kept()
     );
 }
 
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_it_is_a_dry_run_nothing_is_deleted_and_the_list_is_printed() {
     let releases = Releases::new();
@@ -304,7 +289,6 @@ fn when_it_is_a_dry_run_nothing_is_deleted_and_the_list_is_printed() {
     assert_eq!(releases.remaining(), ["v0.1.0-beta.1", "v0.1.0-beta.2"]);
 }
 
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_there_is_no_older_release_nothing_happens() {
     let releases = Releases::new();
@@ -317,8 +301,6 @@ fn when_there_is_no_older_release_nothing_happens() {
 }
 
 /// Without the manifest there is no telling what installed betas still fetch.
-///
-/// Verifies: REQ-UPD-020
 #[test]
 fn when_the_beta_channel_manifest_cannot_be_read_nothing_is_deleted() {
     let releases = Releases::new();

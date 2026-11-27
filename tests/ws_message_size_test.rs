@@ -76,7 +76,6 @@ fn unknown_message_of(size: usize) -> String {
     )
 }
 
-/// Verifies: REQ-RMT-038
 #[tokio::test]
 async fn a_message_from_the_relay_is_larger_than_the_rpc_takes_ends_the_connection_and_one_that_fits_arrives(
 ) {
@@ -97,7 +96,6 @@ async fn a_message_from_the_relay_is_larger_than_the_rpc_takes_ends_the_connecti
     assert!(received.is_err(), "a message of the size arrived");
 }
 
-/// Verifies: REQ-RMT-038
 #[tokio::test]
 async fn a_message_from_the_relay_is_far_larger_than_the_rpc_takes_ends_the_connection() {
     let identity = DeviceIdentity::generate();
@@ -111,7 +109,6 @@ async fn a_message_from_the_relay_is_far_larger_than_the_rpc_takes_ends_the_conn
     assert!(received.is_err(), "a message of the size arrived");
 }
 
-/// Verifies: REQ-CON-180
 #[tokio::test]
 async fn a_message_from_the_signaling_server_is_larger_than_a_room_needs_ends_the_connection_and_one_that_fits_is_read(
 ) {

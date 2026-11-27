@@ -67,8 +67,6 @@ describe('the audio settings in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-AUD-107
-  // Verifies: REQ-GUI-024
   it('the user picks mono, the app is asked for that one change and the panel shows mono', async () => {
     const calls = fakeBackend(audioSettings({ transmit_channels: 2 }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -84,7 +82,6 @@ describe('the audio settings in the settings panel', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: en.settings.devices.mono })).toHaveAttribute('aria-pressed', 'true'));
   });
 
-  // Verifies: REQ-GUI-024
   it('the settings change elsewhere while the panel is open, the panel shows the new settings', async () => {
     fakeBackend(audioSettings({ transmit_channels: 2 }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -99,8 +96,6 @@ describe('the audio settings in the settings panel', () => {
 
   // The buffer sizes on offer are the app's: the panel once listed 8 and 16
   // samples of its own, which the app could not save.
-  //
-  // Verifies: REQ-GUI-024
   it('the panel offers exactly the buffer sizes the app reports', async () => {
     fakeBackend(audioSettings({ buffer_sizes: [64, 256], buffer_size: 64 }));
     const { container } = render(<SettingsPanelAdapter initialTab="devices" />);
@@ -114,8 +109,6 @@ describe('the audio settings in the settings panel', () => {
 
   // The answer to a change and the announcement of another can arrive in
   // either order; the newer settings stay on screen.
-  //
-  // Verifies: REQ-GUI-024
   it('settings older than the ones shown arrive, the panel keeps the newer ones', async () => {
     fakeBackend(audioSettings({ revision: 0, transmit_channels: 2 }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -130,8 +123,6 @@ describe('the audio settings in the settings panel', () => {
 
   // A channel picker changes its own side only, so two quick changes cannot
   // undo each other; the right picker's empty choice is mono.
-  //
-  // Verifies: REQ-GUI-024
   it('the user picks none as the right input channel, the app is asked for mono on that side only', async () => {
     const calls = fakeBackend(audioSettings({ input_channels: { left: 1, right: 2 } }));
     const { container } = render(<SettingsPanelAdapter initialTab="devices" />);
@@ -147,7 +138,6 @@ describe('the audio settings in the settings panel', () => {
     );
   });
 
-  // Verifies: REQ-GUI-024
   it('the input is mono, the right channel picker shows none', async () => {
     fakeBackend(audioSettings({ input_channels: { left: 3, right: null }, input_channel_count: 4 }));
     const { container } = render(<SettingsPanelAdapter initialTab="devices" />);

@@ -1,5 +1,5 @@
 /**
- * DiagnosticsTab log file and report-a-problem sections (ADR-036, ADR-058)
+ * DiagnosticsTab log file and report-a-problem sections
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -15,7 +15,6 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('DiagnosticsTab log file section', () => {
-  // Verifies: REQ-GUI-020
   it('the user presses the button, the handler runs', () => {
     const onOpenLogFolder = vi.fn();
     render(<DiagnosticsTab state="idle" onOpenLogFolder={onOpenLogFolder} />);
@@ -25,7 +24,6 @@ describe('DiagnosticsTab log file section', () => {
     expect(onOpenLogFolder).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-GUI-020
   it('the folder could not be opened, the reason with its path is shown as an alert', () => {
     render(
       <DiagnosticsTab
@@ -38,7 +36,6 @@ describe('DiagnosticsTab log file section', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('/logs/me.koeda.jamuru');
   });
 
-  // Verifies: REQ-GUI-020
   it('the folder was opened, its path is shown under the button', () => {
     render(
       <DiagnosticsTab state="idle" onOpenLogFolder={() => {}} logFolder="/logs/me.koeda.jamuru" />
@@ -54,15 +51,13 @@ describe('DiagnosticsTab log file section', () => {
   });
 });
 
-describe('DiagnosticsTab report a problem section (ADR-058)', () => {
-  // Verifies: REQ-RPT-001
+describe('DiagnosticsTab report a problem section', () => {
   it('nothing is rendered when there is no handler to start it', () => {
     render(<DiagnosticsTab state="idle" />);
 
     expect(screen.queryByTestId('diagnostics-report-problem')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RPT-001
   it('idle state shows a button that starts the flow', () => {
     const onOpenReportProblem = vi.fn();
     render(<DiagnosticsTab state="idle" onOpenReportProblem={onOpenReportProblem} />);
@@ -72,7 +67,6 @@ describe('DiagnosticsTab report a problem section (ADR-058)', () => {
     expect(onOpenReportProblem).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-RPT-002
   it('ready state shows exactly the preview text that would be sent', () => {
     render(
       <DiagnosticsTab
@@ -88,7 +82,6 @@ describe('DiagnosticsTab report a problem section (ADR-058)', () => {
     );
   });
 
-  // Verifies: REQ-RPT-001
   it('the comment field is capped at 2000 characters', () => {
     render(
       <DiagnosticsTab state="idle" onOpenReportProblem={() => {}} reportProblemState="ready" />
@@ -100,7 +93,6 @@ describe('DiagnosticsTab report a problem section (ADR-058)', () => {
     );
   });
 
-  // Verifies: REQ-RPT-001
   it('pressing send calls the handler with no separate consent step', () => {
     const onSendReportProblem = vi.fn();
     render(
@@ -223,7 +215,6 @@ describe('DiagnosticsTab connection summary', () => {
       problems: [],
     }) as unknown as CompleteDiagnosticsResult;
 
-  // Verifies: REQ-GUI-038
   it.each([
     ['Wide', 'settings.diagnostics.reach.wide'],
     ['Narrow', 'settings.diagnostics.reach.narrow'],
@@ -237,7 +228,6 @@ describe('DiagnosticsTab connection summary', () => {
     },
   );
 
-  // Verifies: REQ-GUI-038
   it('IPv6 and UPnP are shown as rows of the network card', () => {
     render(<DiagnosticsTab state='complete' result={result('Narrow')} />);
 

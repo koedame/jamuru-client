@@ -1,5 +1,5 @@
 /**
- * SettingsHelpQuestion (ADR-044 §5): a question that has just appeared does not
+ * SettingsHelpQuestion: a question that has just appeared does not
  * take Allow, from the very frame it is drawn.
  */
 
@@ -30,7 +30,6 @@ function FirstFrame({ open, onSeen }: { open: boolean; onSeen: (held: string | n
 }
 
 describe("SettingsHelpQuestion", () => {
-  // Verifies: REQ-RMT-002
   it("a question drawn for the first time holds Allow back from its first frame", () => {
     const seen: (string | null)[] = [];
     render(<FirstFrame open onSeen={(held) => seen.push(held)} />);
@@ -38,7 +37,6 @@ describe("SettingsHelpQuestion", () => {
     expect(seen[0]).toBe("true");
   });
 
-  // Verifies: REQ-RMT-002
   it("a question shown again after it closed holds Allow back from its first frame again", async () => {
     const seen: (string | null)[] = [];
     const onSeen = (held: string | null) => seen.push(held);

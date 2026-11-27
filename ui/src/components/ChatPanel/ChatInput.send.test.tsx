@@ -15,7 +15,6 @@ function typeAndSend(text: string) {
 }
 
 describe("ChatInput send result", () => {
-  // Verifies: REQ-GUI-030
   it("送信に失敗したとき、入力した文章が残りエラーが表示されること", async () => {
     const onSend = vi.fn().mockRejectedValue(new Error("offline"));
     render(<ChatInput onSend={onSend} />);
@@ -26,7 +25,6 @@ describe("ChatInput send result", () => {
     expect(input.value).toBe("こんにちは");
   });
 
-  // Verifies: REQ-GUI-030
   it("送信に成功したとき、入力欄が空になりエラーが出ないこと", async () => {
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(<ChatInput onSend={onSend} />);
@@ -38,7 +36,6 @@ describe("ChatInput send result", () => {
     expect(screen.queryByTestId("chat-send-error")).toBeNull();
   });
 
-  // Verifies: REQ-GUI-030
   it("失敗のあとに文章を直し始めたとき、エラーの表示が消えること", async () => {
     const onSend = vi.fn().mockRejectedValue(new Error("offline"));
     render(<ChatInput onSend={onSend} />);
@@ -50,7 +47,6 @@ describe("ChatInput send result", () => {
     expect(screen.queryByTestId("chat-send-error")).toBeNull();
   });
 
-  // Verifies: REQ-GUI-030
   it("送信の結果を待っている間、同じ文章が二重に送られないこと", async () => {
     let resolve!: () => void;
     const onSend = vi.fn(() => new Promise<void>((r) => (resolve = r)));

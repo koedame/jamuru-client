@@ -31,7 +31,7 @@ impl TestOrchestrator {
     ///
     /// Verifies that both nodes start and stay alive for the test duration. It
     /// does **not** verify that a P2P connection was established or that audio
-    /// flowed - that needs the harness described in Plans.md, under REQ-LAT-102.
+    /// flowed - that needs a harness that captures the audio on both nodes.
     pub async fn run_two_node_test(
         &mut self,
         host_node: TestNode,

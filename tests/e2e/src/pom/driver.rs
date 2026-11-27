@@ -1,4 +1,4 @@
-//! HTTP client for the app's E2E control channel (ADR-025).
+//! HTTP client for the app's E2E control channel.
 //!
 //! Deliberately `pub(crate)`: scenarios talk to page objects, never to this.
 //! If raw selectors leak into tests the page object model stops paying for

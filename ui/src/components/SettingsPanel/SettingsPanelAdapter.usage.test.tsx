@@ -50,7 +50,6 @@ describe('the usage reporting switch in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-TEL-011
   it('the app is opened for the first time, the switch is off and no dialog asks about it', async () => {
     fakeBackend({ usage_reporting: false });
     render(<SettingsPanelAdapter initialTab="privacy" />);
@@ -62,7 +61,6 @@ describe('the usage reporting switch in the settings panel', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-TEL-011
   it('the setting is saved on, the switch starts on', async () => {
     fakeBackend({ usage_reporting: true });
     render(<SettingsPanelAdapter initialTab="privacy" />);
@@ -72,7 +70,6 @@ describe('the usage reporting switch in the settings panel', () => {
     await waitFor(() => expect(toggle).toBeChecked());
   });
 
-  // Verifies: REQ-TEL-011
   it('the user turns the switch on, the setting is saved as on and nothing else in the config changes', async () => {
     const saved = { usage_reporting: false };
     const calls = fakeBackend(saved);
@@ -86,7 +83,6 @@ describe('the usage reporting switch in the settings panel', () => {
     expect(calls).toContainEqual({ command: 'config_set_usage_reporting', args: { enabled: true } });
   });
 
-  // Verifies: REQ-TEL-011
   it('saving fails, the switch goes back and the reason is shown', async () => {
     fakeBackend({ usage_reporting: false });
     const backend = invoke.getMockImplementation()!;
@@ -103,7 +99,6 @@ describe('the usage reporting switch in the settings panel', () => {
     await waitFor(() => expect(toggle).not.toBeChecked());
   });
 
-  // Verifies: REQ-TEL-013
   it('the user turns it on and asks what is sent, the lines with the install ID are shown', async () => {
     const saved = { usage_reporting: false };
     fakeBackend(saved);
@@ -116,7 +111,6 @@ describe('the usage reporting switch in the settings panel', () => {
     expect(await screen.findByTestId('privacy-usage-preview')).toHaveTextContent(INSTALL_LINE);
   });
 
-  // Verifies: REQ-TEL-013
   it('the user turns it off while the lines are shown, they are replaced by a note that nothing is sent and there is no ID', async () => {
     fakeBackend({ usage_reporting: true });
     render(<SettingsPanelAdapter initialTab="privacy" />);
@@ -136,7 +130,6 @@ describe('the usage reporting switch in the settings panel', () => {
     expect(screen.getByTestId('privacy-usage-preview')).not.toHaveTextContent('install_id');
   });
 
-  // Verifies: REQ-TEL-012
   it.each([
     ['en', en],
     ['ja', ja],

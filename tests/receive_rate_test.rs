@@ -1,4 +1,4 @@
-//! The receive buffer is kept at its target by playing a little faster or slower (ADR-122).
+//! The receive buffer is kept at its target by playing a little faster or slower.
 //!
 //! A sender whose clock runs fast or slow against ours is played for a minute or two in virtual
 //! time (one step is one read of the device), once as the app did before and once as it does now,
@@ -181,7 +181,6 @@ fn largest(cents: &[f64]) -> f64 {
     cents.iter().fold(0.0f64, |worst, c| worst.max(c.abs()))
 }
 
-/// Verifies: REQ-LAT-134
 #[test]
 fn when_the_senders_clock_is_off_the_buffer_is_held_at_its_target_without_a_skip_or_a_gap() {
     for skew in [-500.0, -100.0, 100.0, 500.0] {
@@ -210,7 +209,6 @@ fn when_the_senders_clock_is_off_the_buffer_is_held_at_its_target_without_a_skip
     }
 }
 
-/// Verifies: REQ-LAT-134
 #[test]
 fn a_sine_and_a_chord_never_change_pitch_by_more_than_two_cents_with_the_clock_off() {
     for skew in [-500.0, -100.0, 100.0, 500.0] {
@@ -242,7 +240,6 @@ fn a_sine_and_a_chord_never_change_pitch_by_more_than_two_cents_with_the_clock_o
     }
 }
 
-/// Verifies: REQ-LAT-134
 #[test]
 fn when_the_delay_is_lowered_the_buffer_drains_by_playing_faster_without_a_skip_or_a_gap() {
     // From 6 frames to 3 at ten seconds: 3 frames of 64 are 4 ms, far inside what is given back by
@@ -286,7 +283,6 @@ fn when_the_delay_is_lowered_the_buffer_drains_by_playing_faster_without_a_skip_
     assert!(largest(&cents) <= 2.0, "{:.2}", largest(&cents));
 }
 
-/// Verifies: REQ-LAT-134
 #[test]
 fn when_packets_arrive_unevenly_and_the_clock_is_off_it_skips_and_drops_out_no_more_than_before() {
     for (skew, jitter) in [(100.0, 0.5), (-100.0, 0.5), (300.0, 1.0), (-300.0, 1.0)] {
@@ -333,7 +329,6 @@ fn bin_amplitude(samples: &[f32], hz: f64) -> f32 {
     (2.0 * (re * re + im * im).sqrt() / samples.len() as f64) as f32
 }
 
-/// Verifies: REQ-LAT-134
 #[test]
 fn when_packets_arrive_unevenly_a_tone_that_is_not_played_stays_out_of_the_output() {
     for (skew, jitter) in [

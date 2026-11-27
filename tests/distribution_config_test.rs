@@ -1,5 +1,5 @@
 //! Guards the app settings that break or cannot be changed once the app is
-//! in users' hands (ADR-029).
+//! in users' hands.
 //!
 //! None of these show up while developing: `cargo tauri dev` runs with the
 //! terminal's microphone permission, the identifier only matters once data
@@ -58,8 +58,6 @@ fn csp_sources(csp: &Value, directive: &str) -> Vec<String> {
 
 /// macOS terminates an app that touches the microphone without this
 /// description. Tauri merges `src-tauri/Info.plist` into the bundle.
-///
-/// Verifies: REQ-DIST-001
 #[test]
 fn macos_bundle_declares_why_it_uses_the_microphone() {
     let description = plist_string(&src_tauri("Info.plist"), "NSMicrophoneUsageDescription")
@@ -71,7 +69,6 @@ fn macos_bundle_declares_why_it_uses_the_microphone() {
     );
 }
 
-/// Verifies: REQ-DIST-002
 #[test]
 fn identifier_is_the_one_released_under() {
     assert_eq!(
@@ -82,7 +79,6 @@ fn identifier_is_the_one_released_under() {
     );
 }
 
-/// Verifies: REQ-DIST-003
 #[test]
 fn csp_is_enabled() {
     let csp = &tauri_conf()["app"]["security"]["csp"];
@@ -96,8 +92,6 @@ fn csp_is_enabled() {
 
 /// Scripts are the part that matters: an injected script can call every
 /// Tauri command. Only the bundled ones may run.
-///
-/// Verifies: REQ-DIST-003
 #[test]
 fn csp_allows_only_bundled_scripts() {
     let csp = &tauri_conf()["app"]["security"]["csp"];
@@ -109,8 +103,6 @@ fn csp_allows_only_bundled_scripts() {
 /// Nothing in the webview talks to the network - signalling and audio run
 /// in the Rust side - so no directive may name a remote origin. The only
 /// URL allowed is Tauri's IPC endpoint.
-///
-/// Verifies: REQ-DIST-003
 #[test]
 fn csp_names_no_remote_origin() {
     let csp = &tauri_conf()["app"]["security"]["csp"];
@@ -147,8 +139,6 @@ fn csp_names_no_remote_origin() {
 
 /// The UI imports `@tauri-apps/api` as modules; exposing the same API as a
 /// global only widens what a stray script could reach.
-///
-/// Verifies: REQ-DIST-004
 #[test]
 fn tauri_api_is_not_exposed_as_a_global() {
     assert_eq!(tauri_conf()["app"]["withGlobalTauri"], false);
@@ -178,8 +168,6 @@ fn capabilities() -> Vec<(String, Value)> {
 /// A permission handed to the webview is something hostile markup could call
 /// if it ever got past the CSP, so the list is pinned: granting another plugin
 /// command means changing this test and saying why the UI needs it.
-///
-/// Verifies: REQ-DIST-006
 #[test]
 fn the_webview_is_granted_only_the_plugin_commands_the_ui_calls() {
     let mut granted: Vec<String> = capabilities()
@@ -207,7 +195,6 @@ fn the_webview_is_granted_only_the_plugin_commands_the_ui_calls() {
     );
 }
 
-/// Verifies: REQ-DIST-006
 #[test]
 fn no_remote_page_is_given_ipc_access() {
     for (name, capability) in capabilities() {
@@ -249,8 +236,6 @@ fn source_files(dir: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) {
 /// A release build uses the server its builder passes in `JAMJAM_SERVER_URL`
 /// and asks it where the signaling server is, so the core library - where the
 /// default lives - carries no `https://` or `wss://` URL but example hosts.
-///
-/// Verifies: REQ-DIST-005
 #[test]
 fn the_source_names_no_production_server() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -280,8 +265,6 @@ fn the_source_names_no_production_server() {
 /// `src-tauri/build.rs` refuses to make a release without a server, or with
 /// one that is not `https://` or that reaches the user's own machine however
 /// it is spelled - the app would ship unable to connect.
-///
-/// Verifies: REQ-DIST-005
 #[test]
 fn a_release_is_only_given_a_remote_server_over_tls() {
     for url in [
@@ -319,8 +302,6 @@ fn a_release_is_only_given_a_remote_server_over_tls() {
 /// `cargo tauri dev` and the GUI E2E suite build without optimisation and
 /// must keep using a jamuru server on this machine, on the development port
 /// 17890 that the GUI E2E suite's server occupies.
-///
-/// Verifies: REQ-DIST-005
 #[test]
 fn development_builds_use_the_local_server() {
     assert_eq!(host_of(DEV_SERVER_URL), "localhost");
@@ -334,8 +315,6 @@ fn development_builds_use_the_local_server() {
 /// The default follows the build profile this test was compiled with, so
 /// `cargo test` checks the development side and `cargo test --release` the
 /// release side.
-///
-/// Verifies: REQ-DIST-005
 #[test]
 fn the_default_follows_the_build_profile() {
     let expected = if cfg!(debug_assertions) {
@@ -355,8 +334,6 @@ const PUBLISHED_DOCS_PREFIX: &str = "https://github.com/koedame/jamuru-client/bl
 /// server by the server itself. A URL written into the UI or the Tauri
 /// commands would be a second default that release builds could carry
 /// unnoticed - which is how the UI once shipped a local signaling server.
-///
-/// Verifies: REQ-DIST-005
 #[test]
 fn no_other_source_names_a_server() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -449,7 +426,7 @@ fn csp_sources_reads_both_object_and_string_forms() {
     assert!(csp_sources(&object, "img-src").is_empty());
 }
 
-// -- self-update (ADR-041) ---------------------------------------------------
+// -- self-update ---------------------------------------------------
 
 /// The settings only the release build is given (`--config` of
 /// `cargo tauri build` in release.yml).
@@ -460,8 +437,6 @@ fn updater_conf() -> Value {
 
 /// A build made from source (README: `cargo tauri build`) must not be
 /// replaced by an official release: it may dial a server of its own.
-///
-/// Verifies: REQ-UPD-003
 #[test]
 fn a_build_from_source_is_given_no_updater() {
     let conf = tauri_conf();
@@ -476,7 +451,6 @@ fn a_build_from_source_is_given_no_updater() {
     );
 }
 
-/// Verifies: REQ-UPD-006
 #[test]
 fn updates_are_checked_against_a_public_key_and_fetched_over_https() {
     let updater = &updater_conf()["plugins"]["updater"];
@@ -503,8 +477,6 @@ fn updates_are_checked_against_a_public_key_and_fetched_over_https() {
 
 /// `releases/latest` is GitHub's latest non-pre-release, so the betas that
 /// every push to main publishes reach nobody who has a release build.
-///
-/// Verifies: REQ-UPD-007
 #[test]
 fn updates_come_from_the_latest_release_only() {
     let endpoints = &updater_conf()["plugins"]["updater"]["endpoints"];
@@ -519,8 +491,6 @@ fn updates_come_from_the_latest_release_only() {
 
 /// `releases/latest` answers 404 until there is a release that is not a
 /// pre-release, so a beta that looked there never updated once.
-///
-/// Verifies: REQ-UPD-013
 #[test]
 fn a_beta_looks_for_updates_in_the_beta_channel_and_changes_nothing_else() {
     let conf: Value = serde_json::from_str(&src_tauri("tauri.updater.beta.conf.json"))
@@ -538,7 +508,6 @@ fn a_beta_looks_for_updates_in_the_beta_channel_and_changes_nothing_else() {
     assert!(conf.get("bundle").is_none());
 }
 
-/// Verifies: REQ-UPD-013
 #[test]
 fn only_a_beta_build_is_given_the_beta_channel_and_its_version() {
     let workflow =
@@ -557,7 +526,6 @@ fn only_a_beta_build_is_given_the_beta_channel_and_its_version() {
     assert!(only_for_a_beta.contains("build-version.conf.json"));
 }
 
-/// Verifies: REQ-UPD-008
 #[test]
 fn the_release_build_makes_signed_update_bundles() {
     assert_eq!(
@@ -605,7 +573,6 @@ fn release_jobs() -> Vec<(String, String)> {
     jobs
 }
 
-/// Verifies: REQ-DIST-009
 #[test]
 fn a_job_that_reads_a_signing_or_publishing_credential_names_its_environment() {
     let credentials = [
@@ -646,8 +613,6 @@ fn a_job_that_reads_a_signing_or_publishing_credential_names_its_environment() {
 
 /// Deleting a release cannot be undone, so it waits for the new release to
 /// reach the people who install it, and never happens in a rehearsal.
-///
-/// Verifies: REQ-UPD-020
 #[test]
 fn the_job_that_deletes_old_releases_waits_for_the_publishing_and_skips_a_rehearsal() {
     let jobs = release_jobs();

@@ -1,5 +1,5 @@
 //! Guards that no release is published before the update drill passed, and
-//! that what the drill breaks on purpose cannot ship (ADR-089).
+//! that what the drill breaks on purpose cannot ship.
 //!
 //! The drill itself (`scripts/update-drill.py`) installs real packages and
 //! runs on CI only (`.github/workflows/update-drill.yml`). These read what
@@ -31,7 +31,6 @@ fn job(workflow: &str, name: &str) -> String {
         .join("\n")
 }
 
-/// Verifies: REQ-UPD-032
 #[test]
 fn no_release_is_published_before_the_update_drill_passed() {
     let workflow = read(".github/workflows/release.yml");
@@ -56,8 +55,6 @@ fn no_release_is_published_before_the_update_drill_passed() {
 
 /// The drill builds and runs each kind of package that installs an update
 /// itself, and each is run where it would be installed.
-///
-/// Verifies: REQ-UPD-032
 #[test]
 fn the_update_drill_runs_on_every_system_that_installs_updates_itself() {
     let workflow = read(".github/workflows/update-drill.yml");
@@ -89,8 +86,6 @@ fn the_update_drill_runs_on_every_system_that_installs_updates_itself() {
 /// The first version is made from this source and from the release before
 /// it, since a change in what two versions say to each other shows only in
 /// the second.
-///
-/// Verifies: REQ-UPD-032
 #[test]
 fn the_update_drill_also_starts_from_the_release_before_this_one() {
     let workflow = read(".github/workflows/update-drill.yml");
@@ -109,7 +104,6 @@ fn the_update_drill_also_starts_from_the_release_before_this_one() {
     );
 }
 
-/// Verifies: REQ-UPD-032
 #[test]
 fn the_drills_breaking_is_not_a_default_feature() {
     let manifest = read("src-tauri/Cargo.toml");
@@ -136,7 +130,6 @@ fn the_drills_breaking_is_not_a_default_feature() {
     );
 }
 
-/// Verifies: REQ-UPD-032
 #[test]
 fn each_release_build_is_checked_to_have_nothing_of_the_drill() {
     let workflow = read(".github/workflows/release.yml");
@@ -161,7 +154,6 @@ fn check(binary: &Path, expected: &str) -> std::process::Output {
         .expect("bash is needed to run scripts/check-update-drill.sh")
 }
 
-/// Verifies: REQ-UPD-032
 #[test]
 fn a_build_that_can_be_broken_on_purpose_does_not_pass_as_a_release() {
     let dir = tempfile::tempdir().unwrap();

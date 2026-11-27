@@ -98,7 +98,7 @@ jobs:
 
       - name: Build Tauri app
         env:
-          # The signaling server the app dials (ADR-030). Kept out of the source.
+          # The signaling server the app dials. Kept out of the source.
           JAMJAM_SERVER_URL: ${{ secrets.JAMJAM_SERVER_URL }}
         run: cargo tauri build
 

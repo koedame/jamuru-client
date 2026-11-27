@@ -257,8 +257,6 @@ describe('components without hard-coded text', () => {
   // Given a reaction, the quick reactions and the side panel
   // When the language is English or Japanese
   // Then their accessible names read in that language, with the count's plural
-  //
-  // Verifies: REQ-I18N-105
   it.each(languages)('names the reaction and side panel controls in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     const { container } = render(
@@ -287,8 +285,6 @@ describe('components without hard-coded text', () => {
   // Given the mixer shows a channel
   // When the language is English or Japanese
   // Then the pan and volume sliders are named in that language
-  //
-  // Verifies: REQ-I18N-105
   it.each(languages)('names the mixer sliders in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     render(<MixerPanel channels={channels} onChannelMonitorToggle={() => {}} />);
@@ -300,8 +296,6 @@ describe('components without hard-coded text', () => {
   // Given the privacy tab is shown
   // When the language is English or Japanese
   // Then the usage reporting switch, with its description, reads in that language
-  //
-  // Verifies: REQ-TEL-011
   it.each(languages)('shows the usage reporting section in the privacy tab in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     const { container } = render(
@@ -320,9 +314,6 @@ describe('components without hard-coded text', () => {
   // Given the diagnostics result recommends a preset and reports a NAT type
   // When the language is English or Japanese
   // Then the preset, the NAT type and the missing values read in that language
-  //
-  // Verifies: REQ-I18N-105
-  // Verifies: REQ-GUI-027
   it.each(languages)('shows the diagnostics result in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     const { container } = render(<DiagnosticsTab state="complete" result={diagnosticsResult} />);
@@ -366,8 +357,6 @@ describe('components without hard-coded text', () => {
   // (macOS keeps the old answer until then), and the undecided one points at
   // the question on joining, not at the OS settings, where the app is not
   // listed until it has asked
-  //
-  // Verifies: REQ-CON-176
   it.each(languages)('マイクの許可の診断の案内が、%s で次にすることを正しく言うこと', async (language, bundle: Bundle) => {
     const phrases: Record<string, { reopen: RegExp; osSettings: RegExp }> = {
       en: { reopen: /quit jamuru and open it again/, osSettings: /OS settings/ },
@@ -386,8 +375,6 @@ describe('components without hard-coded text', () => {
   // Given the session statistics and a device selector
   // When the language is English or Japanese
   // Then their labels read in that language
-  //
-  // Verifies: REQ-I18N-105
   it.each(languages)('shows the session statistics and device selector in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     const { container } = render(
@@ -415,8 +402,6 @@ describe('components without hard-coded text', () => {
   // Given the settings panel has loaded the devices and sample rates
   // When the language is English or Japanese
   // Then the buffer, channel and sample rate options read in that language
-  //
-  // Verifies: REQ-I18N-105
   it.each(languages)('labels the device options of the settings panel in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     const { container } = render(<SettingsPanelAdapter initialTab="devices" />);
@@ -432,8 +417,6 @@ describe('components without hard-coded text', () => {
   // Given the display name field in the general tab
   // When the name is emptied or too long
   // Then the error reads in the current language, and the placeholder does too
-  //
-  // Verifies: REQ-I18N-105
   it.each(languages)('validates the display name in %s', async (language, bundle: Bundle) => {
     await i18n.changeLanguage(language);
     render(<SettingsPanelAdapter initialTab="general" />);
@@ -451,8 +434,6 @@ describe('components without hard-coded text', () => {
   // Given the device options were loaded in English
   // When the language changes to Japanese while the panel is open
   // Then the options are re-labelled without reloading the devices
-  //
-  // Verifies: REQ-I18N-105
   it('re-labels the device options when the language changes', async () => {
     await i18n.changeLanguage('en');
     render(<SettingsPanelAdapter initialTab="devices" />);

@@ -26,7 +26,6 @@ describe('the entry name dialog', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-CON-141
   it('it is open, it asks for the name with the given name in the field', () => {
     open();
 
@@ -34,14 +33,12 @@ describe('the entry name dialog', () => {
     expect(screen.getByLabelText('Display name')).toHaveValue('Aki');
   });
 
-  // Verifies: REQ-CON-141
   it('it is closed, it shows nothing', () => {
     open({ open: false });
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-CON-141
   it('the name is changed and confirmed, the new name is handed on without stopping the check', () => {
     const { onConfirm } = open();
 
@@ -51,7 +48,6 @@ describe('the entry name dialog', () => {
     expect(onConfirm).toHaveBeenCalledWith('Taro', false);
   });
 
-  // Verifies: REQ-CON-142
   it('"use this name from now on" is ticked, confirming says to stop asking', () => {
     const { onConfirm } = open();
 
@@ -61,7 +57,6 @@ describe('the entry name dialog', () => {
     expect(onConfirm).toHaveBeenCalledWith('Aki', true);
   });
 
-  // Verifies: REQ-CON-141
   it('the name is empty, it cannot be confirmed', () => {
     const { onConfirm } = open({ initialName: '' });
 
@@ -71,7 +66,6 @@ describe('the entry name dialog', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
-  // Verifies: REQ-CON-141
   it('Enter is pressed in the field, the name is confirmed', () => {
     const { onConfirm } = open();
 
@@ -80,7 +74,6 @@ describe('the entry name dialog', () => {
     expect(onConfirm).toHaveBeenCalledWith('Aki', false);
   });
 
-  // Verifies: REQ-CON-141
   it('cancel or Escape is chosen, the dialog is cancelled and nothing is confirmed', () => {
     const { onConfirm, onCancel } = open();
 
@@ -91,7 +84,6 @@ describe('the entry name dialog', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
-  // Verifies: REQ-CON-141
   it('the name is being saved, nothing can be pressed or cancelled', () => {
     const { onCancel } = open({ pending: true });
 
@@ -101,14 +93,12 @@ describe('the entry name dialog', () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
-  // Verifies: REQ-CON-141
   it('the name could not be saved, the reason is shown', () => {
     open({ error: 'Could not save the name' });
 
     expect(screen.getByRole('alert')).toHaveTextContent('Could not save the name');
   });
 
-  // Verifies: REQ-CON-141
   it('it is opened again, the field and the tick start over', () => {
     const onConfirm = vi.fn();
     const props = { initialName: 'Aki', confirmLabel: 'Join', onConfirm, onCancel: vi.fn() };

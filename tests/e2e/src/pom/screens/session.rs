@@ -258,7 +258,7 @@ impl<'a> SessionScreen<'a> {
         self.channel_peak(selector)
     }
 
-    // --- helping with settings (ADR-044 §5) ---
+    // --- helping with settings ---
 
     /// The button, in the room's sidebar, that starts asking for help with
     /// one's own audio settings.

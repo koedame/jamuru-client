@@ -2,7 +2,7 @@
  * SessionStats component tests
  *
  * Covers the latency and jitter figures latency.feature requires the session
- * view to display (REQ-LAT-101, REQ-LAT-103).
+ * view to display.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -38,8 +38,7 @@ const emptyLatency: DetailedLatency = {
 };
 
 describe('SessionStats', () => {
-  describe('Latency figures (REQ-LAT-101)', () => {
-    // Verifies: REQ-LAT-101
+  describe('Latency figures', () => {
     it('shows the network RTT', () => {
       render(<SessionStats network={network} latency={emptyLatency} />);
       expect(screen.getByText('18.42 ms')).toBeInTheDocument();
@@ -50,7 +49,6 @@ describe('SessionStats', () => {
       expect(screen.getByText('0.1 %')).toBeInTheDocument();
     });
 
-    // Verifies: REQ-LAT-130
     it('shows a measuring state rather than 0ms before the first RTT sample', () => {
       // The connection exists (`network` is non-null) but no RTT ping has
       // returned yet, so `rtt_ms` is null - not a misleading 0ms.
@@ -71,8 +69,7 @@ describe('SessionStats', () => {
     });
   });
 
-  describe('Jitter (REQ-LAT-103)', () => {
-    // Verifies: REQ-LAT-103
+  describe('Jitter', () => {
     it('shows the current jitter value', () => {
       render(<SessionStats network={network} latency={emptyLatency} />);
       expect(screen.getByText('0.83 ms')).toBeInTheDocument();
@@ -93,7 +90,7 @@ describe('SessionStats', () => {
     });
   });
 
-  describe('Total latency breakdown (REQ-LAT-101)', () => {
+  describe('Total latency breakdown', () => {
     const latency: DetailedLatency = {
       upstream: [
         { name: 'Capture', ms: 1.33, info: null },
@@ -109,7 +106,6 @@ describe('SessionStats', () => {
       roundtrip_total_ms: 31.75,
     };
 
-    // Verifies: REQ-LAT-101
     it('shows the one-way and round-trip totals', () => {
       render(<SessionStats network={network} latency={latency} />);
 

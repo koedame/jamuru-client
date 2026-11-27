@@ -108,8 +108,6 @@ describe('connected screen language', () => {
   // Given the UI language is English
   // When the connected screen's panels are rendered without explicit texts
   // Then no Japanese appears anywhere in them
-  //
-  // Verifies: REQ-I18N-105
   it('shows no Japanese in English', async () => {
     await i18n.changeLanguage('en');
     const { container } = renderConnectedPanels();
@@ -123,8 +121,6 @@ describe('connected screen language', () => {
   // Given the UI language is Japanese
   // When the same panels are rendered
   // Then the titles, placeholder and system messages are the Japanese bundle's
-  //
-  // Verifies: REQ-I18N-105
   it('shows the Japanese bundle in Japanese', async () => {
     await i18n.changeLanguage('ja');
     renderConnectedPanels();
@@ -141,8 +137,6 @@ describe('connected screen language', () => {
   // Given a system message carries only its kind and the participant's name
   // When the language changes while it is on screen
   // Then the message is re-rendered in the new language
-  //
-  // Verifies: REQ-I18N-105
   it('re-renders a system message when the language changes', async () => {
     await i18n.changeLanguage('en');
     const { rerender } = render(
@@ -164,8 +158,6 @@ describe('connected screen language', () => {
   // Given the backend reports a join and a leave as kind + name, with no text
   // When the chat adapter shows them
   // Then they read in the current UI language
-  //
-  // Verifies: REQ-I18N-105
   it.each(backendMessageCases)('renders the backend join/leave messages in %s', async (language, joined, left) => {
     await i18n.changeLanguage(language);
     invoke.mockResolvedValue([
@@ -182,8 +174,6 @@ describe('connected screen language', () => {
   // Given the connection panel is rendered without any text props
   // When the language is English
   // Then no Japanese shows, and in Japanese the Japanese bundle does
-  //
-  // Verifies: REQ-I18N-105
   it.each(connectionPanelCases)('renders the connection panel defaults in %s', async (language, welcomeTitle) => {
     await i18n.changeLanguage(language);
     const { container } = render(<ConnectionPanel onCreateRoom={() => {}} onJoinRoom={() => {}} />);

@@ -78,8 +78,6 @@ async fn test_gather_candidates_match_socket_family() {
 /// The machine may have no global IPv6 address (a CI container), so no IPv6 candidate is
 /// required; those that are offered must be global unicast: a link-local, unique-local or
 /// loopback address names no host to a peer elsewhere.
-///
-/// Verifies: REQ-CON-145
 #[tokio::test]
 async fn test_dual_stack_socket_is_offered_addresses_a_peer_can_send_to() {
     let std_socket = jamjam::network::bind_audio_std(0).expect("bind audio socket");

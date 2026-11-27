@@ -10,7 +10,7 @@ use tracing::{info, warn};
 
 /// Every mesh scenario needs a cluster of hosts running real jamuru processes.
 /// Until one exists, they report NotImplemented instead of a fabricated
-/// measurement (ADR-018).
+/// measurement.
 const MISSING_CLUSTER: &str =
     "needs a cluster of hosts running one jamuru process per node; not set up yet";
 

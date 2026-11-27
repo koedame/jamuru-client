@@ -51,13 +51,11 @@ beforeEach(() => {
 });
 
 describe('settingsTabFromHash', () => {
-  // Verifies: REQ-MNU-007
   it('アドレスがタブを名指ししているとき、そのタブを返すこと', () => {
     expect(settingsTabFromHash('#/settings/about')).toBe('about');
     expect(settingsTabFromHash('#/settings/diagnostics')).toBe('diagnostics');
   });
 
-  // Verifies: REQ-MNU-007
   it('タブを名指ししていないか、知らない名前のとき、null を返すこと', () => {
     expect(settingsTabFromHash('#/settings')).toBeNull();
     expect(settingsTabFromHash('#settings')).toBeNull();
@@ -66,7 +64,6 @@ describe('settingsTabFromHash', () => {
 });
 
 describe('SettingsScreen のタブの選び方', () => {
-  // Verifies: REQ-MNU-007
   it('アドレスが「アプリについて」を名指ししているとき、そのタブで開くこと', async () => {
     window.location.hash = '#/settings/about';
 
@@ -75,7 +72,6 @@ describe('SettingsScreen のタブの選び方', () => {
     expect(await screen.findByTestId('settings-legal-terms')).toBeInTheDocument();
   });
 
-  // Verifies: REQ-MNU-007
   it('開いているときにアプリからタブを替えるよう伝えられたとき、そのタブに替わること', async () => {
     window.location.hash = '#/settings';
     render(<SettingsScreen />);
@@ -87,7 +83,6 @@ describe('SettingsScreen のタブの選び方', () => {
     expect(await screen.findByTestId('settings-legal-terms')).toBeInTheDocument();
   });
 
-  // Verifies: REQ-MNU-007
   it('知らないタブの名前を伝えられたとき、今のタブのままであること', async () => {
     window.location.hash = '#/settings';
     render(<SettingsScreen />);
@@ -100,26 +95,22 @@ describe('SettingsScreen のタブの選び方', () => {
 });
 
 describe('settingsChecksUpdateFromHash', () => {
-  // Verifies: REQ-MNU-010
   it('アドレスが更新の確認を求めているとき、true を返すこと', () => {
     expect(settingsChecksUpdateFromHash('#/settings/about/check-update')).toBe(true);
   });
 
-  // Verifies: REQ-MNU-010
   it('アドレスが更新の確認を求めていないとき、false を返すこと', () => {
     expect(settingsChecksUpdateFromHash('#/settings/about')).toBe(false);
     expect(settingsChecksUpdateFromHash('#/settings')).toBe(false);
     expect(settingsChecksUpdateFromHash('#/settings/about/other')).toBe(false);
   });
 
-  // Verifies: REQ-MNU-010
   it('更新の確認を求めるアドレスでも、タブは「アプリについて」と読めること', () => {
     expect(settingsTabFromHash('#/settings/about/check-update')).toBe('about');
   });
 });
 
 describe('SettingsScreen の更新の確認', () => {
-  // Verifies: REQ-MNU-010
   it('アドレスが更新の確認を求めているとき、開いてすぐ確認して結果を出すこと', async () => {
     window.location.hash = '#/settings/about/check-update';
 
@@ -129,7 +120,6 @@ describe('SettingsScreen の更新の確認', () => {
     expect(invoke.mock.calls.map((call) => call[0])).toContain('update_check');
   });
 
-  // Verifies: REQ-MNU-010
   it('アドレスが更新の確認を求めていないとき、開いただけでは確認しないこと', async () => {
     window.location.hash = '#/settings/about';
 
@@ -139,7 +129,6 @@ describe('SettingsScreen の更新の確認', () => {
     expect(invoke.mock.calls.map((call) => call[0])).not.toContain('update_check');
   });
 
-  // Verifies: REQ-MNU-010
   it('開いているときにアプリから更新の確認を伝えられたとき、確認して結果を出すこと', async () => {
     window.location.hash = '#/settings/about';
     render(<SettingsScreen />);

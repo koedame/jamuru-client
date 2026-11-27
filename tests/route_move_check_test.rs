@@ -79,7 +79,6 @@ async fn pair_behind_a_relay() -> (Connection, Connection, Path) {
     )
 }
 
-/// Verifies: REQ-CON-175
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn when_the_peers_sealed_packets_are_sent_again_from_another_address_the_route_stays_where_it_is(
 ) {

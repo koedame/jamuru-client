@@ -14,7 +14,6 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('ConnectionPanel connection check link', () => {
-  // Verifies: REQ-GUI-037
   it('the person presses the link, the check is asked for', () => {
     const onCheckConnection = vi.fn();
     render(<ConnectionPanel onCheckConnection={onCheckConnection} />);
@@ -24,7 +23,6 @@ describe('ConnectionPanel connection check link', () => {
     expect(onCheckConnection).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-GUI-037
   it('no handler is given, the link is not shown', () => {
     render(<ConnectionPanel />);
 

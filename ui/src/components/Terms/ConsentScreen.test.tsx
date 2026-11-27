@@ -12,7 +12,6 @@ describe('the consent screen', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-TRM-001
   it('it is shown, the terms and the line saying other people can see the IP address are on screen', () => {
     render(<ConsentScreen text={TEXT} onAccept={() => {}} />);
 
@@ -22,14 +21,12 @@ describe('the consent screen', () => {
     );
   });
 
-  // Verifies: REQ-TRM-001
   it('neither box is checked, the button cannot be pressed', () => {
     render(<ConsentScreen text={TEXT} onAccept={() => {}} />);
 
     expect(screen.getByTestId('consent-start')).toBeDisabled();
   });
 
-  // Verifies: REQ-TRM-001
   it('only one of the two boxes is checked, the button cannot be pressed', () => {
     const onAccept = vi.fn();
     render(<ConsentScreen text={TEXT} onAccept={onAccept} />);
@@ -44,7 +41,6 @@ describe('the consent screen', () => {
     expect(onAccept).not.toHaveBeenCalled();
   });
 
-  // Verifies: REQ-TRM-001
   it('both boxes are checked, the button agrees once', () => {
     const onAccept = vi.fn();
     render(<ConsentScreen text={TEXT} onAccept={onAccept} />);
@@ -72,7 +68,6 @@ describe('the consent screen', () => {
     expect(screen.getByText('同意して始める')).toBeInTheDocument();
   });
 
-  // Verifies: REQ-TRM-006
   it('the screen is shown in English, a line says the terms are in Japanese only and for users in Japan', () => {
     render(<ConsentScreen text={TEXT} onAccept={() => {}} />);
 
@@ -82,7 +77,6 @@ describe('the consent screen', () => {
     expect(screen.getByTestId('consent-japanese-only-notice')).toHaveTextContent('users in Japan');
   });
 
-  // Verifies: REQ-TRM-006
   it('the screen is shown in Japanese, the line about Japanese-only terms is not shown', async () => {
     await i18n.changeLanguage('ja');
     render(<ConsentScreen text={TEXT} onAccept={() => {}} />);

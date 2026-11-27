@@ -57,8 +57,6 @@ describe("buildElementReport", () => {
   // Given a button the person pointed at, in a panel that is muted
   // When the report is built
   // Then it names the element, its state, and where to find the code
-  //
-  // Verifies: REQ-RMT-033
   it("names the element, its state and the source hints, when the element is a button in a muted panel", () => {
     const { getByTestId } = render(<Panel muted name="Bob" />);
 
@@ -78,8 +76,6 @@ describe("buildElementReport", () => {
   // Given the same panel in another state
   // When the report is built
   // Then it reports that state, not a fixed one
-  //
-  // Verifies: REQ-RMT-033
   it("reports the state the element is in now, when the panel is live", () => {
     const { getByTestId } = render(<Panel muted={false} name="Bob" />);
 
@@ -93,8 +89,6 @@ describe("buildElementReport", () => {
   // Given a text field and a password field
   // When the report is built for each
   // Then the text is in the report and the password is not
-  //
-  // Verifies: REQ-RMT-033
   it("leaves a password out, when the element is a password field", () => {
     const { getByLabelText } = render(<Panel muted={false} name="Bob" />);
 
@@ -107,8 +101,6 @@ describe("buildElementReport", () => {
   // Given the window someone helping works in
   // When the report is built
   // Then it says so, because the same component is drawn there from another app's state
-  //
-  // Verifies: REQ-RMT-033
   it("says the screen is the help window, when the hash is the help hash", () => {
     window.location.hash = "#/help";
     document.title = "Helping";
@@ -123,8 +115,6 @@ describe("buildElementReport", () => {
   // Given an element with a very long text
   // When the report is built
   // Then the text and the html are cut, so one node cannot flood the clipboard
-  //
-  // Verifies: REQ-RMT-033
   it("cuts a long text and html, when the element holds thousands of characters", () => {
     const { container } = render(<p>{"x".repeat(5000)}</p>);
 
@@ -139,8 +129,6 @@ describe("cssPath", () => {
   // Given an element inside a part with a test id
   // When its selector is built
   // Then it starts from the test id and counts same-named siblings
-  //
-  // Verifies: REQ-RMT-033
   it("starts from the nearest data-testid and numbers same-tag siblings, when the element is the second input", () => {
     const { getAllByRole } = render(<Panel muted={false} name="Bob" />);
 
@@ -153,8 +141,6 @@ describe("buildElementReport of a part holding a password field", () => {
   // Given a panel that contains a password field
   // When the report is built for the panel
   // Then the html in it does not carry the password
-  //
-  // Verifies: REQ-RMT-033
   it("leaves the password out of the html, when the element contains a password field", () => {
     const { getByTestId } = render(<Panel muted={false} name="Bob" />);
 
@@ -166,8 +152,6 @@ describe("buildElementReport of the app and its settings", () => {
   // Given what the backend says about the app, its audio settings and the session
   // When the report is built
   // Then the version, platform, devices, buffer and room state are in it, and no device id is
-  //
-  // Verifies: REQ-RMT-033
   it("names the version, platform, devices, audio settings and room state, when the backend answered", () => {
     const { getByTestId } = render(<Panel muted={false} name="Bob" />);
 
@@ -193,8 +177,6 @@ describe("buildElementReport of the app and its settings", () => {
   // Given a window that could not read the backend
   // When the report is built
   // Then it says each part is unavailable instead of leaving it out silently
-  //
-  // Verifies: REQ-RMT-033
   it("says the parts are unavailable, when the backend could not be read", () => {
     const { getByTestId } = render(<Panel muted={false} name="Bob" />);
 
@@ -208,8 +190,6 @@ describe("buildElementReport of the app and its settings", () => {
   // Given the default devices and a session without a room
   // When the report is built
   // Then the default is named as the system default and no participants are counted
-  //
-  // Verifies: REQ-RMT-033
   it("names the system default device and no room, when nothing is chosen and no room is joined", () => {
     const { getByTestId } = render(<Panel muted={false} name="Bob" />);
 

@@ -1,5 +1,3 @@
-//! Connection tests based on docs-spec/behavior/connection.feature
-//!
 //! Tests for session connection functionality.
 
 mod common;
@@ -54,8 +52,6 @@ async fn test_connection_initial_state() {
 /// The OS-level registration that hands the URL to the app is platform plumbing;
 /// what this covers is that a link the app produced round-trips, and that a link
 /// it did not produce is rejected rather than guessed at.
-///
-/// Verifies: REQ-CON-103
 #[test]
 fn test_invite_url_round_trips() {
     use jamjam::network::{invite_url, parse_invite_url, InviteCode};
@@ -109,7 +105,7 @@ fn test_invite_url_round_trips() {
 }
 
 // ---------------------------------------------------------------------------
-// Reconnection (ADR-022)
+// Reconnection
 // ---------------------------------------------------------------------------
 
 /// Poll until the connection reports `wanted`, or `within` has passed
@@ -134,8 +130,6 @@ async fn wait_for_state(
 ///
 /// Thresholds are scaled down so the test does not sleep for seconds; the
 /// behaviour under test is the transition, not the wall-clock values.
-///
-/// Verifies: REQ-CON-109
 #[tokio::test]
 async fn test_short_outage_recovers_without_asking_the_user() {
     use jamjam::network::{ConnectionState, ReconnectConfig};
@@ -214,8 +208,6 @@ async fn test_short_outage_recovers_without_asking_the_user() {
 /// When the network drops for 10 seconds
 /// Then automatic recovery gives up so the user can be asked, and choosing to
 /// retry starts a full attempt again
-///
-/// Verifies: REQ-CON-110
 #[tokio::test]
 async fn test_long_outage_hands_the_decision_to_the_user() {
     use jamjam::network::{ConnectionState, ReconnectConfig};
@@ -384,8 +376,6 @@ async fn audio_flows(
 /// Given the user is in a session
 /// When the link goes down for longer than automatic recovery waits, and comes back
 /// Then the audio flows again without the user doing anything
-///
-/// Verifies: REQ-CON-110
 #[tokio::test]
 async fn when_the_link_returns_after_recovery_gave_up_audio_flows_again_by_itself() {
     use jamjam::network::ConnectionState;
@@ -435,8 +425,6 @@ async fn when_the_link_returns_after_recovery_gave_up_audio_flows_again_by_itsel
 /// When the user chooses to reconnect
 /// Then the connection is tried again: it gives up only after a full attempt that fails, and
 /// the audio flows once the link is back
-///
-/// Verifies: REQ-CON-110
 #[tokio::test]
 async fn when_the_user_reconnects_after_recovery_gave_up_audio_flows_once_the_link_is_back() {
     use jamjam::network::ConnectionState;
@@ -479,9 +467,7 @@ async fn when_the_user_reconnects_after_recovery_gave_up_audio_flows_once_the_li
 /// audio sequence, not be a constant.
 ///
 /// It was hardcoded to 0.0, which meant the quality classification that reads it
-/// (REQ-LAT-121) could never report loss - only high RTT.
-///
-/// Verifies: REQ-CON-023
+/// could never report loss - only high RTT.
 #[tokio::test]
 async fn test_packet_loss_is_measured_not_assumed() {
     use jamjam::network::ConnectionQuality;
@@ -560,8 +546,6 @@ async fn test_packet_loss_is_measured_not_assumed() {
 /// on connect and the latency info sent after it left holes in the audio
 /// numbering, the sender's FEC groups drifted from the receiver's, and a
 /// "recovered" frame was the XOR of unrelated frames: a burst of noise.
-///
-/// Verifies: REQ-AUD-026
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fec_groups_line_up_with_audio_sequences_across_control_packets() {
     use jamjam::audio::CodecType;
@@ -743,8 +727,6 @@ async fn send_frames_through_a_relay_that_drops_one(
 
 /// When a frame is lost on the way and FEC rebuilds it, the receiver counts
 /// it, and the frame reaches the audio callback once, under its own number.
-///
-/// Verifies: REQ-TEL-010
 #[tokio::test]
 async fn when_fec_rebuilds_a_lost_frame_the_connection_counts_it() {
     let (sequences, stats) = send_frames_through_a_relay_that_drops_one(Some(4), 8, Some(2)).await;
@@ -753,7 +735,6 @@ async fn when_fec_rebuilds_a_lost_frame_the_connection_counts_it() {
     assert_eq!(sequences.iter().filter(|&&s| s == 2).count(), 1);
 }
 
-/// Verifies: REQ-TEL-010
 #[tokio::test]
 async fn when_nothing_is_lost_the_connection_counts_no_fec_recovery() {
     let (_, stats) = send_frames_through_a_relay_that_drops_one(Some(4), 8, None).await;
@@ -761,7 +742,6 @@ async fn when_nothing_is_lost_the_connection_counts_no_fec_recovery() {
     assert_eq!(stats.fec_recovered, Some(0));
 }
 
-/// Verifies: REQ-TEL-010
 #[tokio::test]
 async fn when_the_link_sends_no_fec_the_connection_has_no_recovery_count() {
     let (sequences, stats) = send_frames_through_a_relay_that_drops_one(None, 8, Some(2)).await;
@@ -770,7 +750,6 @@ async fn when_the_link_sends_no_fec_the_connection_has_no_recovery_count() {
     assert!(!sequences.contains(&2), "nothing rebuilds the lost frame");
 }
 
-/// Verifies: REQ-CON-144
 #[tokio::test]
 async fn when_a_peer_publishes_many_candidates_only_the_first_ones_are_sent_to() {
     use jamjam::network::MAX_PEER_CANDIDATES;
@@ -821,7 +800,6 @@ const QUICK_KEEP_ALIVES: jamjam::network::ReconnectConfig = jamjam::network::Rec
     check_interval: std::time::Duration::from_millis(50),
 };
 
-/// Verifies: REQ-CON-173
 #[tokio::test]
 async fn when_the_peer_is_not_heard_both_ends_go_quiet_and_then_send_to_every_address_again() {
     use jamjam::network::PunchSchedule;
@@ -881,7 +859,6 @@ async fn when_the_peer_is_not_heard_both_ends_go_quiet_and_then_send_to_every_ad
     assert!(tries >= 1, "the sending started over {tries} times");
 }
 
-/// Verifies: REQ-CON-173
 #[tokio::test]
 async fn when_the_peer_is_heard_the_sending_does_not_go_quiet() {
     use jamjam::network::PunchSchedule;

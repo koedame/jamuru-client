@@ -80,7 +80,6 @@ describe('「アプリについて」タブのアップデート', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-UPD-022
   it('タブを開いたとき、実行中の版を出し、確認はまだしないこと', async () => {
     const calls = await showUpdate();
 
@@ -89,7 +88,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(calls).not.toContain('update_check');
   });
 
-  // Verifies: REQ-UPD-022
   it('最新の版のとき、確認すると「最新の版」と出て、入れるボタンは出ないこと', async () => {
     await showUpdate();
 
@@ -99,7 +97,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(screen.queryByTestId('settings-update-install')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-UPD-022
   it('確認しているあいだ、確認のボタンを押せないこと', async () => {
     await showUpdate({ checked: new Promise(() => {}) });
 
@@ -109,7 +106,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(screen.getByTestId('settings-update-check')).toBeDisabled();
   });
 
-  // Verifies: REQ-UPD-022
   it('開発用などで更新を確認しないビルドのとき、そう出し、ボタンを出さないこと', async () => {
     await showUpdate({ support: 'none' });
 
@@ -119,7 +115,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(screen.queryByTestId('settings-update-check')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-UPD-022
   it('確認が失敗したとき、理由を出し、もう一度確認できること', async () => {
     const calls = await showUpdate();
     invoke.mockImplementationOnce(async () => {
@@ -133,7 +128,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(calls).toContain('update_status');
   });
 
-  // Verifies: REQ-UPD-023
   it('自分で入れ替えられるビルドで新しい版が見つかったとき、版を出し、入れるボタンを出すこと', async () => {
     await showUpdate({ checked: available });
 
@@ -144,7 +138,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(screen.getByTestId('settings-update-install')).toBeEnabled();
   });
 
-  // Verifies: REQ-UPD-023
   it('入れるボタンを押したとき、アプリに入れるよう頼み、入れているあいだ押せないこと', async () => {
     const calls = await showUpdate({ checked: available });
     fireEvent.click(screen.getByTestId('settings-update-check'));
@@ -156,7 +149,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(screen.getByTestId('settings-update-check')).toBeDisabled();
   });
 
-  // Verifies: REQ-UPD-023
   it('自分で入れ替えられない配布形態のとき、入れ直すよう出し、入れるボタンは出さないこと', async () => {
     await showUpdate({ support: 'notice', checked: available });
 
@@ -168,7 +160,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(screen.queryByTestId('settings-update-install')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-UPD-024
   it('ルームの中のとき、入れるボタンを押せず、退室してからと伝えること', async () => {
     const calls = await showUpdate({ checked: available, inSession: true });
     await waitFor(() => expect(calls).toContain('window_is_in_session'));
@@ -178,7 +169,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(screen.getByTestId('settings-update-install')).toBeDisabled();
   });
 
-  // Verifies: REQ-UPD-024
   it('ルームに入ったとき、押せなくなり、出たとき、また押せること', async () => {
     await showUpdate({ checked: available });
     fireEvent.click(screen.getByTestId('settings-update-check'));
@@ -192,7 +182,6 @@ describe('「アプリについて」タブのアップデート', () => {
     await waitFor(() => expect(install).toBeEnabled());
   });
 
-  // Verifies: REQ-UPD-024
   it('入れようとしたときアプリがセッション中だと断ったとき、押せなくなり、断られた理由を伝えること', async () => {
     await showUpdate({ checked: available, installed: { kind: 'in_session' } });
     fireEvent.click(screen.getByTestId('settings-update-check'));
@@ -202,7 +191,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(screen.getByTestId('settings-update-install')).toBeDisabled();
   });
 
-  // Verifies: REQ-UPD-023
   it('別の更新が進んでいるとアプリが答えたとき、しばらくしてからと伝えること', async () => {
     await showUpdate({ checked: available, installed: { kind: 'busy' } });
     fireEvent.click(screen.getByTestId('settings-update-check'));
@@ -211,7 +199,6 @@ describe('「アプリについて」タブのアップデート', () => {
     expect(await screen.findByText(/Another update is in progress/)).toBeInTheDocument();
   });
 
-  // Verifies: REQ-UPD-023
   it('日本語のとき、版とボタンを日本語で出すこと', async () => {
     await i18n.changeLanguage('ja');
     await showUpdate({ checked: available });

@@ -1,4 +1,4 @@
-//! Whose line broke, as every participant of a room works it out together (REQ-CON-163, ADR-112)
+//! Whose line broke, as every participant of a room works it out together
 //!
 //! Several apps run the decision against audio links that stop hearing each other as a scenario
 //! says, with the messages between them (what each hears, the server's answer to who is in the
@@ -167,7 +167,6 @@ fn side(apps: &[App], of: usize, about: usize) -> Option<Side> {
 /// Given A, B and C hearing each other
 /// When A's own line goes down, so that A hears neither B nor C
 /// Then A takes it for its own line, and B and C each take A's line for the one that broke
-/// Verifies: REQ-CON-163
 #[test]
 fn when_a_participants_own_line_is_cut_in_a_room_of_three_they_see_it_is_their_own_line_and_the_others_see_theirs(
 ) {
@@ -197,7 +196,6 @@ fn when_a_participants_own_line_is_cut_in_a_room_of_three_they_see_it_is_their_o
 /// Given A, B and C hearing each other
 /// When C's line goes down
 /// Then A and B each take C's line for the one that broke, and C takes its own
-/// Verifies: REQ-CON-163
 #[test]
 fn when_one_of_three_has_their_line_cut_the_other_two_see_their_line_and_they_see_their_own() {
     let apps = run(
@@ -226,7 +224,6 @@ fn when_one_of_three_has_their_line_cut_the_other_two_see_their_line_and_they_se
 /// Given A, B and C hearing each other, every line up
 /// When the audio between A and B stops, and C still hears both
 /// Then A and B each see that it is the path between the two, and C sees nothing
-/// Verifies: REQ-CON-163
 #[test]
 fn when_the_path_between_two_of_three_is_cut_the_two_see_the_path_between_them_broke() {
     let apps = run(
@@ -253,8 +250,6 @@ fn when_the_path_between_two_of_three_is_cut_the_two_see_the_path_between_them_b
 /// Given A and B hearing each other, and both pinging the server
 /// When B's line goes down, so that B stops pinging the server
 /// Then A, with nobody else to ask, takes B's line for the one that broke
-/// Verifies: REQ-CON-163
-/// Verifies: REQ-CON-164
 #[test]
 fn when_in_a_room_of_two_the_other_ones_line_is_cut_the_server_not_hearing_them_says_it_is_their_line(
 ) {
@@ -275,8 +270,6 @@ fn when_in_a_room_of_two_the_other_ones_line_is_cut_the_server_not_hearing_them_
 /// Given A and B hearing each other, and both pinging the server
 /// When the audio between them stops while both lines stay up
 /// Then both take it for the path between them, because the server still hears the other
-/// Verifies: REQ-CON-163
-/// Verifies: REQ-CON-164
 #[test]
 fn when_in_a_room_of_two_the_path_between_them_is_cut_the_server_still_hearing_them_says_it_is_the_path(
 ) {

@@ -1,8 +1,7 @@
 //! Metric liveness checks
 //!
-//! The traceability checks (ADR-018) catch a *test* that asserts nothing. They
-//! cannot catch a *product* value that looks measured but is a constant, and two
-//! of those shipped:
+//! A *test* that asserts nothing is easy to spot. A *product* value that looks
+//! measured but is a constant is not, and two of those shipped:
 //!
 //! | Field | Was | Effect |
 //! |-------|-----|--------|
@@ -15,7 +14,7 @@
 //!
 //! Each test below applies a stimulus and asserts the metric responds. Adding a
 //! field to one of these structs without adding it here leaves the same hole
-//! open, so `.claude/rules/traceability.md` requires it.
+//! open, so every new field gets a test here.
 
 mod common;
 
@@ -29,9 +28,6 @@ use jamjam::network::{
 use jamjam::protocol::Packet;
 
 /// Every field of `ConnectionStats` that describes traffic must respond to traffic.
-///
-/// Verifies: REQ-NET-026
-/// Verifies: REQ-AUD-045
 #[tokio::test]
 async fn connection_stats_respond_to_traffic() {
     let mut receiver = Connection::new("127.0.0.1:0")
@@ -118,7 +114,7 @@ async fn connection_stats_respond_to_traffic() {
     );
 
     // The derived classification must move with the figures it reads. No RTT
-    // ping has fired within this test's short window (REQ-LAT-130), so go
+    // ping has fired within this test's short window, so go
     // through the classifier directly rather than `quality()`, which stays
     // `None` until the first sample arrives.
     assert_ne!(
@@ -133,8 +129,6 @@ async fn connection_stats_respond_to_traffic() {
 /// `LocalLatencyInfo::from_audio_config` cannot know the jitter buffer depth, so
 /// the caller has to supply it. When nobody did, the breakdown under-reported
 /// downstream latency by the whole buffer.
-///
-/// Verifies: REQ-NET-027
 #[test]
 fn latency_breakdown_includes_the_jitter_buffer() {
     let preset = AudioPreset::HighQuality;
@@ -176,8 +170,6 @@ fn latency_breakdown_includes_the_jitter_buffer() {
 
 /// The bandwidth estimator must report the rate it observes, not a constant,
 /// and its verdict must follow what the link drops.
-///
-/// Verifies: REQ-NET-028
 #[test]
 fn bandwidth_estimate_responds_to_throughput() {
     use std::time::Instant;

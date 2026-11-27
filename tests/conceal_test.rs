@@ -1,4 +1,4 @@
-//! Filling the gaps FEC could not repair with sound that continues what was heard (ADR-105).
+//! Filling the gaps FEC could not repair with sound that continues what was heard.
 //!
 //! The sounds are made from formulas here, so there is no recording to license. How much better
 //! the fill is than the old repeat-and-fade, across kinds of sound, is measured in
@@ -44,8 +44,6 @@ fn heard(concealer: &mut Concealer, sound: &[f32]) {
 
 /// Where a frame is missing and the one after it is here, the fill is closer to the lost sound
 /// than the old repeat-and-fade is, for notes of different pitch.
-///
-/// Verifies: REQ-AUD-070
 #[test]
 fn a_lost_frame_with_a_later_one_held_is_filled_closer_than_the_old_repeat() {
     for hz in [110.0, 196.0, 330.0, 523.0] {
@@ -81,8 +79,6 @@ fn a_lost_frame_with_a_later_one_held_is_filled_closer_than_the_old_repeat() {
 
 /// A fill is the length of the gap, finite, and never louder than the sound around it, even on
 /// noise that nothing can be predicted from.
-///
-/// Verifies: REQ-AUD-070
 #[test]
 fn a_fill_is_never_louder_than_the_sound_around_the_gap() {
     let mut seed = 12345u64;
@@ -114,8 +110,6 @@ fn a_fill_is_never_louder_than_the_sound_around_the_gap() {
 
 /// With nothing heard yet, or after a reset, there is nothing to continue and the caller is told
 /// so (it falls back to the old way).
-///
-/// Verifies: REQ-AUD-070
 #[test]
 fn a_gap_is_not_filled_without_a_past_to_continue() {
     let sound = note(220.0, 0, 70);
@@ -130,8 +124,6 @@ fn a_gap_is_not_filled_without_a_past_to_continue() {
 
 /// When nothing later has arrived either, the sound is predicted from the past: close to what
 /// was lost on a held note, and gone within the length cap (130 ms), never a drone.
-///
-/// Verifies: REQ-AUD-071
 #[test]
 fn a_held_note_is_predicted_from_its_past_and_fades_out_within_the_cap() {
     let sound = note(196.0, 0, 200);
@@ -166,8 +158,6 @@ fn a_held_note_is_predicted_from_its_past_and_fades_out_within_the_cap() {
 
 /// A prediction starts where the sound was heading: no step at the join with what was played,
 /// and none where the real sound returns.
-///
-/// Verifies: REQ-AUD-041, REQ-AUD-071
 #[test]
 fn a_prediction_joins_the_sound_on_both_sides_without_a_step() {
     let sound = note(262.0, 0, 120);
@@ -243,8 +233,6 @@ fn play(
 /// Filling does not change when anything plays: the same reads give the same results in the
 /// same order and the same length, filled or not. The buffer is not made longer to wait for a
 /// frame that follows a gap.
-///
-/// Verifies: REQ-AUD-072
 #[test]
 fn filling_gaps_changes_neither_the_timing_nor_the_length_of_the_reads() {
     let sound = note(220.0, 0, 150);
@@ -266,8 +254,6 @@ fn filling_gaps_changes_neither_the_timing_nor_the_length_of_the_reads() {
 }
 
 /// A frame that is played is left exactly as it arrived, where no gap came before it.
-///
-/// Verifies: REQ-AUD-072
 #[test]
 fn frames_with_no_gap_before_them_play_bit_for_bit() {
     let sound = note(330.0, 0, 120);
@@ -286,8 +272,6 @@ fn frames_with_no_gap_before_them_play_bit_for_bit() {
 
 /// A stall of the link, when nothing at all has arrived, is answered with silence as before
 /// unless prediction is asked for; asked for, it is answered with sound that fades out.
-///
-/// Verifies: REQ-AUD-071
 #[test]
 fn a_stall_is_silent_unless_prediction_is_switched_on() {
     let sound = note(220.0, 0, 150);

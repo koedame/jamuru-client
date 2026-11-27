@@ -1,5 +1,5 @@
 /**
- * Helping with settings in the main window (ADR-044 §5): asking someone for
+ * Helping with settings in the main window: asking someone for
  * help, the question the helper answers, the bars that say a help is going on,
  * and stopping. The app's side (what is sent, when the help ends) is
  * `src-tauri/src/settings_help.rs`; what the helper does is in their own window
@@ -101,7 +101,6 @@ beforeEach(async () => {
 });
 
 describe("asking for help", () => {
-  // Verifies: REQ-RMT-001
   it("the person opens the ask, it says what it means in a few lines and nothing is sent yet", () => {
     mount([AKI]);
 
@@ -114,7 +113,6 @@ describe("asking for help", () => {
     expect(calls).toEqual([]);
   });
 
-  // Verifies: REQ-RMT-007
   it("choosing who to ask lists the participants whose app takes peer messages, and not the others", () => {
     mount([AKI, peer("old-id", "Old app", [])]);
 
@@ -125,7 +123,6 @@ describe("asking for help", () => {
     expect(screen.queryByRole("radio", { name: "Old app" })).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-007
   it("no one in the room can be asked, the dialog says so and cannot send", () => {
     mount([peer("old-id", "Old app", [])]);
 
@@ -137,7 +134,6 @@ describe("asking for help", () => {
     expect(calls).toEqual([]);
   });
 
-  // Verifies: REQ-RMT-001
   it("the person picks someone and asks, the ask goes to that person and the bar says they are waiting", async () => {
     mount([AKI, BO]);
 
@@ -168,7 +164,6 @@ describe("asking for help", () => {
     expect(calls).toEqual([]);
   });
 
-  // Verifies: REQ-RMT-005
   it("while this app waits for an answer, it cannot ask again", async () => {
     mount([AKI, BO]);
     await askFor("Aki");
@@ -176,7 +171,6 @@ describe("asking for help", () => {
     expect(screen.queryByRole("button", { name: "ask for help" })).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-003
   it("the person withdraws the ask, it is stopped and they can ask again", async () => {
     mount([AKI]);
     await askFor("Aki");
@@ -187,7 +181,6 @@ describe("asking for help", () => {
     expect(screen.getByRole("button", { name: "ask for help" })).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-001
   it("the other person says not now, the wait ends and says so", async () => {
     const { send } = mount([AKI]);
     await askFor("Aki");
@@ -198,7 +191,6 @@ describe("asking for help", () => {
     expect(screen.getByRole("button", { name: "ask for help" })).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-005
   it("the other person is already helping someone, the wait ends and says so", async () => {
     const { send } = mount([AKI]);
     await askFor("Aki");
@@ -208,7 +200,6 @@ describe("asking for help", () => {
     expect(screen.getByText(fill(en.settingsHelp.ask.busy, { name: "Aki" }))).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-001
   it("the other person says yes, the help is started from here without asking again", async () => {
     const { send } = mount([AKI]);
     await askFor("Aki");
@@ -221,7 +212,6 @@ describe("asking for help", () => {
     expect(screen.getByTestId("settings-help-bar")).toHaveTextContent(fill(en.settingsHelp.helped.bar, { name: "Aki" }));
   });
 
-  // Verifies: REQ-RMT-001
   it("the help cannot be started here, the wait is not left up and it says so", async () => {
     invoke.mockImplementation(async (command: string, args?: unknown) => {
       calls.push({ command, args });
@@ -239,7 +229,6 @@ describe("asking for help", () => {
     expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-003
   it("no one answers in time, the ask is let go and says so", async () => {
     vi.useFakeTimers();
     try {
@@ -266,7 +255,6 @@ describe("asking for help", () => {
 });
 
 describe("being asked", () => {
-  // Verifies: REQ-RMT-001
   it("someone asks for help, the question names them and helping answers yes to that person", async () => {
     const { send } = mount([AKI]);
 
@@ -283,7 +271,6 @@ describe("being asked", () => {
     });
   });
 
-  // Verifies: REQ-RMT-001
   it("someone asks for help and the user says not now, the answer is no and the question closes", () => {
     const { send } = mount([AKI]);
 
@@ -297,7 +284,6 @@ describe("being asked", () => {
     expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-001
   it("helping closes the question at once and asks nothing again", async () => {
     const { send } = mount([AKI]);
     send({ type: "asked", peer: "aki-id", peer_name: "Aki" });
@@ -311,7 +297,6 @@ describe("being asked", () => {
     expect(calls.filter((c) => c.command === "settings_help_answer")).toHaveLength(1);
   });
 
-  // Verifies: REQ-RMT-001
   it("answering yes fails, the question is not left waiting for a help that will not begin", async () => {
     invoke.mockImplementation(async (command: string, args?: unknown) => {
       calls.push({ command, args });
@@ -329,7 +314,6 @@ describe("being asked", () => {
     expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-002
   it("a question that has just appeared does not take a click on yes, so a double click answers only the first", () => {
     const { send } = mount([AKI]);
     send({ type: "asked", peer: "aki-id", peer_name: "Aki" });
@@ -340,7 +324,6 @@ describe("being asked", () => {
     expect(screen.getByTestId("settings-help-allow")).toHaveAttribute("aria-disabled", "true");
   });
 
-  // Verifies: REQ-RMT-003
   it("an ask and its withdrawal arrive in the same poll, no question is left up and it says so", () => {
     const { sendAll } = mount([AKI]);
 
@@ -353,7 +336,6 @@ describe("being asked", () => {
     expect(screen.getByText(fill(en.settingsHelp.ask.withdrawn, { name: "Aki" }))).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-002
   it("the same person withdraws and asks again in one poll, the new question holds yes back again", async () => {
     const { send, sendAll } = mount([AKI]);
     send({ type: "asked", peer: "aki-id", peer_name: "Aki" });
@@ -381,7 +363,6 @@ describe("being asked", () => {
     before.remove();
   });
 
-  // Verifies: REQ-RMT-003
   it("while helped, the bar says who helps and Stop ends it", async () => {
     const { send } = mount([AKI]);
     await askFor("Aki");
@@ -394,7 +375,6 @@ describe("being asked", () => {
     expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-003
   it("the helper leaves the room, the bar goes and says so", () => {
     const { send } = mount([AKI]);
     send({ type: "started", role: "helped", peer: "aki-id", peer_name: "Aki" });
@@ -407,7 +387,6 @@ describe("being asked", () => {
 });
 
 describe("helping", () => {
-  // Verifies: REQ-RMT-003
   it("the help starts, the bar says who is helped and Stop ends it", () => {
     const { send } = mount([AKI]);
     send({ type: "asked", peer: "aki-id", peer_name: "Aki" });
@@ -419,7 +398,6 @@ describe("helping", () => {
     expect(screen.queryByTestId("settings-help-bar")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-003
   it("the other person stops the help, the bar goes and says so", () => {
     const { send } = mount([AKI]);
     send({ type: "started", role: "helper", peer: "aki-id", peer_name: "Aki" });
@@ -430,7 +408,6 @@ describe("helping", () => {
     expect(screen.getByText(fill(en.settingsHelp.ended.stopped, { name: "Aki" }))).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-003
   it("helping one person while another helps this app, the end of one leaves the other", () => {
     const { send } = mount([AKI, BO]);
     send({ type: "started", role: "helper", peer: "aki-id", peer_name: "Aki" });
@@ -442,7 +419,6 @@ describe("helping", () => {
     expect(screen.queryByTestId("settings-help-stop-helper")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-003
   it("an end about someone else leaves the help with the person helped now", () => {
     const { send } = mount([AKI, BO]);
     send({ type: "started", role: "helper", peer: "aki-id", peer_name: "Aki" });
@@ -454,7 +430,6 @@ describe("helping", () => {
     expect(screen.getByTestId("settings-help-bar")).toHaveTextContent(fill(en.settingsHelp.helper.bar, { name: "Bo" }));
   });
 
-  // Verifies: REQ-RMT-003
   it("the person helped leaves, the notice names them though they are gone from the list", () => {
     let people = [AKI];
     const { send, rerender } = mountWith(() => people);
@@ -467,7 +442,6 @@ describe("helping", () => {
     expect(screen.getByText(fill(en.settingsHelp.ended.left, { name: "Aki" }))).toBeInTheDocument();
   });
 
-  // Verifies: REQ-RMT-001
   it("the other app could not start the help this app agreed to, the help is not left up and it says so", () => {
     const { send } = mount([AKI]);
     send({ type: "asked", peer: "aki-id", peer_name: "Aki" });
@@ -479,7 +453,6 @@ describe("helping", () => {
 });
 
 describe("the chat line for a change", () => {
-  // Verifies: REQ-RMT-004
   it.each([
     ["en", en],
     ["ja", ja],

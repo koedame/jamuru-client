@@ -107,7 +107,6 @@ async fn connected_pair() -> (Connection, Connection, Nat) {
     (a, b, n)
 }
 
-/// Verifies: REQ-CON-136
 #[tokio::test]
 async fn when_the_peer_is_seen_from_a_new_port_after_an_outage_both_ends_hear_each_other_again() {
     let (a, b, n) = connected_pair().await;
@@ -132,7 +131,6 @@ async fn when_the_peer_is_seen_from_a_new_port_after_an_outage_both_ends_hear_ea
     assert_eq!(b.state(), ConnectionState::Connected);
 }
 
-/// Verifies: REQ-CON-136
 #[tokio::test]
 async fn when_a_stranger_sends_from_another_address_the_connection_keeps_sending_to_the_peer() {
     let (a, _b, n) = connected_pair().await;

@@ -10,7 +10,6 @@ describe('the window a start shows while it updates the app', () => {
     await i18n.changeLanguage('ja');
   });
 
-  // Verifies: REQ-UPD-025
   it('while it checks, it says so and the app can be opened without waiting', () => {
     const onSkip = vi.fn();
     render(<StartupUpdate progress={{ phase: 'checking' }} onSkip={onSkip} />);
@@ -20,7 +19,6 @@ describe('the window a start shows while it updates the app', () => {
     expect(onSkip).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-UPD-025
   it('while it downloads a download of known size, how far it is is shown in whole percent', () => {
     render(
       <StartupUpdate
@@ -34,7 +32,6 @@ describe('the window a start shows while it updates the app', () => {
     expect(screen.getByTestId('startup-update-skip')).toBeEnabled();
   });
 
-  // Verifies: REQ-UPD-025
   it('when how big the download is is not known, no percent is made up', () => {
     render(
       <StartupUpdate
@@ -47,7 +44,6 @@ describe('the window a start shows while it updates the app', () => {
     expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
   });
 
-  // Verifies: REQ-UPD-025
   it('once it is installing or restarting, opening without waiting is no longer offered', () => {
     const { rerender } = render(<StartupUpdate progress={{ phase: 'installing' }} onSkip={() => {}} />);
     expect(screen.getByRole('status')).toHaveTextContent('新しい版を入れています');
@@ -58,14 +54,12 @@ describe('the window a start shows while it updates the app', () => {
     expect(screen.queryByTestId('startup-update-skip')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-UPD-025
   it('once the person asked to open without waiting, the button cannot be pressed again', () => {
     render(<StartupUpdate progress={{ phase: 'checking' }} onSkip={() => {}} skipping />);
 
     expect(screen.getByTestId('startup-update-skip')).toBeDisabled();
   });
 
-  // Verifies: REQ-UPD-025
   it('in English, it says the same in English', async () => {
     await i18n.changeLanguage('en');
     render(<StartupUpdate progress={{ phase: 'checking' }} onSkip={() => {}} />);

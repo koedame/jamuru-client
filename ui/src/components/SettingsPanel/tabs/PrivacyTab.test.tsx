@@ -1,5 +1,5 @@
 /**
- * PrivacyTab usage reporting (ADR-037) and previous hang (ADR-056, ADR-059) sections
+ * PrivacyTab usage reporting and previous hang sections
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -17,7 +17,6 @@ const INSTALL_LINE =
   '{"v":1,"ts":"2026-09-24T02:10:00Z","seq":1,"event":"app_start","install_id":"a91d5c0e7b3f4a68b2c1d0e9f8a7b6c5","launch_id":"7f3c"}';
 
 describe('PrivacyTab usage reporting section', () => {
-  // Verifies: REQ-TEL-011
   it('usage reporting is not on, the switch is off and nothing is previewed', () => {
     render(<PrivacyTab onUsageReportingChange={() => {}} />);
 
@@ -26,7 +25,6 @@ describe('PrivacyTab usage reporting section', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-TEL-011
   it('the user turns the switch on, the handler gets true', () => {
     const onUsageReportingChange = vi.fn();
     render(<PrivacyTab onUsageReportingChange={onUsageReportingChange} />);
@@ -36,7 +34,6 @@ describe('PrivacyTab usage reporting section', () => {
     expect(onUsageReportingChange).toHaveBeenCalledWith(true);
   });
 
-  // Verifies: REQ-TEL-011
   it('usage reporting is on, the switch is on and turning it off gives false', () => {
     const onUsageReportingChange = vi.fn();
     render(
@@ -50,14 +47,12 @@ describe('PrivacyTab usage reporting section', () => {
     expect(onUsageReportingChange).toHaveBeenCalledWith(false);
   });
 
-  // Verifies: REQ-TEL-011
   it('no handler is given, the section is not shown', () => {
     render(<PrivacyTab />);
 
     expect(screen.queryByTestId('privacy-usage')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-TEL-012
   it('the section is shown, it says what is sent, what is not, and that device names can hold a name', () => {
     render(<PrivacyTab onUsageReportingChange={() => {}} />);
 
@@ -71,7 +66,6 @@ describe('PrivacyTab usage reporting section', () => {
     expect(section).toHaveTextContent('discards the ID');
   });
 
-  // Verifies: REQ-TEL-013
   it('the user asks what is sent, the handler runs', () => {
     const onShowUsagePreview = vi.fn();
     render(
@@ -87,7 +81,6 @@ describe('PrivacyTab usage reporting section', () => {
     expect(onShowUsagePreview).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-TEL-013
   it('lines are waiting to be sent, they are shown as they are, install ID included', () => {
     render(
       <PrivacyTab
@@ -101,7 +94,6 @@ describe('PrivacyTab usage reporting section', () => {
     expect(screen.getByTestId('privacy-usage-preview')).toHaveTextContent(INSTALL_LINE);
   });
 
-  // Verifies: REQ-TEL-013
   it('usage reporting is off and the preview is empty, it says nothing is sent and there is no ID', () => {
     render(
       <PrivacyTab onUsageReportingChange={() => {}} usagePreview="" />
@@ -112,7 +104,6 @@ describe('PrivacyTab usage reporting section', () => {
     );
   });
 
-  // Verifies: REQ-TEL-013
   it('usage reporting is on and nothing is waiting, it says so', () => {
     render(
       <PrivacyTab usageReporting onUsageReportingChange={() => {}} usagePreview="" />
@@ -136,24 +127,21 @@ describe('PrivacyTab usage reporting section', () => {
   });
 });
 
-describe('PrivacyTab previous hang section (ADR-056, ADR-059)', () => {
+describe('PrivacyTab previous hang section', () => {
   const hang = { stage: 'restart' as const, stalled_ms: 9000 };
 
-  // Verifies: REQ-TEL-020
   it('nothing is rendered when there is no pending hang', () => {
     render(<PrivacyTab onSendPreviousHang={() => {}} previousHang={null} />);
 
     expect(screen.queryByTestId('privacy-previous-hang')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-TEL-020
   it('nothing is rendered when there is no handler to answer it', () => {
     render(<PrivacyTab previousHang={hang} />);
 
     expect(screen.queryByTestId('privacy-previous-hang')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-TEL-020
   it('a pending hang with no attached log describes the report as not carrying audio, chat or room content', () => {
     render(
       <PrivacyTab
@@ -169,7 +157,6 @@ describe('PrivacyTab previous hang section (ADR-056, ADR-059)', () => {
     );
   });
 
-  // Verifies: REQ-TEL-021
   it('a pending hang that attaches the log says so and names what the log can carry', () => {
     render(
       <PrivacyTab
@@ -186,7 +173,6 @@ describe('PrivacyTab previous hang section (ADR-056, ADR-059)', () => {
     expect(section).not.toHaveTextContent('nothing about your audio, chat or rooms');
   });
 
-  // Verifies: REQ-TEL-020
   it('pressing send answers with true', () => {
     const onSendPreviousHang = vi.fn();
     render(
@@ -202,7 +188,6 @@ describe('PrivacyTab previous hang section (ADR-056, ADR-059)', () => {
     expect(onSendPreviousHang).toHaveBeenCalledWith(true);
   });
 
-  // Verifies: REQ-TEL-020
   it('pressing dismiss answers with false', () => {
     const onSendPreviousHang = vi.fn();
     render(
@@ -218,7 +203,6 @@ describe('PrivacyTab previous hang section (ADR-056, ADR-059)', () => {
     expect(onSendPreviousHang).toHaveBeenCalledWith(false);
   });
 
-  // Verifies: REQ-TEL-020
   it('once answered, a short confirmation replaces the report and its buttons', () => {
     render(
       <PrivacyTab

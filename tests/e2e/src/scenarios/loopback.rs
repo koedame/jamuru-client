@@ -22,7 +22,7 @@ const PIPELINE_CHANNELS: u16 = 1;
 /// Largest delay the latency measurement searches for, in milliseconds
 ///
 /// Cross-correlation cost grows with the search range, and no preset is
-/// specified to cost anywhere near this much (ADR-019).
+/// specified to cost anywhere near this much.
 const MAX_SEARCH_LAG_MS: f32 = 100.0;
 
 /// Loopback test configuration
@@ -122,7 +122,7 @@ impl LoopbackTest {
     ///
     /// The delay is recovered by cross-correlating the played signal against
     /// the reference. The device capture and playback buffers cannot exist
-    /// without hardware, so they are added analytically (ADR-019) before the
+    /// without hardware, so they are added analytically before the
     /// result is compared with the preset budget.
     pub fn run_latency_test(&self) -> TestResult {
         let start = Instant::now();
@@ -357,11 +357,8 @@ mod tests {
     }
 
     /// The measured pipeline delay plus the derived device buffers must fit
-    /// inside every preset's budget, and must reproduce the value ADR-019
-    /// derives from the preset parameters.
-    ///
-    /// Verifies: REQ-LAT-020
-    /// Verifies: REQ-LAT-027
+    /// inside every preset's budget, and must reproduce the value the latency
+    /// budget derives from the preset parameters.
     #[test]
     fn test_all_presets_meet_their_latency_budget() {
         for preset in AudioPreset::all() {
@@ -387,13 +384,14 @@ mod tests {
                 preset.max_app_latency_ms()
             );
 
-            // Since ADR-020 the measurement should not merely fit the budget,
-            // it should reproduce the value ADR-019 derives from the preset
-            // parameters. A mismatch means the model and the code disagree.
+            // With the jitter buffer on the receive path, the measurement should
+            // not merely fit the budget, it should reproduce the value the budget
+            // derives from the preset parameters. A mismatch means the model and
+            // the code disagree.
             let designed = preset.designed_app_latency_ms(48_000);
             assert!(
                 (measured - designed).abs() < 0.1,
-                "preset {} measured {:.2}ms but ADR-019 derives {:.2}ms",
+                "preset {} measured {:.2}ms but its budget derives {:.2}ms",
                 preset.name(),
                 measured,
                 designed

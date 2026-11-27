@@ -110,7 +110,7 @@ fn test_latency_measurer_with_delay() {
 }
 
 /// Every preset must have a MOS bar here, and its latency budget must come
-/// from the product rather than a copy kept in the test suite (ADR-019).
+/// from the product rather than a copy kept in the test suite.
 #[test]
 fn test_preset_thresholds() {
     for preset in AudioPreset::all() {
@@ -173,7 +173,7 @@ fn test_test_result_creation() {
     assert_eq!(failed.error, Some("error message".to_string()));
 
     // A scenario without a harness is neither a pass nor a failure, and it
-    // must always carry a reason (ADR-018).
+    // must always carry a reason.
     let skipped = TestResult::not_implemented("test_scenario", "no harness");
     assert!(!skipped.is_passed());
     assert!(skipped.is_not_implemented());

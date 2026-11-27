@@ -1,5 +1,5 @@
 /**
- * Recording the room in the main window (ADR-095): the card in the sidebar,
+ * Recording the room in the main window: the card in the sidebar,
  * the mark beside a participant who records, the chat line, and the notice of
  * a recording that ended by itself.
  */
@@ -55,7 +55,6 @@ beforeEach(async () => {
 });
 
 describe("the recording card", () => {
-  // Verifies: REQ-GUI-033
   it("nothing records, the card offers to start and says everyone is told", () => {
     const props = panel();
 
@@ -66,7 +65,6 @@ describe("the recording card", () => {
     expect(screen.queryByTestId("recording-stop")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-033
   it("the microphone's own file is asked for with the checkbox", () => {
     const props = panel();
 
@@ -75,7 +73,6 @@ describe("the recording card", () => {
     expect(props.onWithSelfChange).toHaveBeenCalledWith(true);
   });
 
-  // Verifies: REQ-GUI-033
   it("a recording runs, the card shows the time and the file and offers to stop", () => {
     const props = panel({ recording: true, seconds: 75, fileName: "jamuru-x.wav" });
 
@@ -87,7 +84,6 @@ describe("the recording card", () => {
     expect(props.onStop).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-GUI-033
   it("a recording that the person stopped, the card says it is saved, where, and opens the folder", () => {
     const props = panel({ last: ended("stopped") });
 
@@ -98,7 +94,6 @@ describe("the recording card", () => {
     expect(props.onOpenFolder).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-GUI-033
   it.each([
     ["session_ended", en.recording.ended.sessionEnded],
     ["size_limit", en.recording.ended.sizeLimit],
@@ -109,28 +104,24 @@ describe("the recording card", () => {
     expect(screen.getByTestId("recording-result")).toHaveTextContent(text);
   });
 
-  // Verifies: REQ-GUI-033
   it("frames were lost to a slow disk, the card says part of the sound is missing", () => {
     panel({ last: ended("stopped", { dropped_frames: 4800 }) });
 
     expect(screen.getByTestId("recording-dropped")).toHaveTextContent(en.recording.ended.dropped);
   });
 
-  // Verifies: REQ-GUI-033
   it("a start fails, the card shows what the app said", () => {
     panel({ error: "A recording is already running" });
 
     expect(screen.getByTestId("recording-error")).toHaveTextContent("A recording is already running");
   });
 
-  // Verifies: REQ-GUI-033
   it("the time is shown as minutes and seconds, and with hours past an hour", () => {
     expect(formatDuration(0)).toBe("0:00");
     expect(formatDuration(75.9)).toBe("1:15");
     expect(formatDuration(3725)).toBe("1:02:05");
   });
 
-  // Verifies: REQ-CON-034
   it("a participant records, the mark beside them says so in the UI language", async () => {
     render(<RecordingMark />);
     expect(screen.getByTestId("recording-mark")).toHaveTextContent(en.recording.on);
@@ -141,7 +132,6 @@ describe("the recording card", () => {
 });
 
 describe("the chat line for someone recording", () => {
-  // Verifies: REQ-CON-034
   it.each([
     ["recording_started", en.chat.system.recordingStarted],
     ["recording_stopped", en.chat.system.recordingStopped],
@@ -181,7 +171,6 @@ function Harness({ active }: { active: boolean }) {
 }
 
 describe("reading the recording", () => {
-  // Verifies: REQ-CON-034
   it("a session is up, who records is read again and again", async () => {
     let peers: string[] = [];
     invoke.mockImplementation(async () => status({ peers }));
@@ -195,7 +184,6 @@ describe("reading the recording", () => {
     });
   });
 
-  // Verifies: REQ-AUD-047
   it("the room is left and the recording ended with it, the person is told where it was saved", async () => {
     invoke.mockImplementation(async () => status({ last: null }));
     const { rerender } = render(<Harness active />);
@@ -211,7 +199,6 @@ describe("reading the recording", () => {
     );
   });
 
-  // Verifies: REQ-AUD-047
   it("an ending from before this window opened is not announced", async () => {
     invoke.mockImplementation(async () => status({ last: ended("session_ended") }));
     render(<Harness active />);
@@ -221,7 +208,6 @@ describe("reading the recording", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-AUD-047
   it("the person stopped it themselves, no notice is added to the card that says so", async () => {
     invoke.mockImplementation(async () => status({ last: null }));
     const { rerender } = render(<Harness active />);
@@ -234,7 +220,6 @@ describe("reading the recording", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-AUD-046
   it("a start is refused, the person sees why and nothing is marked as recording", async () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === "recording_start") throw "There is no audio to record: the room has not been entered";

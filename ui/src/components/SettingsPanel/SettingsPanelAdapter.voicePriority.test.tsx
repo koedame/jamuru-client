@@ -39,7 +39,6 @@ describe('the voice priority switch in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-CON-160
   it('the marking was turned on, the switch is on', async () => {
     fakeBackend({ voice_priority: true });
     render(<SettingsPanelAdapter />);
@@ -49,7 +48,6 @@ describe('the voice priority switch in the settings panel', () => {
     await waitFor(() => expect(toggle).toBeChecked());
   });
 
-  // Verifies: REQ-CON-160
   it('the marking is off, the switch is off', async () => {
     fakeBackend({ voice_priority: false });
     render(<SettingsPanelAdapter />);
@@ -59,7 +57,6 @@ describe('the voice priority switch in the settings panel', () => {
     await waitFor(() => expect(toggle).not.toBeChecked());
   });
 
-  // Verifies: REQ-CON-160
   it('the switch is turned on, the setting is saved as on', async () => {
     const saved = { voice_priority: false };
     fakeBackend(saved);
@@ -75,7 +72,6 @@ describe('the voice priority switch in the settings panel', () => {
     ]);
   });
 
-  // Verifies: REQ-CON-160
   it('saving fails, the switch goes back to what is saved', async () => {
     fakeBackend({ voice_priority: false }, true);
     render(<SettingsPanelAdapter />);

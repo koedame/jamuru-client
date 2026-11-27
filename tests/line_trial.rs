@@ -1,8 +1,8 @@
-//! Tries the app on bad lines and prints what it did, one row per line (ADR-124).
+//! Tries the app on bad lines and prints what it did, one row per line.
 //!
 //! The CLI joins a room whose only other member is a peer that sends back the audio it gets,
 //! with a simulated bad line in front of that peer (`common::line`), and measures the round trip
-//! of its own bursts as `--input-bursts --report-json` does (ADR-039). The row is that report and
+//! of its own bursts as `--input-bursts --report-json` does. The row is that report and
 //! what the line did to the datagrams. To judge a change to the receive buffer, the concealment
 //! or the like, run the same conditions with the app before it and with the app after it and put
 //! the rows side by side:

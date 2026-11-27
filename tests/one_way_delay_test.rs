@@ -1,5 +1,4 @@
-//! Each way of the round trip is timed by the clocks of both ends, over a real encrypted link
-//! (REQ-LAT-133).
+//! Each way of the round trip is timed by the clocks of both ends, over a real encrypted link.
 
 mod common;
 
@@ -16,8 +15,6 @@ const CONFIG: ReconnectConfig = ReconnectConfig {
 
 /// Both ends of a link on one machine share a clock, so the two ways come out as the real
 /// ones: each is tiny and the two add up to the round trip.
-///
-/// Verifies: REQ-LAT-133
 #[tokio::test]
 async fn when_two_ends_share_a_clock_the_two_ways_add_up_to_the_round_trip() {
     let mut a = Connection::new("127.0.0.1:0").await.unwrap();

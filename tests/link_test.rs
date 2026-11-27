@@ -67,7 +67,6 @@ impl Side {
     }
 }
 
-/// Verifies: REQ-CON-133
 #[tokio::test]
 async fn when_two_links_are_set_up_and_connected_the_hook_hears_it_and_the_peers_audio_is_mixed() {
     let (a, b) = (Side::new(1).await, Side::new(1).await);
@@ -117,7 +116,6 @@ async fn when_two_links_are_set_up_and_connected_the_hook_hears_it_and_the_peers
     }
 }
 
-/// Verifies: REQ-CON-020
 #[tokio::test]
 async fn when_the_mix_has_no_place_left_the_link_is_refused() {
     let a = Side::new(1).await;

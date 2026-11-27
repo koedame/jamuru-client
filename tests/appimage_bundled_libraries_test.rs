@@ -1,4 +1,4 @@
-//! Guards `scripts/appimage-bundled-libraries.py` (REQ-DIST-008): the notice
+//! Guards `scripts/appimage-bundled-libraries.py`: the notice
 //! for the system libraries (mostly LGPL) inside the Linux AppImage.
 //!
 //! The script runs for real, on a directory laid out like an unpacked
@@ -101,7 +101,6 @@ fn run_for(dir: &Path, root: &Path, package_arch: Option<&str>) -> (Output, Stri
     (output, text)
 }
 
-/// Verifies: REQ-DIST-008
 #[test]
 fn when_every_library_belongs_to_a_package_the_notice_names_each_with_its_copyright_and_source() {
     let dir = tempfile::tempdir().unwrap();
@@ -134,7 +133,6 @@ fn when_every_library_belongs_to_a_package_the_notice_names_each_with_its_copyri
     assert!(!notice.contains("libnot"), "a text file is not a library");
 }
 
-/// Verifies: REQ-DIST-008
 #[test]
 fn when_a_library_belongs_to_two_packages_both_are_named() {
     let dir = tempfile::tempdir().unwrap();
@@ -151,7 +149,6 @@ fn when_a_library_belongs_to_two_packages_both_are_named() {
     assert!(notice.contains("libbar2 4.5-6"));
 }
 
-/// Verifies: REQ-DIST-008
 #[test]
 fn when_a_library_matches_no_package_the_script_fails_and_the_notice_says_so() {
     let dir = tempfile::tempdir().unwrap();
@@ -176,8 +173,6 @@ fn when_a_library_matches_no_package_the_script_fails_and_the_notice_says_so() {
 /// An AppImage cross-built for armhf on an amd64 machine finds each library
 /// under both architectures; the amd64 package is not in the AppImage, and
 /// asking dpkg about the bare name would answer for both.
-///
-/// Verifies: REQ-DIST-012
 #[test]
 fn when_the_build_machine_has_the_package_for_two_architectures_only_the_target_one_is_named() {
     let dir = tempfile::tempdir().unwrap();

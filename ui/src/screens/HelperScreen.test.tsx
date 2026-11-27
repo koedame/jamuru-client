@@ -1,5 +1,5 @@
 /**
- * HelperScreen: the window someone helping works in (ADR-044 §5).
+ * HelperScreen: the window someone helping works in.
  *
  * The window is the helped app's own screen, drawn from the helped app's state
  * over the relay, so what these tests look at is what it asks of the helped app
@@ -130,7 +130,6 @@ afterEach(() => {
 });
 
 describe('HelperScreen', () => {
-  // Verifies: REQ-RMT-002
   it('手伝いの画面を開いたとき、相手の名前を示す帯と、相手のルームの画面が出ること', async () => {
     render(<HelperScreen />);
 
@@ -141,7 +140,6 @@ describe('HelperScreen', () => {
     expect(await screen.findByTestId('participant-list')).toHaveTextContent('Aki');
   });
 
-  // Verifies: REQ-RMT-002
   it('画面が相手のアプリの状態を読むとき、呼びはすべて手伝いの口へ向かい、自分のアプリの状態を読まないこと', async () => {
     render(<HelperScreen />);
     await screen.findByTestId('room-code');
@@ -152,7 +150,6 @@ describe('HelperScreen', () => {
     expect(own.filter((cmd) => cmd !== 'help_call' && cmd !== 'help_window_info')).toEqual([]);
   });
 
-  // Verifies: REQ-RMT-025
   it('画面を出すとき、相手の代わりに話す・抜ける操作は出さず、相手の履歴・接続先は聞かないこと', async () => {
     render(<HelperScreen />);
     await screen.findByTestId('room-code');
@@ -172,7 +169,6 @@ describe('HelperScreen', () => {
     expect(own).not.toContain('window_resize_main');
   });
 
-  // Verifies: REQ-RMT-037
   it('相手のアプリが残り時間を知らせてきたとき、何もしないと手伝いが終わるまでの時間が帯の下に出ること', async () => {
     render(<HelperScreen />);
     await screen.findByTestId('room-code');
@@ -185,7 +181,6 @@ describe('HelperScreen', () => {
     );
   });
 
-  // Verifies: REQ-RMT-002
   it('設定ボタンを押したとき、相手の音声の設定が読まれて手伝い用のパネルに出ること', async () => {
     render(<HelperScreen />);
     await screen.findByTestId('room-code');
@@ -197,7 +192,6 @@ describe('HelperScreen', () => {
     expect(askedOf('settings_get')).toHaveLength(1);
   });
 
-  // Verifies: REQ-RMT-002
   it('パネルで設定を選んだとき、その 1 件が相手のアプリの settings_change として送られ、返った設定が出ること', async () => {
     render(<HelperScreen />);
     await screen.findByTestId('room-code');
@@ -214,7 +208,6 @@ describe('HelperScreen', () => {
     await waitFor(() => expect((panel.querySelector('#buffer-size') as HTMLSelectElement).value).toBe('128'));
   });
 
-  // Verifies: REQ-RMT-002
   it('相手のアプリが設定を知らせてきたとき、パネルがそれに追いつき、古い知らせでは戻らないこと', async () => {
     render(<HelperScreen />);
     await screen.findByTestId('room-code');
@@ -229,7 +222,6 @@ describe('HelperScreen', () => {
     expect((panel.querySelector('#buffer-size') as HTMLSelectElement).value).toBe('256');
   });
 
-  // Verifies: REQ-RMT-002, REQ-RMT-006
   it('相手のアプリが設定を適用できなかったとき、決まった理由が利用者の言葉で出ること', async () => {
     onChange = () => new Error('device_gone');
     render(<HelperScreen />);
@@ -244,7 +236,6 @@ describe('HelperScreen', () => {
     );
   });
 
-  // Verifies: REQ-RMT-030
   it('相手のメーターの読み取りがまだ返らないとき、次の読み取りを頼まないこと', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let answer: (status: unknown) => void = () => {};
@@ -274,7 +265,6 @@ describe('HelperScreen', () => {
     }
   });
 
-  // Verifies: REQ-RMT-030
   it('窓が見えていないとき、相手のメーターを読みに行かないこと', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
@@ -298,7 +288,6 @@ describe('HelperScreen', () => {
     }
   });
 
-  // Verifies: REQ-RMT-034
   it('手伝いの画面を開いたとき、動きが相手にも見えていることが示され、相手の画面に届いたときだけ印が点くこと', async () => {
     presenceDelivered = false;
     render(<HelperScreen />);
@@ -315,7 +304,6 @@ describe('HelperScreen', () => {
     await waitFor(() => expect(notice).toHaveAttribute('data-delivered', 'true'));
   });
 
-  // Verifies: REQ-RMT-034
   it('設定パネルを開いたとき、その旨が相手の画面に伝わり、閉じるとそれも伝わること', async () => {
     render(<HelperScreen />);
     await screen.findByTestId('room-code');
@@ -333,7 +321,6 @@ describe('HelperScreen', () => {
     );
   });
 
-  // Verifies: REQ-RMT-034
   it('ボタンの上にポインタを置いたとき、部品の名前と位置だけが送られ、文字や座標は送られないこと', async () => {
     render(<HelperScreen />);
     const button = await screen.findByRole('button', { name: en.settings.title });
@@ -349,7 +336,6 @@ describe('HelperScreen', () => {
     expect(JSON.stringify(sent)).not.toContain(en.settings.title);
   });
 
-  // Verifies: REQ-RMT-034
   it('相手が部品を指していると知らせてきたとき、その部品に枠が出て、指すのをやめると消えること', async () => {
     render(<HelperScreen />);
     const button = await screen.findByRole('button', { name: en.settings.title });
@@ -369,7 +355,6 @@ describe('HelperScreen', () => {
     await waitFor(() => expect(screen.queryByTestId('presence-mark-hover')).not.toBeInTheDocument());
   });
 
-  // Verifies: REQ-RMT-034
   it('相手が画面にない部品の名前を知らせてきたとき、枠は出ないこと', async () => {
     render(<HelperScreen />);
     await screen.findByTestId('room-code');

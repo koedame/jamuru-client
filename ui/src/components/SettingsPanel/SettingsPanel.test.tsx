@@ -1,5 +1,5 @@
 /**
- * SettingsPanel tabs: which item lives in which tab (ADR-080)
+ * SettingsPanel tabs: which item lives in which tab
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -44,7 +44,6 @@ function open(tab: string) {
 }
 
 describe('SettingsPanel tabs', () => {
-  // Verifies: REQ-GUI-028
   it('the panel is shown, the tabs are General, Audio, Privacy, Troubleshooting and About in that order', () => {
     render(<SettingsPanel {...baseProps} />);
 
@@ -57,7 +56,6 @@ describe('SettingsPanel tabs', () => {
     ]);
   });
 
-  // Verifies: REQ-GUI-028
   it('the General tab is open, the display name, the language and the server are there and the rest is not', () => {
     render(<SettingsPanel {...baseProps} initialTab="general" />);
 
@@ -68,7 +66,6 @@ describe('SettingsPanel tabs', () => {
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-028
   it('the Privacy tab is open, usage reporting is there and the diagnostics are not', () => {
     render(<SettingsPanel {...baseProps} initialTab="privacy" />);
 
@@ -77,7 +74,6 @@ describe('SettingsPanel tabs', () => {
     expect(screen.queryByRole('button', { name: 'Run Diagnostics' })).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-028
   it('the Troubleshooting tab is open, the diagnostics, the log folder and the problem report are there and usage reporting is not', () => {
     render(<SettingsPanel {...baseProps} initialTab="diagnostics" />);
 
@@ -87,7 +83,6 @@ describe('SettingsPanel tabs', () => {
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-028
   it('the About tab is chosen, the terms, the license, the privacy page and the announcements are there', () => {
     render(<SettingsPanel {...baseProps} />);
 
@@ -98,7 +93,6 @@ describe('SettingsPanel tabs', () => {
     }
   });
 
-  // Verifies: REQ-GUI-028
   it('the Audio tab is chosen, the devices and the sample rate and buffer size are there', () => {
     render(<SettingsPanel {...baseProps} />);
 
@@ -109,7 +103,6 @@ describe('SettingsPanel tabs', () => {
     expect(document.getElementById('buffer-size')).not.toBeNull();
   });
 
-  // Verifies: REQ-GUI-028
   it('no rows for the terms are given, there is no About tab', () => {
     render(<SettingsPanel {...baseProps} legal={undefined} />);
 

@@ -1,5 +1,5 @@
 /**
- * Webview side of the diagnostic log file (ADR-036).
+ * Webview side of the diagnostic log file.
  *
  * The bridge to the Rust side is `invoke("log_frontend", ...)`; these tests
  * read what was sent through it.
@@ -53,7 +53,6 @@ describe('installFrontendLogging', () => {
     vi.restoreAllMocks();
   });
 
-  // Verifies: REQ-GUI-017
   it('console.error is called, the line reaches the log file at error level', async () => {
     console.error('Failed to load peer name:', new Error('boom'));
     await flush();
@@ -64,7 +63,6 @@ describe('installFrontendLogging', () => {
     expect(line.message).toContain('boom');
   });
 
-  // Verifies: REQ-GUI-017
   it('console.log, warn and info are called, they keep their levels (log becomes info)', async () => {
     console.log('a');
     console.warn('b');
@@ -78,7 +76,6 @@ describe('installFrontendLogging', () => {
     ]);
   });
 
-  // Verifies: REQ-GUI-017
   it('a promise is rejected and nobody handles it, the reason reaches the log file', async () => {
     const event = new Event('unhandledrejection');
     Object.assign(event, { reason: 'Command plugin:event|listen not allowed by ACL' });
@@ -93,7 +90,6 @@ describe('installFrontendLogging', () => {
     ]);
   });
 
-  // Verifies: REQ-GUI-017
   it('an error escapes every handler, its message and place reach the log file', async () => {
     window.dispatchEvent(
       new ErrorEvent('error', { message: 'x is not a function', filename: 'app.js', lineno: 12, colno: 3 })
@@ -154,7 +150,6 @@ describe('invoke', () => {
     uninstall();
   });
 
-  // Verifies: REQ-GUI-017
   it('a command fails, its name and error reach the log file and the caller still gets the error', async () => {
     backend.mockImplementation(async (cmd) => {
       if (cmd === 'log_frontend') return undefined;
@@ -173,7 +168,6 @@ describe('invoke', () => {
     );
   });
 
-  // Verifies: REQ-GUI-018
   it('a command with a password argument fails, the argument is not in the log file', async () => {
     backend.mockImplementation(async (cmd) => {
       if (cmd === 'log_frontend') return undefined;
@@ -224,7 +218,6 @@ describe('invoke', () => {
 });
 
 describe('the lines sent to the log file', () => {
-  // Verifies: REQ-GUI-017
   it('two lines are logged in a row, the second is sent only after the first was written', async () => {
     vi.mocked(isTauri).mockReturnValue(true);
     backend.mockReset();

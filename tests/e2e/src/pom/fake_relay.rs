@@ -1,5 +1,4 @@
-//! A stand-in for the server's relay, for scenarios about remote operation
-//! (ADR-044).
+//! A stand-in for the server's relay, for scenarios about remote operation.
 //!
 //! It answers the app's enrollment question and accepts its WebSocket, then
 //! plays the operator: it sends requests and reads what comes back. It knows

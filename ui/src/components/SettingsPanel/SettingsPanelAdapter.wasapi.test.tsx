@@ -76,7 +76,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-GUI-031
   it('with a WASAPI device in use, all three ways are offered with their verdict, period and reason', async () => {
     fakeBackend(audioSettings({ wasapi: codec }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -97,7 +96,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect(within(exclusive.card).getByText(text.exclusiveCaution)).toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-031
   it('the heading spells out WASAPI, and what it is opens from under the heading', async () => {
     fakeBackend(audioSettings({ wasapi: codec }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -110,7 +108,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect(within(about).getByText(text.aboutText)).toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-031
   it('with an ASIO driver on both sides, what WASAPI is can still be read', async () => {
     fakeBackend(audioSettings({ wasapi: { mode: 'shared', advice: { applies: false, modes: [] } } }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -119,7 +116,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect(screen.getByText(text.about).closest('details')).not.toBeNull();
   });
 
-  // Verifies: REQ-GUI-031
   it('the caution about other apps is only on the exclusive mode', async () => {
     fakeBackend(audioSettings({ wasapi: codec }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -128,7 +124,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect(screen.getAllByText(text.exclusiveCaution)).toHaveLength(1);
   });
 
-  // Verifies: REQ-GUI-031
   it('the user picks the exclusive mode, the app is asked for it and it shows as chosen', async () => {
     const calls = fakeBackend(audioSettings({ wasapi: codec }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -144,7 +139,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     await waitFor(async () => expect((await option(text.modes.exclusive)).radio.checked).toBe(true));
   });
 
-  // Verifies: REQ-GUI-031
   it('the latency shown is the period the chosen way runs the devices at, when longer than the buffer', async () => {
     fakeBackend(audioSettings({ buffer_size: 64, sample_rate: 48000, wasapi: codec }));
     const { unmount } = render(<SettingsPanelAdapter initialTab="devices" />);
@@ -160,7 +154,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect(latency(en.settings.devices.latencyTotal)).toBe('6.0ms');
   });
 
-  // Verifies: REQ-GUI-031
   it('a way that does not open the devices cannot be chosen, and says why', async () => {
     fakeBackend(
       audioSettings({
@@ -188,7 +181,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect((await option(text.modes.shared)).radio.disabled).toBe(false);
   });
 
-  // Verifies: REQ-GUI-031
   it('when Windows does not let apps take a device exclusively, exclusive cannot be chosen and says how to allow it', async () => {
     fakeBackend(
       audioSettings({
@@ -214,7 +206,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect((await option(text.modes.shared)).radio.disabled).toBe(false);
   });
 
-  // Verifies: REQ-GUI-031
   it('a saved way the devices now in use do not open stays shown as chosen, and the latency is the standard way', async () => {
     fakeBackend(
       audioSettings({
@@ -237,7 +228,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect(latency(en.settings.devices.latencyInput)).toBe('10.0ms');
   });
 
-  // Verifies: REQ-GUI-031
   it('a saved exclusive mode that only one device opens shows that device at the exclusive period and keeps the caution', async () => {
     fakeBackend(
       audioSettings({
@@ -271,7 +261,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect(latency(en.settings.devices.latencyOutput)).toBe('3.0ms');
   });
 
-  // Verifies: REQ-GUI-031
   it('with an ASIO driver on both sides, the choice is replaced by a note that it is not used', async () => {
     fakeBackend(audioSettings({ wasapi: { mode: 'exclusive', advice: { applies: false, modes: [] } } }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -281,7 +270,6 @@ describe('the WASAPI mode in the Devices tab', () => {
     expect(latency(en.settings.devices.latencyInput)).toBe('1.3ms');
   });
 
-  // Verifies: REQ-GUI-031
   it('where no device is a WASAPI one (not Windows), there is no WASAPI mode at all', async () => {
     fakeBackend(audioSettings());
     render(<SettingsPanelAdapter initialTab="devices" />);

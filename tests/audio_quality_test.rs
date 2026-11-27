@@ -1,5 +1,3 @@
-//! Audio quality tests based on docs-spec/behavior/audio-quality.feature
-//!
 //! Tests for audio quality functionality.
 
 use jamjam::audio::{
@@ -14,7 +12,6 @@ use jamjam::protocol::Packet;
 /// Test: Operates at 48kHz sample rate
 /// When sample rate is set to "48000Hz"
 /// Then audio engine operates at 48kHz
-/// Verifies: REQ-AUD-104
 #[test]
 fn test_sample_rate_48khz() {
     let config = AudioConfig {
@@ -31,7 +28,6 @@ fn test_sample_rate_48khz() {
 /// Test: Operates at 96kHz sample rate
 /// When sample rate is set to "96000Hz"
 /// Then audio engine operates at 96kHz
-/// Verifies: REQ-AUD-105
 #[test]
 fn test_sample_rate_96khz() {
     let config = AudioConfig {
@@ -103,7 +99,6 @@ async fn send_captured_frame(
 /// When input channel is set to "mono"
 /// Then the mono capture is what is transmitted
 /// And the receiving side plays both channels the same
-/// Verifies: REQ-AUD-107
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_mono_input() {
     let captured = [0.5f32, -0.25, 0.75, 0.125];
@@ -125,8 +120,6 @@ async fn test_mono_input() {
 /// When input channel is set to "stereo"
 /// Then 2-channel audio is transmitted
 /// And the receiving side plays it in stereo
-/// Verifies: REQ-AUD-108
-/// Verifies: REQ-AUD-044
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_stereo_input() {
     // Left and right carry different audio, so mixing them across would show.
@@ -148,9 +141,6 @@ async fn test_stereo_input() {
 /// A stereo capture with sound on the left only reaches the listener's output
 /// on the left only: what the sender keeps apart, the receiving side's pan
 /// keeps apart too.
-///
-/// Verifies: REQ-AUD-108
-/// Verifies: REQ-AUD-120
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_stereo_input_is_played_back_in_stereo() {
     let captured = [0.5f32, 0.0, -0.25, 0.0, 0.75, 0.0];
@@ -167,8 +157,6 @@ async fn test_stereo_input_is_played_back_in_stereo() {
 /// Given participant B has set their transmit channel count to mono
 /// When B sends A its latency info over the wire
 /// Then A decodes B's channel count as mono
-///
-/// Verifies: REQ-AUD-117
 #[test]
 fn test_peer_channel_count_is_carried_in_latency_info() {
     let info = jamjam::protocol::LatencyInfoMessage {
@@ -195,7 +183,6 @@ fn test_peer_channel_count_is_carried_in_latency_info() {
 /// Test: Operates with 64 sample frame size
 /// When frame size is set to "64 samples"
 /// Then audio buffer becomes 64 samples
-/// Verifies: REQ-AUD-109
 #[test]
 fn test_frame_size_64() {
     let config = AudioConfig {
@@ -215,7 +202,6 @@ fn test_frame_size_64() {
 /// Test: Operates with 256 sample frame size
 /// When frame size is set to "256 samples"
 /// Then audio buffer becomes 256 samples
-/// Verifies: REQ-AUD-110
 #[test]
 fn test_frame_size_256() {
     let config = AudioConfig {
@@ -255,7 +241,6 @@ fn play_session(
 /// When local monitoring is set to "ON"
 /// Then my own audio is heard without the network delay
 /// And the other participants' audio is heard at the same time
-/// Verifies: REQ-AUD-111
 #[test]
 fn test_local_monitoring_on_plays_my_input_together_with_the_others() {
     let monitor = LocalMonitor::new(64);
@@ -275,7 +260,6 @@ fn test_local_monitoring_on_plays_my_input_together_with_the_others() {
 /// When local monitoring is set to "OFF"
 /// Then my own audio is not heard directly
 /// And only the other participants' audio is heard
-/// Verifies: REQ-AUD-112
 #[test]
 fn test_local_monitoring_off_leaves_only_the_others() {
     let monitor = LocalMonitor::new(64);
@@ -428,17 +412,13 @@ fn test_capture_callback_accepts_non_sync_types() {
 // ---------------------------------------------------------------------------
 // Codec and transport fidelity
 //
-// These verify the "no processing" promise of ADR-005: whatever the musician
+// These verify the "no processing" promise: whatever the musician
 // plays must come out the other end unchanged.
 // ---------------------------------------------------------------------------
 
 /// Given a link with at least 10 Mbps of bandwidth
 /// When the codec is set to PCM
 /// Then audio is sent as 24-bit samples (at most ~1.15 Mbps per channel), packed without loss, with 0ms of codec delay
-///
-/// Verifies: REQ-CORE-002
-/// Verifies: REQ-AUD-101
-/// Verifies: REQ-AUD-131
 #[test]
 fn test_pcm_codec_packs_without_loss_and_never_beyond_the_samples() {
     let config = CodecConfig {
@@ -485,8 +465,6 @@ fn test_pcm_codec_packs_without_loss_and_never_beyond_the_samples() {
 /// PCM encoding rounds to 24 bits once and nothing else: decoding returns a sample that was
 /// already 24-bit exactly, and any other to within half a step of 24 bits - no dithering, no
 /// noise shaping, no requantisation on the way.
-///
-/// Verifies: REQ-AUD-020
 #[test]
 fn test_pcm_codec_round_trip_is_exact_to_24_bits() {
     let config = CodecConfig {
@@ -530,8 +508,6 @@ fn test_pcm_codec_round_trip_is_exact_to_24_bits() {
 }
 
 /// An audio packet must survive serialisation to the wire and back unchanged.
-///
-/// Verifies: REQ-AUD-021
 #[test]
 fn test_audio_packet_round_trip_preserves_payload() {
     let payload: Vec<u8> = (0..=255u8).collect();
@@ -551,9 +527,6 @@ fn test_audio_packet_round_trip_preserves_payload() {
 /// Given audio processing (AEC, NS, AGC) is disabled
 /// When an instrument is played
 /// Then the received samples are identical to the ones that were captured
-///
-/// Verifies: REQ-CORE-003
-/// Verifies: REQ-AUD-113
 #[test]
 fn test_audio_is_transmitted_without_processing() {
     let config = CodecConfig {
@@ -596,8 +569,6 @@ fn test_audio_is_transmitted_without_processing() {
 /// What the 24-bit wire does to a full-scale tone, measured: the noise it adds is the rounding
 /// to 24 bits and nothing more, about 146 dB below the tone, which is quieter than the noise
 /// floor of the best audio interface (about 120 dB below full scale).
-///
-/// Verifies: REQ-AUD-020
 #[test]
 fn test_24_bit_wire_adds_no_audible_noise() {
     let mut codec = PcmCodec::new(&CodecConfig::default());
@@ -627,8 +598,6 @@ fn test_24_bit_wire_adds_no_audible_noise() {
 /// Given participant A runs at 96kHz and participant B at 48kHz
 /// When the session starts
 /// Then A's audio is resampled to 48kHz
-///
-/// Verifies: REQ-AUD-106
 #[test]
 fn test_mismatched_sample_rates_are_resampled() {
     const CHUNK: usize = 128;
@@ -668,12 +637,7 @@ fn test_mismatched_sample_rates_are_resampled() {
 }
 
 /// Each preset must carry the frame size, jitter buffer depth, codec and FEC
-/// settings the specification records (ADR-019, ADR-021).
-///
-/// Verifies: REQ-AUD-022
-/// Verifies: REQ-AUD-114
-/// Verifies: REQ-AUD-115
-/// Verifies: REQ-AUD-116
+/// settings the specification records.
 #[test]
 fn test_preset_parameters_match_the_specification() {
     struct Expected {
@@ -742,11 +706,9 @@ fn test_preset_parameters_match_the_specification() {
 /// Opus compresses, but only at the frame sizes libopus accepts
 ///
 /// No preset can use Opus: 48kHz frames must be 120/240/480/960/1920/2880
-/// samples and every preset uses a power of two (ADR-021). This test pins both
+/// samples and every preset uses a power of two. This test pins both
 /// halves of that finding - the codec works, and it rejects a preset frame size
 /// - so the constraint cannot be forgotten. The `opus` CI job runs it.
-///
-/// Verifies: REQ-AUD-027
 #[cfg(feature = "opus-codec")]
 #[test]
 fn test_opus_codec_compresses_audio() {
@@ -764,7 +726,7 @@ fn test_opus_codec_compresses_audio() {
     let preset_frame = vec![0.1f32; preset.frame_size() as usize];
     assert!(
         rejecting_codec.encode(&preset_frame).is_err(),
-        "Opus unexpectedly accepted a {}-sample frame; revisit ADR-021",
+        "Opus unexpectedly accepted a {}-sample frame; revisit the presets' codec settings",
         preset.frame_size()
     );
 
@@ -802,8 +764,6 @@ fn test_opus_codec_compresses_audio() {
 /// A mono resampler fed interleaved stereo would treat alternating samples from
 /// different channels as one stream, shifting the pitch and mixing the channels.
 /// The receive path is stereo, so this is the case that actually runs.
-///
-/// Verifies: REQ-AUD-028
 #[test]
 fn test_stereo_resampling_converts_both_channels() {
     use jamjam::audio::create_resampler_with_channels;

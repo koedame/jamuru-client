@@ -1,4 +1,4 @@
-//! Integration tests for the `jamuru` CLI (ADR-027).
+//! Integration tests for the `jamuru` CLI.
 //!
 //! The CLI exists so a session can be driven without the GUI while debugging,
 //! which means these tests run the real binary: they would have caught that
@@ -139,8 +139,6 @@ impl Drop for Running {
 
 /// The preset chosen from the CLI is the one the app starts with: same file,
 /// same field, and the buffer size moves with it.
-///
-/// Verifies: REQ-CLI-003
 #[test]
 fn preset_use_saves_the_choice_where_the_app_reads_it() {
     let home = tempfile::tempdir().expect("temp HOME");
@@ -186,8 +184,6 @@ fn preset_use_saves_the_choice_where_the_app_reads_it() {
 
 /// An unknown preset is refused rather than saved, so a typo cannot leave the
 /// app configured for something that does not exist.
-///
-/// Verifies: REQ-CLI-003
 #[test]
 fn preset_use_refuses_a_name_that_is_not_a_preset() {
     let home = tempfile::tempdir().expect("temp HOME");
@@ -208,10 +204,8 @@ fn preset_use_refuses_a_name_that_is_not_a_preset() {
 }
 
 /// Choosing a device the machine does not offer is refused, the same way the
-/// settings UI refuses it (REQ-GUI-011) - saving the name would silently fall
+/// settings UI refuses it - saving the name would silently fall
 /// back to the default device at session start.
-///
-/// Verifies: REQ-CLI-004
 #[test]
 fn devices_set_refuses_a_device_this_machine_does_not_have() {
     let home = tempfile::tempdir().expect("temp HOME");
@@ -286,8 +280,6 @@ fn tone_frequency(samples: &[f32], sample_rate: u32) -> f32 {
 
 /// The server's record of who entered has the CLI's version and OS, as it has the app's, and
 /// not what is the person's: the display name, or an audio device while usage reporting is off.
-///
-/// Verifies: REQ-CON-171
 #[test]
 fn a_cli_entering_a_room_tells_the_server_its_version_and_os_but_not_its_display_name() {
     let _alone = one_audio_session_at_a_time();
@@ -367,8 +359,6 @@ fn a_cli_entering_a_room_tells_the_server_its_version_and_os_but_not_its_display
 
 /// With usage reporting turned on in the saved settings, the CLI tells the server the devices it
 /// uses as the app does.
-///
-/// Verifies: REQ-CON-171
 #[test]
 fn a_cli_with_usage_reporting_on_tells_the_server_the_audio_device_it_uses() {
     let _alone = one_audio_session_at_a_time();
@@ -413,8 +403,6 @@ fn a_cli_with_usage_reporting_on_tells_the_server_the_audio_device_it_uses() {
 ///
 /// The sound card is replaced by `--input-tone` and `--output-file`, so this
 /// runs wherever `cargo test` runs.
-///
-/// Verifies: REQ-CLI-005
 #[test]
 fn two_clis_in_a_room_hear_each_other() {
     let _alone = one_audio_session_at_a_time();
@@ -692,8 +680,6 @@ const NOT_HEARD: f32 = 0.1;
 /// Three CLIs in a room each hear both of the others, at the same time, and not themselves:
 /// the third to enter a room was linked to one of the others only, who was linked to the other,
 /// so the third heard nobody and nobody heard the third.
-///
-/// Verifies: REQ-CLI-011
 #[test]
 fn three_clis_in_a_room_each_hear_both_of_the_others() {
     let _alone = one_audio_session_at_a_time();
@@ -725,8 +711,6 @@ fn three_clis_in_a_room_each_hear_both_of_the_others() {
 
 /// When one of three leaves, the two who stay go on hearing each other and stop hearing the one
 /// who left.
-///
-/// Verifies: REQ-CLI-011
 #[test]
 fn a_cli_leaves_a_room_of_three_the_other_two_go_on_hearing_each_other() {
     let _alone = one_audio_session_at_a_time();
@@ -800,9 +784,6 @@ fn cli_alone_playing(extra_args: &[&str]) -> Vec<f32> {
 /// With `--monitor` the CLI hears its own tone at the pitch and level it was
 /// captured, before any peer exists to send it anywhere - which is what makes
 /// it local, not a round trip.
-///
-/// Verifies: REQ-AUD-111
-/// Verifies: REQ-CLI-006
 #[test]
 fn a_monitoring_cli_hears_its_own_input_without_a_peer() {
     const SAMPLE_RATE: u32 = 48000;
@@ -835,7 +816,6 @@ fn a_monitoring_cli_hears_its_own_input_without_a_peer() {
     );
 }
 
-/// Verifies: REQ-AUD-112
 #[test]
 fn a_cli_without_monitoring_does_not_play_its_own_input() {
     let left = cli_alone_playing(&[]);
@@ -853,9 +833,6 @@ fn a_cli_without_monitoring_does_not_play_its_own_input() {
 /// the audio path shows up as a number. The sound card is replaced by
 /// `--input-bursts` and `--output-file`, so this runs wherever `cargo test`
 /// runs.
-///
-/// Verifies: REQ-CLI-007
-/// Verifies: REQ-CLI-013
 #[test]
 fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
     let _alone = one_audio_session_at_a_time();
@@ -980,8 +957,6 @@ fn a_cli_joined_to_an_echo_reports_the_round_trip_of_its_bursts() {
 /// open (a script, a terminal that is not typed in). The prompt reads stdin on a thread of its
 /// own that nothing can interrupt, and the runtime waits for such a thread when it is dropped:
 /// a CLI that did not leave it behind stayed after "Summary", with the room already left.
-///
-/// Verifies: REQ-CLI-007
 #[test]
 fn a_cli_that_reached_its_duration_ends_though_its_stdin_is_still_open() {
     let _alone = one_audio_session_at_a_time();

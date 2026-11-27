@@ -1,4 +1,4 @@
-//! Feeds a known signal into the app's capture device (ADR-025).
+//! Feeds a known signal into the app's capture device.
 //!
 //! Verifying that the level meter follows the input means controlling what
 //! the input *is*, which needs a loopback audio device: one that presents

@@ -221,8 +221,6 @@ describe('i18n source lint', () => {
   // Given a component under ui/src
   // When its source is read
   // Then no Japanese text is written in it outside comments
-  //
-  // Verifies: REQ-I18N-105
   it('has no hard-coded Japanese in runtime source', () => {
     const found: string[] = [];
     for (const [file, source] of runtimeSources) {
@@ -242,8 +240,6 @@ describe('i18n source lint', () => {
   // Given a component under ui/src
   // When its JSX is read
   // Then no English text or user-facing attribute is written in it
-  //
-  // Verifies: REQ-I18N-105
   it('has no hard-coded English in JSX', () => {
     const found: string[] = [];
     for (const [file, source] of runtimeSources) {
@@ -260,8 +256,6 @@ describe('i18n source lint', () => {
   // Given a component calls t("some.key")
   // When the key is missing from en.json or ja.json
   // Then this fails, instead of the screen falling back to another language
-  //
-  // Verifies: REQ-I18N-105
   it('has every statically referenced translation key in both bundles', () => {
     const missing: string[] = [];
     for (const [file, source] of runtimeSources) {
@@ -276,8 +270,6 @@ describe('i18n source lint', () => {
   // Given a key exists in one bundle
   // When the other bundle lacks it
   // Then this fails, since that language would show English for the key
-  //
-  // Verifies: REQ-I18N-105
   it('has the same keys in en.json and ja.json', () => {
     const onlyInEn = [...enKeys].filter((k) => !jaKeys.has(k));
     const onlyInJa = [...jaKeys].filter((k) => !enKeys.has(k));

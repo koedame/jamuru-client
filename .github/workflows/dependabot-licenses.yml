@@ -1,7 +1,7 @@
 name: Dependabot license notices
 
 # THIRD_PARTY_LICENSES.md and src-tauri/resources/LICENSES.txt are generated
-# from the lock files (scripts/third-party-licenses.py, ADR-063), and CI fails
+# from the lock files (scripts/third-party-licenses.py), and CI fails
 # when they are older than the lock files. Dependabot cannot run the script, so
 # every dependency PR of it started red. This regenerates both files on the PR
 # branch and pushes them as one extra commit.

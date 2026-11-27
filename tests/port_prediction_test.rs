@@ -1,5 +1,5 @@
 //! What the app offers a peer when its router gives the audio socket a different public port for
-//! each address it sends to (ADR-115)
+//! each address it sends to
 //!
 //! On loopback: a NAT in front of the audio socket sends what the socket sends to each of
 //! several STUN servers out from a port of its own (the next free one, or the same one for
@@ -141,7 +141,6 @@ async fn gather_through_nat(per_destination: bool) -> (Vec<SocketAddr>, Vec<Sock
     (offered, used)
 }
 
-/// Verifies: REQ-CON-170
 #[tokio::test]
 async fn when_the_nat_gives_each_server_a_port_of_its_own_the_port_each_saw_is_offered() {
     let (mut offered, mut used) = gather_through_nat(true).await;
@@ -154,7 +153,6 @@ async fn when_the_nat_gives_each_server_a_port_of_its_own_the_port_each_saw_is_o
     assert_eq!(offered, used, "the ports the NAT sent from");
 }
 
-/// Verifies: REQ-CON-170
 #[tokio::test]
 async fn when_the_nat_keeps_one_port_for_the_socket_only_that_port_is_offered() {
     let (offered, used) = gather_through_nat(false).await;
