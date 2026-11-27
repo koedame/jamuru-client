@@ -1569,9 +1569,7 @@ impl Connection {
         // at once: a request left in the socket until the loop ends would be timed by the peer
         // as a long round trip.
         let mut probing = Probing::new(candidates);
-        let started = self
-            .open_own_nat_and_wait(candidates, &mut probing)
-            .await?;
+        let started = self.open_own_nat_and_wait(candidates, &mut probing).await?;
         let mut due: Vec<(Duration, usize, usize)> = (0..PROBE_ROUNDS)
             .flat_map(|round| {
                 (0..candidates.len()).map(move |i| {
