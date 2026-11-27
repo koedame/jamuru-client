@@ -1,5 +1,5 @@
 /**
- * How long until a help that sits idle ends by itself (ADR-044 §5), counted
+ * How long until a help that sits idle ends by itself, counted
  * down on the screen between the backend's announcements. The helped app
  * announces the time left whenever something is done and every few seconds, so
  * a screen that opened late catches up and a drift in the count is corrected.

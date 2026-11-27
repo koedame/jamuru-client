@@ -276,7 +276,6 @@ mod tests {
             .collect()
     }
 
-    /// Verifies: REQ-TEL-010
     #[test]
     fn when_readings_are_counted_by_value_the_percentiles_match_the_sorted_list() {
         let cases: Vec<Vec<f32>> = vec![
@@ -309,7 +308,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-TEL-010
     #[test]
     fn when_readings_are_invalid_or_missing_they_are_not_counted() {
         let mut tally = SessionTally::new();
@@ -324,7 +322,6 @@ mod tests {
         assert_eq!(end.rtt_ms_p95, None);
     }
 
-    /// Verifies: REQ-TEL-010
     #[test]
     fn when_a_hundred_thousand_readings_arrive_only_the_distinct_values_are_held() {
         let readings = pseudo_random_readings(100_000, 3);

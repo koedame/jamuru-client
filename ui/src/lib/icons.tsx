@@ -1,6 +1,6 @@
 /**
  * Shared hand-inlined lucide SVG icon primitives (no icon library dependency
- * is installed - see .claude/rules re: minimizing new deps). All icons use
+ * is installed, to keep new dependencies to a minimum). All icons use
  * `currentColor` so color is controlled via CSS `color`.
  *
  * Icons used by exactly one component stay local to that component's file;

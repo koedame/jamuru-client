@@ -5,7 +5,7 @@
  * here, so what it is connected to can be swapped. The app's own windows are
  * connected to this app's backend. A window that helps another participant is
  * connected to *their* backend, through the relay (`helperBackend.ts`), and draws
- * the same screens from it (ADR-044 §5). Each window is its own webview with its
+ * the same screens from it. Each window is its own webview with its
  * own copy of this module, so switching one leaves the others as they are.
  */
 

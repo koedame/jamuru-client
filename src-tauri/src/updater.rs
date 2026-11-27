@@ -1,11 +1,11 @@
-//! Self-update (ADR-041).
+//! Self-update.
 //!
 //! A release published after the running version is downloaded, checked
 //! against the public key in `tauri.conf.json` (`plugins.updater`), and
 //! installed without the user doing anything. Nothing here can install or
 //! change anything from the webview: no command, no event, no permission for
 //! that. The one thing that reaches it is a version number, for a package that
-//! cannot replace itself (ADR-076): the screen is told that a newer release
+//! cannot replace itself: the screen is told that a newer release
 //! exists, and the user installs it by hand.
 //!
 //! Two rules keep it out of the way of the app's purpose. It never installs
@@ -17,7 +17,7 @@
 //! same bundle), and each step has a time limit, so a download that stalls or
 //! an install that never returns is given up on while the app keeps running.
 //!
-//! An update never leaves the app unable to start either (ADR-089). A start
+//! An update never leaves the app unable to start either. A start
 //! looks for one before the app opens (`startup`), and every install keeps the
 //! version it replaces until the new one has started (`trial`): a new version
 //! that does not start is replaced by the kept one again, and is not installed
@@ -181,7 +181,7 @@ pub(crate) fn package_updates_itself() -> bool {
 }
 
 /// Whether this package installs releases itself: one that replaces itself,
-/// where the running version can be kept to go back to (ADR-089). One that
+/// where the running version can be kept to go back to. One that
 /// cannot keep it - installed where the app cannot write, say - is told of a
 /// newer release instead, as a package that cannot replace itself is.
 fn installs_itself() -> bool {
@@ -326,10 +326,10 @@ async fn notify_once<R: Runtime>(app: &AppHandle<R>) -> Result<(), UpdateError> 
 #[serde(rename_all = "snake_case")]
 pub enum Support {
     /// A development build, or one made from source: it never looks for a
-    /// release (ADR-041).
+    /// release.
     None,
-    /// A package that cannot replace itself (ADR-076), or that cannot keep the
-    /// running version to go back to (ADR-089): it can say that a newer
+    /// A package that cannot replace itself, or that cannot keep the
+    /// running version to go back to: it can say that a newer
     /// release exists, and the person installs it by hand.
     Notice,
     /// Downloads, installs and restarts into the newer release.
@@ -381,7 +381,7 @@ pub enum Checked {
 
 /// Looks for a newer release now, whatever `auto_update` says: the person
 /// asked. Nothing is downloaded. A package that cannot install it by itself
-/// also tells the top of the screen, as its background check does (ADR-076).
+/// also tells the top of the screen, as its background check does.
 #[tauri::command]
 pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Result<Checked, String> {
     let support = support_of(&app);
@@ -425,7 +425,7 @@ pub enum Installed {
 
 /// Downloads and installs the newer release, then restarts the app. Never
 /// during a session, whatever `auto_update` says. Only the app's own screen
-/// can ask (ADR-082); the restart ends the call, so an answer means it did not
+/// can ask; the restart ends the call, so an answer means it did not
 /// happen.
 #[tauri::command]
 pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<Installed, String> {
@@ -458,7 +458,7 @@ fn announce<R: Runtime>(app: &AppHandle<R>, version: String) {
 }
 
 /// Installs a newer release now, without waiting for the user to leave a
-/// session: for someone debugging the app remotely (ADR-044), who restarts it
+/// session: for someone debugging the app remotely, who restarts it
 /// afterwards. Returns the version installed, or `None` when there was none.
 #[cfg(feature = "debug-tools")]
 pub(crate) async fn install_now<R: Runtime>(
@@ -761,7 +761,6 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Verifies: REQ-DIST-011
     #[test]
     fn when_a_package_that_cannot_replace_itself_reads_the_notice_on_linux_it_reads_the_entry_of_its_architecture(
     ) {
@@ -777,47 +776,40 @@ mod tests {
         assert_eq!(notice_target_for("macos", "aarch64"), None);
     }
 
-    /// Verifies: REQ-UPD-001
     #[test]
     fn when_the_setting_is_on_in_a_release_build_the_app_updates_itself() {
         assert_eq!(plan(true, false, true), Ok(Round::Install));
     }
 
-    /// Verifies: REQ-UPD-002
     #[test]
     fn when_the_setting_is_off_the_app_does_not_update_itself() {
         assert!(plan(false, false, true).is_err());
         assert!(plan(false, false, false).is_err());
     }
 
-    /// Verifies: REQ-UPD-003
     #[test]
     fn when_it_is_a_development_build_the_app_does_not_update_itself() {
         assert!(plan(true, true, true).is_err());
         assert!(plan(true, true, false).is_err());
     }
 
-    /// Verifies: REQ-UPD-004
     #[test]
     fn when_the_package_cannot_replace_itself_the_app_only_looks_for_a_newer_release() {
         assert_eq!(plan(true, false, false), Ok(Round::Notify));
     }
 
-    /// Verifies: REQ-UPD-004
     #[test]
     fn when_it_is_a_windows_msi_the_package_cannot_replace_itself() {
         use tauri::utils::config::BundleType;
         assert!(!bundle_updates_itself("windows", Some(BundleType::Msi)));
     }
 
-    /// Verifies: REQ-UPD-004
     #[test]
     fn when_it_is_a_windows_nsis_installer_the_package_replaces_itself() {
         use tauri::utils::config::BundleType;
         assert!(bundle_updates_itself("windows", Some(BundleType::Nsis)));
     }
 
-    /// Verifies: REQ-UPD-004
     #[test]
     fn when_it_is_a_linux_deb_the_package_cannot_replace_itself() {
         use tauri::utils::config::BundleType;
@@ -827,8 +819,6 @@ mod tests {
 
     /// A release made before the running version could be kept never says it
     /// has started; watching it would put back a release that works.
-    ///
-    /// Verifies: REQ-UPD-026
     #[test]
     fn only_a_release_whose_update_info_says_it_reports_its_start_is_watched() {
         use serde_json::json;
@@ -844,7 +834,6 @@ mod tests {
         ));
     }
 
-    /// Verifies: REQ-UPD-021
     #[test]
     fn when_a_newer_release_was_found_the_screen_can_read_its_version() {
         let app = tauri::test::mock_app();
@@ -856,7 +845,6 @@ mod tests {
         assert_eq!(update_notice_get(app.state()), Some("1.2.3".to_string()));
     }
 
-    /// Verifies: REQ-UPD-021
     #[test]
     fn when_a_newer_release_was_found_the_open_screens_are_told_its_version() {
         use tauri::Listener;
@@ -873,19 +861,16 @@ mod tests {
         assert_eq!(*heard.lock().unwrap(), vec!["\"1.2.3\"".to_string()]);
     }
 
-    /// Verifies: REQ-UPD-022
     #[test]
     fn when_it_is_a_release_build_that_updates_itself_the_person_can_install_by_hand() {
         assert_eq!(support(false, true, true), Support::Install);
     }
 
-    /// Verifies: REQ-UPD-022
     #[test]
     fn when_the_package_cannot_replace_itself_the_person_is_only_told_of_a_newer_release() {
         assert_eq!(support(false, true, false), Support::Notice);
     }
 
-    /// Verifies: REQ-UPD-022
     #[test]
     fn when_it_is_a_development_or_self_built_build_there_is_nothing_to_check() {
         assert_eq!(support(true, true, true), Support::None);
@@ -893,7 +878,6 @@ mod tests {
         assert_eq!(support(false, false, false), Support::None);
     }
 
-    /// Verifies: REQ-UPD-022
     #[test]
     fn when_the_screen_asks_for_the_status_it_gets_the_running_version_and_the_support() {
         let app = tauri::test::mock_app();
@@ -909,8 +893,6 @@ mod tests {
     }
 
     /// The screen reads these shapes (`ui/src/lib/tauri.ts`).
-    ///
-    /// Verifies: REQ-UPD-022
     #[test]
     fn when_a_check_or_an_install_is_answered_the_screen_reads_a_kind_and_a_version() {
         use serde_json::json;
@@ -938,7 +920,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-022
     #[tokio::test]
     async fn when_the_build_cannot_check_a_check_by_hand_says_so_without_the_network() {
         let app = tauri::test::mock_app();
@@ -953,21 +934,18 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-024
     #[test]
     fn when_the_person_asked_by_hand_and_is_in_a_session_the_install_is_refused() {
         assert!(InSession::Refuse.refuses(true));
         assert!(!InSession::Refuse.refuses(false));
     }
 
-    /// Verifies: REQ-UPD-024
     #[test]
     fn when_the_update_is_automatic_or_remote_it_is_not_refused_for_a_session_here() {
         assert!(!InSession::Wait.refuses(true));
         assert!(!InSession::Install.refuses(true));
     }
 
-    /// Verifies: REQ-UPD-005
     #[tokio::test]
     async fn when_the_user_is_in_a_session_the_install_waits_until_it_ends() {
         let asked = AtomicUsize::new(0);
@@ -978,7 +956,6 @@ mod tests {
         assert_eq!(asked.load(Ordering::SeqCst), 4);
     }
 
-    /// Verifies: REQ-UPD-005
     #[tokio::test]
     async fn when_the_user_is_not_in_a_session_the_install_does_not_wait() {
         let asked = AtomicUsize::new(0);
@@ -992,7 +969,6 @@ mod tests {
         assert_eq!(asked.load(Ordering::SeqCst), 1);
     }
 
-    /// Verifies: REQ-UPD-015
     #[test]
     fn when_an_update_is_running_another_is_refused_at_once() {
         let gate = Gate::new();
@@ -1001,7 +977,6 @@ mod tests {
         assert!(matches!(gate.begin(), Err(UpdateError::Busy)));
     }
 
-    /// Verifies: REQ-UPD-015
     #[test]
     fn when_an_update_has_ended_without_installing_the_next_may_start() {
         let gate = Gate::new();
@@ -1010,7 +985,6 @@ mod tests {
         assert!(gate.begin().is_ok());
     }
 
-    /// Verifies: REQ-UPD-015
     #[test]
     fn when_an_update_is_installed_no_other_starts_before_the_restart() {
         let gate = Gate::new();
@@ -1019,7 +993,6 @@ mod tests {
         assert!(matches!(gate.begin(), Err(UpdateError::Restarting)));
     }
 
-    /// Verifies: REQ-UPD-016
     #[tokio::test(start_paused = true)]
     async fn when_a_step_does_not_finish_it_is_given_up_after_its_limit() {
         let stalled = std::future::pending::<tauri_plugin_updater::Result<()>>();
@@ -1029,7 +1002,6 @@ mod tests {
         assert!(matches!(result, Err(UpdateError::TimedOut("the download"))));
     }
 
-    /// Verifies: REQ-UPD-016
     #[tokio::test]
     async fn when_an_install_never_returns_it_is_given_up_and_the_gate_stays_shut_until_it_ends() {
         static GATE: Gate = Gate::new();
@@ -1058,8 +1030,6 @@ mod tests {
     /// The background update is downloading when `debug.update_apply` is
     /// called: the call is refused at once instead of joining it, and the
     /// background update ends at its limit without holding the app.
-    ///
-    /// Verifies: REQ-UPD-015, REQ-UPD-016
     #[cfg(feature = "debug-tools")]
     #[tokio::test(start_paused = true)]
     async fn when_an_update_is_running_update_apply_is_refused_and_both_end() {

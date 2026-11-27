@@ -14,7 +14,7 @@ pub fn default_route_is_wifi() -> Option<bool> {
 
 /// Whether this machine has a route out of the local network at all, as the system's route table
 /// says. `Some(false)` is the Wi-Fi switched off or the cable pulled: nothing can reach the
-/// internet, which is this machine's own line broken (REQ-CON-163). `None` when that could not be
+/// internet, which is this machine's own line broken. `None` when that could not be
 /// found out, so the caller does not take the silence for an answer.
 pub fn has_default_route() -> Option<bool> {
     platform::has_default_route()
@@ -194,13 +194,11 @@ wlan0\t00000000\t0100A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0\n\
 eth0\t00000000\t0100A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n\
 eth0\t0000A8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n";
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_two_default_routes_exist_the_one_with_the_lowest_metric_is_the_default_interface() {
         assert_eq!(linux_default_interface(ROUTES), Some("eth0"));
     }
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_the_only_default_route_is_down_there_is_no_default_interface() {
         let routes =
@@ -209,7 +207,6 @@ wlan0\t00000000\t0100A8C0\t0002\t0\t0\t600\t00000000\t0\t0\t0\n";
         assert_eq!(linux_default_interface(routes), None);
     }
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_only_a_local_network_route_exists_there_is_no_default_interface() {
         let routes =
@@ -218,20 +215,17 @@ eth0\t0000A8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n";
         assert_eq!(linux_default_interface(routes), None);
     }
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_the_route_table_is_empty_there_is_no_default_interface() {
         assert_eq!(linux_default_interface(""), None);
     }
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_route_prints_the_interface_it_is_the_default_interface() {
         let output = "   route to: default\ndestination: default\n       mask: default\n    gateway: 192.168.1.1\n  interface: en0\n      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>\n";
         assert_eq!(macos_default_interface(output), Some("en0"));
     }
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_route_prints_no_interface_there_is_no_default_interface() {
         assert_eq!(
@@ -242,19 +236,16 @@ eth0\t0000A8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n";
 
     const PORTS: &str = "Hardware Port: Ethernet Adapter (en4)\nDevice: en4\nEthernet Address: aa:bb:cc:dd:ee:ff\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: 11:22:33:44:55:66\n\nHardware Port: Thunderbolt Bridge\nDevice: bridge0\nEthernet Address: N/A\n";
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_the_hardware_port_of_the_interface_is_wifi_the_interface_is_wifi() {
         assert!(macos_interface_is_wifi(PORTS, "en0"));
     }
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_the_hardware_port_of_the_interface_is_ethernet_the_interface_is_not_wifi() {
         assert!(!macos_interface_is_wifi(PORTS, "en4"));
     }
 
-    /// Verifies: REQ-GUI-027
     #[test]
     fn when_the_interface_is_not_listed_it_is_not_wifi() {
         assert!(!macos_interface_is_wifi(PORTS, "utun3"));

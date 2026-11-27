@@ -1,5 +1,5 @@
 //! The version that ran before an update is kept until the new one has
-//! started (ADR-089).
+//! started.
 //!
 //! An update replaces the app where it is installed. If the new version cannot
 //! start - it does not run on this machine, crashes while starting, or hangs
@@ -1834,7 +1834,6 @@ mod tests {
 
     // --- the package ---
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn when_running_from_an_appimage_the_package_is_the_appimage_file() {
         let package = Package::locate(
@@ -1852,7 +1851,6 @@ mod tests {
         assert_eq!(package.launch, package.program);
     }
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn when_not_running_from_an_appimage_on_linux_there_is_no_package_to_keep() {
         assert!(
@@ -1860,7 +1858,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn when_running_from_an_app_bundle_the_package_is_the_bundle() {
         let package = Package::locate(
@@ -1879,7 +1876,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn when_not_running_from_an_app_bundle_on_macos_there_is_no_package_to_keep() {
         assert!(Package::locate(
@@ -1891,7 +1887,6 @@ mod tests {
         .is_err());
     }
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn on_windows_the_package_is_what_the_installer_puts_in_the_directory_and_not_the_data() {
         let root = Path::new("C:/Users/u/AppData/Local/jamuru");
@@ -1911,7 +1906,6 @@ mod tests {
 
     // --- opening a trial ---
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn opening_a_trial_keeps_a_copy_of_every_entry_and_holds_the_old_versions_lock() {
         for fixture in [Fixture::file(), Fixture::bundle(), Fixture::install_dir()] {
@@ -1936,7 +1930,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-029
     #[test]
     fn a_trial_is_not_opened_over_another() {
         let fixture = Fixture::file();
@@ -1952,7 +1945,6 @@ mod tests {
         assert!(error.to_string().contains("still being tried"), "{}", error);
     }
 
-    /// Verifies: REQ-UPD-029
     #[test]
     fn a_trial_is_not_opened_over_one_nobody_can_read() {
         let fixture = Fixture::file();
@@ -1961,7 +1953,6 @@ mod tests {
         assert!(open(&fixture.store, fixture.package.clone(), A, B, no_watcher).is_err());
     }
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn a_trial_of_the_running_version_is_not_opened() {
         let fixture = Fixture::file();
@@ -1969,7 +1960,6 @@ mod tests {
         assert!(fixture.trial().is_none());
     }
 
-    /// Verifies: REQ-UPD-026
     #[cfg(unix)]
     #[test]
     fn where_the_app_cannot_write_no_trial_is_opened() {
@@ -1986,8 +1976,6 @@ mod tests {
     /// The probe beside the package passes, but the package itself is the
     /// person's to write and not the app's: the updater would ask for a
     /// password, and the watcher has none to put it back with.
-    ///
-    /// Verifies: REQ-UPD-026
     #[cfg(unix)]
     #[test]
     fn where_the_app_cannot_write_the_package_itself_no_trial_is_opened() {
@@ -2007,7 +1995,6 @@ mod tests {
         assert!(fixture.trial().is_none());
     }
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn a_watcher_that_runs_but_never_watches_counts_as_not_started() {
         let fixture = Fixture::file();
@@ -2030,7 +2017,6 @@ mod tests {
         assert!(!fixture.store.held(FORMER_LOCK));
     }
 
-    /// Verifies: REQ-UPD-026
     #[test]
     fn when_the_watcher_cannot_be_started_the_trial_is_closed_and_not_installed() {
         let fixture = Fixture::file();
@@ -2043,7 +2029,6 @@ mod tests {
         assert!(!fixture.store.held(FORMER_LOCK));
     }
 
-    /// Verifies: REQ-UPD-030
     #[test]
     fn when_the_install_fails_the_kept_version_is_put_back_and_the_trial_closed() {
         for fixture in [Fixture::file(), Fixture::bundle(), Fixture::install_dir()] {
@@ -2063,7 +2048,6 @@ mod tests {
 
     // --- putting back ---
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn putting_back_restores_files_directories_links_and_permissions_and_drops_what_the_update_added(
     ) {
@@ -2077,7 +2061,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn putting_back_leaves_the_apps_data_beside_the_package_alone() {
         let fixture = Fixture::install_dir();
@@ -2095,7 +2078,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn putting_back_works_when_the_update_removed_an_entry_or_made_it_another_kind() {
         let fixture = Fixture::install_dir();
@@ -2110,7 +2092,6 @@ mod tests {
 
     // --- deciding ---
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn the_first_decision_written_stands() {
         let fixture = Fixture::file();
@@ -2131,8 +2112,6 @@ mod tests {
     /// Whoever comes late to a trial that was decided and closed must not
     /// decide it again: a watcher would otherwise put back over the version
     /// that was kept.
-    ///
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_trial_closed_is_not_decided_again_and_another_trials_decision_is_not_its_own() {
         let fixture = Fixture::file();
@@ -2151,7 +2130,6 @@ mod tests {
         assert_eq!(fixture.store.decision(&later.trial.id), None);
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn of_decisions_written_at_once_exactly_one_stands_for_everyone() {
         for _ in 0..20 {
@@ -2192,7 +2170,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_lock_is_held_while_its_holder_keeps_it_and_free_once_it_lets_go() {
         let fixture = Fixture::file();
@@ -2217,7 +2194,6 @@ mod tests {
             .is_some());
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn looking_at_a_lock_does_not_keep_its_holder_from_taking_it() {
         let fixture = Fixture::file();
@@ -2256,7 +2232,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_watcher_leaves_a_trial_that_is_decided_and_puts_back_one_that_was_given_up_on() {
         for decision in [Decision::Confirmed, Decision::Abandoned] {
@@ -2274,7 +2249,6 @@ mod tests {
         assert_eq!(next(&rejected, &SHORT), Next::RollBack);
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_watcher_waits_as_long_as_the_old_version_runs() {
         let running = Seen {
@@ -2286,7 +2260,6 @@ mod tests {
         assert_eq!(next(&running, &SHORT), Next::Wait);
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_watcher_gives_up_on_a_new_version_that_does_not_start_in_time() {
         let handed = Seen {
@@ -2306,7 +2279,6 @@ mod tests {
         assert_eq!(next(&late, &SHORT), Next::Reject);
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_watcher_gives_up_on_a_new_version_that_starts_but_does_not_say_so_in_time() {
         let running = Seen {
@@ -2322,7 +2294,6 @@ mod tests {
         assert_eq!(next(&hung, &SHORT), Next::Reject);
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_watcher_gives_up_on_a_new_version_that_ended_and_did_not_come_back() {
         let gone = Seen {
@@ -2343,7 +2314,6 @@ mod tests {
         assert_eq!(next(&ended, &SHORT), Next::Reject);
     }
 
-    /// Verifies: REQ-UPD-030
     #[test]
     fn a_watcher_puts_back_a_package_whose_install_did_not_return() {
         let died = Seen {
@@ -2358,7 +2328,6 @@ mod tests {
         assert_eq!(next(&died, &SHORT), Next::Reject);
     }
 
-    /// Verifies: REQ-UPD-031
     #[test]
     fn a_watcher_leaves_an_installed_version_that_was_not_started_to_its_next_start() {
         let installed = Seen {
@@ -2381,7 +2350,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_start_closes_a_trial_that_was_decided() {
         let trial = a_trial();
@@ -2395,7 +2363,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_start_of_either_version_during_a_put_back_ends_and_leaves_it_to_the_watcher() {
         let trial = a_trial();
@@ -2425,7 +2392,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn the_first_start_of_the_new_version_takes_part_in_its_trial() {
         let trial = a_trial();
@@ -2435,7 +2401,6 @@ mod tests {
         assert_eq!(boot(&trial, None, B, false, false, false), Boot::Candidate);
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_second_copy_started_while_the_old_version_runs_starts_as_usual() {
         let trial = a_trial();
@@ -2444,7 +2409,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn the_old_version_started_while_the_new_one_is_tried_ends_and_leaves_it_to_the_watcher() {
         let trial = a_trial();
@@ -2461,8 +2425,6 @@ mod tests {
     /// The installer did not put the new version in place, or only part of
     /// it, and the watcher is gone with the system: what was kept is put back
     /// rather than the half kept.
-    ///
-    /// Verifies: REQ-UPD-030
     #[test]
     fn the_old_version_started_after_it_handed_over_with_nobody_watching_has_its_copy_put_back() {
         let trial = a_trial();
@@ -2472,7 +2434,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-031
     #[test]
     fn a_trial_nobody_watches_or_runs_is_closed_by_the_next_start() {
         let trial = a_trial();
@@ -2490,7 +2451,6 @@ mod tests {
 
     // --- trials from start to end ---
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn when_the_new_version_says_it_started_it_stays_installed() {
         let fixture = Fixture::bundle();
@@ -2510,7 +2470,6 @@ mod tests {
         assert!(matches!(start_as(&fixture, B), Booted::Normal));
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn when_the_new_version_never_starts_the_old_one_is_put_back_and_started() {
         for fixture in [Fixture::file(), Fixture::bundle(), Fixture::install_dir()] {
@@ -2527,7 +2486,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn when_the_new_version_ends_before_it_says_it_started_the_old_one_is_put_back_and_started() {
         let fixture = Fixture::file();
@@ -2542,7 +2500,6 @@ mod tests {
         assert!(fixture.store.is_rejected(B));
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn when_the_new_version_hangs_before_it_says_it_started_it_is_ended_and_the_old_one_put_back() {
         let fixture = Fixture::bundle();
@@ -2558,7 +2515,6 @@ mod tests {
         assert!(slot.lock().unwrap().is_none());
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn when_the_person_quits_the_new_version_before_it_started_the_old_one_is_put_back_but_not_started(
     ) {
@@ -2574,7 +2530,6 @@ mod tests {
         assert_eq!(fixture.version(), A);
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn when_the_new_version_restarts_itself_before_it_says_it_started_its_trial_goes_on() {
         let fixture = Fixture::file();
@@ -2594,7 +2549,6 @@ mod tests {
         assert_eq!(fixture.version(), B);
     }
 
-    /// Verifies: REQ-UPD-030
     #[test]
     fn when_the_old_version_ends_in_the_middle_of_the_install_the_old_version_is_put_back() {
         for fixture in [Fixture::file(), Fixture::bundle(), Fixture::install_dir()] {
@@ -2611,7 +2565,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-030
     #[test]
     fn when_the_install_fails_the_watcher_leaves() {
         let fixture = Fixture::file();
@@ -2626,7 +2579,6 @@ mod tests {
         assert_eq!(fixture.version(), A);
     }
 
-    /// Verifies: REQ-UPD-031
     #[test]
     fn when_the_old_version_ends_after_the_install_without_restarting_the_new_one_is_tried_at_its_next_start(
     ) {
@@ -2663,7 +2615,6 @@ mod tests {
         assert_eq!(started.confirm().unwrap(), Some(Decision::Confirmed));
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn when_the_new_version_does_not_end_when_asked_the_trial_stays_for_the_next_start_to_finish() {
         let fixture = Fixture::file();
@@ -2700,7 +2651,6 @@ mod tests {
         assert_eq!(fixture.version(), A);
     }
 
-    /// Verifies: REQ-UPD-029
     #[test]
     fn when_putting_back_keeps_failing_the_trial_is_given_up_and_the_app_still_starts() {
         let fixture = Fixture::file();
@@ -2722,7 +2672,6 @@ mod tests {
         assert!(matches!(start_as(&fixture, B), Booted::Normal));
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_start_while_the_old_version_is_put_back_has_it_started_again_even_after_a_quit() {
         let fixture = Fixture::file();
@@ -2740,7 +2689,6 @@ mod tests {
         assert!(!fixture.store.has(QUIT));
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn when_the_new_version_says_it_started_after_the_watcher_gave_up_the_watcher_wins() {
         let fixture = Fixture::file();
@@ -2754,7 +2702,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_second_copy_of_the_new_version_does_not_take_part_in_the_trial() {
         let fixture = Fixture::file();
@@ -2766,8 +2713,6 @@ mod tests {
     /// A start that waited for the lock of a copy that was given up on
     /// meanwhile must not take part in a trial that is over: it would mark
     /// itself started and be ended by the watcher putting the old one back.
-    ///
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_start_that_waited_for_the_lock_follows_what_was_decided_meanwhile() {
         let fixture = Fixture::file();
@@ -2794,8 +2739,6 @@ mod tests {
 
     /// Without a watcher (none could be started since the system restarted)
     /// nothing else ends the trial of a version that never starts.
-    ///
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_new_version_that_keeps_ending_before_it_starts_is_given_up_on_after_a_few_starts() {
         let fixture = Fixture::file();
@@ -2826,7 +2769,6 @@ mod tests {
         assert!(fixture.store.is_rejected(B));
     }
 
-    /// Verifies: REQ-UPD-031
     #[test]
     fn a_damaged_trial_nobody_takes_part_in_is_discarded_and_one_of_a_later_protocol_is_left() {
         let fixture = Fixture::file();
@@ -2844,7 +2786,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_watcher_of_another_trial_or_of_one_already_watched_leaves() {
         let fixture = Fixture::file();
@@ -2866,7 +2807,6 @@ mod tests {
 
     // --- versions given up on ---
 
-    /// Verifies: REQ-UPD-029
     #[test]
     fn versions_given_up_on_are_remembered_the_latest_few_and_forgotten_once_one_starts() {
         let fixture = Fixture::file();
@@ -2886,7 +2826,6 @@ mod tests {
         assert!(!fixture.store.is_rejected("0.0.5"));
     }
 
-    /// Verifies: REQ-UPD-029
     #[test]
     fn a_release_tried_by_itself_is_held_back_for_a_while_and_only_that_release() {
         let fixture = Fixture::file();
@@ -2906,7 +2845,6 @@ mod tests {
 
     // --- the watcher's command line ---
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn only_a_command_line_that_names_the_watcher_starts_one() {
         let args = |list: &[&str]| list.iter().map(OsString::from).collect::<Vec<_>>();
@@ -3030,7 +2968,6 @@ mod tests {
         fs::read_to_string(fixture.store.path("watched")).unwrap()
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_new_version_process_that_hangs_is_ended_by_the_watcher_process_and_the_old_one_put_back() {
         let fixture = Fixture::bundle();
@@ -3048,7 +2985,6 @@ mod tests {
         assert!(fixture.store.is_rejected(B));
     }
 
-    /// Verifies: REQ-UPD-028
     #[test]
     fn a_new_version_process_that_crashes_is_noticed_by_the_watcher_process_and_the_old_one_put_back(
     ) {
@@ -3059,7 +2995,6 @@ mod tests {
         assert_eq!(fixture.version(), A);
     }
 
-    /// Verifies: REQ-UPD-027
     #[test]
     fn a_new_version_process_that_says_it_started_is_left_installed_by_the_watcher_process() {
         let fixture = Fixture::file();

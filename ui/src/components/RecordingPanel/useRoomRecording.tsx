@@ -1,5 +1,5 @@
 /**
- * Recording the room, as the main window has it (ADR-095): what the backend
+ * Recording the room, as the main window has it: what the backend
  * says about it (read while a session is up, and once more when it ends, to
  * learn how it ended), the buttons' effects, the participants who record, and
  * the notice for a recording that ended without being asked to.

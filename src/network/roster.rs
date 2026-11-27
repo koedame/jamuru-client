@@ -50,7 +50,7 @@ pub enum Audio {
     /// Bind the audio socket and tell the room where to send audio.
     ///
     /// Nothing can send this app audio until it does: the port is chosen when
-    /// the socket is bound, and peers learn it only from this (ADR-026).
+    /// the socket is bound, and peers learn it only from this.
     Advertise,
     /// Start the audio session on the devices, with no link yet, if none
     /// runs. Done on entering the room, so the microphone is heard (the meter
@@ -95,7 +95,7 @@ const MAX_REJOINS: u32 = 3;
 /// and, for a peer that answers the key exchange, guesses ports; a peer that published again
 /// and again would otherwise have that go on for as long as it likes, and not only once as
 /// the link would on its own. Five is what a peer that is not heard publishes at most in good
-/// faith: the address STUN saw again up to four times while nothing is heard (ADR-129), and
+/// faith: the address STUN saw again up to four times while nothing is heard, and
 /// the one the router opened. A link that gives up is dealt with by entering the room again
 /// (see [`MAX_REJOINS`]), which starts the count over.
 const MAX_RESTARTS: u32 = 5;
@@ -178,7 +178,7 @@ impl Roster {
 
     /// The participants the room no longer lists but whose audio still arrives, with the name
     /// they had: the person can still hear them, so the screen keeps them where it can be
-    /// turned down (REQ-CON-150).
+    /// turned down.
     pub fn departed(&self) -> Vec<(Uuid, String)> {
         self.links
             .iter()
@@ -276,7 +276,7 @@ impl Roster {
 
     /// A peer published (or changed) its audio address. This is what lets
     /// whichever side entered first open its link: at that time the other
-    /// had no address yet (ADR-026).
+    /// had no address yet.
     ///
     /// A link to them that is not hearing them is opened again at what they
     /// published, if that is something else than it was started with: they
@@ -626,8 +626,6 @@ mod tests {
     /// "Heard" is a packet arriving, not the connection coming up: it comes up on the first
     /// address even when nobody answers there, and counting that as heard would stop the
     /// roster from ever trying another address.
-    ///
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_connection_is_up_but_nothing_arrived_is_starting_and_is_heard_once_something_does() {
         assert_eq!(
@@ -640,7 +638,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_connection_is_setting_up_reconnecting_or_failed_has_the_health_the_roster_acts_on() {
         for setting_up in [
@@ -661,7 +658,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-113
     #[test]
     fn a_peer_in_the_room_has_already_published_an_address_when_entering_advertises_ours_and_starts_with_them(
     ) {
@@ -679,8 +675,6 @@ mod tests {
     /// The bug this guards: the third to enter a room of two was linked to one
     /// of them only, who was already linked to the other, so the third heard
     /// no one and no one heard the third.
-    ///
-    /// Verifies: REQ-CON-133
     #[test]
     fn two_peers_have_published_when_entering_opens_a_link_to_each() {
         let mut roster = Roster::default();
@@ -705,7 +699,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(2), id(3)]);
     }
 
-    /// Verifies: REQ-CON-140
     #[test]
     fn nobody_has_published_an_address_when_entering_advertises_ours_and_opens_the_audio_alone() {
         let mut roster = Roster::default();
@@ -731,8 +724,6 @@ mod tests {
     /// The bug this guards: with the audio "already with someone", a second
     /// participant who published an address was given no link, and was heard
     /// by no one.
-    ///
-    /// Verifies: REQ-CON-133
     #[test]
     fn there_is_a_link_to_someone_when_another_peer_publishes_opens_a_second_link_and_keeps_the_first(
     ) {
@@ -767,7 +758,6 @@ mod tests {
         assert_eq!(roster.peers().len(), 1);
     }
 
-    /// Verifies: REQ-CON-020
     #[test]
     fn fifteen_others_are_in_a_full_room_opens_a_link_to_each_of_them() {
         let mut roster = Roster::default();
@@ -784,8 +774,6 @@ mod tests {
     /// The room can list more than fifteen others for a while: entries of
     /// connections the server has not yet found dead are not counted against
     /// its sixteen. The session has fifteen places.
-    ///
-    /// Verifies: REQ-CON-020
     #[test]
     fn more_than_fifteen_others_are_listed_links_the_first_fifteen_and_the_next_when_one_of_them_leaves(
     ) {
@@ -805,8 +793,6 @@ mod tests {
     /// The microphone is heard in a room with no one else in it, so the audio
     /// session does not end with the last link: the meter keeps moving, and
     /// whoever joins next gets a link on the session that is there.
-    ///
-    /// Verifies: REQ-CON-140
     #[test]
     fn the_only_peer_there_is_a_link_to_leaves_and_is_not_heard_ends_the_link_and_keeps_the_audio_session(
     ) {
@@ -831,8 +817,6 @@ mod tests {
 
     /// The others go on hearing each other, on the address the room has: the
     /// socket they send to is the one the link that ended used too.
-    ///
-    /// Verifies: REQ-CON-133
     #[test]
     fn one_of_two_linked_peers_leaves_and_is_not_heard_ends_the_link_to_them_and_touches_nothing_else(
     ) {
@@ -880,7 +864,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-024
     #[test]
     fn the_audio_restarts_in_the_same_room_tells_the_new_address_and_links_everyone_again() {
         let mut roster = hearing(&[2, 3]);
@@ -915,7 +898,6 @@ mod tests {
     /// The bug this guards: the app came back to its room as a new peer while
     /// the server still listed its old entry, and started its audio with that
     /// entry - an address nothing listens on - instead of with the other peer.
-    /// Verifies: REQ-CON-130
     #[test]
     fn the_room_still_lists_our_own_old_entry_when_entering_again_starts_the_audio_with_the_other_peer(
     ) {
@@ -938,7 +920,6 @@ mod tests {
         assert_eq!(roster.peers()[0].id, Uuid::from_u128(2));
     }
 
-    /// Verifies: REQ-CON-130
     #[test]
     fn the_room_still_lists_every_old_entry_of_ours_when_entering_a_third_time_lists_none_of_them()
     {
@@ -973,7 +954,6 @@ mod tests {
     /// The bug this guards: the other side of a rejoin kept sending audio to
     /// the old entry of the peer that came back, for ever, because the audio
     /// was "already with someone" and the server had not removed the entry.
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_peer_comes_back_under_a_new_id_gets_a_link_at_once_and_ours_to_the_old_entry_is_left_to_the_room(
     ) {
@@ -990,7 +970,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(12)]);
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_peer_publishes_other_addresses_while_the_link_to_them_is_silent_opens_it_again_there() {
         let mut roster = hearing(&[2, 3]);
@@ -1002,7 +981,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(2), id(3)]);
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_peer_published_other_addresses_before_the_link_to_them_went_silent_opens_it_again_there_when_it_does(
     ) {
@@ -1016,8 +994,6 @@ mod tests {
 
     /// A link that was started at an address nothing answers on has not heard
     /// its peer, so it need not wait to go silent to follow them.
-    ///
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_peer_publishes_other_addresses_before_the_link_to_them_has_heard_them_opens_it_again_there(
     ) {
@@ -1034,7 +1010,6 @@ mod tests {
         peer(2, Some(&format!("192.0.2.2:{}", 7000 + n % 2 * 1000)))
     }
 
-    /// Verifies: REQ-CON-179
     #[test]
     fn a_peer_not_heard_publishes_other_addresses_again_and_again_has_the_link_opened_again_only_a_few_times(
     ) {
@@ -1049,14 +1024,13 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(2)]);
     }
 
-    /// Verifies: REQ-CON-179
     #[test]
     fn a_peer_not_heard_publishes_the_addresses_the_stun_server_saw_as_often_as_it_asks_has_the_link_opened_again_each_time(
     ) {
         let mut roster = Roster::default();
         roster.entered(me(), vec![peer(2, Some("192.0.2.2:5000"))]);
 
-        // One address first, then one more each time the peer asked again (REQ-CON-177)
+        // One address first, then one more each time the peer asked again
         for asked in 1..=4 {
             let candidates: Vec<String> = (0..=asked)
                 .map(|i| format!("192.0.2.2:{}", 5000 + i))
@@ -1071,7 +1045,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-179
     #[test]
     fn a_link_is_heard_after_it_was_opened_again_to_its_limit_can_be_opened_again_when_it_goes_silent(
     ) {
@@ -1088,7 +1061,6 @@ mod tests {
         assert_eq!(silent, vec![end(2), start(2, "192.0.2.2:8000")]);
     }
 
-    /// Verifies: REQ-CON-179
     #[test]
     fn a_link_opened_again_to_its_limit_gives_up_and_the_room_is_entered_again_opens_a_new_link_that_follows_again(
     ) {
@@ -1110,7 +1082,6 @@ mod tests {
         assert_eq!(updated, vec![end(2), start(2, "192.0.2.2:7000")]);
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_peer_publishes_other_addresses_while_they_are_heard_leaves_the_link_as_it_is() {
         let mut roster = hearing(&[2]);
@@ -1130,7 +1101,6 @@ mod tests {
         assert_eq!(audio, vec![]);
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_link_goes_silent_and_comes_back_does_nothing_to_it_or_to_the_others() {
         let mut roster = hearing(&[2, 3]);
@@ -1145,8 +1115,6 @@ mod tests {
     /// Entering again takes this app out of the room for a few seconds, which
     /// cuts the audio with everyone. That is no way to treat a trouble with
     /// one participant while the others are heard.
-    ///
-    /// Verifies: REQ-CON-134
     #[test]
     fn a_link_gives_up_while_someone_else_is_heard_stays_in_the_room() {
         let mut roster = hearing(&[2, 3]);
@@ -1158,7 +1126,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(2), id(3)]);
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn the_only_link_gives_up_enters_the_room_again() {
         let mut roster = hearing(&[2]);
@@ -1169,7 +1136,6 @@ mod tests {
         assert_eq!(audio, vec![Audio::Rejoin]);
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn every_link_gives_up_one_after_the_other_enters_the_room_again_once() {
         let mut roster = hearing(&[2, 3]);
@@ -1182,7 +1148,6 @@ mod tests {
         assert_eq!((first, second), (vec![Audio::Rejoin], vec![]));
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn the_heard_peer_stops_being_heard_after_leaving_and_the_one_left_is_one_the_link_gave_up_on_enters_the_room_again(
     ) {
@@ -1199,8 +1164,6 @@ mod tests {
     /// as up and then gives up again. Only hearing the peer counts as the
     /// audio being back; anything less had the app entering the room again
     /// for as long as the server listed someone who was gone.
-    ///
-    /// Verifies: REQ-CON-134
     #[test]
     fn nobody_is_heard_after_entering_the_room_again_enters_it_again_only_a_few_times() {
         let mut roster = Roster::default();
@@ -1219,7 +1182,6 @@ mod tests {
         assert_eq!(entered_again, 3);
     }
 
-    /// Verifies: REQ-CON-134
     #[test]
     fn someone_is_heard_after_entering_the_room_again_enters_it_again_when_a_link_next_gives_up() {
         let mut roster = Roster::default();
@@ -1251,7 +1213,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-113
     #[test]
     fn a_peer_on_the_same_network_is_tried_on_its_lan_address_before_its_public_one() {
         let mut roster = Roster::default();
@@ -1269,7 +1230,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-113
     #[test]
     fn a_peer_that_published_legacy_addresses_too_has_them_appended_when_not_already_listed() {
         let mut roster = Roster::default();
@@ -1286,7 +1246,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-113
     #[test]
     fn a_peer_that_published_its_bind_address_as_the_legacy_local_one_is_not_sent_to_it() {
         let mut roster = Roster::default();
@@ -1299,7 +1258,6 @@ mod tests {
         assert_eq!(candidates, vec![addr("192.168.1.20:5000")]);
     }
 
-    /// Verifies: REQ-CON-113
     #[test]
     fn a_peer_with_only_a_legacy_public_address_is_reached_on_it() {
         let mut roster = Roster::default();
@@ -1311,12 +1269,10 @@ mod tests {
         assert_eq!(candidates, vec![addr("203.0.113.7:5000")]);
     }
 
-    // ---- The audio goes on without the server (REQ-CON-150) ----
+    // ---- The audio goes on without the server ----
 
     /// The server says someone left when it loses their connection, which says nothing of
     /// the audio: that goes between the two apps directly.
-    ///
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_leaves_while_their_audio_is_heard_does_not_end_the_link() {
         let mut roster = hearing(&[2]);
@@ -1330,7 +1286,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_is_still_reported_as_departed_with_their_name() {
         let mut roster = hearing(&[2, 3]);
@@ -1341,7 +1296,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(3)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_their_audio_stops_is_no_longer_reported_as_departed() {
         let mut roster = hearing(&[2]);
@@ -1352,7 +1306,6 @@ mod tests {
         assert_eq!(roster.departed(), vec![]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_the_link_says_it_is_the_same_name_at_the_same_addresses_under_a_new_id_is_no_longer_departed(
     ) {
@@ -1367,7 +1320,6 @@ mod tests {
         assert_eq!(roster.departed(), vec![]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_their_audio_stops_ends_the_link() {
         for stopped in [LinkHealth::Silent, LinkHealth::Failed] {
@@ -1381,7 +1333,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_the_link_says_it_is_the_same_name_at_the_same_addresses_under_a_new_id_goes_on_with_the_link_as_the_new_id(
     ) {
@@ -1404,7 +1355,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(12)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_the_same_name_publishes_other_addresses_starts_a_link_to_them() {
         let mut roster = Roster::default();
@@ -1418,7 +1368,6 @@ mod tests {
         assert_eq!(audio, vec![start(12, "192.0.2.2:6000")]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_another_name_publishes_the_same_addresses_starts_a_link_to_them()
     {
@@ -1435,8 +1384,6 @@ mod tests {
 
     /// The room may list us again before the others have published: whoever the link goes to
     /// is found when they do.
-    ///
-    /// Verifies: REQ-CON-150
     #[test]
     fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_has_the_same_id_keeps_their_link(
     ) {
@@ -1452,7 +1399,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(2)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn this_app_enters_again_while_the_audio_is_heard_and_the_link_says_it_is_the_peer_listed_as_a_new_id_with_their_name_and_addresses_goes_on_with_the_link_as_the_new_id(
     ) {
@@ -1480,7 +1426,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(12)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_is_listed_as_a_new_id_with_other_addresses_starts_a_link_to_them(
     ) {
@@ -1499,7 +1444,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_is_listed_as_a_new_id_with_another_name_starts_a_link_to_them(
     ) {
@@ -1520,8 +1464,6 @@ mod tests {
 
     /// Their entry is not there yet (they have not published): the link waits for them, as it
     /// does for one who left.
-    ///
-    /// Verifies: REQ-CON-150
     #[test]
     fn this_app_enters_again_while_the_audio_is_heard_and_the_link_says_it_is_the_peer_who_has_not_published_yet_goes_on_with_the_link_as_the_new_id_once_they_do(
     ) {
@@ -1546,7 +1488,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn this_app_enters_again_while_the_audio_is_not_heard_ends_the_link_and_starts_it_again() {
         for health in [LinkHealth::Starting, LinkHealth::Silent, LinkHealth::Failed] {
@@ -1571,7 +1512,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn this_app_enters_again_and_no_audio_runs_starts_the_links_from_nothing() {
         let mut roster = hearing(&[2]);
@@ -1586,8 +1526,6 @@ mod tests {
 
     /// The name and the addresses are listed for everyone; only the far end of the link can say,
     /// over the link, who it is.
-    ///
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_another_participant_has_their_name_and_addresses_without_the_link_saying_so_starts_a_link_to_them_and_keeps_the_departed_one(
     ) {
@@ -1604,7 +1542,6 @@ mod tests {
         assert_eq!(roster.departed(), vec![(id(2), "Ben".to_string())]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_a_participant_already_linked_to_publishes_their_name_and_addresses_keeps_both_links(
     ) {
@@ -1629,8 +1566,6 @@ mod tests {
 
     /// The id is listed for everyone, so naming it proves nothing: the claim has to be signed by
     /// the key the room lists for that id.
-    ///
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_the_link_names_an_entry_with_their_name_and_addresses_signed_by_another_key_starts_a_link_to_the_entry_and_keeps_the_departed_one(
     ) {
@@ -1649,7 +1584,6 @@ mod tests {
         assert_eq!(roster.departed(), vec![(id(2), "Ben".to_string())]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_the_link_names_an_entry_the_room_lists_no_key_for_keeps_the_departed_link(
     ) {
@@ -1669,7 +1603,6 @@ mod tests {
         assert_eq!(roster.departed(), vec![(id(2), "Ben".to_string())]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_peer_left_while_heard_and_two_entries_have_their_name_and_addresses_goes_on_with_the_link_as_the_one_the_link_says_it_is(
     ) {
@@ -1700,8 +1633,6 @@ mod tests {
 
     /// The room listed them with their new id before they said so, so a link to the new id was
     /// started: it gives way to the one that is heard.
-    ///
-    /// Verifies: REQ-CON-150
     #[test]
     fn the_link_says_it_is_a_peer_a_link_was_already_started_to_and_not_heard_ends_that_one_and_goes_on_as_them(
     ) {
@@ -1730,7 +1661,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(12)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn the_link_says_it_is_a_peer_who_is_already_heard_ends_the_old_link() {
         let mut roster = Roster::default();
@@ -1752,8 +1682,6 @@ mod tests {
 
     /// The link is still there when the room lists them: the stale entry of the old id is not
     /// linked to again.
-    ///
-    /// Verifies: REQ-CON-150
     #[test]
     fn the_link_says_it_is_a_peer_while_the_room_still_lists_the_old_id_goes_on_as_the_new_id_and_does_not_link_to_the_old_one_again(
     ) {
@@ -1772,7 +1700,6 @@ mod tests {
         assert_eq!(roster.linked(), vec![id(12)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn the_link_says_it_is_a_peer_of_another_name_or_other_addresses_does_not_go_on_as_them() {
         for (name, addr) in [("Cleo", "192.0.2.2:5000"), ("Ben", "192.0.2.9:7000")] {
@@ -1790,7 +1717,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn this_app_enters_again_while_the_audio_is_heard_and_the_peer_is_listed_as_a_new_id_with_their_name_and_addresses_without_the_link_saying_so_starts_a_link_to_them(
     ) {

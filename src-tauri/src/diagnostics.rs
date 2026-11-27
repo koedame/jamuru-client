@@ -14,9 +14,9 @@ use crate::config::ConfigState;
 use crate::device_identity::DeviceIdentityState;
 
 /// The client the signaling check connects with: the configured server and
-/// this installation's identity, as `signaling_connect` uses (ADR-030).
+/// this installation's identity, as `signaling_connect` uses.
 /// Refuses until the user has agreed to the terms, so every diagnostic that
-/// reaches the server goes through this one check (REQ-TRM-003).
+/// reaches the server goes through this one check.
 fn signaling_client<R: Runtime>(
     app: &AppHandle<R>,
     config_state: &ConfigState,
@@ -125,7 +125,6 @@ mod tests {
     use super::*;
     use tauri::Manager;
 
-    /// Verifies: REQ-TRM-003
     #[test]
     fn the_terms_are_not_agreed_to_and_a_diagnostic_asks_for_the_server_client_refuses() {
         let dir = tempfile::tempdir().unwrap();
@@ -139,7 +138,6 @@ mod tests {
         assert!(client.is_err());
     }
 
-    /// Verifies: REQ-TRM-003
     #[test]
     fn the_terms_are_agreed_to_and_a_diagnostic_asks_for_the_server_client_gets_it() {
         let dir = tempfile::tempdir().unwrap();

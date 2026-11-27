@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Puts an update manifest where the betas look for updates (ADR-045): the asset
+# Puts an update manifest where the betas look for updates: the asset
 # `latest.json` of the release `beta-channel`.
 #
 # Usage: scripts/publish-beta-channel.sh <latest.json>     (needs `gh` and a token)

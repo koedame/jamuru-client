@@ -4,7 +4,7 @@
 //! - IPv4/IPv6 support detection (whether IPv6 gets out, not only whether an address exists)
 //! - How the router maps ports, measured through STUN from one socket
 //! - Whether the router answers UPnP (a read-only look; nothing is forwarded)
-//! - Which peers the above make hard to reach (ADR-114)
+//! - Which peers the above make hard to reach
 //! - Connection stability (RTT, jitter, packet loss)
 //! - Signaling server connectivity
 
@@ -316,8 +316,8 @@ impl NetworkDiagnostics {
     }
 
     /// Check IPv4/IPv6 support, and which outside port each of several STUN servers sees the
-    /// host at, both from one dual-stack socket like the one a session sends its audio from
-    /// (ADR-093). A fresh socket for each server would get a fresh mapping each time, which says
+    /// host at, both from one dual-stack socket like the one a session sends its audio from.
+    /// A fresh socket for each server would get a fresh mapping each time, which says
     /// nothing about how the router maps one socket.
     async fn check_ip_support() -> (IpSupport, Vec<SocketAddr>) {
         let mut ipv4_addresses = Vec::new();
@@ -661,8 +661,6 @@ mod tests {
     /// Given the same address and port seen by every STUN server
     /// When the router's mapping is judged
     /// Then it is Stable
-    ///
-    /// Verifies: REQ-CON-166
     #[test]
     fn when_every_server_sees_the_same_port_the_mapping_is_stable() {
         let seen = [addr("198.51.100.1:40000"), addr("198.51.100.1:40000")];
@@ -675,8 +673,6 @@ mod tests {
     /// Given servers that see the same address at different ports
     /// When the router's mapping is judged
     /// Then it maps per destination
-    ///
-    /// Verifies: REQ-CON-166
     #[test]
     fn when_the_servers_see_different_ports_the_mapping_is_per_destination() {
         let seen = [addr("198.51.100.1:40000"), addr("198.51.100.1:40001")];
@@ -689,8 +685,6 @@ mod tests {
     /// Given fewer than two answers
     /// When the router's mapping is judged
     /// Then it is Unknown, not guessed
-    ///
-    /// Verifies: REQ-CON-166
     #[test]
     fn when_fewer_than_two_servers_answer_the_mapping_is_unknown() {
         let s = support(Some("198.51.100.1"), &["192.168.0.5"]);
@@ -704,8 +698,6 @@ mod tests {
     /// Given the host holds the public address itself
     /// When the router's mapping is judged
     /// Then there is no NAT, whatever the servers saw
-    ///
-    /// Verifies: REQ-CON-166
     #[test]
     fn when_the_host_holds_the_public_address_there_is_no_nat() {
         assert_eq!(
@@ -714,7 +706,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-167
     #[test]
     fn ipv6_is_usable_only_when_an_address_exists_and_a_server_answered_over_it() {
         let mut s = support(None, &[]);
@@ -725,7 +716,6 @@ mod tests {
         assert_eq!(ipv6_status(&s), Ipv6Status::Usable);
     }
 
-    /// Verifies: REQ-CON-167
     #[test]
     fn only_global_unicast_addresses_count_as_ipv6_that_gets_out() {
         assert!(!is_global_ipv6(&"fe80::1".parse().unwrap()));
@@ -733,7 +723,6 @@ mod tests {
         assert!(is_global_ipv6(&"2001:db8::1".parse().unwrap()));
     }
 
-    /// Verifies: REQ-CON-167
     #[test]
     fn what_the_router_said_to_the_look_becomes_a_status() {
         let ip = "203.0.113.7".parse().unwrap();
@@ -761,7 +750,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-166
     #[test]
     fn a_router_that_forwards_the_port_reaches_every_peer_even_when_it_maps_per_destination() {
         assert_eq!(
@@ -786,7 +774,6 @@ mod tests {
         problems.iter().map(|p| format!("{:?}", p.code)).collect()
     }
 
-    /// Verifies: REQ-CON-168
     #[test]
     fn when_peers_are_hard_to_reach_the_problems_say_what_to_do() {
         let narrow = reach_problems(Ipv6Status::NoAddress, UpnpStatus::Off, PeerReach::Narrow);
@@ -808,20 +795,17 @@ mod tests {
         assert!(codes(&refused).contains(&"UpnpRefused".to_string()));
     }
 
-    /// Verifies: REQ-CON-168
     #[test]
     fn when_ipv6_works_a_per_destination_mapping_is_only_information() {
         let problems = reach_problems(Ipv6Status::Usable, UpnpStatus::NoRouter, PeerReach::Narrow);
         assert_eq!(problems[0].severity, ProblemSeverity::Info);
     }
 
-    /// Verifies: REQ-CON-168
     #[test]
     fn when_the_network_reaches_everyone_and_ipv6_is_absent_nothing_is_raised() {
         assert!(reach_problems(Ipv6Status::NoAddress, UpnpStatus::Off, PeerReach::Wide).is_empty());
     }
 
-    /// Verifies: REQ-CON-168
     #[test]
     fn when_stun_did_not_answer_it_is_said_and_when_ipv6_has_no_route_it_is_noted() {
         let unknown = reach_problems(Ipv6Status::NoRoute, UpnpStatus::Off, PeerReach::Unknown);

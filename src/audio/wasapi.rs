@@ -1,7 +1,7 @@
 //! WASAPI streams jamuru opens itself (Windows only), for the two ways of
 //! opening a device that `cpal` does not offer: exclusive mode, and the shared
 //! mode at the smallest period the driver allows (`IAudioClient3`). What each
-//! way does, and which is advised where: `wasapi_mode` and ADR-088.
+//! way does, and which is advised where: `wasapi_mode`.
 //!
 //! A stream runs on a thread of its own, woken by the device's event once a
 //! period, and hands its callback interleaved `f32` samples the way `cpal`

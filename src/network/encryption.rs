@@ -903,7 +903,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn when_a_claim_is_signed_by_the_key_of_the_id_it_names_the_other_end_takes_it_as_theirs() {
         let (a, b) = agreed();
@@ -918,7 +917,6 @@ mod tests {
         assert!(claim.is_signed_by(Some(&new_key.public_key())));
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn when_a_claim_names_an_id_whose_listed_key_is_another_one_it_is_not_taken_as_theirs() {
         let (a, b) = agreed();
@@ -933,7 +931,6 @@ mod tests {
         assert!(!claim.is_signed_by(Some("not a key")));
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn when_a_claim_made_over_one_link_is_passed_over_another_it_is_not_taken_as_theirs() {
         let (a, b) = agreed();
@@ -968,7 +965,6 @@ mod tests {
         )
     }
 
-    /// Verifies: REQ-SEC-010
     #[test]
     fn when_the_peer_signs_a_route_probe_and_its_reply_the_other_end_reads_their_kind_and_token() {
         let (amy, ben, _) = route_probe_links();
@@ -983,8 +979,6 @@ mod tests {
 
     /// Someone who sends from the peer's address does not hold the peer's key: what they sign,
     /// or leave unsigned as an app before probes were signed did, is not the peer's probe.
-    ///
-    /// Verifies: REQ-SEC-010
     #[test]
     fn when_a_route_probe_is_not_signed_by_the_peer_for_us_it_is_not_read() {
         let (amy, ben, cid) = route_probe_links();
@@ -1005,7 +999,6 @@ mod tests {
         assert_eq!(amy.read_route_probe(&no_signature), None);
     }
 
-    /// Verifies: REQ-SEC-010
     #[test]
     fn when_the_token_or_the_kind_of_a_signed_route_probe_is_changed_it_is_not_read() {
         let (amy, ben, _) = route_probe_links();
@@ -1018,7 +1011,6 @@ mod tests {
         assert_eq!(amy.read_route_probe(&made_a_reply), None);
     }
 
-    /// Verifies: REQ-SEC-010
     #[test]
     fn when_our_own_route_probe_is_sent_back_to_us_it_is_not_read_as_the_peers() {
         let (amy, _, _) = route_probe_links();
@@ -1028,7 +1020,6 @@ mod tests {
         assert_eq!(amy.read_route_probe(&ours), None);
     }
 
-    /// Verifies: REQ-SEC-010
     #[test]
     fn when_a_link_does_not_know_its_peer_it_neither_signs_nor_reads_a_route_probe() {
         let (_, ben, _) = route_probe_links();
@@ -1044,7 +1035,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn when_a_claim_is_not_exactly_an_id_and_a_signature_none_is_read() {
         let (a, b) = agreed();
@@ -1057,7 +1047,6 @@ mod tests {
         assert!(b.read_claim(&[]).is_none());
     }
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn when_the_keys_are_not_agreed_there_is_no_claim_to_send_or_read() {
         let (_, _, a, b) = verified_links();
@@ -1096,7 +1085,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-SEC-001
     #[test]
     fn when_the_keys_are_agreed_audio_sealed_by_one_end_opens_at_the_other() {
         let (a, b) = agreed();
@@ -1145,7 +1133,6 @@ mod tests {
         assert_ne!(first.payload, second.payload);
     }
 
-    /// Verifies: REQ-SEC-003
     #[test]
     fn packets_of_every_type_sharing_a_sequence_number_are_sealed_under_different_nonces() {
         let (a, _b) = agreed();
@@ -1163,7 +1150,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-SEC-002
     #[test]
     fn a_packet_changed_on_the_way_is_refused() {
         let (a, b) = agreed();
@@ -1180,7 +1166,6 @@ mod tests {
         assert!(opened(&b, sealed).is_some(), "the unchanged packet opens");
     }
 
-    /// Verifies: REQ-SEC-002
     #[test]
     fn a_packet_given_another_header_is_refused() {
         let (a, b) = agreed();
@@ -1199,7 +1184,6 @@ mod tests {
         assert!(opened(&b, sealed).is_some());
     }
 
-    /// Verifies: REQ-SEC-002
     #[test]
     fn a_packet_that_arrives_twice_is_accepted_once() {
         let (a, b) = agreed();
@@ -1219,7 +1203,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-SEC-002
     #[test]
     fn a_packet_further_behind_than_the_window_is_refused() {
         let (a, b) = agreed();
@@ -1232,7 +1215,6 @@ mod tests {
         assert!(opened(&b, first).is_none());
     }
 
-    /// Verifies: REQ-SEC-003
     #[test]
     fn a_packet_sent_to_the_peer_cannot_be_played_back_to_its_sender() {
         let (a, _b) = agreed();
@@ -1241,7 +1223,6 @@ mod tests {
         assert!(opened(&a, sealed).is_none());
     }
 
-    /// Verifies: REQ-SEC-003
     #[test]
     fn a_packet_sealed_for_another_peer_is_refused() {
         let (a, _b) = agreed();
@@ -1251,7 +1232,6 @@ mod tests {
         assert!(opened(&d, sealed).is_none());
     }
 
-    /// Verifies: REQ-SEC-005
     #[test]
     fn before_the_keys_are_agreed_only_keep_alives_may_be_sent() {
         let (_, _, link, _) = verified_links();
@@ -1263,8 +1243,6 @@ mod tests {
         assert!(!link.can_send_media());
     }
 
-    /// Verifies: REQ-SEC-002
-    /// Verifies: REQ-SEC-005
     #[test]
     fn until_the_peer_has_shown_it_has_the_keys_only_keep_alives_may_be_sent_and_they_are_sealed() {
         let (a, b) = exchanged();
@@ -1299,8 +1277,6 @@ mod tests {
 
     /// An app that cannot encrypt sends plain audio and no key. It is not talked to: the link
     /// stays without keys and nothing it sent is passed on.
-    ///
-    /// Verifies: REQ-SEC-004
     #[test]
     fn when_a_peer_sends_plain_audio_before_any_key_the_link_does_not_go_plain() {
         let (_, _, link, _) = verified_links();
@@ -1341,7 +1317,6 @@ mod tests {
         assert!(!a.wants_key_exchange());
     }
 
-    /// Verifies: REQ-SEC-003
     #[test]
     fn our_own_key_played_back_to_us_is_refused() {
         let (_, _, a, _) = verified_links();
@@ -1351,7 +1326,6 @@ mod tests {
         assert_eq!(a.security(), LinkSecurity::Negotiating);
     }
 
-    /// Verifies: REQ-SEC-002
     #[test]
     fn a_key_that_gives_no_secret_is_refused() {
         let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
@@ -1446,7 +1420,6 @@ mod tests {
     /// Sealed bytes for fixed keys, so a dependency upgrade cannot silently change the
     /// wire format. The expected bytes were made independently, with Python's `cryptography`
     /// (X25519, HKDF-SHA256 over the salt described in [`derive_keys`], AES-256-GCM).
-    /// Verifies: REQ-SEC-003
     #[test]
     fn the_sealed_bytes_for_fixed_keys_match_the_known_answer() {
         let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
@@ -1474,7 +1447,6 @@ mod tests {
         assert!(opened(&a, from_b).is_some());
     }
 
-    /// Verifies: REQ-SEC-007
     #[test]
     fn when_both_ends_know_the_other_by_its_key_they_agree_keys_and_audio_goes() {
         let (_, _, a, b) = verified_links();
@@ -1498,7 +1470,6 @@ mod tests {
         assert_eq!(a.security(), LinkSecurity::Encrypted);
     }
 
-    /// Verifies: REQ-SEC-007
     #[test]
     fn when_a_key_exchange_is_signed_by_someone_else_it_is_not_taken() {
         let (ia, _, a, _) = verified_links();
@@ -1515,7 +1486,6 @@ mod tests {
         assert!(!a.has_keys());
     }
 
-    /// Verifies: REQ-SEC-007
     #[test]
     fn when_the_key_in_a_signed_key_exchange_is_replaced_it_is_not_taken() {
         let (_, _, a, b) = verified_links();
@@ -1529,9 +1499,6 @@ mod tests {
 
     /// A peer that cannot sign - an older app - sends its key unsigned. It is not taken, and the
     /// key that was sent is not answered.
-    ///
-    /// Verifies: REQ-SEC-007
-    /// Verifies: REQ-SEC-008
     #[test]
     fn when_a_peer_sends_an_unsigned_key_exchange_it_is_not_taken() {
         let (_, _, a, _) = verified_links();
@@ -1546,8 +1513,6 @@ mod tests {
     }
 
     /// A half signed for one participant is of no use against another
-    ///
-    /// Verifies: REQ-SEC-007
     #[test]
     fn when_a_key_exchange_meant_for_another_participant_is_passed_on_it_is_not_taken() {
         let (ia, ib) = (LinkIdentity::generate(), LinkIdentity::generate());
@@ -1562,7 +1527,6 @@ mod tests {
         ));
     }
 
-    /// Verifies: REQ-SEC-007
     #[test]
     fn when_a_peer_that_must_sign_is_sent_plain_audio_the_link_does_not_go_plain() {
         let (_, _, a, _) = verified_links();
@@ -1577,8 +1541,6 @@ mod tests {
 
     /// There is no link to a peer whose key is not a key: the server gave none, or what it gave
     /// is not one
-    ///
-    /// Verifies: REQ-SEC-008
     #[test]
     fn when_the_peer_key_is_not_a_key_there_is_no_link_to_the_peer() {
         let ours = LinkIdentity::generate();
@@ -1591,8 +1553,6 @@ mod tests {
     }
 
     /// A link that is for nobody yet agrees no keys with anyone and sends no key
-    ///
-    /// Verifies: REQ-SEC-008
     #[test]
     fn a_link_for_nobody_agrees_no_keys_and_sends_none() {
         let link = SecureLink::unbound();
@@ -1614,7 +1574,6 @@ mod tests {
         (app, server, a, s)
     }
 
-    /// Verifies: REQ-SEC-009
     #[test]
     fn when_an_app_that_checks_talks_to_a_server_that_answers_any_app_they_agree_keys_and_audio_goes(
     ) {
@@ -1640,7 +1599,6 @@ mod tests {
         assert_eq!(a.security(), LinkSecurity::Encrypted);
     }
 
-    /// Verifies: REQ-SEC-009
     #[test]
     fn when_a_server_that_answers_any_app_has_heard_no_key_it_has_no_half_to_send() {
         let (_, _, _, s) = app_and_answering_server();
@@ -1648,7 +1606,6 @@ mod tests {
         assert!(s.key_exchange_packet().is_none());
     }
 
-    /// Verifies: REQ-SEC-009
     #[test]
     fn when_someone_on_the_path_answers_an_app_that_checks_with_a_key_of_their_own_it_is_not_taken()
     {
@@ -1675,8 +1632,6 @@ mod tests {
 
     /// The server signs whatever half it is sent, so what it signed for one app must not be of
     /// use against another
-    ///
-    /// Verifies: REQ-SEC-009
     #[test]
     fn when_the_answer_the_server_gave_one_app_is_passed_to_another_it_is_not_taken() {
         let (_, server, a, s) = app_and_answering_server();
@@ -1690,7 +1645,6 @@ mod tests {
         assert!(!other.has_keys());
     }
 
-    /// Verifies: REQ-SEC-009
     #[test]
     fn when_the_ephemeral_key_in_the_servers_answer_is_replaced_it_is_not_taken() {
         let (_, _, a, s) = app_and_answering_server();
@@ -1702,7 +1656,6 @@ mod tests {
         assert!(!a.has_keys());
     }
 
-    /// Verifies: REQ-SEC-009
     #[test]
     fn when_the_app_that_the_server_answers_sends_a_half_that_is_not_signed_it_gets_no_answer() {
         let (_, _, _, s) = app_and_answering_server();
@@ -1717,7 +1670,6 @@ mod tests {
         assert!(!s.has_keys());
     }
 
-    /// Verifies: REQ-SEC-009
     #[test]
     fn when_the_app_changes_its_key_before_the_link_is_confirmed_the_server_answers_the_new_one() {
         let (app, server, first, s) = app_and_answering_server();
@@ -1738,7 +1690,6 @@ mod tests {
         ));
     }
 
-    /// Verifies: REQ-SEC-009
     #[test]
     fn a_server_that_answers_any_app_does_not_carry_an_app_that_sends_plain_audio() {
         let (_, _, _, s) = app_and_answering_server();

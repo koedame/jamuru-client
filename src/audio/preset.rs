@@ -3,17 +3,17 @@
 //! This module is the single source of truth for preset parameters and for the
 //! one-way, application-induced latency each preset is allowed to cost.
 //!
-//! Before this module existed the same numbers lived in three places (ADR-008's
-//! summary table, the Tauri config layer, and the E2E quality thresholds) and had
+//! Before this module existed the same numbers lived in three places (the
+//! zero-latency mode's summary table, the Tauri config layer, and the E2E quality thresholds) and had
 //! drifted apart. `src-tauri` now re-exports [`AudioPreset`] from here and the
 //! latency tests derive their expectations from the same constants, so the GUI,
 //! the audio path and the tests cannot disagree.
 //!
 //! ## Latency model
 //!
-//! One-way application-induced latency is the sum of three buffering stages
-//! (ADR-008). Encode/decode is 0 ms because the default codec is uncompressed
-//! PCM f32 (ADR-003):
+//! One-way application-induced latency is the sum of three buffering stages.
+//! Encode/decode is 0 ms because the default codec is uncompressed
+//! PCM f32:
 //!
 //! ```text
 //! app_latency = capture_buffer + jitter_buffer + playback_buffer
@@ -24,13 +24,12 @@
 //! application, and the top-priority requirement is that total latency
 //! approaches "network RTT only".
 //!
-//! Budgets are defined in [`AudioPreset::max_app_latency_ms`] and justified in
-//! ADR-019.
+//! Budgets are defined in [`AudioPreset::max_app_latency_ms`].
 
 use crate::audio::codec::CodecType;
 use serde::{Deserialize, Serialize};
 
-/// Sample rate the latency budgets are defined at (ADR-013 recommends 48 kHz).
+/// Sample rate the latency budgets are defined at (48 kHz is the recommended rate).
 ///
 /// Budgets are stated at this rate; [`AudioPreset::designed_app_latency_ms`]
 /// accepts any rate so that 44.1 kHz and 96 kHz can be checked as well.
@@ -43,7 +42,7 @@ const FIXED_FRAME_STAGES: u32 = 2;
 
 /// Available audio presets
 ///
-/// Parameters come from ADR-008 (zero-latency) and ADR-019 (remaining presets).
+/// Parameters come from the zero-latency mode and the preset latency budget.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum AudioPreset {
@@ -88,13 +87,13 @@ impl AudioPreset {
     /// Maximum one-way, application-induced latency this preset may cost, in ms
     ///
     /// Verified by `tests/latency_test.rs` against
-    /// [`Self::designed_app_latency_ms`]. Raising a budget requires a new ADR;
-    /// see ADR-019 for how each value was derived.
+    /// [`Self::designed_app_latency_ms`]. Raising a budget requires a new design
+    /// decision.
     ///
-    /// - `zero-latency` and `ultra-low-latency` carry ADR-008's external targets
+    /// - `zero-latency` and `ultra-low-latency` carry the external targets
     ///   verbatim, because they are what the top-priority requirement promises.
     /// - `balanced` and `high-quality` are the designed value plus 2 ms of
-    ///   headroom, because ADR-008's estimates for them predate the preset
+    ///   headroom, because the first estimates for them predate the preset
     ///   parameters and understate the real cost.
     pub fn max_app_latency_ms(&self) -> f32 {
         match self {
@@ -134,7 +133,7 @@ impl AudioPreset {
     /// 1920/2880-sample frames at 48kHz, and no preset's frame size (32, 64,
     /// 128, 256) is among them - encoding at 128 fails outright. Adopting Opus
     /// would mean either abandoning power-of-two device buffer sizes or
-    /// repacketising frames, both of which cost latency (ADR-021).
+    /// repacketising frames, both of which cost latency.
     pub fn codec_type(&self) -> CodecType {
         CodecType::Pcm
     }
@@ -144,7 +143,7 @@ impl AudioPreset {
     /// Equal to the jitter buffer depth. A lost packet is recovered at most
     /// `group_size - 1` frames late, and the buffer plays `jitter_buffer_frames`
     /// behind the newest packet, so a larger group would recover packets after
-    /// they were due (ADR-021).
+    /// they were due.
     ///
     /// A depth of 1 would make the FEC packet a duplicate of the single data
     /// packet - 100% redundancy for no reordering benefit - so FEC is off below
@@ -215,7 +214,6 @@ fn frame_duration_ms_f64(frame_size: u32, sample_rate: u32) -> f64 {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-LAT-020
     #[test]
     fn every_preset_fits_its_latency_budget() {
         for preset in AudioPreset::all() {
@@ -231,7 +229,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-LAT-021
     #[test]
     fn presets_are_ordered_by_latency() {
         let latencies: Vec<f32> = AudioPreset::all()
@@ -248,7 +245,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-LAT-022
     #[test]
     fn preset_names_round_trip() {
         for preset in AudioPreset::all() {
@@ -258,7 +254,6 @@ mod tests {
         assert_eq!(AudioPreset::from_name("nonexistent"), None);
     }
 
-    /// Verifies: REQ-LAT-023
     #[test]
     fn frame_duration_matches_sample_rate() {
         // 64 samples @ 48kHz = 1.33ms
@@ -272,9 +267,7 @@ mod tests {
     }
 
     /// The FEC group must never exceed the jitter buffer depth, or recovered
-    /// packets arrive after they were due (ADR-021).
-    ///
-    /// Verifies: REQ-AUD-024
+    /// packets arrive after they were due.
     #[test]
     fn fec_group_never_outlives_the_jitter_buffer() {
         for preset in AudioPreset::all() {
@@ -302,9 +295,7 @@ mod tests {
     }
 
     /// Every preset must use a codec that is available and whose frame size the
-    /// codec actually accepts (ADR-021). PCM satisfies both unconditionally.
-    ///
-    /// Verifies: REQ-AUD-025
+    /// codec actually accepts. PCM satisfies both unconditionally.
     #[test]
     fn every_preset_uses_an_available_codec() {
         for preset in AudioPreset::all() {
@@ -329,13 +320,12 @@ mod tests {
         for preset in AudioPreset::all() {
             assert!(
                 !OPUS_FRAME_SIZES.contains(&preset.frame_size()),
-                "{} now has an Opus-compatible frame size; revisit ADR-021",
+                "{} now has an Opus-compatible frame size; revisit the presets' codec settings",
                 preset.name()
             );
         }
     }
 
-    /// Verifies: REQ-LAT-024
     #[test]
     fn zero_latency_uses_passthrough_jitter_buffer() {
         assert_eq!(AudioPreset::ZeroLatency.jitter_buffer_frames(), 0);

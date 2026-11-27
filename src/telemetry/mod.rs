@@ -22,8 +22,8 @@
 //! - **What would be sent** can be read at any time with
 //!   [`UsageReporter::preview_ndjson`].
 //!
-//! This is a separate path from the diagnostic log file `jamuru.log`
-//! (ADR-036), which stays on the machine. Nothing here reuses its redaction:
+//! This is a separate path from the diagnostic log file `jamuru.log`,
+//! which stays on the machine. Nothing here reuses its redaction:
 //! what may leave the machine is decided by the schema and by
 //! [`settings::LEFT_OUT`].
 

@@ -1,4 +1,4 @@
-//! The native menu bar (ADR-081).
+//! The native menu bar.
 //!
 //! What the menu holds, in which language, and which entries can be used right
 //! now are all decided here by plain functions of plain values ([`layout`],
@@ -75,7 +75,7 @@ impl WindowKind {
 pub struct Context {
     /// The window the menu is used from.
     pub window: WindowKind,
-    /// The terms of use are agreed to (REQ-TRM-003).
+    /// The terms of use are agreed to.
     pub terms_accepted: bool,
     /// Connected to the server and in no room, so a room can be made or joined.
     pub can_enter_room: bool,
@@ -614,7 +614,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         let handle = app.clone();
         app.listen(event, move |_| refresh(&handle, None));
     }
-    // Until the terms are agreed to, most entries are disabled (REQ-TRM-003).
+    // Until the terms are agreed to, most entries are disabled.
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         crate::terms::wait_accepted(&handle).await;
@@ -735,7 +735,7 @@ pub fn handle_event(app: &AppHandle, id: &str) {
 }
 
 /// What the main window's screen is asked when the app is to end while in a
-/// room: it confirms leaving, leaves, and then quits (REQ-CON-137).
+/// room: it confirms leaving, leaves, and then quits.
 pub const QUIT_ACTION: &str = "quit_requested";
 
 /// Whether the session is in a room.
@@ -789,7 +789,6 @@ mod tests {
             .collect()
     }
 
-    /// Verifies: REQ-MNU-001
     #[test]
     fn on_windows_and_linux_every_entry_is_in_the_menu_once() {
         let mut items = items_of(Os::Other);
@@ -799,7 +798,6 @@ mod tests {
         assert_eq!(items, all);
     }
 
-    /// Verifies: REQ-MNU-001
     #[test]
     fn on_macos_every_entry_but_quit_is_in_the_menu_once() {
         let mut items = items_of(Os::Mac);
@@ -813,7 +811,6 @@ mod tests {
             .any(|s| s.nodes.contains(&Node::Native(Native::Quit))));
     }
 
-    /// Verifies: REQ-MNU-001
     #[test]
     fn on_windows_and_linux_the_menu_holds_only_what_those_systems_provide() {
         for section in layout(Os::Other) {
@@ -825,7 +822,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-002
     #[test]
     fn on_macos_the_app_name_menu_comes_first_and_help_comes_last() {
         let sections = layout(Os::Mac);
@@ -835,7 +831,6 @@ mod tests {
             && s.nodes.contains(&Node::Native(Native::BringAllToFront))));
     }
 
-    /// Verifies: REQ-MNU-002
     #[test]
     fn on_windows_and_linux_settings_is_in_file_and_about_is_in_help() {
         let sections = layout(Os::Other);
@@ -845,7 +840,6 @@ mod tests {
         assert!(help.nodes.contains(&Node::Native(Native::About)));
     }
 
-    /// Verifies: REQ-MNU-003
     #[test]
     fn the_help_menu_reaches_the_guide_the_support_tools_and_the_notices() {
         for os in [Os::Mac, Os::Other] {
@@ -874,7 +868,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-004
     #[test]
     fn every_entry_has_an_id_that_finds_it_and_text_in_both_languages() {
         let mut ids = std::collections::HashSet::new();
@@ -887,7 +880,6 @@ mod tests {
         assert_eq!(Item::from_id("menu.nothing"), None);
     }
 
-    /// Verifies: REQ-MNU-004
     #[test]
     fn every_native_entry_has_text_in_both_languages() {
         for os in [Os::Mac, Os::Other] {
@@ -902,14 +894,12 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-004
     #[test]
     fn the_chosen_language_decides_the_menu_language_before_the_system_does() {
         assert_eq!(Lang::resolve(Some("ja"), Some("en-US")), Lang::Ja);
         assert_eq!(Lang::resolve(Some("en"), Some("ja-JP")), Lang::En);
     }
 
-    /// Verifies: REQ-MNU-004
     #[test]
     fn with_no_chosen_language_the_system_language_decides_and_english_is_the_last_resort() {
         assert_eq!(Lang::resolve(None, Some("ja-JP")), Lang::Ja);
@@ -917,7 +907,6 @@ mod tests {
         assert_eq!(Lang::resolve(None, None), Lang::En);
     }
 
-    /// Verifies: REQ-MNU-005
     #[test]
     fn before_a_room_is_entered_a_room_can_be_made_or_joined_and_not_left() {
         let context = context();
@@ -929,7 +918,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-005
     #[test]
     fn in_a_room_the_room_can_be_left_and_not_made() {
         let context = Context {
@@ -945,7 +933,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-005
     #[test]
     fn without_a_test_room_from_the_server_the_test_room_is_not_offered() {
         let context = Context {
@@ -956,7 +943,6 @@ mod tests {
         assert!(Item::CreateRoom.enabled(&context));
     }
 
-    /// Verifies: REQ-MNU-006
     #[test]
     fn before_the_terms_are_agreed_to_only_what_stays_on_the_machine_or_in_the_browser_works() {
         let context = Context {
@@ -977,7 +963,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-006
     #[test]
     fn from_a_helpers_window_only_the_browser_and_the_log_folder_entries_work() {
         let context = Context {
@@ -1000,7 +985,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-006
     #[test]
     fn from_the_settings_window_the_settings_entries_work_and_the_room_ones_do_not() {
         let context = Context {
@@ -1028,7 +1012,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-MNU-007
     #[test]
     fn a_window_is_told_apart_by_its_label() {
         assert_eq!(WindowKind::of("main"), WindowKind::Main);
@@ -1037,7 +1020,6 @@ mod tests {
         assert_eq!(WindowKind::of("help-log"), WindowKind::Help);
     }
 
-    /// Verifies: REQ-MNU-007
     #[test]
     fn entries_that_open_settings_name_a_tab_the_settings_window_has() {
         for item in Item::ALL {
@@ -1052,14 +1034,12 @@ mod tests {
         assert_eq!(Item::Terms.route(), Route::Settings(Some("about")));
     }
 
-    /// Verifies: REQ-MNU-010
     #[test]
     fn the_update_check_opens_settings_on_the_about_tab_and_checks() {
         assert_eq!(Item::CheckForUpdates.route(), Route::UpdateCheck);
         assert!(windows::SETTINGS_TABS.contains(&"about"));
     }
 
-    /// Verifies: REQ-MNU-010
     #[test]
     fn on_macos_the_update_check_follows_about_in_the_app_menu() {
         let app_menu = &layout(Os::Mac)[0];
@@ -1073,7 +1053,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-MNU-010
     #[test]
     fn on_windows_and_linux_the_update_check_sits_just_before_about_in_the_help_menu() {
         let sections = layout(Os::Other);
@@ -1088,7 +1067,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-MNU-007
     #[test]
     fn entries_that_work_on_the_screen_each_name_a_different_action() {
         let mut actions = std::collections::HashSet::new();
@@ -1100,7 +1078,6 @@ mod tests {
         assert_eq!(actions.len(), 6);
     }
 
-    /// Verifies: REQ-MNU-007
     #[test]
     fn entries_that_open_the_browser_open_https_pages() {
         for item in Item::ALL {

@@ -2,7 +2,7 @@
  * The UI's one way to call a Tauri command.
  *
  * Wraps the backend's `invoke` (`backend.ts`) so every failed command reaches
- * the log file with its name and error (ADR-036). Tauri does not let the
+ * the log file with its name and error. Tauri does not let the
  * webview hook `invoke` itself: `__TAURI_INTERNALS__.invoke` is a read-only
  * property.
  */

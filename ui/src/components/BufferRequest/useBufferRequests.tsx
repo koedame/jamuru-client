@@ -1,6 +1,6 @@
 /**
  * Asking participants to buffer your audio for longer, and answering their
- * asks (ADR-097): the state of the asks this app made and was made, built from
+ * asks: the state of the asks this app made and was made, built from
  * the events the backend sends, and what to show for it - the question the
  * user answers and the passing notices. Where an ask is made and where a
  * buffer held for someone is put back is the participant's dialog

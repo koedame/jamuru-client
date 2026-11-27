@@ -1,8 +1,8 @@
 /**
  * UpdateSection - The running version and the update check, on the About tab
  *
- * The person asks for the check and for the install (ADR-082); the background
- * update (ADR-041) goes on regardless. What it can do depends on the build: a
+ * The person asks for the check and for the install; the background
+ * update goes on regardless. What it can do depends on the build: a
  * development or self-built build checks nothing, a package that cannot
  * replace itself (a Linux `.deb`, a Windows `.msi`) only says that a newer
  * release exists, and the others also install it and restart.

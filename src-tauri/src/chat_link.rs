@@ -41,7 +41,6 @@ fn check(url: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-GUI-029
     #[test]
     fn when_the_address_is_http_or_https_it_is_accepted() {
         assert!(check("https://example.com/a?b=c#d").is_ok());
@@ -49,7 +48,6 @@ mod tests {
         assert!(check("https://user@example.com:8080/").is_ok());
     }
 
-    /// Verifies: REQ-GUI-029
     #[test]
     fn when_the_address_is_not_a_web_address_it_is_refused() {
         for url in [
@@ -66,7 +64,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-GUI-029
     #[test]
     fn when_the_address_has_no_host_it_is_refused() {
         for url in [
@@ -79,14 +76,12 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-GUI-029
     #[test]
     fn when_the_address_has_a_space_or_control_character_it_is_refused() {
         assert!(check("https://example.com/a b").is_err());
         assert!(check("https://example.com/\n--flag").is_err());
     }
 
-    /// Verifies: REQ-GUI-029
     #[test]
     fn when_the_address_is_too_long_it_is_refused() {
         let url = format!("https://example.com/{}", "a".repeat(MAX_LEN));

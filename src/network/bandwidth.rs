@@ -3,9 +3,8 @@
 //! Uncompressed PCM has a fixed cost, so the interesting question is not "what
 //! bitrate should we pick" but "does this link carry what the peer sends".
 //! Bitrate adaptation is out of scope: narrow-band links are not a target and
-//! PCM's rate cannot be lowered without adding latency (ADR-022). What this
-//! module does is detect and report a link that cannot carry the stream
-//! (REQ-LAT-124, REQ-LAT-125, REQ-LAT-126).
+//! PCM's rate cannot be lowered without adding latency. What this
+//! module does is detect and report a link that cannot carry the stream.
 //!
 //! # What the verdict is made of
 //!
@@ -29,8 +28,8 @@ use super::encryption::SEAL_OVERHEAD;
 
 /// Bits in a byte, spelled out so the bitrate arithmetic reads clearly
 const BITS_PER_BYTE: f64 = 8.0;
-/// Bytes per sample on the wire at most: 24-bit PCM (ADR-096). Packing it takes some
-/// of them back (ADR-111), by as much as the sound allows
+/// Bytes per sample on the wire at most: 24-bit PCM. Packing it takes some
+/// of them back, by as much as the sound allows
 const BYTES_PER_SAMPLE: f64 = PCM_BYTES_PER_SAMPLE as f64;
 /// UDP + IP header bytes per packet on IPv4: 20 + 8. What the socket counts
 /// is the jamuru packet; the link carries these on top.
@@ -121,7 +120,7 @@ impl BandwidthStatus {
 /// `None` means the interval was measured and carried zero bytes, which is a
 /// different situation from an actual narrow link: nothing is arriving from the
 /// peer at all, so classifying it against the bandwidth requirement would call
-/// a dead connection "insufficient bandwidth" (REQ-LAT-127). Callers must not
+/// a dead connection "insufficient bandwidth". Callers must not
 /// reuse the previous classification for a zero-byte interval, or a stale
 /// "insufficient"/"marginal" verdict survives after the peer stops sending.
 pub fn status_label(status: Option<BandwidthStatus>) -> &'static str {
@@ -133,7 +132,7 @@ pub fn status_label(status: Option<BandwidthStatus>) -> &'static str {
 
 /// Bits per second a preset needs in one direction, at most
 ///
-/// A packet is as large as the sound makes it (ADR-111), and the most it comes to is
+/// A packet is as large as the sound makes it, and the most it comes to is
 /// the samples as they are, one byte more per packet. This counts that: what a link
 /// has to carry when the sound packs no better, and so the figure to tell someone whose
 /// link drops packets. Quiet and tonal sound takes a half to two thirds of it, and the
@@ -267,7 +266,7 @@ impl BandwidthEstimator {
     ///
     /// Returns `None` until a rate has been measured, so a caller does not warn
     /// about a link it has not observed yet, and `None` for an interval that
-    /// carried no bytes at all (REQ-LAT-127). An interval in which the peer sent
+    /// carried no bytes at all. An interval in which the peer sent
     /// no audio - it has muted itself - is sufficient: there was nothing to
     /// carry, and nothing was dropped.
     pub fn status(&self) -> Option<BandwidthStatus> {
@@ -304,10 +303,10 @@ const STARTUP_GRACE: Duration = Duration::from_secs(4);
 /// packets in a hundred is not a link that cannot carry the stream. A peer
 /// that has only just connected is worse - a test peer that replies after a
 /// deliberate delay, or plain connection setup, means the first intervals
-/// carry only keepalives (REQ-LAT-128). Both call for withholding judgment:
+/// carry only keepalives. Both call for withholding judgment:
 /// a single bad reading proves nothing, so `BandwidthVerdict` requires
 /// [`CONFIRM_INTERVALS`] in a row before it reports one, while a sufficient
-/// reading clears immediately (REQ-LAT-129).
+/// reading clears immediately.
 #[derive(Debug, Default)]
 pub struct BandwidthVerdict {
     connected_at: Option<Instant>,
@@ -317,7 +316,7 @@ pub struct BandwidthVerdict {
 impl BandwidthVerdict {
     /// Confirm (or withhold) a raw classification observed at `now`
     ///
-    /// `raw` is `None` for a zero-byte interval (REQ-LAT-127's no-signal case)
+    /// `raw` is `None` for a zero-byte interval (the no-signal case)
     /// and passes straight through unchanged: a dead link is never withheld or
     /// debounced. `Some(status)` is withheld during the startup grace period
     /// and must repeat for [`CONFIRM_INTERVALS`] consecutive calls before it
@@ -363,9 +362,7 @@ mod tests {
     use super::*;
 
     /// PCM's requirement is fixed by the sample rate and width: 24 bits a sample
-    /// is 1.152 Mbps of audio per channel (ADR-096).
-    ///
-    /// Verifies: REQ-NET-020
+    /// is 1.152 Mbps of audio per channel.
     #[test]
     fn pcm_requirement_matches_the_documented_figure() {
         // Mono, no FEC: 48000 * 3 * 8 = 1.152 Mbps plus header overhead.
@@ -394,9 +391,7 @@ mod tests {
     }
 
     /// FEC is extra packets, so it must show up as extra bandwidth in exactly
-    /// the proportion the preset's redundancy states (ADR-021).
-    ///
-    /// Verifies: REQ-NET-021
+    /// the proportion the preset's redundancy states.
     #[test]
     fn fec_costs_its_redundancy_in_bandwidth() {
         // Balanced adds a 25% FEC group; ultra-low-latency adds none.
@@ -414,8 +409,6 @@ mod tests {
 
     /// A smaller frame carries the same audio in more packets, so header
     /// overhead makes it cost more.
-    ///
-    /// Verifies: REQ-NET-022
     #[test]
     fn smaller_frames_cost_more_in_overhead() {
         // Compare presets that both have no FEC, so only the frame size differs.
@@ -429,7 +422,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-NET-029
     #[test]
     fn a_frame_is_cut_into_equal_packets_that_each_fit_the_payload_limit() {
         for preset in AudioPreset::all() {
@@ -453,7 +445,6 @@ mod tests {
         assert_eq!(samples_per_audio_packet(256, 1), 256);
     }
 
-    /// Verifies: REQ-NET-029
     #[test]
     fn a_packet_lasts_the_frame_unless_the_frame_was_cut_in_two() {
         assert!((audio_packet_duration_ms(128, 2, 48_000) - 2.667).abs() < 0.001);
@@ -468,8 +459,6 @@ mod tests {
 
     /// Cutting a frame in two doubles the headers it pays for, and the requirement
     /// counts them.
-    ///
-    /// Verifies: REQ-NET-029
     #[test]
     fn the_requirement_counts_the_headers_of_every_packet_a_frame_is_cut_into() {
         let preset = AudioPreset::HighQuality;
@@ -483,9 +472,6 @@ mod tests {
         assert!((required_bps(&preset, 48_000, 2) - expected).abs() < 1.0);
     }
 
-    /// Verifies: REQ-NET-023
-    /// Verifies: REQ-LAT-124
-    /// Verifies: REQ-LAT-125
     #[test]
     fn status_classifies_the_share_of_the_peers_packets_that_were_lost() {
         assert_eq!(BandwidthStatus::classify(0.0), BandwidthStatus::Sufficient);
@@ -528,9 +514,6 @@ mod tests {
     /// requirement that is the boundary, so the old verdict read every healthy
     /// link as insufficient or marginal; measured by what was lost it reads as
     /// sufficient.
-    ///
-    /// Verifies: REQ-LAT-124
-    /// Verifies: REQ-LAT-125
     #[test]
     fn a_link_that_delivers_exactly_what_the_peer_sends_is_sufficient() {
         let preset = AudioPreset::UltraLowLatency;
@@ -553,8 +536,6 @@ mod tests {
 
     /// A peer that has muted itself sends no audio, only keepalives. That is
     /// not a link too narrow for the stream.
-    ///
-    /// Verifies: REQ-LAT-131
     #[test]
     fn a_peer_that_sends_no_audio_is_not_a_narrow_link() {
         let start = Instant::now();
@@ -569,9 +550,6 @@ mod tests {
 
     /// Packets the peer's sequence numbers show as missing decide the verdict,
     /// however many bytes arrived.
-    ///
-    /// Verifies: REQ-LAT-124
-    /// Verifies: REQ-LAT-125
     #[test]
     fn a_link_that_drops_the_peers_packets_is_marginal_and_then_insufficient() {
         let start = Instant::now();
@@ -587,8 +565,6 @@ mod tests {
 
     /// The verdict is about the last interval. A link that lost packets and
     /// recovered is sufficient again.
-    ///
-    /// Verifies: REQ-LAT-124
     #[test]
     fn the_verdict_follows_the_last_interval_and_not_the_whole_session() {
         let start = Instant::now();
@@ -608,8 +584,6 @@ mod tests {
     /// A late packet takes its loss back, so the cumulative count of lost
     /// packets can go down. That must not read as anything but a clean
     /// interval.
-    ///
-    /// Verifies: REQ-LAT-124
     #[test]
     fn a_packet_that_takes_its_loss_back_does_not_break_the_interval() {
         let start = Instant::now();
@@ -625,8 +599,6 @@ mod tests {
 
     /// The estimator must report the rate over the interval, ignore samples that
     /// arrive too soon, and survive a counter reset.
-    ///
-    /// Verifies: REQ-NET-024
     #[test]
     fn estimator_measures_the_interval_rate() {
         let start = Instant::now();
@@ -662,13 +634,11 @@ mod tests {
         assert!(after_reset >= 0.0, "got {} bps", after_reset);
     }
 
-    /// Verifies: REQ-LAT-127
     #[test]
     fn status_label_when_the_interval_carried_zero_bytes_reports_no_signal_not_the_last_verdict() {
         assert_eq!(status_label(None), "no_signal");
     }
 
-    /// Verifies: REQ-LAT-127
     #[test]
     fn status_label_when_a_rate_was_measured_reports_the_classification() {
         assert_eq!(
@@ -682,8 +652,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-NET-025
-    /// Verifies: REQ-LAT-126
     #[test]
     fn status_is_absent_until_measured() {
         let start = Instant::now();
@@ -701,8 +669,6 @@ mod tests {
     }
 
     /// An interval with no bytes at all is a dead link, not a verdict.
-    ///
-    /// Verifies: REQ-LAT-127
     #[test]
     fn an_interval_that_carried_nothing_has_no_verdict() {
         let start = Instant::now();
@@ -714,7 +680,6 @@ mod tests {
         assert_eq!(estimator.status(), None);
     }
 
-    /// Verifies: REQ-LAT-128
     #[test]
     fn verdict_withholds_judgment_during_the_startup_grace_period() {
         let start = Instant::now();
@@ -736,7 +701,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-LAT-129
     #[test]
     fn verdict_requires_consecutive_confirmation_before_reporting_insufficient() {
         let start = Instant::now();
@@ -778,8 +742,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-LAT-127
-    /// Verifies: REQ-LAT-129
     #[test]
     fn verdict_passes_no_signal_through_unconfirmed_and_resets_the_streak() {
         let start = Instant::now();

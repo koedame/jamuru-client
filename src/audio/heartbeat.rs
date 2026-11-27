@@ -138,7 +138,6 @@ mod tests {
         t0 + Duration::from_millis(millis)
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn clones_of_a_heartbeat_count_together() {
         let heartbeat = Heartbeat::default();
@@ -150,7 +149,6 @@ mod tests {
         assert_eq!(watcher.count(), 2);
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn when_the_callback_keeps_being_called_the_stream_is_flowing() {
         let t0 = Instant::now();
@@ -161,7 +159,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn when_the_callback_is_silent_for_the_limit_the_stream_is_reopened() {
         let t0 = Instant::now();
@@ -173,7 +170,6 @@ mod tests {
         assert_eq!(guard.check(100, ms(t0, 1010)), Verdict::Reopen);
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn a_stream_that_is_reopened_is_given_the_limit_again_before_the_next_reopen() {
         let t0 = Instant::now();
@@ -185,7 +181,6 @@ mod tests {
         assert_eq!(guard.check(5, ms(t0, 2000)), Verdict::Reopen);
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn when_every_reopen_stays_silent_the_guard_gives_up_once() {
         let t0 = Instant::now();
@@ -209,7 +204,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn when_the_callback_is_heard_again_after_giving_up_that_is_said_once() {
         let t0 = Instant::now();
@@ -223,7 +217,6 @@ mod tests {
         assert_eq!(guard.check(7, ms(t0, 4600)), Verdict::Flowing);
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn a_callback_heard_after_a_reopen_gives_the_next_stall_its_reopens_back() {
         let t0 = Instant::now();
@@ -238,7 +231,6 @@ mod tests {
         assert_eq!(guard.check(6, ms(t0, 4100)), Verdict::Reopen);
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn while_a_stream_is_being_opened_the_wait_does_not_run() {
         let t0 = Instant::now();
@@ -255,7 +247,6 @@ mod tests {
         assert_eq!(guard.check(5, ms(t0, 5000)), Verdict::Reopen);
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn when_the_watching_thread_was_away_longer_than_the_limit_the_stream_is_not_blamed() {
         let t0 = Instant::now();
@@ -269,7 +260,6 @@ mod tests {
         assert_eq!(guard.check(5, ms(t0, 61_000)), Verdict::Reopen);
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn a_session_that_waits_to_connect_before_its_first_check_is_not_blamed() {
         let t0 = Instant::now();

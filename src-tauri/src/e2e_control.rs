@@ -1,4 +1,4 @@
-//! GUI E2E control channel (ADR-025, ADR-043, ADR-044)
+//! GUI E2E control channel
 //!
 //! Exposes the running app's rendered DOM over loopback HTTP so
 //! `tests/e2e/` can assert on it, and lets a scenario call any of the app's
@@ -120,7 +120,7 @@ async fn health() -> &'static str {
 }
 
 /// Calls `method` as the loopback portal, the same way every other portal
-/// calls it (ADR-044). The endpoints below only translate HTTP.
+/// calls it. The endpoints below only translate HTTP.
 async fn call(
     state: &ControlState,
     method: &str,
@@ -294,13 +294,11 @@ mod tests {
         result
     }
 
-    /// Verifies: REQ-GUI-004
     #[test]
     fn test_no_port_env_means_no_listener() {
         assert_eq!(with_port_env(None, read_port), None);
     }
 
-    /// Verifies: REQ-GUI-004
     #[test]
     fn test_port_env_is_used_verbatim() {
         assert_eq!(with_port_env(Some("39999"), read_port), Some(39999));
@@ -309,8 +307,6 @@ mod tests {
 
     /// A malformed value must not fall back to a default port - that would
     /// open a listener the harness never asked for.
-    ///
-    /// Verifies: REQ-GUI-004
     #[test]
     fn test_malformed_port_env_means_no_listener() {
         for value in ["", "0", "not-a-port", "-1", "70000", "8080abc"] {

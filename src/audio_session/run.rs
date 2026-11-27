@@ -1,5 +1,4 @@
-//! The audio thread of a session: opens the devices, serves the commands, and keeps the links
-//! (ADR-077).
+//! The audio thread of a session: opens the devices, serves the commands, and keeps the links.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc as std_mpsc;
@@ -31,7 +30,7 @@ use crate::protocol::LatencyInfoMessage;
 
 /// How long the receive loop waits when it has nothing to hand to playback.
 ///
-/// Short enough to be irrelevant to the latency budget (ADR-008) and long
+/// Short enough to be irrelevant to the latency budget and long
 /// enough to hand the runtime back to the task that receives packets, which
 /// shares this thread. The playback ring buffer holds eight frames, so a wake
 /// that the OS timer rounds up to a millisecond still refills it in time.
@@ -96,7 +95,7 @@ pub(super) async fn run(
     );
 
     // Capture config: mono (for network transmission)
-    // Sample rate from config (ADR-013: user-selectable)
+    // Sample rate from config (user-selectable)
     let capture_config = AudioConfig {
         sample_rate,
         channels: 1,
@@ -135,7 +134,7 @@ pub(super) async fn run(
     // - Playback: rtrb ring buffer (wait-free network callback)
     // - Send thread: dedicated std::thread (no tokio overhead)
 
-    // Configure the codec and FEC from the preset (ADR-021).
+    // Configure the codec and FEC from the preset.
     let encoding = AudioEncodingConfig {
         codec_type: preset.codec_type(),
         sample_rate,
@@ -149,7 +148,7 @@ pub(super) async fn run(
     // links there are and for those opened later.
     let mut jitter_buffer_frames = preset.jitter_buffer_frames();
     // The buffer counts packets, and a frame too big for one packet goes as
-    // several (ADR-070), so its depth lasts packets long, not frames long.
+    // several, so its depth lasts packets long, not frames long.
     let packet_duration_ms = audio_packet_duration_ms(buffer_size, WIRE_CHANNELS, sample_rate);
     // Everyone the session has a link to is mixed here for the output callback
     let mix = PeerMix::new(MAX_LINKS, sample_rate, buffer_size, underrun_count.clone());
@@ -160,7 +159,7 @@ pub(super) async fn run(
     let input_level_for_capture = Arc::new(AtomicU32::new(0));
 
     // Local monitoring: what the capture callback hears goes straight to the
-    // output callback, never through the network (ADR-033).
+    // output callback, never through the network.
     let monitor = LocalMonitor::new(buffer_size);
     monitor.set_enabled(is_monitoring.load(Ordering::SeqCst));
 
@@ -179,7 +178,7 @@ pub(super) async fn run(
     ));
 
     // Start audio capture with level metering. Mono or stereo follows the
-    // transmit channel setting (REQ-AUD-107/108).
+    // transmit channel setting.
     let mut wanted_channels = transmit_channels.clamp(1, WIRE_CHANNELS as u32) as u16;
 
     // The input and output settings name the same ASIO driver (Windows
@@ -288,7 +287,7 @@ pub(super) async fn run(
             // Start audio playback (stereo). The callback takes frames from
             // the play-out buffer itself and applies the mixer gains, so a
             // volume change is heard on the next frame and nothing queues
-            // behind the buffer (ADR-028).
+            // behind the buffer.
             match &output_file {
                 Some(path) => {
                     let source = playout_source(
@@ -406,8 +405,8 @@ pub(super) async fn run(
 
     tracing::info!("Streaming active");
 
-    // What every peer is told about our audio when its link comes up (ADR-013:
-    // sample rate communication). The delay is that of the peer's own
+    // What every peer is told about our audio when its link comes up (sample
+    // rate communication). The delay is that of the peer's own
     // play-out buffer, filled in as it is sent.
     let frame_ms = (buffer_size as f32 / sample_rate as f32) * 1000.0;
     // A side's buffer is the frame or the period the system hands the device
@@ -587,7 +586,7 @@ pub(super) async fn run(
             Ok(Command::SetJitterBufferFrames(frames)) => {
                 tracing::info!("Setting the play-out delay to {} frame(s)", frames);
                 jitter_buffer_frames = frames;
-                // What is held moves to the new delay (ADR-031). The display
+                // What is held moves to the new delay. The display
                 // and the peers hear about it from the stats tick below.
                 for link in &links {
                     link.receive.set_delay_frames(frames);
@@ -831,7 +830,7 @@ pub(super) async fn run(
         // A stream that has stopped calling back raises no error and leaves
         // the session connected, so the callbacks are watched: one silent
         // for a second is opened again, and one that stays silent is told to
-        // the user (REQ-AUD-128). ASIO has its own session, not watched here.
+        // the user. ASIO has its own session, not watched here.
         #[cfg(target_os = "windows")]
         let streams_watched = asio_driver_in_use.is_none();
         #[cfg(not(target_os = "windows"))]
@@ -943,7 +942,7 @@ pub(super) async fn run(
         // spin, which is a property of the audio clock, not of anything the UI
         // cares about.
         // What the owner set for a receive buffer, or a participant asked of it, takes hold at
-        // once rather than at the next tick (ADR-097)
+        // once rather than at the next tick
         for link in &mut links {
             link.follow_buffer_control(packet_duration_ms, false);
         }
@@ -1040,7 +1039,7 @@ pub(super) async fn run(
                 );
                 // Whatever moved the delay - a preset switch, an adaptation,
                 // a reconnect, the peer saying how long its packets are - the
-                // display follows (ADR-031)
+                // display follows
                 link.report
                     .jitter_buffer_delay_us
                     .store(link.delay_us(packet_duration_ms), Ordering::SeqCst);
@@ -1054,7 +1053,7 @@ pub(super) async fn run(
         }
 
         // Nothing to do here for audio: the output callback takes frames
-        // from the play-out buffer itself, at the device's clock (ADR-028).
+        // from the play-out buffer itself, at the device's clock.
         // This loop only carries commands and statistics, so it waits.
         crate::perf::RECEIVE_LOOP.stop(pass_started);
         tokio::time::sleep(POP_IDLE).await;

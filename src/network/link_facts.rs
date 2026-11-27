@@ -436,7 +436,6 @@ mod tests {
         assert_eq!(LinkRoute::of(addr("[::1]:5000")), LinkRoute::Loopback);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_the_address_is_on_the_lan_it_is_preferred_to_an_overlay_and_to_a_public_one() {
         let lan = route_preference(addr("192.168.1.20:5000"));
@@ -447,7 +446,6 @@ mod tests {
         assert!(lan > overlay, "{lan} > {overlay}");
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_public_address_and_a_tailscale_address_both_answer_the_public_one_is_preferred() {
         let overlay = route_preference(addr("100.68.50.7:5000"));
@@ -458,7 +456,6 @@ mod tests {
         assert!(public_v6 > overlay, "{public_v6} > {overlay}");
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_the_address_is_a_tailscale_one_its_round_trip_is_held_to_be_longer_than_any_others() {
         assert_eq!(route_handicap(addr("100.68.50.7:5000")), OVERLAY_HANDICAP);
@@ -466,7 +463,6 @@ mod tests {
         assert_eq!(route_handicap(addr("192.168.1.20:5000")), Duration::ZERO);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_the_address_is_in_the_tailscale_range_it_is_an_overlay_in_both_families() {
         for text in [
@@ -533,7 +529,6 @@ mod tests {
         assert_eq!(snapshot.first_audio_ms, None);
     }
 
-    /// Verifies: REQ-CON-174
     #[test]
     fn when_the_check_sends_and_hears_the_first_times_and_the_candidate_kinds_are_kept() {
         let facts = LinkFacts::new();
@@ -568,7 +563,6 @@ mod tests {
         assert_eq!(snapshot.sent_to_other, 2);
     }
 
-    /// Verifies: REQ-CON-174
     #[test]
     fn when_the_sending_starts_over_the_tries_and_the_order_are_kept() {
         let facts = LinkFacts::new();
@@ -583,7 +577,6 @@ mod tests {
         assert_eq!(snapshot.punched_first, Some(false));
     }
 
-    /// Verifies: REQ-CON-174
     #[test]
     fn when_the_route_is_chosen_the_reason_is_kept_and_a_move_says_followed() {
         let facts = LinkFacts::new();

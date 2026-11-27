@@ -1,11 +1,11 @@
 //! The receive buffer of each participant: the one its owner sets by hand, and
-//! the one another participant asks to be longer (ADR-097).
+//! the one another participant asks to be longer.
 //!
 //! Every link has a play-out buffer of its own (`ReceivePath`), so what holds
 //! for one participant holds for that participant only. Two things move it:
 //!
 //! - **The owner's choice.** [`Own::Preset`] is the buffer the preset asks for,
-//!   adapting to the link (ADR-031). [`Own::Fixed`] is a delay the owner typed:
+//!   adapting to the link. [`Own::Fixed`] is a delay the owner typed:
 //!   it is held, and adaptation leaves it alone.
 //! - **A participant's ask**, once the owner accepted it: [`Terms`]. It is a
 //!   floor under the delay, and the longer of the two is held. A participant
@@ -370,7 +370,6 @@ mod tests {
         .unwrap()
     }
 
-    /// Verifies: REQ-LAT-031
     #[test]
     fn the_ring_holds_the_longest_buffer_in_the_shortest_packets() {
         // 85 ms at 48 kHz is 4080 samples, 127.5 packets of 32
@@ -379,7 +378,6 @@ mod tests {
         assert_eq!(ring_frames(44_100), 118);
     }
 
-    /// Verifies: REQ-LAT-031
     #[test]
     fn a_buffer_longer_than_eighty_five_milliseconds_is_not_a_choice() {
         assert_eq!(Own::fixed(850), Ok(Own::Fixed { ms10: 850 }));
@@ -387,7 +385,6 @@ mod tests {
         assert!(Own::fixed(70_000).is_err());
     }
 
-    /// Verifies: REQ-LAT-032
     #[test]
     fn an_ask_is_within_what_it_may_say_or_it_is_not_one() {
         let ask = |max_ms10, tolerance_tenths| Terms {
@@ -403,7 +400,6 @@ mod tests {
         assert!(!ask(100, 101).is_valid());
     }
 
-    /// Verifies: REQ-LAT-031
     #[test]
     fn a_fixed_buffer_is_held_in_whole_packets_and_the_choice_goes_back_to_the_preset() {
         let (control, receive, mut driver) =
@@ -420,7 +416,6 @@ mod tests {
         assert_eq!(receive.delay_frames(), 4, "the preset's delay is back");
     }
 
-    /// Verifies: REQ-LAT-032
     #[test]
     fn an_ask_that_is_accepted_holds_the_buffer_and_letting_go_gives_it_back() {
         let (control, receive, mut driver) =
@@ -454,7 +449,6 @@ mod tests {
         assert_eq!(control.view().granted, None);
     }
 
-    /// Verifies: REQ-LAT-032
     #[test]
     fn an_automatic_ask_starts_at_its_lowest_and_says_it_follows_the_link() {
         let (control, receive, mut driver) =
@@ -479,7 +473,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-LAT-030
     #[test]
     fn what_is_set_for_one_participant_leaves_the_buffer_of_every_other_as_it_was() {
         let controls: Vec<_> = (0..3).map(|_| PeerBufferControl::default()).collect();
@@ -515,7 +508,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-LAT-032
     #[test]
     fn an_ask_stays_when_the_packets_of_the_participant_turn_out_longer_than_assumed() {
         let (control, receive, mut driver) =

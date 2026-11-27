@@ -1,4 +1,4 @@
-//! Events the app publishes to the portals that listen (ADR-044).
+//! Events the app publishes to the portals that listen.
 //!
 //! The backend announces a change by emitting a Tauri event; the screen hears
 //! it through the webview. A remote portal hears the same events here, but
@@ -50,8 +50,8 @@ pub const EVENTS: &[EventSpec] = &[
         name: crate::help_record::REMAINING_EVENT,
         access: Access::ALL,
     },
-    // Where the person helped is looking, for the helper's window
-    // (REQ-RMT-034). It is published only while their screen is helped.
+    // Where the person helped is looking, for the helper's window.
+    // It is published only while their screen is helped.
     EventSpec {
         name: crate::help_presence::FROM_HELPED_EVENT,
         access: Access::SCREEN_AND_HELP,
@@ -102,7 +102,6 @@ mod tests {
     use super::*;
     use crate::rpc::spec::Portal;
 
-    /// Verifies: REQ-RMT-022
     #[tokio::test]
     async fn an_emitted_event_reaches_a_subscriber() {
         let app = tauri::test::mock_app();
@@ -122,7 +121,6 @@ mod tests {
         assert_eq!(event.payload, serde_json::json!({ "revision": 3 }));
     }
 
-    /// Verifies: REQ-RMT-034
     #[test]
     fn what_the_person_helped_points_at_goes_to_the_helper_and_what_the_helper_points_at_does_not_come_back(
     ) {

@@ -1,5 +1,4 @@
-//! Breaks a build on purpose, for the update drill (`scripts/update-drill.py`,
-//! ADR-089).
+//! Breaks a build on purpose, for the update drill (`scripts/update-drill.py`).
 //!
 //! The drill installs one build over another and checks that a release that
 //! cannot start is taken out again. The file [`FILE`] next to `config.toml`,

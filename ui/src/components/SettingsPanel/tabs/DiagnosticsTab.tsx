@@ -57,7 +57,7 @@ export interface DiagnosticsTabProps {
   logFolder?: string | null;
   /** Why the folder could not be opened */
   logFolderError?: string | null;
-  /** "Report a problem" (ADR-058): a manual, one-off send of jamuru.log and a comment */
+  /** "Report a problem": a manual, one-off send of jamuru.log and a comment */
   reportProblemState?: ReportProblemState;
   /** The jamuru.log content that would be sent; null while not loaded yet */
   reportProblemPreview?: string | null;

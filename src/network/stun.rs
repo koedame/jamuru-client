@@ -693,7 +693,6 @@ mod tests {
         UdpSocket::from_std(super::super::bind_audio_std(0).unwrap()).unwrap()
     }
 
-    /// Verifies: REQ-CON-145
     #[tokio::test]
     async fn when_the_socket_is_dual_stack_both_families_are_asked_and_each_answer_is_kept() {
         let socket = audio_socket();
@@ -718,7 +717,6 @@ mod tests {
         assert_eq!(addresses, vec![reported_v4, reported_v6]);
     }
 
-    /// Verifies: REQ-CON-145
     #[tokio::test]
     async fn when_one_family_answers_and_the_other_is_silent_the_answer_waits_only_the_grace() {
         let socket = audio_socket();
@@ -752,7 +750,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-145
     #[tokio::test]
     async fn when_the_socket_is_ipv4_only_the_ipv6_family_is_not_asked() {
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();

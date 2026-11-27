@@ -172,7 +172,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-135
     #[test]
     fn a_request_to_create_asks_for_a_room_with_the_name_the_features_and_the_key() {
         let message = request(RoomEntry::Create {
@@ -199,7 +198,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-135
     #[test]
     fn a_request_to_join_asks_for_the_room_by_what_was_given_with_the_features_and_the_key() {
         let message = request(RoomEntry::Join {
@@ -224,7 +222,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-135
     #[test]
     fn a_room_just_made_has_its_code_and_nobody_else_in_it() {
         let peer_id = Uuid::new_v4();
@@ -244,7 +241,6 @@ mod tests {
         assert!(entered.peers.is_empty());
     }
 
-    /// Verifies: REQ-CON-135, REQ-CON-026
     #[test]
     fn a_room_joined_has_those_already_in_it_and_the_code_when_the_server_gives_one() {
         let peer_id = Uuid::new_v4();
@@ -273,7 +269,6 @@ mod tests {
         assert_eq!(entered.peers[0].id, other.id);
     }
 
-    /// Verifies: REQ-CON-135
     #[test]
     fn a_refusal_carries_what_the_server_said_and_any_other_reply_is_unexpected() {
         let refused = read_reply(SignalingMessage::Error {

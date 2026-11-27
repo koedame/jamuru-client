@@ -78,7 +78,7 @@ impl PcmPlc {
     /// Write concealment audio for a lost frame into `out`.
     ///
     /// The allocation-free form of [`Self::generate_concealment`], for callers
-    /// on the audio callback, where allocating is not allowed (ADR-028).
+    /// on the audio callback, where allocating is not allowed.
     /// `out` is filled to its own length, so a caller with a different frame
     /// size still gets a complete buffer.
     pub fn conceal_into(&mut self, out: &mut [f32]) {

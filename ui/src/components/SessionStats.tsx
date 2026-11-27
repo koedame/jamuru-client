@@ -13,7 +13,7 @@ export interface SessionStatsProps {
   latency: DetailedLatency | null;
   /** Underrun rate per second */
   underrunRate?: number;
-  /** Peer's audio configuration (ADR-013) */
+  /** Peer's audio configuration */
   peerAudio?: PeerAudioInfo | null;
   /** Local sample rate for comparison */
   localSampleRate?: number;
@@ -65,7 +65,7 @@ export function SessionStats({ network, latency, underrunRate = 0, peerAudio, lo
         </div>
       </section>
 
-      {/* Peer Audio Section (ADR-013) */}
+      {/* Peer Audio Section */}
       {peerAudio && (
         <section className="session-stats__section">
           <h3 className="session-stats__section-title">{t("sessionStats.peerAudio")}</h3>

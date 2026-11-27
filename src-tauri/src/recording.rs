@@ -1,4 +1,4 @@
-//! Recording the room (ADR-095).
+//! Recording the room.
 //!
 //! The screen starts and stops it and shows how long it has run; the files
 //! are written by the core's recorder. Which folder they go to is not the
@@ -202,7 +202,6 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    /// Verifies: REQ-AUD-046
     #[test]
     fn when_a_recording_starts_its_name_is_the_time_it_started() {
         let now = chrono::Local
@@ -212,7 +211,6 @@ mod tests {
         assert_eq!(stem(now), "jamuru-2026-11-04-153012");
     }
 
-    /// Verifies: REQ-AUD-046
     #[test]
     fn when_a_recording_ended_the_screen_is_given_file_names_not_paths() {
         let finished = FinishedRecording {

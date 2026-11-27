@@ -3,8 +3,7 @@
 //! The CLI and the GUI both run sessions. Everything between the socket and
 //! the output callback - decoding, sample-rate conversion, the play-out buffer
 //! and its concealment - lives here, so the two cannot drift apart: a problem
-//! with jitter or loss reproduces in the CLI exactly as the app would play it
-//! (ADR-027, ADR-028).
+//! with jitter or loss reproduces in the CLI exactly as the app would play it.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
@@ -27,7 +26,7 @@ use crate::protocol::LatencyInfoMessage;
 /// path is stereo throughout - including the resampler.
 pub const WIRE_CHANNELS: usize = 2;
 
-/// How often [`ReceivePath::adapt`] is called (ADR-031). One second is the
+/// How often [`ReceivePath::adapt`] is called. One second is the
 /// window each decision judges, and ten of them in a row are needed to give
 /// a frame back.
 pub const ADAPT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
@@ -331,7 +330,7 @@ pub struct ReceivePath {
     /// signal can be joined (see [`Seam`]). Only the output callback uses it.
     seam: Arc<Mutex<Seam>>,
     /// Plays a little faster or slower when the buffer holds too much or too
-    /// little (ADR-122). Only the output callback uses it.
+    /// little. Only the output callback uses it.
     stretcher: Arc<Mutex<Stretcher>>,
 }
 
@@ -370,7 +369,7 @@ impl ReceivePath {
         let frame_samples = frame_size as usize * WIRE_CHANNELS;
 
         // The ring is sized for the largest preset, so switching preset in a
-        // session never needs a bigger one (ADR-031).
+        // session never needs a bigger one.
         let largest_preset_delay = AudioPreset::all()
             .iter()
             .map(AudioPreset::jitter_buffer_frames)
@@ -379,7 +378,7 @@ impl ReceivePath {
         let ring_delay_frames =
             PlayoutConfig::for_delay(frame_samples, largest_preset_delay).max_delay_frames;
         // ... and for the longest buffer a participant may be given, counted in
-        // the shortest packet (ADR-097). A restarted stream is still told from a
+        // the shortest packet. A restarted stream is still told from a
         // late one by the distance the preset-sized ring has.
         let widest_ring_frames =
             ring_delay_frames.max(super::peer_buffer::ring_frames(sample_rate));
@@ -472,7 +471,7 @@ impl ReceivePath {
 
         // A peer at another sample rate is converted before it is stored, and
         // the converted frame keeps whatever length the conversion produced -
-        // padding it to a fixed size would change pitch (ADR-013).
+        // padding it to a fixed size would change pitch.
         match self.resampler.lock() {
             Ok(mut guard) => match guard.as_mut() {
                 Some(resampler) => match resampler.process(decoded) {
@@ -559,7 +558,7 @@ impl ReceivePath {
     }
 
     /// Plays `read` a little faster or slower as `ppm` asks, by taking a
-    /// sample frame out of it or putting one in (ADR-122). A read that is not a
+    /// sample frame out of it or putting one in. A read that is not a
     /// whole frame played as it came (silence, concealment) ends what was going
     /// on instead. The read is let through as it is if the stretcher is held.
     fn stretched(
@@ -623,7 +622,7 @@ impl ReceivePath {
 
     /// Drops everything waiting. Called when the link is (re-)established:
     /// sequence numbers carry on from before an outage, so stale frames would
-    /// otherwise play out of order (ADR-022).
+    /// otherwise play out of order.
     pub fn reset(&self) {
         if let Ok(mut buffer) = self.playout.lock() {
             buffer.reset();
@@ -641,7 +640,7 @@ impl ReceivePath {
 
     /// Chooses whether the buffer is kept at its target by playing a little
     /// faster or slower (on, from the start) or by skipping and waiting, as
-    /// before (off), to compare the two (ADR-122).
+    /// before (off), to compare the two.
     pub fn set_rate_following(&self, on: bool) {
         if let Ok(mut buffer) = self.playout.lock() {
             if on {
@@ -677,7 +676,7 @@ impl ReceivePath {
             .unwrap_or_default()
     }
 
-    /// Switches filling gaps with sound that continues what was heard on or off (ADR-105).
+    /// Switches filling gaps with sound that continues what was heard on or off.
     /// It is on from the start; off is the plain repeat-and-fade, for comparing the two.
     pub fn set_waveform_concealment(&self, on: bool) {
         if let Ok(mut buffer) = self.playout.lock() {
@@ -699,7 +698,7 @@ impl ReceivePath {
 
     /// Chooses a new play-out delay, as a preset switch does. What is held
     /// moves to it: silence goes in to raise the delay and frames are skipped
-    /// to lower it (ADR-031).
+    /// to lower it.
     pub fn set_delay_frames(&self, frames: u32) {
         if let Ok(mut buffer) = self.playout.lock() {
             buffer.set_delay(frames);
@@ -708,8 +707,8 @@ impl ReceivePath {
         }
     }
 
-    /// Holds the delay at `frames` whatever the link does: the user chose it
-    /// (ADR-097). Returns the delay in force.
+    /// Holds the delay at `frames` whatever the link does: the user chose it.
+    /// Returns the delay in force.
     pub fn pin_delay_frames(&self, frames: u32) -> u32 {
         let Ok(mut buffer) = self.playout.lock() else {
             return self.delay_frames();
@@ -729,8 +728,8 @@ impl ReceivePath {
         }
     }
 
-    /// Holds the delay to what a participant asked for, or lets go of it
-    /// (ADR-097). Returns the delay the ask holds it to, in frames.
+    /// Holds the delay to what a participant asked for, or lets go of it.
+    /// Returns the delay the ask holds it to, in frames.
     pub fn set_grant(&self, grant: Option<Grant>) -> u32 {
         let Ok(mut buffer) = self.playout.lock() else {
             return 0;
@@ -772,8 +771,8 @@ impl ReceivePath {
         moved
     }
 
-    /// Converts the peer's audio when it runs at another sample rate
-    /// (ADR-013). Call it whenever the peer reports its rate.
+    /// Converts the peer's audio when it runs at another sample rate.
+    /// Call it whenever the peer reports its rate.
     pub fn follow_peer_rate(&self, peer_rate: u32) -> PeerRateChange {
         if self.peer_rate.swap(peer_rate, Ordering::SeqCst) == peer_rate {
             return PeerRateChange::Unchanged;
@@ -954,8 +953,6 @@ mod tests {
     /// The bug this guards: the frame the decoder wrote into was as long as
     /// our own buffer size, so a peer running a larger one could not be
     /// decoded. None of their audio was played, while they heard us.
-    ///
-    /// Verifies: REQ-AUD-038
     #[test]
     fn a_peer_runs_a_larger_buffer_than_ours_plays_their_frames_whole() {
         for (ours, theirs) in [(64, 128), (32, 128), (32, 64)] {
@@ -979,8 +976,6 @@ mod tests {
 
     /// The longest frame there is: a packet filled to the limit, from a peer
     /// whose rate is converted by the widest ratio the app offers.
-    ///
-    /// Verifies: REQ-AUD-038
     #[test]
     fn the_longest_packet_from_a_peer_at_the_lowest_rate_is_stored_and_fits_the_widest_frame() {
         let path = ReceivePath::new(CodecType::Pcm, 96000, 32, 0).expect("PCM is always available");
@@ -1014,8 +1009,6 @@ mod tests {
     /// A payload handed to the receive path comes out of the output side
     /// decoded, in order, after the configured delay - the same route for
     /// every interface.
-    ///
-    /// Verifies: REQ-LAT-025
     #[test]
     fn a_received_payload_plays_after_the_configured_delay() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 2).expect("PCM is always available");
@@ -1045,8 +1038,6 @@ mod tests {
 
     /// A frame that never arrives is concealed rather than skipped, so the
     /// frames after it keep their timing.
-    ///
-    /// Verifies: REQ-LAT-025
     #[test]
     fn a_missing_frame_is_concealed_in_its_slot() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 0).expect("PCM is always available");
@@ -1105,9 +1096,7 @@ mod tests {
 
     /// Every preset can be switched to from every other, in a running
     /// session, and lands on its own delay - the range the path started with
-    /// does not cut it short (ADR-031).
-    ///
-    /// Verifies: REQ-LAT-106
+    /// does not cut it short.
     #[test]
     fn every_preset_can_be_switched_to_from_every_other() {
         for from in AudioPreset::all() {
@@ -1129,8 +1118,6 @@ mod tests {
     /// The delay change reaches what plays, not just what is reported: after a
     /// switch to a deeper preset the output is silent for the extra frames and
     /// the buffer then holds the new depth.
-    ///
-    /// Verifies: REQ-LAT-106
     #[test]
     fn a_preset_switch_in_a_running_session_changes_what_is_held() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 1).expect("PCM is always available");
@@ -1158,8 +1145,6 @@ mod tests {
 
     /// Adaptation runs on the path the receive loop uses: a lossy stretch
     /// makes the delay grow and says so.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn adaptation_through_the_receive_path_grows_the_delay_on_late_frames() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 2).expect("PCM is always available");
@@ -1186,7 +1171,7 @@ mod tests {
     }
 
     /// A peer at another rate is converted, and one at ours is not. Asking
-    /// again with the same rate changes nothing (ADR-013).
+    /// again with the same rate changes nothing.
     #[test]
     fn the_peer_rate_decides_whether_audio_is_converted() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 0).expect("PCM is always available");
@@ -1230,7 +1215,6 @@ mod tests {
         ));
     }
 
-    /// Verifies: REQ-AUD-034
     #[test]
     fn a_gain_ramp_moves_to_silence_over_the_ramp_time_not_at_once() {
         let mut ramp = GainRamp::new(48_000);
@@ -1253,7 +1237,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-034
     #[test]
     fn a_gain_ramp_never_steps_by_more_than_one_ramp_step_between_frames() {
         let mut ramp = GainRamp::new(48_000);
@@ -1328,8 +1311,6 @@ mod tests {
     /// The listener's pan on a stereo peer is a balance: a centred pan leaves
     /// a left-only signal on the left, with nothing leaking to the right and
     /// no level lost.
-    ///
-    /// Verifies: REQ-AUD-120
     #[test]
     fn a_centred_pan_leaves_the_sides_of_a_stereo_peer_alone() {
         let mut frames = [0.5, 0.0, -0.25, 0.0];
@@ -1339,7 +1320,6 @@ mod tests {
         assert_eq!(frames, [0.5, 0.0, -0.25, 0.0]);
     }
 
-    /// Verifies: REQ-AUD-120
     #[test]
     fn panning_a_stereo_peer_turns_down_only_the_side_away_from_the_pan() {
         let mut frames = [1.0, 1.0];
@@ -1355,8 +1335,6 @@ mod tests {
 
     /// A mono peer's two sides were placed by its own pan, and the listener's
     /// constant-power pan moves them as before.
-    ///
-    /// Verifies: REQ-AUD-120
     #[test]
     fn the_pan_of_a_mono_peer_keeps_the_constant_power_law() {
         let mut centred = [0.6, 0.6];
@@ -1378,8 +1356,6 @@ mod tests {
     /// The whole route a stereo peer's audio takes to the output: through the
     /// play-out buffer, with the channel count the peer reported, a
     /// left-only signal comes out on the left only.
-    ///
-    /// Verifies: REQ-AUD-120
     #[test]
     fn a_left_only_signal_from_a_stereo_peer_plays_on_the_left_only() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 4, 0).expect("PCM is always available");
@@ -1535,8 +1511,6 @@ mod tests {
 
     /// A new receive path answers a stall of the link with sound that continues the tone
     /// heard, and answers it with silence once prediction is switched off.
-    ///
-    /// Verifies: REQ-AUD-071
     #[test]
     fn when_the_link_stalls_a_new_path_continues_the_sound_until_prediction_is_switched_off() {
         const FRAME: u32 = 64;
@@ -1618,8 +1592,6 @@ mod tests {
     /// While the buffer is kept at its target by playing faster, frames that
     /// piled up are skipped only when there are more than ten milliseconds of
     /// them; fewer are played off, so nothing is skipped.
-    ///
-    /// Verifies: REQ-LAT-134
     #[test]
     fn a_pile_of_frames_too_big_to_play_off_is_skipped_and_a_small_one_is_played_off() {
         for (piled, skipped) in [(4, 0), (12, 1)] {
@@ -1764,24 +1736,19 @@ mod tests {
         assert_eq!(path.delay_frames(), 4, "back to the preset's delay");
     }
 
-    /// Verifies: REQ-AUD-029
     #[test]
     fn test_rms_level_is_zero_for_silence() {
         assert_eq!(rms_level(&[0.0; 128]), 0);
     }
 
     /// An empty frame must not divide by zero or report a stale level.
-    ///
-    /// Verifies: REQ-AUD-029
     #[test]
     fn test_rms_level_is_zero_for_an_empty_frame() {
         assert_eq!(rms_level(&[]), 0);
     }
 
     /// The meter has to move with the signal - a constant would make it
-    /// useless (.claude/rules/traceability.md, "指標は定数化させない").
-    ///
-    /// Verifies: REQ-AUD-029
+    /// useless: a metric must never be a constant.
     #[test]
     fn test_rms_level_rises_with_amplitude() {
         let quiet = rms_level(&[0.1; 128]);
@@ -1795,8 +1762,6 @@ mod tests {
     }
 
     /// RMS, not peak: a full-scale sine is 1/sqrt(2) of full scale.
-    ///
-    /// Verifies: REQ-AUD-029
     #[test]
     fn test_rms_level_of_a_full_scale_sine_is_about_71() {
         let samples: Vec<f32> = (0..4800)
@@ -1812,8 +1777,6 @@ mod tests {
     }
 
     /// Sign must not matter: the meter shows magnitude.
-    ///
-    /// Verifies: REQ-AUD-029
     #[test]
     fn test_rms_level_ignores_polarity() {
         assert_eq!(rms_level(&[0.5; 64]), rms_level(&[-0.5; 64]));
@@ -1821,8 +1784,6 @@ mod tests {
 
     /// Samples beyond full scale are clamped rather than reported above 100,
     /// which the meter's 0-100 range could not display.
-    ///
-    /// Verifies: REQ-AUD-029
     #[test]
     fn test_rms_level_clamps_above_full_scale() {
         assert_eq!(rms_level(&[4.0; 64]), 100);
@@ -1832,8 +1793,6 @@ mod tests {
     /// A non-finite sample must not surface as a nonsense level. `f32::NAN`
     /// would otherwise fall through `min` and round to 0 by accident rather
     /// than by decision.
-    ///
-    /// Verifies: REQ-AUD-029
     #[test]
     fn test_rms_level_rejects_non_finite_samples() {
         assert_eq!(rms_level(&[f32::NAN, 0.5, 0.5]), 0);
@@ -1896,8 +1855,6 @@ mod tests {
 
     /// Raising the delay puts silence where the signal was; the drop to it
     /// and the rise from it are ramps, not steps.
-    ///
-    /// Verifies: REQ-AUD-041
     #[test]
     fn raising_the_delay_leaves_no_step_in_what_is_played() {
         let mut ramp = Ramp::new(2);
@@ -1913,8 +1870,6 @@ mod tests {
     }
 
     /// Lowering the delay skips frames; the signal must not jump with them.
-    ///
-    /// Verifies: REQ-AUD-041
     #[test]
     fn lowering_the_delay_leaves_no_step_in_what_is_played() {
         let mut ramp = Ramp::new(4);
@@ -1931,8 +1886,6 @@ mod tests {
 
     /// The network side holds the buffer for the instant the device asks, so
     /// that read is silence; it must not be a drop to zero and back.
-    ///
-    /// Verifies: REQ-AUD-041
     #[test]
     fn a_read_that_finds_the_buffer_held_leaves_no_step_in_what_is_played() {
         let mut ramp = Ramp::new(2);
@@ -1957,8 +1910,6 @@ mod tests {
 
     /// A frame that does not arrive in time is a read of silence, then the
     /// signal comes back.
-    ///
-    /// Verifies: REQ-AUD-041
     #[test]
     fn a_frame_that_is_late_leaves_no_step_in_what_is_played() {
         let mut ramp = Ramp::new(0);
@@ -1975,8 +1926,6 @@ mod tests {
 
     /// The first frame after the buffer is started over rises from silence,
     /// whatever the sender's waveform was doing.
-    ///
-    /// Verifies: REQ-AUD-041
     #[test]
     fn the_first_frame_after_a_reset_rises_from_silence() {
         let mut ramp = Ramp::new(0);
@@ -2004,8 +1953,6 @@ mod tests {
 
     /// Joining a cut must not push the signal beyond its own size: a tone
     /// that starts mid-wave is joined to silence with a fade, not an offset.
-    ///
-    /// Verifies: REQ-AUD-041
     #[test]
     fn a_tone_that_starts_mid_wave_is_never_louder_than_itself() {
         let path = ReceivePath::new(CodecType::Pcm, 48000, 64, 0).expect("PCM");

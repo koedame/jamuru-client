@@ -52,9 +52,9 @@ const PENDING_HANG_FILE: &str = "pending_hang.json";
 
 /// How long a stage may run before it counts as stuck. Chosen well inside
 /// anything else that would end the process on its own - restarting has its
-/// own 10s grace before ADR-055 starts a new instance regardless, so this
-/// fires before that and gives a name to what ADR-055 would otherwise only
-/// log.
+/// own 10s grace before a new instance is started regardless of the main
+/// thread, so this fires before that and gives a name to what the restart
+/// would otherwise only log.
 fn limit_for(stage: HangStage) -> Duration {
     match stage {
         HangStage::AppExit => Duration::from_secs(5),
@@ -317,7 +317,6 @@ mod tests {
         )
     }
 
-    /// Verifies: REQ-TEL-019
     #[test]
     fn a_stage_that_runs_past_its_limit_is_written_with_how_long_it_ran() {
         let dir = tempfile::tempdir().unwrap();
@@ -394,7 +393,6 @@ mod tests {
         assert!(previous_incident(&reporter(dir.path())).is_none());
     }
 
-    /// Verifies: REQ-TEL-019
     #[test]
     fn a_launch_killed_with_no_stage_active_is_found_as_an_unknown_stage_by_the_next_one() {
         let dir = tempfile::tempdir().unwrap();
@@ -415,7 +413,6 @@ mod tests {
         assert!(previous_incident(&reporter(dir.path())).is_none());
     }
 
-    /// Verifies: REQ-TEL-024
     #[test]
     fn a_launch_handed_over_to_an_installer_leaves_no_record_but_one_that_stays_running_does() {
         let dir = tempfile::tempdir().unwrap();

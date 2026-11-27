@@ -1,5 +1,5 @@
 /**
- * The Devices tab's props for a set of audio settings (ADR-043).
+ * The Devices tab's props for a set of audio settings.
  *
  * Shared by the settings window (the app's own settings) and the panel a
  * helper uses for another participant's settings, so both offer the same

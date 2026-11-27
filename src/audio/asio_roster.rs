@@ -88,7 +88,6 @@ mod tests {
         devices.iter().map(|d| d.name.as_str()).collect()
     }
 
-    /// Verifies: REQ-AUD-130
     #[test]
     fn no_session_holds_a_driver_before_one_is_opened_and_after_it_is_closed() {
         let mut roster = Roster::new();
@@ -101,7 +100,6 @@ mod tests {
         assert!(!roster.holds_a_driver());
     }
 
-    /// Verifies: REQ-AUD-130
     #[test]
     fn a_driver_still_being_opened_already_stops_the_drivers_being_opened_for_a_listing() {
         let mut roster = Roster::new();
@@ -111,7 +109,6 @@ mod tests {
         assert!(roster.while_open().is_empty());
     }
 
-    /// Verifies: REQ-AUD-130
     #[test]
     fn while_a_session_holds_a_driver_the_listing_has_it_and_the_others_as_last_found() {
         let mut roster = Roster::new();
@@ -128,7 +125,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-130
     #[test]
     fn a_driver_never_listed_before_the_session_opened_it_is_in_the_listing_all_the_same() {
         let mut roster = Roster::new();
@@ -138,7 +134,6 @@ mod tests {
         assert_eq!(names(&roster.while_open()), ["ASIO4ALL v2"]);
     }
 
-    /// Verifies: REQ-AUD-130
     #[test]
     fn the_session_s_driver_is_listed_as_it_described_itself_when_it_opened() {
         let mut roster = Roster::new();
@@ -152,7 +147,6 @@ mod tests {
         assert_eq!(listed[0].supported_channels, [8]);
     }
 
-    /// Verifies: REQ-AUD-130
     #[test]
     fn a_new_listing_replaces_what_was_last_found_once_the_session_has_closed() {
         let mut roster = Roster::new();

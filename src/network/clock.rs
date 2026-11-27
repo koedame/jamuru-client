@@ -1,6 +1,6 @@
 //! Telling a refusal that came from this computer's clock
 //!
-//! A device identity signs the current time (ADR-024), and the server refuses
+//! A device identity signs the current time, and the server refuses
 //! a time that is too far from its own with the same 401 it gives a forged
 //! identity. The refusal says nothing about the time, so the app measures it:
 //! every answer of the server carries the server's time in its `Date` header,
@@ -24,7 +24,7 @@ pub(super) fn now_unix_secs() -> i64 {
 }
 
 /// Current Unix time in microseconds: what a ping and its answer carry so that each way of the
-/// round trip can be timed (REQ-LAT-132). Wall-clock time, so it is only as right as this
+/// round trip can be timed. Wall-clock time, so it is only as right as this
 /// computer's clock; the measurement says so by being read next to the clock's own state.
 pub(super) fn now_unix_us() -> u64 {
     SystemTime::now()

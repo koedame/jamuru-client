@@ -1,6 +1,6 @@
 /**
- * SettingsHelpAsk - the two steps of asking someone for help with settings
- * (ADR-044 §5): what it means, in a few calm lines, and then who to ask.
+ * SettingsHelpAsk - the two steps of asking someone for help with settings:
+ * what it means, in a few calm lines, and then who to ask.
  * Nothing is sent until the person picks someone and confirms. Escape and the
  * cancel button close it; clicking outside does nothing.
  */

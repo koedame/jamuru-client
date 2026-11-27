@@ -1,5 +1,5 @@
 //! How much faster or slower to play so that the receive buffer holds what its
-//! target asks for (ADR-122).
+//! target asks for.
 //!
 //! Two clocks that were set to the same rate never keep it: the other side's
 //! sound card sends a little faster or slower than ours plays, by some tens of
@@ -194,7 +194,6 @@ mod tests {
         (ppm, worst)
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn when_the_buffer_holds_what_it_should_no_rate_is_asked_for() {
         let mut rate = DepthRate::new(RATE);
@@ -203,7 +202,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn when_the_buffer_holds_more_than_it_should_a_faster_rate_is_asked_for() {
         let mut rate = DepthRate::new(RATE);
@@ -215,7 +213,6 @@ mod tests {
         assert!(ppm <= MAX_PPM);
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn when_the_buffer_holds_less_than_it_should_a_slower_rate_is_asked_for() {
         let mut rate = DepthRate::new(RATE);
@@ -227,7 +224,6 @@ mod tests {
         assert!(ppm >= -MAX_PPM);
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn the_rate_never_goes_beyond_the_limit_however_far_off_the_buffer_is() {
         let mut rate = DepthRate::new(RATE);
@@ -242,7 +238,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn a_clock_off_by_a_few_hundred_ppm_is_learned_and_the_depth_stays_within_the_band() {
         for skew in [-500.0f32, -100.0, 100.0, 500.0] {
@@ -252,14 +247,12 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn a_clock_off_by_more_than_the_limit_is_corrected_as_far_as_the_limit_goes() {
         let (ppm, _) = drift(2500.0, 60.0, 60.0, 4);
         assert_eq!(ppm, MAX_PPM);
     }
 
-    /// Verifies: REQ-LAT-134
     #[test]
     fn after_the_target_moves_the_depth_is_brought_to_it_without_the_wide_band() {
         let mut rate = DepthRate::new(RATE);

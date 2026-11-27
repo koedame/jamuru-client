@@ -2,8 +2,8 @@
 //!
 //! Provides TOML-based configuration file management for the jamuru application.
 //! Lives in the core library because the CLI and the GUI share one config file:
-//! a device or preset chosen from either is what the other starts with
-//! (ADR-027). The Tauri command wrappers stay in `src-tauri/src/config.rs`.
+//! a device or preset chosen from either is what the other starts with.
+//! The Tauri command wrappers stay in `src-tauri/src/config.rs`.
 //! Configuration is stored in platform-specific directories:
 //! - Linux: ~/.config/jamuru/config.toml
 //! - Windows: %APPDATA%\jamuru\config.toml
@@ -31,10 +31,10 @@ pub const DEFAULT_BUFFER_SIZE: u32 = 64;
 /// terms change in a way users must agree to again.
 pub const TERMS_VERSION: u32 = 1;
 
-/// Default sample rate in Hz (48kHz is the recommended value per ADR-013)
+/// Default sample rate in Hz (48kHz is the recommended value)
 pub const DEFAULT_SAMPLE_RATE: u32 = 48000;
 
-/// Valid sample rates per ADR-013
+/// Valid sample rates
 pub const VALID_SAMPLE_RATES: [u32; 3] = [44100, 48000, 96000];
 
 /// The most channels a device is taken to have, and so the highest channel
@@ -49,7 +49,7 @@ pub const VALID_BUFFER_SIZES: [u32; 4] = [32, 64, 128, 256];
 /// The buffer sizes the settings offer on this platform: [`VALID_BUFFER_SIZES`]
 /// without the ones the device cannot run at. On Linux PipeWire's period is at
 /// least [`LINUX_MIN_OUTPUT_PERIOD`] frames, so a smaller buffer size only
-/// arrives in lumps of that many frames (REQ-AUD-037). The config file and the
+/// arrives in lumps of that many frames. The config file and the
 /// CLI still take any of [`VALID_BUFFER_SIZES`].
 pub fn offered_buffer_sizes() -> Vec<u32> {
     let floor = if cfg!(target_os = "linux") {
@@ -64,14 +64,14 @@ pub fn offered_buffer_sizes() -> Vec<u32> {
 }
 
 /// jamuru server a development build uses: one running on this machine on the
-/// development port 17890 (ADR-030).
+/// development port 17890.
 ///
 /// The app asks the server where its signaling server is each time it
 /// connects (`jamjam::network::discover_signaling_url`), so this is the only
 /// address the app holds.
 pub const DEV_SERVER_URL: &str = "http://localhost:17890";
 
-/// jamuru server a release build uses (ADR-030).
+/// jamuru server a release build uses.
 ///
 /// The source does not name it: whoever builds the release passes it in
 /// `JAMJAM_SERVER_URL` at compile time. The app's build script refuses to
@@ -83,7 +83,7 @@ pub const RELEASE_SERVER_URL: Option<&str> = option_env!("JAMJAM_SERVER_URL");
 ///
 /// Chosen by the build profile at compile time, so a release build carries
 /// only the production URL and `cargo tauri dev` keeps using the local
-/// server (ADR-030).
+/// server.
 pub const DEFAULT_SERVER_URL: &str = if cfg!(debug_assertions) {
     DEV_SERVER_URL
 } else {
@@ -95,7 +95,7 @@ pub const DEFAULT_SERVER_URL: &str = if cfg!(debug_assertions) {
 
 /// Whether `url` names an HTTP(S) server this app could send requests to.
 /// [`DEFAULT_SERVER_URL`] can be empty (a from-source build with no release
-/// server configured, ADR-030); transports built on it (usage reporting,
+/// server configured); transports built on it (usage reporting,
 /// problem reports) check this before trying to send. Kept here, rather
 /// than duplicated where it is used, because `tests/distribution_config_test.rs`
 /// forbids `http://`/`https://` literals outside the core library (no other
@@ -104,14 +104,14 @@ pub fn is_http_url(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("https://")
 }
 
-/// UI languages the app ships translations for (ADR-007).
+/// UI languages the app ships translations for.
 pub const VALID_LANGUAGES: [&str; 2] = ["en", "ja"];
 
 /// Available audio presets
 ///
 /// Re-exported so that preset parameters and their latency budgets have
-/// exactly one definition (see `audio::preset` and ADR-019). Defining them
-/// here as well is what let the GUI, ADR-008 and the E2E thresholds drift
+/// exactly one definition (see `audio::preset`). Defining them here as well
+/// is what let the GUI, the zero-latency mode's table and the E2E thresholds drift
 /// apart previously.
 pub use crate::audio::AudioPreset;
 
@@ -138,8 +138,8 @@ fn default_limiter() -> bool {
     true
 }
 
-/// The delay of the audio device pair, as last measured in the settings
-/// (REQ-AUD-050), with what it was measured on: the figure holds only for
+/// The delay of the audio device pair, as last measured in the settings,
+/// with what it was measured on: the figure holds only for
 /// those devices, that buffer size and that sample rate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeviceDelay {
@@ -200,18 +200,18 @@ pub struct AppConfig {
     #[serde(default = "default_ask_name_on_entry")]
     pub ask_name_on_entry: bool,
     /// Whether the audio packets are marked as voice, so that a Wi-Fi sends them ahead of other
-    /// traffic (ADR-110). On unless turned off: on a busy Wi-Fi it cut the receive stalls and the
+    /// traffic. On unless turned off: on a busy Wi-Fi it cut the receive stalls and the
     /// round trip, and on a quiet line it changed nothing. Takes effect when the next session starts.
     #[serde(default = "default_voice_priority")]
     pub voice_priority: bool,
     /// Whether the app asks the router to forward the audio port to it, so that a peer behind
-    /// a NAT that STUN cannot see through can still reach it (UPnP, ADR-113). On unless turned
+    /// a NAT that STUN cannot see through can still reach it (UPnP). On unless turned
     /// off. Takes effect when the room is next entered.
     #[serde(default = "default_open_router_port")]
     pub open_router_port: bool,
 
     /// Audio sample rate in Hz (44100, 48000, or 96000)
-    /// Default: 48000 (recommended per ADR-013)
+    /// Default: 48000 (recommended)
     #[serde(default = "default_sample_rate")]
     pub sample_rate: u32,
 
@@ -235,17 +235,17 @@ pub struct AppConfig {
     #[serde(default = "default_transmit_channels")]
     pub transmit_channels: u32,
 
-    /// Whether what is sent is held at 0 dBFS (ADR-094). On unless the user
+    /// Whether what is sent is held at 0 dBFS. On unless the user
     /// turns it off in Settings.
     #[serde(default = "default_limiter")]
     pub input_limiter: bool,
 
-    /// Whether what is played is held at 0 dBFS (ADR-094). On unless the
+    /// Whether what is played is held at 0 dBFS. On unless the
     /// user turns it off in Settings.
     #[serde(default = "default_limiter")]
     pub output_limiter: bool,
 
-    /// How a WASAPI device is opened on Windows (ADR-088). The standard
+    /// How a WASAPI device is opened on Windows. The standard
     /// shared way unless the user picks another in Settings.
     #[serde(default)]
     pub wasapi_mode: WasapiMode,
@@ -261,13 +261,13 @@ pub struct AppConfig {
     #[serde(default)]
     pub usage_reporting: bool,
 
-    /// Whether the app installs a new release by itself (ADR-041). On unless
+    /// Whether the app installs a new release by itself. On unless
     /// the user turns it off in `config.toml`.
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
 
     /// Whether another participant's ask to buffer their audio for longer is taken, and
-    /// whether the user is asked about each (ADR-097).
+    /// whether the user is asked about each.
     #[serde(default)]
     pub buffer_asks: crate::network::buffer_request::Policy,
 
@@ -282,7 +282,7 @@ pub struct AppConfig {
     pub terms_accepted_at: Option<u64>,
 
     /// The last measured delay of the device pair. Only the number is ever
-    /// told to the others in a room (REQ-CON-035).
+    /// told to the others in a room.
     #[serde(default)]
     pub device_delay: Option<DeviceDelay>,
 }
@@ -375,7 +375,7 @@ impl AppConfig {
             ));
         }
 
-        // Validate sample rate (ADR-013)
+        // Validate sample rate
         if !VALID_SAMPLE_RATES.contains(&self.sample_rate) {
             return Err(format!(
                 "Invalid sample rate: {}. Valid values are 44100, 48000, 96000",
@@ -515,7 +515,6 @@ pub fn save_config_to(path: &Path, config: &AppConfig) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-CLI-014
     #[test]
     fn when_a_config_directory_is_named_it_is_the_one_used() {
         assert_eq!(
@@ -524,7 +523,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CLI-014
     #[test]
     fn when_no_config_directory_is_named_the_systems_own_is_used() {
         for unset in [None, Some(std::ffi::OsString::new())] {
@@ -545,7 +543,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-050
     #[test]
     fn when_the_devices_are_still_the_ones_measured_the_delay_is_current() {
         let mut config = AppConfig {
@@ -561,7 +558,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-050
     #[test]
     fn when_a_device_the_buffer_or_the_rate_changes_the_old_delay_is_not_current() {
         let base = AppConfig {
@@ -595,7 +591,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-050
     #[test]
     fn a_measured_delay_survives_saving_and_loading_and_a_file_without_one_has_none() {
         let mut config = AppConfig::default();
@@ -629,7 +624,6 @@ mod tests {
         assert!(!toml::to_string(&config).unwrap().contains("ABC234"));
     }
 
-    /// Verifies: REQ-TRM-002
     #[test]
     fn when_no_terms_version_is_saved_the_terms_are_not_accepted() {
         assert!(!AppConfig::default().terms_accepted());
@@ -637,7 +631,6 @@ mod tests {
         assert!(!config.terms_accepted());
     }
 
-    /// Verifies: REQ-TRM-002
     #[test]
     fn when_the_saved_terms_version_is_older_than_the_current_one_the_terms_are_not_accepted() {
         let config: AppConfig =
@@ -645,7 +638,6 @@ mod tests {
         assert!(!config.terms_accepted());
     }
 
-    /// Verifies: REQ-TRM-002
     #[test]
     fn when_the_saved_terms_version_is_the_current_one_the_terms_are_accepted() {
         let config: AppConfig =
@@ -653,7 +645,6 @@ mod tests {
         assert!(config.terms_accepted());
     }
 
-    /// Verifies: REQ-UPD-001
     #[test]
     fn when_the_setting_is_absent_the_app_updates_itself() {
         assert!(AppConfig::default().auto_update);
@@ -661,14 +652,12 @@ mod tests {
         assert!(config.auto_update);
     }
 
-    /// Verifies: REQ-UPD-002
     #[test]
     fn when_the_setting_is_off_in_the_file_the_app_does_not_update_itself() {
         let config: AppConfig = toml::from_str("auto_update = false").unwrap();
         assert!(!config.auto_update);
     }
 
-    /// Verifies: REQ-CON-142
     #[test]
     fn when_the_setting_is_absent_the_name_is_asked_before_entering_a_room() {
         assert!(AppConfig::default().ask_name_on_entry);
@@ -676,14 +665,12 @@ mod tests {
         assert!(config.ask_name_on_entry);
     }
 
-    /// Verifies: REQ-CON-142
     #[test]
     fn when_the_setting_is_off_in_the_file_the_name_is_not_asked() {
         let config: AppConfig = toml::from_str("ask_name_on_entry = false").unwrap();
         assert!(!config.ask_name_on_entry);
     }
 
-    /// Verifies: REQ-CON-160
     #[test]
     fn when_the_setting_is_absent_the_audio_packets_are_marked() {
         assert!(AppConfig::default().voice_priority);
@@ -691,14 +678,12 @@ mod tests {
         assert!(config.voice_priority);
     }
 
-    /// Verifies: REQ-CON-160
     #[test]
     fn when_the_setting_is_off_in_the_file_the_audio_packets_are_not_marked() {
         let config: AppConfig = toml::from_str("voice_priority = false").unwrap();
         assert!(!config.voice_priority);
     }
 
-    /// Verifies: REQ-CON-165
     #[test]
     fn when_the_setting_is_absent_the_router_is_asked_to_open_the_audio_port() {
         assert!(AppConfig::default().open_router_port);
@@ -706,7 +691,6 @@ mod tests {
         assert!(config.open_router_port);
     }
 
-    /// Verifies: REQ-CON-165
     #[test]
     fn when_the_setting_is_off_in_the_file_the_router_is_not_asked() {
         let config: AppConfig = toml::from_str("open_router_port = false").unwrap();
@@ -751,8 +735,6 @@ mod tests {
 
     /// The settings stop offering 32 on Linux, but the file and the CLI still
     /// take it (a PipeWire set to a period of 32, the measuring tools).
-    ///
-    /// Verifies: REQ-AUD-037
     #[test]
     fn a_buffer_size_the_settings_do_not_offer_is_still_valid_in_the_config() {
         for samples in VALID_BUFFER_SIZES {
@@ -792,7 +774,7 @@ mod tests {
         assert_eq!(config, parsed);
     }
 
-    /// ADR-024 removed the email-OTP account fields, but a config.toml
+    /// The email-OTP account fields were removed, but a config.toml
     /// written by an older build that had accounts still contains them. Upgrading must not
     /// fail to parse, and the surviving settings must be preserved.
     #[test]
@@ -824,7 +806,7 @@ mod tests {
         assert_eq!(config.output_device_id, None);
         assert_eq!(config.buffer_size, 64); // Default
         assert_eq!(config.server_url, None);
-        assert_eq!(config.sample_rate, 48000); // Default per ADR-013
+        assert_eq!(config.sample_rate, 48000); // Default
     }
 
     #[test]

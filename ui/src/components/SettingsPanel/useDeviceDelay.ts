@@ -1,5 +1,5 @@
 /**
- * The device delay measurement as the Devices tab shows it (REQ-GUI-034): where
+ * The device delay measurement as the Devices tab shows it: where
  * the run is, the figure for the devices selected now, and the start and stop.
  *
  * The status is read from the app the screen is connected to - the helper's

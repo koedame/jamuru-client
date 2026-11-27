@@ -1,4 +1,4 @@
-//! `debug.*`: what someone verifying a running app needs (ADR-044).
+//! `debug.*`: what someone verifying a running app needs.
 //!
 //! Only builds with `debug-tools` (E2E and beta) contain this module, and only
 //! the two portals that exist to test and debug the app may call it.
@@ -39,7 +39,7 @@ const DEFAULT_ROUNDTRIP_INTERVAL_MS: u64 = 250;
 const MIN_ROUNDTRIP_INTERVAL_MS: u64 = 100;
 const MAX_ROUNDTRIP_INTERVAL_MS: u64 = 2000;
 /// The most a run may take (pulses times interval): a method runs at most 25
-/// seconds (ADR-044 §4), and the run also waits out the warm-up and the last
+/// seconds, and the run also waits out the warm-up and the last
 /// pulse's return.
 const MAX_ROUNDTRIP_MS: u64 = 20_000;
 /// After the last pulse is due: warm-up and the return of the last pulse.
@@ -863,7 +863,6 @@ mod tests {
         assert!(panic_lines("INFO all well\nWARN a warning").is_empty());
     }
 
-    /// Verifies: REQ-AUD-123
     #[test]
     fn a_call_into_the_driver_is_hung_by_name_and_lifted_with_zero_seconds() {
         let hang = |call: &str, seconds: f32| {
@@ -883,7 +882,6 @@ mod tests {
         assert!(hang("open_input", MAX_HANG_SECONDS + 1.0).is_err());
     }
 
-    /// Verifies: REQ-AUD-128
     #[test]
     fn the_streams_are_stalled_by_mode_and_an_unknown_mode_is_refused() {
         let stall = |mode: &str| {
@@ -898,7 +896,6 @@ mod tests {
         assert!(stall("sometimes").is_err());
     }
 
-    /// Verifies: REQ-RMT-027
     #[tokio::test]
     async fn a_round_trip_run_with_no_pulses_or_too_long_a_run_is_refused() {
         let refused = |pulses, interval_ms, amplitude, threshold| {
@@ -916,7 +913,6 @@ mod tests {
         assert!(refused(20, 250, 0.5, 0.6).await.is_err());
     }
 
-    /// Verifies: REQ-RMT-027
     #[test]
     fn the_round_trip_names_the_pulses_the_delays_and_the_callback_sizes() {
         let report = jamjam::audio::device_loop::Report {
@@ -948,7 +944,6 @@ mod tests {
         assert_eq!(value["input_callback_frames"], 441);
     }
 
-    /// Verifies: REQ-RMT-027
     #[test]
     fn the_audio_timing_names_each_kind_and_lists_events_with_their_time() {
         let recorder = jamjam::audio::FlightRecorder::new();

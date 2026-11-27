@@ -1,5 +1,5 @@
 /**
- * useAppUpdate - the About tab's update section against the backend (ADR-082)
+ * useAppUpdate - the About tab's update section against the backend
  *
  * Reads the running version and what this build can do about a newer release,
  * checks when asked (by the button, or by the menu through `checkRequest`) and

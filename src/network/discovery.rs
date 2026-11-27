@@ -3,7 +3,7 @@
 //! The app holds no signaling address. It holds the address of the jamuru
 //! server ([`crate::config::DEFAULT_SERVER_URL`], or `server_url` in
 //! `config.toml`) and asks it where to connect each time it connects, so the
-//! signaling server can move without a new release of the app (ADR-030).
+//! signaling server can move without a new release of the app.
 
 use std::time::Duration;
 
@@ -182,7 +182,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-029
     #[tokio::test]
     async fn when_the_server_names_something_other_than_a_websocket_the_app_does_not_connect() {
         let (server, _) = answering_server(
@@ -193,7 +192,6 @@ mod tests {
         assert!(discover_signaling_url(&server).await.is_err());
     }
 
-    /// Verifies: REQ-TEL-017
     #[tokio::test]
     async fn when_the_server_answers_530_the_failure_is_a_5xx() {
         let (server, _) = answering_server("530 Origin Down", String::new()).await;
@@ -212,7 +210,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-TEL-017
     #[tokio::test]
     async fn when_the_server_answers_404_the_failure_is_a_4xx() {
         let (server, _) = answering_server("404 Not Found", String::new()).await;
@@ -231,7 +228,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-TEL-017
     #[tokio::test]
     async fn when_the_server_name_does_not_resolve_the_failure_is_dns() {
         // `.invalid` never resolves (RFC 6761).
@@ -287,7 +283,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-029
     #[test]
     fn an_answer_that_is_not_a_websocket_url_is_refused() {
         for answer in [
@@ -303,7 +298,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-029
     #[test]
     fn a_server_asked_over_https_cannot_send_the_app_to_an_unencrypted_websocket() {
         assert!(check_signaling_url(

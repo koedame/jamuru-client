@@ -1,4 +1,4 @@
-//! Audio settings (ADR-043)
+//! Audio settings
 //!
 //! Every change to the audio settings goes through [`apply`]: from the
 //! settings window ([`settings_change`]) and from the E2E control channel. One
@@ -75,11 +75,11 @@ pub enum SettingChange {
     TransmitChannels {
         count: u32,
     },
-    /// Hold what is sent at 0 dBFS, or stop doing so (ADR-094)
+    /// Hold what is sent at 0 dBFS, or stop doing so
     InputLimiter {
         enabled: bool,
     },
-    /// Hold what is played at 0 dBFS, or stop doing so (ADR-094)
+    /// Hold what is played at 0 dBFS, or stop doing so
     OutputLimiter {
         enabled: bool,
     },
@@ -91,11 +91,11 @@ pub enum SettingChange {
     SampleRate {
         hz: u32,
     },
-    /// A preset's frame size and jitter buffer depth (ADR-019)
+    /// A preset's frame size and jitter buffer depth
     Preset {
         preset: AudioPreset,
     },
-    /// How a WASAPI device is opened on Windows (ADR-088). A running session
+    /// How a WASAPI device is opened on Windows. A running session
     /// starts over to take it.
     WasapiMode {
         mode: WasapiMode,
@@ -111,7 +111,7 @@ fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u
 
 impl SettingChange {
     /// The change as a log line. Device ids are masked like everywhere else
-    /// in `jamuru.log` (REQ-GUI-022).
+    /// in `jamuru.log`.
     fn describe(&self, redact: bool) -> String {
         match self {
             SettingChange::InputDevice { device_id } => {
@@ -187,7 +187,7 @@ impl std::fmt::Display for SettingsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // Masked: the message reaches jamuru.log through the webview's
-            // record of failed commands (REQ-GUI-022).
+            // record of failed commands.
             SettingsError::DeviceNotOffered(id) => write!(
                 f,
                 "Device not found: {}",
@@ -674,7 +674,6 @@ mod tests {
         SettingChange::InputChannel { side, channel }
     }
 
-    /// Verifies: REQ-GUI-024
     #[test]
     fn switching_to_an_input_device_with_the_chosen_channels_plans_to_keep_them() {
         let (mut config, devices) = setup();
@@ -708,8 +707,6 @@ mod tests {
     /// Channels 5 and 6 of the interface do not exist on a stereo device, so
     /// the device is opened with its first two - but the pair the user chose
     /// stays saved, and comes back with the interface.
-    ///
-    /// Verifies: REQ-AUD-122
     #[test]
     fn switching_to_an_input_device_without_the_chosen_channels_keeps_the_saved_pair() {
         let (config, devices) = setup();
@@ -768,8 +765,6 @@ mod tests {
     /// A mono microphone is opened with its one channel, as a pair of the same
     /// channel (captured as mono). Choosing it must not leave that pair saved:
     /// the stereo interface used next would have lost its right side.
-    ///
-    /// Verifies: REQ-AUD-122
     #[test]
     fn a_mono_microphone_is_used_as_one_channel_without_changing_the_saved_stereo_pair() {
         let (mut config, mut devices) = setup();
@@ -801,8 +796,6 @@ mod tests {
 
     /// Falling back one channel at a time could leave a doubled or reversed
     /// pair (2 and 3 on a stereo device becoming 2 and 2).
-    ///
-    /// Verifies: REQ-AUD-122
     #[test]
     fn when_only_one_channel_of_the_pair_is_missing_the_whole_pair_falls_back() {
         let (_, devices) = setup();
@@ -815,8 +808,6 @@ mod tests {
 
     /// The settings show the channels in use, so the choice on screen is the
     /// one a device that lacks the saved channels is actually opened with.
-    ///
-    /// Verifies: REQ-AUD-122
     #[test]
     fn the_settings_show_the_channels_in_use_while_the_saved_pair_stays() {
         let (mut config, devices) = setup();
@@ -842,8 +833,6 @@ mod tests {
 
     /// A change to one channel starts from the pair on screen, not from the
     /// saved pair the device does not have.
-    ///
-    /// Verifies: REQ-AUD-122
     #[test]
     fn changing_one_channel_on_a_device_that_lacks_the_saved_pair_starts_from_the_pair_in_use() {
         let (mut config, devices) = setup();
@@ -864,8 +853,6 @@ mod tests {
 
     /// The same holds for a mono output device: it plays its only channel,
     /// and the saved pair stays.
-    ///
-    /// Verifies: REQ-AUD-122
     #[test]
     fn switching_to_a_mono_output_device_keeps_the_saved_pair_and_plays_its_only_channel() {
         let (config, mut devices) = setup();
@@ -892,8 +879,6 @@ mod tests {
 
     /// A device that does not report its channels (a busy one, say) keeps the
     /// pair: refusing on a guess would drop an 8-channel interface's choice.
-    ///
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_device_that_does_not_say_how_many_channels_it_has_keeps_the_chosen_pair() {
         let (config, mut devices) = setup();
@@ -914,8 +899,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-011
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_device_that_is_not_offered_is_refused() {
         let (config, devices) = setup();
@@ -934,7 +917,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_channel_the_device_in_use_does_not_have_is_refused() {
         let (config, devices) = setup();
@@ -954,8 +936,6 @@ mod tests {
 
     /// With no device chosen the system default is the one in use, so its
     /// channels are the ones that exist.
-    ///
-    /// Verifies: REQ-GUI-024
     #[test]
     fn with_no_device_chosen_channels_are_checked_against_the_system_default() {
         let (mut config, devices) = setup();
@@ -974,7 +954,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-024
     #[test]
     fn channel_zero_is_refused_even_when_no_device_can_be_checked() {
         let (mut config, devices) = setup();
@@ -997,8 +976,6 @@ mod tests {
 
     /// A device that does not say how many channels it has still has no more
     /// than any device can: a huge number would be saved and then offered.
-    ///
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_channel_beyond_what_any_device_has_is_refused_even_when_the_device_does_not_say() {
         let (mut config, mut devices) = setup();
@@ -1039,8 +1016,6 @@ mod tests {
 
     /// Changing one side keeps the other as it is in the config - not as a
     /// window last saw it - so two quick changes cannot undo each other.
-    ///
-    /// Verifies: REQ-GUI-024
     #[test]
     fn changing_one_channel_of_the_pair_plans_the_other_as_it_is() {
         let (config, devices) = setup();
@@ -1065,7 +1040,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-024
     #[test]
     fn no_right_channel_plans_mono_and_no_left_channel_is_refused() {
         let (config, devices) = setup();
@@ -1081,7 +1055,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-107
     #[test]
     fn choosing_mono_plans_to_save_it_and_to_tell_a_running_session() {
         let (config, devices) = setup();
@@ -1097,7 +1070,6 @@ mod tests {
         assert_eq!(plan.session, vec![SessionSetting::TransmitChannels(1)]);
     }
 
-    /// Verifies: REQ-AUD-048
     #[test]
     fn the_limiters_are_on_until_the_user_switches_them_off() {
         let (config, _devices) = setup();
@@ -1106,7 +1078,6 @@ mod tests {
         assert!(config.output_limiter);
     }
 
-    /// Verifies: REQ-AUD-048
     #[test]
     fn switching_the_input_limiter_off_plans_to_save_it_and_to_tell_a_running_session() {
         let (config, devices) = setup();
@@ -1124,7 +1095,6 @@ mod tests {
         assert!(!plan.new_session);
     }
 
-    /// Verifies: REQ-AUD-048
     #[test]
     fn switching_the_output_limiter_off_plans_to_save_it_and_to_tell_a_running_session() {
         let (config, devices) = setup();
@@ -1142,7 +1112,6 @@ mod tests {
         assert!(!plan.new_session);
     }
 
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_transmit_channel_count_other_than_mono_or_stereo_is_refused() {
         let (config, devices) = setup();
@@ -1159,8 +1128,6 @@ mod tests {
     /// The frame size and the sample rate are fixed for the life of a session's
     /// audio engines, so a new one cannot be told to the running session: it is
     /// saved, and the session is to be replaced by one that starts from it.
-    ///
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_new_buffer_size_or_sample_rate_is_saved_and_plans_a_new_session() {
         let (config, devices) = setup();
@@ -1181,8 +1148,6 @@ mod tests {
     }
 
     /// Choosing what is already in use must not cost the room a reconnect.
-    ///
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_buffer_size_or_sample_rate_already_in_use_plans_no_new_session() {
         let (config, devices) = setup();
@@ -1210,8 +1175,6 @@ mod tests {
 
     /// A preset is a jitter depth the session takes live and a frame size it
     /// cannot: only a preset with another frame size replaces the session.
-    ///
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_preset_plans_a_new_session_only_when_its_frame_size_differs() {
         let (mut config, devices) = setup();
@@ -1238,7 +1201,6 @@ mod tests {
         assert!(!same.new_session);
     }
 
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_change_a_running_session_takes_on_plans_no_new_session() {
         let (config, devices) = setup();
@@ -1255,8 +1217,6 @@ mod tests {
 
     /// The app once offered 8 and 16 samples, which the config then refused to
     /// save: the panel showed the choice while the next start used the old one.
-    ///
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_buffer_size_the_app_cannot_save_is_refused() {
         let (config, devices) = setup();
@@ -1272,8 +1232,6 @@ mod tests {
     /// Applying a preset writes its frame size as the buffer size, so a preset
     /// whose frame size the app offers has to plan and save, and one it does
     /// not offer (32 on Linux) is refused.
-    ///
-    /// Verifies: REQ-LAT-106, REQ-AUD-037
     #[test]
     fn a_preset_is_applied_exactly_when_its_frame_size_is_a_buffer_size_on_offer() {
         let (config, devices) = setup();
@@ -1305,8 +1263,6 @@ mod tests {
     /// receiver in lumps of 64 and breaks it up. The settings do not offer it
     /// and refuse it from any caller, as a buffer size or as the zero-latency
     /// preset.
-    ///
-    /// Verifies: REQ-AUD-037
     #[cfg(target_os = "linux")]
     #[test]
     fn on_linux_a_buffer_size_under_64_is_not_offered_and_is_refused() {
@@ -1336,7 +1292,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-037
     #[cfg(not(target_os = "linux"))]
     #[test]
     fn off_linux_every_buffer_size_the_app_can_save_is_offered() {
@@ -1348,7 +1303,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-024
     #[test]
     fn a_sample_rate_outside_the_offered_ones_is_refused() {
         let (config, devices) = setup();
@@ -1365,8 +1319,6 @@ mod tests {
     /// Applying the preset diagnostics recommends uses the preset's own frame
     /// size - the settings window once mapped presets to buffer sizes of its
     /// own, which disagreed with the presets and could not all be saved.
-    ///
-    /// Verifies: REQ-LAT-106
     #[test]
     fn applying_a_preset_plans_its_frame_size_and_a_new_jitter_depth_for_a_running_session() {
         let (config, devices) = setup();
@@ -1462,7 +1414,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn choosing_a_wasapi_mode_saves_it_and_plans_a_new_session_only_when_it_differs() {
         let (config, devices) = setup();
@@ -1479,7 +1430,6 @@ mod tests {
         assert!(!same.new_session);
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn a_wasapi_mode_change_is_named_on_the_wire() {
         let change = SettingChange::WasapiMode {
@@ -1496,7 +1446,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn where_no_device_on_offer_is_a_wasapi_one_the_settings_have_no_wasapi_section() {
         let (config, devices) = setup();
@@ -1506,7 +1455,6 @@ mod tests {
         assert_eq!(settings.wasapi, None);
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn the_wasapi_advice_is_for_the_devices_in_use() {
         let config = AppConfig {
@@ -1555,7 +1503,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn with_an_asio_driver_on_both_sides_the_wasapi_mode_does_not_apply() {
         let config = AppConfig {
@@ -1600,8 +1547,6 @@ mod tests {
             config::load_config_from(&dir.path().join("config.toml")).unwrap()
         }
 
-        /// Verifies: REQ-AUD-107
-        /// Verifies: REQ-GUI-024
         #[tokio::test]
         async fn a_change_during_a_session_is_saved_reaches_the_session_and_is_announced() {
             let dir = tempfile::tempdir().unwrap();
@@ -1632,7 +1577,6 @@ mod tests {
             assert_eq!(*announced.lock().unwrap(), vec![settings]);
         }
 
-        /// Verifies: REQ-AUD-048
         #[tokio::test]
         async fn a_limiter_switched_during_a_session_is_saved_and_reaches_the_session() {
             let dir = tempfile::tempdir().unwrap();
@@ -1660,8 +1604,6 @@ mod tests {
 
         /// The failure of the ticket: the driver stops answering, and every
         /// read and change of the settings waited for it, one listing at a time.
-        ///
-        /// Verifies: REQ-AUD-123
         #[tokio::test]
         async fn when_the_audio_driver_hangs_the_settings_still_read_and_change_within_the_limit() {
             use jamjam::audio::fault::{self, Call};
@@ -1706,7 +1648,6 @@ mod tests {
             );
         }
 
-        /// Verifies: REQ-AUD-107
         #[tokio::test]
         async fn a_change_with_no_session_running_is_saved_and_no_session_is_told() {
             let dir = tempfile::tempdir().unwrap();
@@ -1724,7 +1665,6 @@ mod tests {
             assert!(session.try_recv().is_err(), "no session was running");
         }
 
-        /// Verifies: REQ-GUI-024
         #[tokio::test]
         async fn a_refused_change_leaves_the_saved_settings_the_session_and_the_revision_alone() {
             let dir = tempfile::tempdir().unwrap();
@@ -1748,8 +1688,6 @@ mod tests {
 
         /// A change that cannot be saved is not in effect either: the next
         /// connect must not use a value the file does not hold.
-        ///
-        /// Verifies: REQ-GUI-024
         #[tokio::test]
         async fn a_change_that_cannot_be_saved_is_not_in_effect() {
             let dir = tempfile::tempdir().unwrap();

@@ -172,7 +172,6 @@ mod tests {
             .collect()
     }
 
-    /// Verifies: REQ-AUD-118
     #[test]
     fn test_input_channels_5_and_6_are_read_from_the_fifth_and_sixth_channel() {
         let input = eight_channel_frames(3);
@@ -184,7 +183,6 @@ mod tests {
         assert_eq!(out, [4.0, 5.0, 4.0, 5.0, 4.0, 5.0]);
     }
 
-    /// Verifies: REQ-AUD-118
     #[test]
     fn test_a_mono_transmit_reads_only_the_left_input_channel() {
         let input = eight_channel_frames(2);
@@ -196,27 +194,23 @@ mod tests {
         assert_eq!(out, [2.0, 2.0]);
     }
 
-    /// Verifies: REQ-AUD-121
     #[test]
     fn test_a_stereo_transmit_with_no_right_channel_captures_the_left_as_one_channel() {
         assert_eq!(capture_picks(3, None, 2), [2]);
     }
 
-    /// Verifies: REQ-AUD-121
     #[test]
     fn test_a_stereo_transmit_with_the_same_channel_on_both_sides_captures_it_once() {
         assert_eq!(capture_picks(3, Some(3), 2), [2]);
         assert_eq!(capture_picks(1, Some(1), 2), [0]);
     }
 
-    /// Verifies: REQ-AUD-118
     #[test]
     fn test_the_default_input_setting_reads_the_first_two_channels() {
         assert_eq!(capture_picks(1, Some(2), 2), [0, 1]);
         assert_eq!(capture_picks(1, Some(2), 1), [0]);
     }
 
-    /// Verifies: REQ-AUD-118
     #[test]
     fn test_a_selection_the_device_lacks_falls_back_to_its_first_channels() {
         let attempts = capture_attempts(5, Some(6), 2);
@@ -224,14 +218,12 @@ mod tests {
         assert_eq!(attempts, [vec![4, 5], vec![0, 1], vec![0]]);
     }
 
-    /// Verifies: REQ-AUD-118
     #[test]
     fn test_the_default_selection_falls_back_only_to_mono() {
         assert_eq!(capture_attempts(1, Some(2), 2), [vec![0, 1], vec![0]]);
         assert_eq!(capture_attempts(1, Some(2), 1), [vec![0]]);
     }
 
-    /// Verifies: REQ-AUD-119
     #[test]
     fn test_output_channels_5_and_6_play_the_left_and_right_on_the_fifth_and_sixth() {
         let wire = [0.5, -0.5, 0.25, -0.25];
@@ -249,7 +241,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-119
     #[test]
     fn test_an_output_with_no_right_channel_plays_both_sides_mixed_on_the_left() {
         let wire = [0.5, -0.25];
@@ -261,7 +252,6 @@ mod tests {
         assert_eq!(out, [0.0, 0.0, 0.125, 0.0]);
     }
 
-    /// Verifies: REQ-AUD-119
     #[test]
     fn test_the_default_output_setting_is_the_stereo_frame_itself() {
         let route = OutputRoute::from_settings(1, Some(2));
@@ -274,7 +264,6 @@ mod tests {
         assert_eq!(out, wire);
     }
 
-    /// Verifies: REQ-AUD-119
     #[test]
     fn test_a_route_needs_a_device_with_its_highest_channel() {
         assert_eq!(OutputRoute::from_settings(5, Some(6)).channels_needed(), 6);
@@ -282,7 +271,6 @@ mod tests {
         assert_eq!(OutputRoute::default().channels_needed(), 2);
     }
 
-    /// Verifies: REQ-AUD-118
     #[test]
     fn test_a_device_is_opened_with_the_smallest_channel_count_that_reaches_the_channel() {
         assert_eq!(smallest_channel_count(&[2, 8, 4], 3), Some(4));

@@ -1,5 +1,5 @@
 /**
- * DeviceDelayField - measures the delay of the devices in use (REQ-GUI-034).
+ * DeviceDelayField - measures the delay of the devices in use.
  *
  * A measuring sound is played from the output and timed to its arrival at the
  * input, so the way from one to the other has to exist: a loopback cable, or

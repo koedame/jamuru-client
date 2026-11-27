@@ -1,4 +1,4 @@
-//! Which links went quiet and whose line it is (ADR-112, REQ-CON-162..164)
+//! Which links went quiet and whose line it is
 //!
 //! `Dropouts` decides; this feeds it what the audio links hear and how the signaling connection
 //! stands, sends what it decides over the room's signaling connection, and hands the result to
@@ -231,13 +231,11 @@ pub(super) fn presence_received(state: &SignalingState, peers: Vec<jamjam::netwo
 mod tests {
     use super::*;
 
-    /// Verifies: REQ-CON-163
     #[test]
     fn when_there_is_no_signaling_connection_the_line_is_down() {
         assert_eq!(line_of(None), Line::Down);
     }
 
-    /// Verifies: REQ-CON-161
     #[test]
     fn when_a_link_is_reported_quiet_its_side_is_remembered_until_it_is_heard_again() {
         use jamjam::network::dropout::Dropout;

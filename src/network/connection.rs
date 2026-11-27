@@ -33,7 +33,7 @@ use super::udp_mux::UdpMux;
 /// The hop limit of the packets sent to every candidate before the first probe: enough to get
 /// through our own NAT (and a carrier's NAT behind it), too few to reach the peer's. Some NATs
 /// keep a packet of the peer that arrives before we have sent to the peer, and then never let what
-/// we send reach it; one that has seen ours go out first takes the peer's as the answer (ADR-131).
+/// we send reach it; one that has seen ours go out first takes the peer's as the answer.
 const OPENING_HOPS: u32 = 3;
 
 /// How many of those packets go to each candidate, and how far apart
@@ -152,11 +152,11 @@ pub struct OneWayDelays {
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionStats {
     /// Round-trip time in milliseconds, or `None` before the first sample
-    /// arrives (REQ-LAT-130). `0.0` is a real measurement, not a placeholder,
+    /// arrives. `0.0` is a real measurement, not a placeholder,
     /// so it cannot double as "unmeasured".
     pub rtt_ms: Option<f32>,
     /// The two ways of the round trip timed by the clocks of both ends, or `None` before the
-    /// first answer that carried them (REQ-LAT-133)
+    /// first answer that carried them
     pub one_way: Option<OneWayDelays>,
     /// Packet loss rate (0.0 - 1.0)
     pub packet_loss_rate: f32,
@@ -170,7 +170,7 @@ pub struct ConnectionStats {
     pub packets_sent: u64,
     /// Total packets received
     pub packets_received: u64,
-    /// When a packet last arrived, `None` while none has (REQ-CON-162). An instant rather than
+    /// When a packet last arrived, `None` while none has. An instant rather than
     /// an age, so a reader of the published statistics knows how long ago it was at the moment
     /// it asks, not at the moment they were taken.
     pub last_received_at: Option<Instant>,
@@ -257,7 +257,7 @@ impl ConnectionStats {
     }
 
     /// How usable this connection currently is, or `None` before the first
-    /// RTT sample arrives (REQ-LAT-121, REQ-LAT-130).
+    /// RTT sample arrives.
     ///
     /// Derived rather than stored, so it can never disagree with the RTT and
     /// loss figures it is computed from. Withheld rather than defaulted to
@@ -274,7 +274,7 @@ impl ConnectionStats {
 /// The address picked while connecting only shows that the peer's packets
 /// reach us from there. Whether ours reach the peer is known only once it
 /// answers a ping, so the route can move to an address the peer is heard
-/// from when it has not answered (REQ-CON-114).
+/// from when it has not answered.
 #[derive(Debug)]
 struct Route {
     current: SocketAddr,
@@ -287,7 +287,7 @@ struct Route {
     /// answered since. There is no answer to wait for there: the peer is where it is heard from.
     fell_back: bool,
     /// The ports guessed for a peer none of whose offered addresses answered: it is behind a NAT
-    /// that gives each destination a port of its own (ADR-115). What comes from one of them is
+    /// that gives each destination a port of its own. What comes from one of them is
     /// the peer's, and the route follows an answer from there.
     predicted: Option<PortPrediction>,
     /// Until when the keep-alive goes to the peer's other addresses whatever the silence, while
@@ -512,7 +512,7 @@ struct Probing<'a> {
     /// what the peer signed is taken in ([`SecureLink::read_route_probe`])
     link: &'a SecureLink,
     /// When the probe of each round went out to the candidate. A probe that did not go out
-    /// is not a route, however its packets reach us (REQ-CON-114). The rounds after the
+    /// is not a route, however its packets reach us. The rounds after the
     /// scheduled ones are the probes sent in answer to the peer's ([`TRIGGERED_PROBES`])
     sent_at: Vec<Vec<Option<Instant>>>,
     /// The round trip of each probe, once its reply came
@@ -606,7 +606,7 @@ impl<'a> Probing<'a> {
     ///
     /// Nothing is taken from a candidate no probe of ours went to: a packet that reaches us
     /// from an address we cannot send to shows a one-way path, and choosing it leaves the peer
-    /// hearing nothing from us (REQ-CON-114).
+    /// hearing nothing from us.
     ///
     /// A probe that reaches us shows that the path works from the peer to us, and that the
     /// peer's NAT, if any, now lets us in: our own probe sent back at once is the first to
@@ -727,7 +727,7 @@ fn deliver_recovered(
         fec_recovered.fetch_add(1, Ordering::Relaxed);
         if let Some(callback) = callback {
             // Timestamp is not recoverable from FEC; the receive path keys off
-            // sequence (ADR-021).
+            // sequence.
             callback(sequence, recovered.data, 0);
         }
     }
@@ -1053,7 +1053,7 @@ impl ConnectionState {
 }
 
 /// Callback for received audio data
-/// How audio is encoded on the wire, and whether FEC is sent (ADR-021)
+/// How audio is encoded on the wire, and whether FEC is sent
 #[derive(Debug, Clone)]
 pub struct AudioEncodingConfig {
     /// Codec to use. Must be available in this build.
@@ -1069,7 +1069,7 @@ pub struct AudioEncodingConfig {
     /// FEC group size, or `None` to disable FEC
     ///
     /// Must not exceed the receiver's jitter buffer depth, or recovered packets
-    /// arrive after they were due (ADR-021).
+    /// arrive after they were due.
     pub fec_group_size: Option<usize>,
 }
 
@@ -1093,7 +1093,7 @@ impl Default for AudioEncodingConfig {
 /// the user was asked. What this configures is when to tell the user, which
 /// `connection.feature` specifies: a 3-second outage recovers on its own, a
 /// 10-second one asks the user, and a link that comes back is taken up again
-/// either way (REQ-CON-109, REQ-CON-110).
+/// either way.
 #[derive(Debug, Clone, Copy)]
 pub struct ReconnectConfig {
     /// How often keep-alives are sent
@@ -1102,7 +1102,7 @@ pub struct ReconnectConfig {
     /// this sets the granularity of every threshold below it.
     pub keep_alive_interval: Duration,
     /// Silence after which the connection is considered lost and reconnection
-    /// starts. Shorter than the 3 seconds REQ-CON-109 describes, so that outage
+    /// starts. Shorter than the 3 seconds a session waits on an outage, so that outage
     /// is detected well inside it.
     pub detect_after: Duration,
     /// Silence after which automatic recovery gives up and the user is asked
@@ -1185,11 +1185,10 @@ pub type StateChangeCallback = Box<dyn Fn(ConnectionState) + Send + Sync + 'stat
 ///
 /// Arguments are `(sequence, payload, timestamp)`. The sequence number is
 /// required to reorder packets and detect loss, so a receiver can feed a jitter
-/// buffer (ADR-020). The payload is passed by value, so a receiver that keeps
+/// buffer. The payload is passed by value, so a receiver that keeps
 /// it does not have to copy it out of the transport.
 ///
-/// `participant_id` and the FEC recovery flags described in
-/// docs-spec/api/network.md are not supplied yet; see that document.
+/// `participant_id` and the FEC recovery flags are not supplied yet.
 pub type AudioCallback = Box<dyn Fn(u32, Vec<u8>, u32) + Send + Sync + 'static>;
 
 /// Callback for received peer latency info
@@ -1208,7 +1207,7 @@ pub struct Connection {
     sequence: AtomicU32,
     /// Sequence for audio packets, kept apart from `sequence` so audio is
     /// numbered without gaps: the receiver counts a gap as loss, and derives
-    /// the FEC group from the number (ADR-021).
+    /// the FEC group from the number.
     audio_sequence: AtomicU32,
     packets_sent: Arc<AtomicU64>,
     packets_received: Arc<AtomicU64>,
@@ -1310,7 +1309,7 @@ impl Connection {
     ///
     /// Lets a caller bind early to learn and advertise its port, then hand the
     /// socket to the runtime that will drive the audio path. Must be called
-    /// from within that runtime - see [`UdpTransport::from_std`] and ADR-026.
+    /// from within that runtime - see [`UdpTransport::from_std`].
     pub fn from_std(std_socket: std::net::UdpSocket) -> Result<Self, NetworkError> {
         Self::from_transport(UdpTransport::from_std(std_socket)?)
     }
@@ -1722,7 +1721,7 @@ impl Connection {
                 route.fell_back = true;
                 // Nothing answered. A peer that offered the same public address with several
                 // ports is behind a NAT that gives each destination a port of its own, and
-                // the port it will send from is none of the ones offered: guess it (ADR-115).
+                // the port it will send from is none of the ones offered: guess it.
                 let prediction = PortPrediction::from_offered(
                     candidates,
                     rand::random::<[u8; 32]>(),
@@ -1908,7 +1907,7 @@ impl Connection {
     }
 
     /// Lets addresses on this machine (127/8) count as public ones when guessing the port of a
-    /// peer behind a NAT (ADR-115), so that a test can stand in for the internet on one
+    /// peer behind a NAT, so that a test can stand in for the internet on one
     /// machine. The app never calls it: there, a peer's loopback address is not one to probe.
     #[doc(hidden)]
     pub fn predict_ports_on_loopback(&mut self) {
@@ -1928,7 +1927,7 @@ impl Connection {
     /// Start a full attempt again after automatic recovery gave up
     ///
     /// `connection.feature` has the user choose whether to retry after a long
-    /// outage (REQ-CON-110); this is what that choice calls. The receive, keep-alive
+    /// outage; this is what that choice calls. The receive, keep-alive
     /// and liveness loops run from the moment the link is up until it is closed, so
     /// they are still there to be given the full give-up time again. Returns an error if
     /// the connection was deliberately closed rather than lost.
@@ -1963,7 +1962,7 @@ impl Connection {
     ///
     /// Groups that were in flight will never complete, and a stale group could
     /// pair a pre-outage packet with a post-outage FEC packet and "recover"
-    /// nonsense (ADR-022).
+    /// nonsense.
     fn reset_receive_state(&self) {
         if let Some(ref decoder) = self.fec_decoder {
             if let Ok(mut decoder) = decoder.lock() {
@@ -2023,7 +2022,7 @@ impl Connection {
     }
 
     /// Get the current RTT estimate in milliseconds, or `None` before the
-    /// first sample arrives (REQ-LAT-130)
+    /// first sample arrives
     pub fn rtt_ms(&self) -> Option<f32> {
         self.rtt_measurement.read().rtt_ms
     }
@@ -2257,7 +2256,7 @@ impl Connection {
         let (bytes, from) = heard;
         // Whether or not it is answered, the peer had opened its own NAT when it sent a probe.
         // Only one it signed counts: a probe sent from its address by someone else would end
-        // the wait before the peer's NAT is open (REQ-CON-181, REQ-SEC-010).
+        // the wait before the peer's NAT is open.
         let probe = probing.read(from, &bytes);
         let probe_of_peer = matches!(probe, Some((false, _)));
         let Some(answer) = probing.take(from, probe, Instant::now()) else {
@@ -2293,7 +2292,7 @@ impl Connection {
     ///
     /// A peer that is already connected sends audio all that time. What arrives
     /// between the last read of the check and the receive loop starting would,
-    /// read at once, overflow the play-out buffer (REQ-CON-116). Audio that old is
+    /// read at once, overflow the play-out buffer. Audio that old is
     /// not worth playing.
     fn discard_audio_queued_while_probing(&self) {
         while self.transport.try_recv_raw().is_some() {}
@@ -2460,7 +2459,7 @@ impl Connection {
                         // Loss is measured from the gaps in the audio sequence.
                         // Without this `ConnectionStats::packet_loss_rate` would
                         // be a constant, and the quality classification that
-                        // reads it could never report loss (REQ-CON-023).
+                        // reads it could never report loss.
                         if let Ok(mut tracker) = sequence_tracker.lock() {
                             tracker.record(packet.sequence);
                         }
@@ -2590,8 +2589,7 @@ impl Connection {
     ///
     /// UDP gives no disconnect event, so silence is the only signal. Recovery
     /// needs no handshake: the keep-alive loop keeps probing throughout, which is
-    /// also what refreshes a NAT mapping that expired during the outage
-    /// (ADR-022).
+    /// also what refreshes a NAT mapping that expired during the outage.
     fn start_liveness_monitor(&mut self) {
         if let Some(handle) = self.liveness_handle.take() {
             handle.abort();
@@ -2625,8 +2623,8 @@ impl Connection {
                 let remote_addr = route.lock().current;
 
                 let next = if attempt >= config.give_up_after {
-                    // Automatic recovery has had long enough. Ask the user
-                    // (REQ-CON-110); the keep-alives go on, so the link is
+                    // Automatic recovery has had long enough. Ask the user;
+                    // the keep-alives go on, so the link is
                     // taken up again if the peer is heard.
                     if current == ConnectionState::Failed {
                         None
@@ -2761,7 +2759,7 @@ impl Connection {
 
                 // No answer to our pings: the peer may not be reached on this
                 // address. Let it hear from us on its other ones too, so that
-                // it is heard from there and the route can follow (REQ-CON-114).
+                // it is heard from there and the route can follow.
                 let probe_others_after =
                     reconnect_config.answer_wait(rtt_measurement.read().slowest_recent());
                 let others = {
@@ -2888,7 +2886,7 @@ impl Connection {
     }
 
     /// Sends to the ports guessed for a peer behind a NAT that changes its port per
-    /// destination, until the peer is heard (ADR-115)
+    /// destination, until the peer is heard
     ///
     /// The peer's NAT lets in what comes from an address it has sent to, and has sent to us from
     /// a port that none of the addresses it offered names. Sending there, from the address it
@@ -3249,7 +3247,6 @@ mod tests {
             .collect()
     }
 
-    /// Verifies: REQ-CON-181
     #[cfg(unix)]
     #[tokio::test]
     async fn when_a_connection_checks_its_candidates_each_first_gets_keep_alives_that_die_on_the_way_and_the_probes_come_after_the_lead(
@@ -3299,7 +3296,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-181
     #[tokio::test]
     async fn when_the_peer_probes_before_the_long_lead_of_a_link_started_after_advertising_ends_the_link_probes_at_once(
     ) {
@@ -3330,8 +3326,6 @@ mod tests {
 
     /// Someone who sends probes from the address of the peer, which has not yet opened its NAT,
     /// does not end the wait for the peer's first probe: only the peer's own probe does.
-    ///
-    /// Verifies: REQ-SEC-010, REQ-CON-181
     #[tokio::test]
     async fn when_probes_from_the_peers_address_are_not_signed_by_the_peer_the_wait_for_its_first_probe_goes_on(
     ) {
@@ -3404,7 +3398,6 @@ mod tests {
         assert!(conn1.is_connected());
     }
 
-    /// Verifies: REQ-TEL-015
     #[tokio::test]
     async fn when_a_candidate_answers_the_link_facts_say_the_route_was_confirmed() {
         let mut conn1 = conn().await;
@@ -3428,8 +3421,6 @@ mod tests {
     /// A peer that already sends audio while we probe is one that does not encrypt: a peer
     /// that does holds its audio back until we have shown it we have the keys. Nothing but a
     /// keep-alive is taken from it, before or after the connection is up.
-    ///
-    /// Verifies: REQ-CON-116
     #[tokio::test]
     async fn when_a_peer_sends_plain_audio_and_latency_info_they_are_neither_played_nor_kept() {
         let mut conn1 = conn().await;
@@ -3481,7 +3472,6 @@ mod tests {
         assert!(conn1.peer_latency_info().is_none());
     }
 
-    /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_every_probe_is_answered_the_connection_is_up_as_soon_as_the_probes_are_out() {
         let mut conn1 = conn().await;
@@ -3500,7 +3490,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-TEL-015
     #[tokio::test]
     async fn when_no_candidate_answers_the_link_facts_say_the_route_was_not_confirmed() {
         let mut conn1 = conn().await;
@@ -3533,7 +3522,6 @@ mod tests {
         (socket, at)
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_a_candidate_we_could_not_send_to_answers_the_answer_is_not_taken() {
         let candidates = [addr("192.168.1.10:5000"), addr("100.64.0.2:5000")];
@@ -3548,7 +3536,6 @@ mod tests {
         assert_eq!(probing.reply_count(1), 1);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_answer_comes_from_no_candidate_it_is_not_taken() {
         let candidates = [addr("192.168.1.10:5000")];
@@ -3565,7 +3552,6 @@ mod tests {
         assert_eq!(probing.reply_count(0), 0);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_packet_from_a_candidate_is_not_a_keep_alive_it_is_not_an_answer() {
         let candidates = [addr("192.168.1.10:5000")];
@@ -3579,7 +3565,6 @@ mod tests {
         assert_eq!(probing.reply_count(0), 0);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_peer_has_not_answered_a_packet_from_another_address_moves_the_route_there() {
         let lan = addr("192.168.1.10:5000");
@@ -3592,7 +3577,6 @@ mod tests {
         assert_eq!(route.others, vec![(lan, true)]);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_link_fell_back_and_nothing_answered_a_packet_from_another_address_moves_the_route_there_at_once(
     ) {
@@ -3609,7 +3593,6 @@ mod tests {
         assert_eq!(route.current, vpn);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_route_the_link_fell_back_to_is_answered_the_route_waits_before_leaving_it() {
         let lan = addr("192.168.1.10:5000");
@@ -3622,7 +3605,6 @@ mod tests {
         assert_eq!(route.current, lan);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_peer_answered_recently_the_route_stays_where_it_is() {
         let lan = addr("192.168.1.10:5000");
@@ -3635,7 +3617,6 @@ mod tests {
         assert_eq!(route.current, lan);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_we_could_not_send_to_the_address_the_peer_is_heard_from_the_route_stays_where_it_is() {
         let lan = addr("192.168.1.10:5000");
@@ -3647,7 +3628,6 @@ mod tests {
         assert_eq!(route.current, lan);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_a_packet_comes_from_an_address_that_is_not_the_peers_the_route_stays_where_it_is() {
         let lan = addr("192.168.1.10:5000");
@@ -3661,7 +3641,6 @@ mod tests {
         assert_eq!(route.current, lan);
     }
 
-    /// Verifies: REQ-CON-170
     #[test]
     fn when_a_packet_comes_from_a_guessed_port_without_proof_the_route_stays_where_it_is() {
         let lan = addr("192.168.1.10:5000");
@@ -3681,7 +3660,6 @@ mod tests {
         assert_eq!(route.current, guessed);
     }
 
-    /// Verifies: REQ-CON-170
     #[test]
     fn when_a_probe_answer_carries_another_ports_token_it_is_not_the_answer_from_the_guessed_port()
     {
@@ -3700,7 +3678,6 @@ mod tests {
         assert!(!route.is_answer_from_guessed(token ^ 1, addr("203.0.113.7:40002")));
     }
 
-    /// Verifies: REQ-CON-136
     #[test]
     fn when_the_answer_to_the_check_of_an_unoffered_address_comes_from_there_the_route_moves_there()
     {
@@ -3720,7 +3697,6 @@ mod tests {
         assert_eq!(route.current, moved);
     }
 
-    /// Verifies: REQ-CON-175
     #[test]
     fn when_the_answer_to_a_check_comes_from_another_address_or_with_another_token_it_is_not_taken()
     {
@@ -3737,7 +3713,6 @@ mod tests {
         assert_eq!(route.current, lan);
     }
 
-    /// Verifies: REQ-CON-175
     #[test]
     fn when_a_check_was_answered_the_same_answer_is_not_taken_again() {
         let lan = addr("192.168.1.10:5000");
@@ -3749,7 +3724,6 @@ mod tests {
         assert!(!route.check_answered(token, moved));
     }
 
-    /// Verifies: REQ-CON-175
     #[test]
     fn when_a_check_went_out_a_moment_ago_the_address_is_not_checked_again_until_the_retry() {
         let lan = addr("192.168.1.10:5000");
@@ -3765,7 +3739,6 @@ mod tests {
         assert!(route.check_answered(second, moved));
     }
 
-    /// Verifies: REQ-CON-175
     #[test]
     fn when_many_addresses_are_heard_from_only_a_few_checks_are_out_at_once() {
         let lan = addr("192.168.1.10:5000");
@@ -3786,7 +3759,6 @@ mod tests {
             .is_some());
     }
 
-    /// Verifies: REQ-CON-175
     #[test]
     fn when_the_answer_to_a_check_comes_after_it_expired_it_is_not_taken() {
         let lan = addr("192.168.1.10:5000");
@@ -3799,7 +3771,6 @@ mod tests {
         assert!(!route.knows(moved));
     }
 
-    /// Verifies: REQ-CON-136
     #[test]
     fn when_the_peer_answered_recently_an_unoffered_address_is_not_checked() {
         let lan = addr("192.168.1.10:5000");
@@ -3814,7 +3785,6 @@ mod tests {
         assert_eq!(route.current, lan);
     }
 
-    /// Verifies: REQ-CON-136
     #[test]
     fn when_the_address_is_already_known_it_is_not_checked() {
         let lan = addr("192.168.1.10:5000");
@@ -3827,7 +3797,6 @@ mod tests {
         assert_eq!(route.others, vec![(vpn, false)]);
     }
 
-    /// Verifies: REQ-CON-172
     #[test]
     fn when_no_candidate_answered_the_link_goes_to_the_public_address_before_a_private_one() {
         let private: SocketAddr = "192.168.1.20:5000".parse().unwrap();
@@ -3851,7 +3820,6 @@ mod tests {
         assert_eq!(fallback_candidate(&[private, public], |_| false), private);
     }
 
-    /// Verifies: REQ-CON-144
     #[test]
     fn when_the_peer_stays_silent_the_other_addresses_are_left_alone_after_a_while() {
         let after = Duration::from_secs(2);
@@ -3866,7 +3834,6 @@ mod tests {
         assert!(!probes_others(Duration::from_secs(3600), after));
     }
 
-    /// Verifies: REQ-CON-114
     #[tokio::test]
     async fn when_no_candidate_answers_the_first_one_we_could_send_to_is_used() {
         let mut conn = conn().await;
@@ -3929,7 +3896,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_relayed_tailscale_address_and_a_public_one_both_reply_the_shorter_round_trip_is_used()
     {
@@ -3953,8 +3919,6 @@ mod tests {
 
     /// A Tailscale path that looks a little faster in a 1 s check can still be a relay that
     /// stalls afterwards; the public address that answers as well is used.
-    ///
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_tailscale_address_is_only_a_little_faster_than_a_public_one_the_public_one_is_used() {
         let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
@@ -3968,7 +3932,6 @@ mod tests {
         assert_eq!(chosen(verdict, &candidates), candidates[1]);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_tailscale_address_is_much_faster_than_a_public_one_the_tailscale_one_is_used() {
         let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
@@ -3982,7 +3945,6 @@ mod tests {
         assert_eq!(chosen(verdict, &candidates), candidates[0]);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_nearer_kind_of_route_is_much_slower_the_faster_route_is_used() {
         let candidates = [addr("192.168.1.20:5000"), addr("203.0.113.7:5000")];
@@ -3997,7 +3959,6 @@ mod tests {
         assert_eq!(chosen(verdict, &candidates), candidates[1]);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_round_trips_differ_by_less_than_the_noise_the_nearer_kind_of_route_is_used() {
         let candidates = [addr("203.0.113.7:5000"), addr("192.168.1.20:5000")];
@@ -4012,8 +3973,6 @@ mod tests {
     }
 
     /// One lucky probe on a path that swings must not decide the route: the median does.
-    ///
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_one_probe_of_a_slow_route_is_lucky_the_route_that_is_steady_is_used() {
         let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
@@ -4032,7 +3991,6 @@ mod tests {
         assert_eq!(chosen(verdict, &candidates), candidates[1]);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_route_answers_fewer_than_half_its_probes_a_slower_one_that_answers_all_is_used() {
         let candidates = [addr("203.0.113.7:5000"), addr("203.0.113.8:5000")];
@@ -4053,7 +4011,6 @@ mod tests {
         assert_eq!(chosen(verdict, &candidates), candidates[1]);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_route_answers_less_than_half_its_probes_but_nothing_else_answers_it_is_used() {
         let candidates = [addr("203.0.113.7:5000"), addr("203.0.113.8:5000")];
@@ -4072,7 +4029,6 @@ mod tests {
         assert_eq!(chosen(verdict, &candidates), candidates[0]);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_candidate_probed_later_may_still_be_faster_the_check_waits_for_it() {
         let candidates = [addr("203.0.113.7:5000"), addr("192.168.1.20:5000")];
@@ -4091,7 +4047,6 @@ mod tests {
         assert_eq!(chosen(late, &candidates), candidates[0]);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_reply_names_another_candidates_token_it_is_not_counted() {
         let candidates = [addr("203.0.113.7:5000"), addr("203.0.113.8:5000")];
@@ -4103,7 +4058,6 @@ mod tests {
         assert!(probing.rtt.iter().flatten().all(Option::is_none));
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_a_reply_names_another_round_it_is_timed_from_the_probe_of_that_round() {
         let candidates = [addr("203.0.113.7:5000")];
@@ -4122,7 +4076,6 @@ mod tests {
         assert_eq!(probing.rtt[0][0], None);
     }
 
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_the_peer_asks_for_a_reply_the_token_is_handed_back_and_a_plain_keep_alive_asks_for_none(
     ) {
@@ -4158,7 +4111,6 @@ mod tests {
         ]
     }
 
-    /// Verifies: REQ-SEC-010
     #[test]
     fn when_a_probe_or_a_reply_from_a_candidate_is_not_signed_by_the_peer_it_is_neither_answered_nor_timed(
     ) {
@@ -4181,7 +4133,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-132
     #[test]
     fn when_the_peer_probes_an_address_none_of_ours_was_answered_by_a_probe_goes_back_to_it() {
         let candidates = [addr("203.0.113.7:5000")];
@@ -4194,7 +4145,6 @@ mod tests {
         assert_eq!(answer.probe_back, Some(probe_token(PROBE_ROUNDS, 0)));
     }
 
-    /// Verifies: REQ-CON-132
     #[test]
     fn when_the_peer_keeps_probing_an_address_no_more_than_the_limit_of_probes_go_back() {
         let candidates = [addr("203.0.113.7:5000")];
@@ -4209,7 +4159,6 @@ mod tests {
         assert_eq!(sent_back, TRIGGERED_PROBES);
     }
 
-    /// Verifies: REQ-CON-132
     #[test]
     fn when_one_of_our_probes_to_the_address_was_answered_none_goes_back_for_the_peers() {
         let candidates = [addr("203.0.113.7:5000")];
@@ -4223,7 +4172,6 @@ mod tests {
         assert_eq!(answer.probe_back, None);
     }
 
-    /// Verifies: REQ-CON-132
     #[test]
     fn when_the_probe_sent_back_is_answered_the_address_is_a_route() {
         let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
@@ -4249,8 +4197,6 @@ mod tests {
 
     /// A peer that answers no probe is not chosen from its own keep-alives: only a measured
     /// round trip makes a route.
-    ///
-    /// Verifies: REQ-CON-115
     #[test]
     fn when_the_peer_answers_no_probe_its_keep_alives_do_not_make_a_route() {
         let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
@@ -4287,7 +4233,6 @@ mod tests {
         at
     }
 
-    /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_two_addresses_of_the_same_kind_reply_at_different_speeds_the_faster_is_used() {
         // The slow one is probed first and its reply arrives first (at 60 ms against
@@ -4304,8 +4249,6 @@ mod tests {
 
     /// The first probe of the nearest-looking candidate is answered at once and every other
     /// is slow; the other candidate is steady. Judged on one probe the first would win.
-    ///
-    /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_one_probe_of_a_route_is_answered_at_once_and_the_rest_slowly_the_steady_route_is_used(
     ) {
@@ -4320,7 +4263,6 @@ mod tests {
         assert_eq!(conn.remote_addr(), steady);
     }
 
-    /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_both_peers_probe_each_other_each_answers_the_others_probes_and_both_connect() {
         let mut a = conn().await;
@@ -4387,8 +4329,6 @@ mod tests {
     /// A peer behind a NAT hears nothing from the other until it has sent to it, so whoever
     /// probes first is not heard at all. Each side's own probes were all dropped or all
     /// answered by the time the other's first one arrived, depending on who was late.
-    ///
-    /// Verifies: REQ-CON-132
     #[tokio::test]
     async fn when_a_nat_lets_the_peer_in_only_after_we_sent_to_it_both_connect_however_late_either_probes(
     ) {
@@ -4463,7 +4403,7 @@ mod tests {
         first_ports: usize,
     ) -> SymmetricNat {
         // Ports the NAT holds below the ones it gives. The guess sends to a few ports on each
-        // side of the one it expects (ADR-115), so the ones below land on the NAT too and not on
+        // side of the one it expects, so the ones below land on the NAT too and not on
         // the socket of another test that 127.0.0.1 is shared with.
         const BELOW: usize = 4;
         // Ports in a row, so that "the next free one" is the next number
@@ -4556,8 +4496,6 @@ mod tests {
     /// A peer behind a NAT that gives each destination a port of its own offers the ports STUN
     /// saw, which are not the port it sends from. The other side guesses the port, and the
     /// guess that is right is answered.
-    ///
-    /// Verifies: REQ-CON-170
     #[tokio::test]
     async fn when_the_peer_is_behind_a_nat_that_gives_each_destination_its_own_port_the_route_goes_to_the_port_it_was_given(
     ) {
@@ -4608,8 +4546,6 @@ mod tests {
     /// expects is handed on a few a second. The port that answered the guess was not offered,
     /// so once the route has gone there, the peer's audio from there still has to reach the
     /// link, all of it.
-    ///
-    /// Verifies: REQ-CON-170
     #[tokio::test]
     async fn when_a_link_on_a_shared_socket_moved_to_the_guessed_port_then_all_the_audio_from_there_comes(
     ) {
@@ -4681,8 +4617,6 @@ mod tests {
     /// too, and that peer has fallen back to an address nobody answered at. It goes to where the
     /// probe came from at once, not after waiting for an answer that cannot come: until then its
     /// audio goes nowhere.
-    ///
-    /// Verifies: REQ-CON-114, REQ-CON-170
     #[tokio::test]
     async fn when_the_guessed_probe_comes_after_the_probing_ended_the_peer_behind_the_nat_goes_where_it_came_from_at_once(
     ) {
@@ -4748,8 +4682,6 @@ mod tests {
 
     /// A peer that offers one port per public address has nothing to guess, and a peer that
     /// answers needs none.
-    ///
-    /// Verifies: REQ-CON-170
     #[tokio::test]
     async fn when_the_peer_is_not_behind_such_a_nat_no_port_is_guessed() {
         let mut a = conn().await;
@@ -4770,7 +4702,6 @@ mod tests {
         assert_eq!(a.route.lock().predicted, None);
     }
 
-    /// Verifies: REQ-CON-150
     #[tokio::test]
     async fn when_one_end_sets_the_id_the_room_knows_it_by_the_other_end_hears_the_claim_over_the_link_signed_by_its_key(
     ) {
@@ -4804,7 +4735,6 @@ mod tests {
         assert_eq!(a.peer_claim(), None, "the end that said it hears nothing");
     }
 
-    /// Verifies: REQ-CON-150
     #[tokio::test]
     async fn when_an_id_arrives_in_the_clear_on_an_encrypted_link_it_is_not_taken() {
         let mut a = conn().await;
@@ -4825,7 +4755,6 @@ mod tests {
         assert_eq!(b.peer_claim(), None);
     }
 
-    /// Verifies: REQ-CON-115
     #[tokio::test]
     async fn when_a_peer_that_is_already_connected_gets_a_route_probe_it_replies_with_the_token() {
         let mut conn = conn().await;
@@ -4851,7 +4780,6 @@ mod tests {
         assert_eq!(reply, 9);
     }
 
-    /// Verifies: REQ-SEC-010
     #[tokio::test]
     async fn when_a_peer_that_is_already_connected_gets_a_route_probe_the_peer_did_not_sign_it_does_not_reply(
     ) {
@@ -4888,8 +4816,6 @@ mod tests {
     /// The silence is counted from the moment the link is up, not from the moment the
     /// connection was created: setup before the probes can take seconds, and probe answers
     /// never reach the monitor.
-    ///
-    /// Verifies: REQ-CON-110
     #[tokio::test]
     async fn when_the_link_comes_up_long_after_the_connection_was_created_it_is_not_reported_silent(
     ) {
@@ -4923,7 +4849,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-114
     #[tokio::test]
     async fn when_the_peer_answers_nothing_on_the_chosen_address_but_is_heard_elsewhere_sends_go_there(
     ) {
@@ -4983,8 +4908,6 @@ mod tests {
     /// take a round trip to agree, so the first ping is answered later than the configured wait
     /// after the route was taken up. That silence is not the peer failing to answer: neither
     /// peer may leave the route it chose.
-    ///
-    /// Verifies: REQ-CON-114
     #[tokio::test]
     async fn when_the_round_trip_is_longer_than_the_keep_alive_interval_the_route_chosen_is_kept() {
         let config = ReconnectConfig {
@@ -5019,7 +4942,6 @@ mod tests {
         assert!(a.rtt_ms().is_some() && b.rtt_ms().is_some());
     }
 
-    /// Verifies: REQ-NET-029
     #[tokio::test]
     async fn when_a_frame_is_too_big_for_one_packet_it_is_sent_as_packets_that_fit() {
         use crate::network::SEAL_OVERHEAD;
@@ -5086,7 +5008,6 @@ mod tests {
         assert!(first.1.max(second.1) + SEAL_OVERHEAD <= MAX_PAYLOAD_SIZE);
     }
 
-    /// Verifies: REQ-TEL-015
     #[tokio::test]
     async fn when_audio_arrives_the_link_facts_have_a_first_audio_time() {
         let mut conn1 = conn().await;
@@ -5108,7 +5029,6 @@ mod tests {
         assert!(conn1.link_facts().snapshot().first_audio_ms.is_some());
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_round_trip_is_short_the_peer_gets_the_configured_wait_to_answer() {
         let config = ReconnectConfig::default().validated();
@@ -5123,8 +5043,6 @@ mod tests {
     /// The tethered link of the 10/7 check: round trips of 1.1 to 1.6 s. The first ping
     /// after the route moves goes out up to one interval later and its answer takes a
     /// round trip, so the wait has to outlast both or the route moves back first.
-    ///
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_round_trip_is_long_the_peer_gets_time_for_the_answer_to_the_next_ping() {
         let config = ReconnectConfig::default().validated();
@@ -5140,7 +5058,6 @@ mod tests {
         assert!(wait > config.detect_after);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_the_round_trip_is_extreme_the_wait_stops_at_giving_up() {
         let config = ReconnectConfig::default().validated();
@@ -5151,7 +5068,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_a_slow_link_has_just_moved_the_route_it_is_not_moved_back_before_the_answer_is_due() {
         let config = ReconnectConfig::default().validated();
@@ -5175,8 +5091,6 @@ mod tests {
 
     /// A round trip that is growing is in no sample until it ends: the ping still out is
     /// the only sign of it.
-    ///
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_a_ping_is_still_out_it_counts_for_as_long_as_it_has_been_out() {
         let mut rtt = RttMeasurement::default();
@@ -5191,8 +5105,6 @@ mod tests {
     }
 
     /// A ping that never comes back must not count for ever: the peer is given up on
-    ///
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_a_ping_has_been_out_very_long_it_counts_only_up_to_the_cap() {
         let mut rtt = RttMeasurement::default();
@@ -5204,8 +5116,6 @@ mod tests {
 
     /// A ping sent before one that was answered was lost, and says nothing of how long an
     /// answer takes
-    ///
-    /// Verifies: REQ-CON-114
     #[test]
     fn when_a_later_ping_was_answered_an_earlier_one_still_out_does_not_count() {
         let mut rtt = RttMeasurement::default();
@@ -5228,7 +5138,6 @@ mod tests {
         assert!(slowest < Duration::from_millis(500), "{:?}", slowest);
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn the_slowest_recent_round_trip_is_unmeasured_before_the_first_pong() {
         let mut rtt = RttMeasurement::default();
@@ -5241,7 +5150,6 @@ mod tests {
         assert_eq!(rtt.slowest_recent(), Some(Duration::from_millis(250)));
     }
 
-    /// Verifies: REQ-CON-114
     #[test]
     fn before_the_first_pong_the_round_trip_the_connectivity_check_timed_is_the_slowest() {
         let mut rtt = RttMeasurement {
@@ -5257,8 +5165,6 @@ mod tests {
 
     /// A `detect_after` below two keep-alive intervals would declare loss on a
     /// link that is merely idle, so it must be raised rather than honoured.
-    ///
-    /// Verifies: REQ-CON-022
     #[test]
     fn reconnect_config_cannot_be_configured_to_flap() {
         let flapping = ReconnectConfig {
@@ -5301,8 +5207,6 @@ mod tests {
     /// Before any pong arrives, RTT must stay unmeasured rather than default
     /// to a real-looking `0.0` - `0.0` is a value the link could actually
     /// report, so it cannot double as "nothing measured yet".
-    ///
-    /// Verifies: REQ-LAT-130
     #[test]
     fn rtt_measurement_starts_unmeasured_and_records_the_first_sample() {
         let mut measurement = RttMeasurement::default();
@@ -5330,8 +5234,6 @@ mod tests {
     /// Each way of the round trip is timed by the clock of the end that sends and the clock of
     /// the end that receives: the ping's way is how long it took to arrive by the answerer's
     /// clock, the pong's way how long by the pinger's.
-    ///
-    /// Verifies: REQ-LAT-133
     #[test]
     fn when_a_pong_carries_clock_times_each_way_of_the_round_trip_is_timed() {
         let mut measurement = RttMeasurement::default();
@@ -5359,8 +5261,6 @@ mod tests {
 
     /// When the answerer's clock is ahead, the ways come out off by the gap in opposite
     /// directions and still add up to the round trip.
-    ///
-    /// Verifies: REQ-LAT-133
     #[test]
     fn when_the_peers_clock_is_ahead_the_two_ways_are_off_by_the_gap_and_still_add_up() {
         let mut measurement = RttMeasurement::default();
@@ -5388,8 +5288,6 @@ mod tests {
 
     /// A peer can put any clock time in its pong; times at the ends of the range are
     /// smoothed in like any other and never stop the receiver.
-    ///
-    /// Verifies: REQ-LAT-133
     #[test]
     fn when_a_pong_carries_times_at_the_ends_of_the_range_the_ways_are_still_computed() {
         let mut measurement = RttMeasurement::default();
@@ -5414,8 +5312,6 @@ mod tests {
 
     /// A pong from a peer that sends no clock times leaves the round trip measured and the
     /// ways unknown.
-    ///
-    /// Verifies: REQ-LAT-133
     #[test]
     fn when_a_pong_carries_no_clock_times_the_ways_stay_unmeasured() {
         let mut measurement = RttMeasurement::default();
@@ -5437,8 +5333,6 @@ mod tests {
     /// What the link carried counts the UDP and IP headers of every packet, or
     /// a stream at its preset's requirement (which counts them) would read as
     /// short of it.
-    ///
-    /// Verifies: REQ-NET-024
     #[test]
     fn wire_bytes_add_the_udp_and_ip_headers_of_every_packet() {
         let stats = ConnectionStats {
@@ -5454,8 +5348,6 @@ mod tests {
     /// measured, and classify normally once it has (the same 0.0-boundary
     /// case `classification_matches_the_specified_bands` in `quality.rs`
     /// covers, but reached through the `Option` gate this struct adds).
-    ///
-    /// Verifies: REQ-LAT-121, REQ-LAT-130
     #[test]
     fn connection_stats_quality_waits_for_the_first_rtt_sample() {
         let unmeasured = ConnectionStats {

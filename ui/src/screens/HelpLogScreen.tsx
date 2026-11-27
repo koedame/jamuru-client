@@ -1,6 +1,6 @@
 /**
  * HelpLogScreen - the window the person being helped keeps beside the app to
- * see what the help did (ADR-044 §5). It reads the helped app's record of the
+ * see what the help did. It reads the helped app's record of the
  * help, adds each line as it happens, and says how long until the help ends by
  * itself. Stop is here too; the main window, which holds the connection, does
  * the stopping.

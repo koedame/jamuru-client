@@ -38,7 +38,7 @@ type ConnectionStateSnapshot = Option<(String, Option<String>)>;
 /// What the link carries versus what the preset needs
 ///
 /// Bitrate adaptation would need a variable-rate codec, which no preset uses, so
-/// this is a warning signal rather than an input to adaptation (ADR-021).
+/// this is a warning signal rather than an input to adaptation.
 #[derive(Debug, Clone, Copy)]
 pub struct BandwidthSnapshot {
     /// Measured throughput in bits per second
@@ -47,7 +47,7 @@ pub struct BandwidthSnapshot {
     pub required_bps: f64,
     /// How the measurement compares with the requirement, or `None` when the
     /// interval carried zero bytes (nothing is arriving from the peer, which is
-    /// not the same as a narrow link - REQ-LAT-127)
+    /// not the same as a narrow link)
     pub status: Option<BandwidthStatus>,
 }
 
@@ -58,7 +58,7 @@ pub struct LinkReport {
     pub stats: RwLock<Option<ConnectionStats>>,
     /// Measured bandwidth against what the preset needs
     pub bandwidth: RwLock<Option<BandwidthSnapshot>>,
-    /// Connection state (ADR-022)
+    /// Connection state
     connection_state: RwLock<ConnectionStateSnapshot>,
     /// Delay their play-out buffer holds, in microseconds
     ///
@@ -128,7 +128,7 @@ pub struct Shared {
     /// The mute the next session starts with: what the room was entered with, or what the
     /// person chose since while no session ran
     pub muted_at_start: Arc<AtomicBool>,
-    /// Whether local monitoring is on (ADR-033)
+    /// Whether local monitoring is on
     pub is_monitoring: Arc<AtomicBool>,
     /// Current input audio level (0-100, RMS normalized)
     pub input_level: Arc<AtomicU32>,
@@ -143,7 +143,7 @@ pub struct Shared {
     /// them yet. The output callback reads them as it mixes.
     pub peer_gains: Arc<RwLock<HashMap<Uuid, Arc<PeerGain>>>>,
     /// The receive buffer of each participant: the owner's choice and what a participant
-    /// asked of it, whether or not there is a link to them yet (ADR-097)
+    /// asked of it, whether or not there is a link to them yet
     pub peer_buffers: Arc<RwLock<HashMap<Uuid, Arc<PeerBufferControl>>>>,
     /// Devices the audio thread could not open, one per direction at most
     pub device_problems: Arc<RwLock<Vec<DeviceProblem>>>,
@@ -165,9 +165,9 @@ pub struct Shared {
     /// What went wrong with the audio received on each link and when. The last session's stay
     /// until the next one starts, so a debug call can still read them.
     pub flights: Arc<Flights>,
-    /// How many frames the limiter on what is sent brought down this session (ADR-094)
+    /// How many frames the limiter on what is sent brought down this session
     pub input_limited_frames: Arc<AtomicU64>,
-    /// How many frames the limiter on what is played brought down this session (ADR-094)
+    /// How many frames the limiter on what is played brought down this session
     pub output_limited_frames: Arc<AtomicU64>,
     /// Master output volume (0-200, 100 = unity gain)
     pub master_volume: Arc<AtomicU32>,
@@ -181,8 +181,8 @@ pub struct Shared {
     /// The id the room knows this app by, and the key it entered with under that id. Each link
     /// tells it to the participant at its far end.
     pub own_id: Arc<RwLock<Option<(Uuid, LinkIdentity)>>>,
-    /// The addresses STUN last saw the audio socket at, asked again while a link heard nothing
-    /// (ADR-129). The room is told the ones it was not told.
+    /// The addresses STUN last saw the audio socket at, asked again while a link heard nothing.
+    /// The room is told the ones it was not told.
     pub seen_mappings: Arc<RwLock<Vec<SocketAddr>>>,
     /// How many times STUN was asked again, and how many times it answered
     pub restun_asked: Arc<AtomicU32>,
@@ -374,7 +374,6 @@ mod tests {
     use super::*;
     use crate::audio::FlightRecorder;
 
-    /// Verifies: REQ-CON-150
     #[test]
     fn a_participant_is_known_by_a_new_id_the_report_the_flights_and_the_fader_follow_the_id() {
         let shared = Shared::new();
@@ -422,7 +421,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-177
     #[test]
     fn a_link_that_was_declared_lost_without_ever_hearing_the_peer_still_counts_as_hearing_nothing()
     {

@@ -2,7 +2,7 @@
 //!
 //! The capture callback feeds a ring through [`MonitorTap`]; the output
 //! callback mixes what is in it into the frame it is about to play with
-//! [`LocalMonitor::mix_into`] (ADR-033). Nothing here touches the network or
+//! [`LocalMonitor::mix_into`]. Nothing here touches the network or
 //! the play-out buffer, so the delay does not depend on the connection or the
 //! preset's jitter buffer.
 //!
@@ -24,7 +24,7 @@ use super::stream::WIRE_CHANNELS;
 /// output with nothing to play.
 ///
 /// With the capture frame and the playback frame this makes the monitored
-/// delay `frame * (1 + MONITOR_MARGIN_FRAMES + 1)` (ADR-033).
+/// delay `frame * (1 + MONITOR_MARGIN_FRAMES + 1)`.
 pub const MONITOR_MARGIN_FRAMES: u32 = 1;
 
 /// Ring capacity in frames. Sized like the capture ring: it only has to hold a
@@ -224,7 +224,7 @@ impl MonitorTap {
 
     /// Hands a captured frame of `channels` interleaved channels to the monitor.
     ///
-    /// The monitor is mono (ADR-033), so a stereo capture is heard as the mean
+    /// The monitor is mono, so a stereo capture is heard as the mean
     /// of its two sides. Same constraints as [`MonitorTap::push`].
     pub fn push_interleaved(&mut self, samples: &[f32], channels: usize) {
         if channels <= 1 {
@@ -290,7 +290,6 @@ mod tests {
         heard
     }
 
-    /// Verifies: REQ-AUD-111
     #[test]
     fn test_enabled_monitor_plays_the_captured_input_in_order_and_unaltered() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -309,7 +308,6 @@ mod tests {
         assert_eq!(played, expected, "no sample lost, repeated or reordered");
     }
 
-    /// Verifies: REQ-AUD-111
     #[test]
     fn test_monitor_adds_to_what_the_peers_are_playing_rather_than_replacing_it() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -328,7 +326,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-111
     #[test]
     fn test_monitor_level_scales_what_is_heard() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -345,7 +342,6 @@ mod tests {
         assert!(out.iter().all(|s| (*s - 0.4).abs() < 1e-6), "{out:?}");
     }
 
-    /// Verifies: REQ-AUD-111
     #[test]
     fn test_monitor_plays_a_stereo_capture_as_the_mean_of_its_sides() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -373,7 +369,6 @@ mod tests {
         assert_eq!(monitor.volume(), 0.0, "NaN leaves the level as it was");
     }
 
-    /// Verifies: REQ-AUD-112
     #[test]
     fn test_disabled_monitor_leaves_the_output_to_the_peers() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -384,7 +379,6 @@ mod tests {
         assert!(heard.iter().all(|s| *s == 0.0), "{heard:?}");
     }
 
-    /// Verifies: REQ-AUD-112
     #[test]
     fn test_switching_the_monitor_off_stops_it_on_the_next_frame() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -400,8 +394,6 @@ mod tests {
 
     /// What was captured before the monitor was switched off is old by the time
     /// it is switched on again, and must not be heard.
-    ///
-    /// Verifies: REQ-AUD-112
     #[test]
     fn test_input_captured_before_switching_off_is_not_heard_after_switching_on() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -423,11 +415,9 @@ mod tests {
         assert!(out.iter().all(|s| (*s - 0.1).abs() < 1e-6), "{out:?}");
     }
 
-    /// The delay is the capture frame, the margin and the playback frame
-    /// (ADR-033). The margin is what the ring holds once the monitor is
+    /// The delay is the capture frame, the margin and the playback frame.
+    /// The margin is what the ring holds once the monitor is
     /// running, and it must stay that when the two clocks are in step.
-    ///
-    /// Verifies: REQ-AUD-032
     #[test]
     fn test_monitor_holds_the_margin_and_no_more_when_the_clocks_agree() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -449,8 +439,6 @@ mod tests {
 
     /// A capture clock running fast against the output clock would otherwise
     /// add a little delay every frame for as long as the session lasts.
-    ///
-    /// Verifies: REQ-AUD-032
     #[test]
     fn test_monitor_does_not_grow_a_backlog_when_capture_runs_ahead_of_output() {
         let monitor = LocalMonitor::new(FRAME as u32);
@@ -473,7 +461,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-032
     #[test]
     fn test_monitor_recovers_after_capture_stalls() {
         let monitor = LocalMonitor::new(FRAME as u32);

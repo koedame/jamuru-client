@@ -1,4 +1,4 @@
-//! The mixer: where the faders stand (ADR-044 §6).
+//! The mixer: where the faders stand.
 //!
 //! The backend owns this, not the screen. Each strip - the microphone, and
 //! each of the others in the room - has a volume, a pan and (for the others) a
@@ -341,7 +341,6 @@ mod tests {
             .peer_gain(Uuid::parse_str(peer).unwrap())
     }
 
-    /// Verifies: REQ-RMT-031
     #[test]
     fn a_fader_is_at_80_is_zero_db_and_plays_the_audio_unchanged() {
         assert_eq!(gain_percent(80), 100);
@@ -349,7 +348,6 @@ mod tests {
         assert_eq!(gain_percent(100), 125);
     }
 
-    /// Verifies: REQ-RMT-031
     #[test]
     fn a_participant_is_in_the_room_gets_a_strip_at_the_default_and_one_who_left_loses_theirs() {
         let app = app();
@@ -363,7 +361,6 @@ mod tests {
         assert_eq!(peer_ids(mixer.snapshot()), ["b"]);
     }
 
-    /// Verifies: REQ-RMT-031
     #[test]
     fn the_room_is_as_it_was_says_nothing_new() {
         let app = app();
@@ -376,7 +373,6 @@ mod tests {
         assert_eq!(mixer.snapshot().revision, revision);
     }
 
-    /// Verifies: REQ-RMT-031
     #[tokio::test]
     async fn a_fader_is_moved_is_kept_and_announced_with_a_rising_revision() {
         let app = app();
@@ -411,7 +407,6 @@ mod tests {
         assert!(heard[1].contains("\"pan\":-40"), "{}", heard[1]);
     }
 
-    /// Verifies: REQ-RMT-031
     #[tokio::test]
     async fn a_fader_is_moved_to_where_it_is_announces_nothing() {
         let app = app();
@@ -426,7 +421,6 @@ mod tests {
         assert_eq!(app.state::<MixerState>().snapshot().revision, revision);
     }
 
-    /// Verifies: REQ-RMT-031
     #[tokio::test]
     async fn a_participant_who_is_not_in_the_room_is_refused_and_changes_nothing() {
         let app = app();
@@ -440,7 +434,6 @@ mod tests {
         assert_eq!(app.state::<MixerState>().snapshot(), before);
     }
 
-    /// Verifies: REQ-RMT-031
     #[tokio::test]
     async fn the_microphone_is_moved_is_set_on_the_audio_in_percent_of_unity_gain() {
         let app = app();
@@ -458,9 +451,6 @@ mod tests {
     /// The bug this guards: only the strip of the one participant the audio
     /// went to was set on the audio, so in a room of three the fader of the
     /// other did nothing.
-    ///
-    /// Verifies: REQ-RMT-031
-    /// Verifies: REQ-GUI-009
     #[tokio::test]
     async fn the_fader_of_any_participant_is_moved_sets_how_that_one_is_played_and_no_one_else() {
         let app = app();
@@ -482,7 +472,6 @@ mod tests {
         assert_eq!(heard_at(&app, BEN), Some((0, 0)));
     }
 
-    /// Verifies: REQ-RMT-031
     #[tokio::test]
     async fn a_participant_leaves_the_room_leaves_nothing_on_the_audio() {
         let app = app();
@@ -502,7 +491,6 @@ mod tests {
         assert_eq!(heard_at(&app, CHO), Some((50, 0)));
     }
 
-    /// Verifies: REQ-RMT-031
     #[tokio::test]
     async fn a_link_is_opened_with_the_faders_where_they_stand_muted_being_silence() {
         let app = app();

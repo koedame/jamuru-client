@@ -14,8 +14,7 @@ export interface Participant {
   name: string;
   /**
    * What their app can do beyond the base protocol ("peer_message": it takes
-   * messages from other apps). Empty for an app or server that predates it
-   * (ADR-043).
+   * messages from other apps). Empty for an app or server that predates it.
    */
   features?: string[];
   /**
@@ -72,7 +71,7 @@ export type SystemKind =
   | "recording_stopped";
 
 // ============================================================================
-// Helping with settings (ADR-044 §5)
+// Helping with settings
 // ============================================================================
 
 /** Which side of a help this app is on */
@@ -255,7 +254,7 @@ export async function appEnvironment(): Promise<AppEnvironment> {
 }
 
 // ============================================================================
-// The session: connecting, entering and leaving a room (ADR-044 §6)
+// The session: connecting, entering and leaving a room
 // ============================================================================
 
 /** How far the app has got. */
@@ -304,7 +303,7 @@ export interface SessionSnapshot {
 /** Event the backend sends with the new snapshot whenever the session changes */
 export const SESSION_CHANGED = "session:changed";
 
-/** Event carrying something about helping with settings that the screen shows (ADR-044 §5) */
+/** Event carrying something about helping with settings that the screen shows */
 export const SESSION_SETTINGS_HELP = "session:settings-help";
 
 /** The session as it is */
@@ -314,8 +313,8 @@ export async function sessionGet(): Promise<SessionSnapshot> {
 
 /**
  * Drop the connection there is and connect to the server again from scratch.
- * The server is the one in the config file, otherwise the build's default
- * (ADR-030). Returns when the connection is made or has failed.
+ * The server is the one in the config file, otherwise the build's default.
+ * Returns when the connection is made or has failed.
  */
 export async function sessionConnect(): Promise<SessionSnapshot> {
   return invoke("session_connect");
@@ -344,7 +343,7 @@ export async function sessionLeave(): Promise<SessionSnapshot> {
 }
 
 // ============================================================================
-// Recording the room (ADR-095)
+// Recording the room
 // ============================================================================
 
 /** How a recording that ended came to an end */
@@ -461,7 +460,7 @@ export interface AudioDeviceInfo {
 }
 
 // ============================================================================
-// Audio Settings API (ADR-043)
+// Audio Settings API
 // ============================================================================
 
 /**
@@ -504,7 +503,7 @@ export interface AudioSettings {
   sample_rates: SampleRateInfo[];
   /**
    * How a WASAPI device is opened, with what each way would do for the
-   * devices in use (Windows, ADR-088). Absent where no device on offer is a
+   * devices in use (Windows). Absent where no device on offer is a
    * WASAPI one.
    */
   wasapi?: WasapiSettings | null;
@@ -672,12 +671,12 @@ export type ConnectionQualityBand = 'good' | 'fair' | 'poor';
  * marginal: enough, but under 20% of headroom
  * insufficient: less than required
  * no_signal: the interval measured zero bytes - nothing is arriving from the
- * peer at all, which is not the same as a narrow link (REQ-LAT-127)
+ * peer at all, which is not the same as a narrow link
  */
 export type BandwidthStatus = 'sufficient' | 'marginal' | 'insufficient' | 'no_signal';
 
 /**
- * Whether the audio to the peer is encrypted (REQ-SEC-001, REQ-SEC-004, REQ-SEC-006)
+ * Whether the audio to the peer is encrypted
  *
  * negotiating: the keys are being agreed, which takes a moment after connecting
  */
@@ -693,15 +692,15 @@ export const PEER_APP_TOO_OLD = 'peer_app_too_old';
  * Network statistics
  */
 export interface NetworkStats {
-  /** Round-trip time in milliseconds, or null before the first sample arrives (REQ-LAT-130) */
+  /** Round-trip time in milliseconds, or null before the first sample arrives */
   rtt_ms: number | null;
   /** Jitter in milliseconds */
   jitter_ms: number;
   /** Packet loss percentage (0-100) */
   packet_loss_percent: number;
   /**
-   * Connection quality band, classified in the core library (REQ-LAT-121),
-   * or null before the first RTT sample arrives (REQ-LAT-130).
+   * Connection quality band, classified in the core library,
+   * or null before the first RTT sample arrives.
    *
    * Do not re-derive this from rtt_ms and packet_loss_percent: the thresholds
    * are defined once, in `src/network/quality.rs`.
@@ -715,7 +714,7 @@ export interface NetworkStats {
    * Whether the link carries what the preset needs, or null before measurement.
    *
    * A warning signal only: bitrate adaptation needs a variable-rate codec, and
-   * no preset uses one (ADR-021).
+   * no preset uses one.
    */
   bandwidth_status: BandwidthStatus | null;
   /** Connection uptime in seconds */
@@ -770,14 +769,14 @@ export interface AudioQuality {
   input_limited_frames: number;
   /** Frames the limiter on what is played brought down this session */
   output_limited_frames: number;
-  /** Times the play-out delay was adjusted automatically (REQ-LAT-108) */
+  /** Times the play-out delay was adjusted automatically */
   delay_adjustments: number;
   /** The play-out delay in ms that the latest adjustment left the adjusted link with */
   adjusted_delay_ms: number;
 }
 
 /**
- * Peer audio configuration (ADR-013)
+ * Peer audio configuration
  */
 export interface PeerAudioInfo {
   /** Peer's sample rate in Hz */
@@ -803,7 +802,7 @@ export interface PeerLinkStatus {
   /** The participant's id in the room */
   peer_id: string;
   /**
-   * Connection state (ADR-022): "connecting" | "checkingconnectivity" |
+   * Connection state: "connecting" | "checkingconnectivity" |
    * "connected" | "reconnecting" | "failed"
    */
   connection_state: string | null;
@@ -813,19 +812,19 @@ export interface PeerLinkStatus {
   network: NetworkStats | null;
   /** Detailed latency breakdown, once the link is up */
   latency: DetailedLatency | null;
-  /** Their audio configuration (ADR-013) */
+  /** Their audio configuration */
   peer_audio: PeerAudioInfo | null;
   /** Level of what is played of them, after their fader (0-100) */
   level: number;
-  /** The buffer their audio is played from (ADR-097) */
+  /** The buffer their audio is played from */
   buffer: PeerBuffer;
-  /** Set while nothing arrives from them and they have not left (REQ-CON-161) */
+  /** Set while nothing arrives from them and they have not left */
   dropout: PeerDropout | null;
-  /** Went quiet twice or more in the last quarter of an hour (REQ-CON-162) */
+  /** Went quiet twice or more in the last quarter of an hour */
   unstable: boolean;
 }
 
-/** Whose line is cut when a participant's audio stopped (REQ-CON-163) */
+/** Whose line is cut when a participant's audio stopped */
 export type DropoutSide = "mine" | "theirs" | "between" | "checking" | "unknown";
 
 /** A participant whose audio stopped without a leave notice */
@@ -835,10 +834,10 @@ export interface PeerDropout {
   side: DropoutSide;
 }
 
-/** The longest a receive buffer may be, in tenths of a millisecond (ADR-097) */
+/** The longest a receive buffer may be, in tenths of a millisecond */
 export const MAX_BUFFER_MS10 = 850;
 
-/** The most frames a second an ask may allow to go missing, in tenths (ADR-097) */
+/** The most frames a second an ask may allow to go missing, in tenths */
 export const MAX_TOLERANCE_TENTHS = 100;
 
 /** What the user chose for a participant's receive buffer */
@@ -856,7 +855,7 @@ export interface GrantView {
   auto_running: boolean;
 }
 
-/** The receive buffer of one participant (ADR-097) */
+/** The receive buffer of one participant */
 export interface PeerBuffer {
   /** What the user chose: the preset's own buffer, or a length held */
   own: OwnBuffer;
@@ -892,20 +891,20 @@ export interface StreamingStatus {
   latency: DetailedLatency | null;
   /** Audio quality metrics */
   audio_quality: AudioQuality | null;
-  /** Peer's audio configuration (ADR-013) */
+  /** Peer's audio configuration */
   peer_audio: PeerAudioInfo | null;
-  /** Connection state (ADR-022). "connected" | "reconnecting" | "failed" | ... */
+  /** Connection state. "connected" | "reconnecting" | "failed" | ... */
   connection_state: string | null;
   /** Why the connection failed, when connection_state is "failed" */
   connection_error: string | null;
   /**
-   * Devices the audio thread could not open, one per side at most (ADR-050).
+   * Devices the audio thread could not open, one per side at most.
    * Read whether or not a session is active: one that could not open its
    * device never became active.
    */
   device_problems: DeviceProblem[];
   /**
-   * How the session's WASAPI devices were opened (Windows, ADR-088): null for
+   * How the session's WASAPI devices were opened (Windows): null for
    * a side not opened through WASAPI or not open. Absent from an app older
    * than this field, as a helped participant's may be.
    */
@@ -951,7 +950,7 @@ export interface DeviceProblem {
 }
 
 /**
- * Retry every link automatic recovery gave up on (REQ-CON-110)
+ * Retry every link automatic recovery gave up on
  *
  * Backs the "reconnect?" prompt shown when a link's `connection_state` reads
  * "failed".
@@ -1037,14 +1036,14 @@ export const UPDATE_AVAILABLE = "update:available";
 
 /**
  * The version of a newer release found by a package that cannot replace itself
- * (a Linux `.deb`, a Windows `.msi`; ADR-076), or `null` while none was found.
+ * (a Linux `.deb`, a Windows `.msi`), or `null` while none was found.
  * Packages that update themselves never have one.
  */
 export async function updateNoticeGet(): Promise<string | null> {
   return (await invoke<string | null | undefined>("update_notice_get")) ?? null;
 }
 
-/** What this build can do about a newer release: nothing (a development or self-built build), tell the person (a package that cannot replace itself), or install it (ADR-082) */
+/** What this build can do about a newer release: nothing (a development or self-built build), tell the person (a package that cannot replace itself), or install it */
 export type UpdateSupport = "none" | "notice" | "install";
 
 export interface UpdateStatus {
@@ -1089,7 +1088,7 @@ export async function updateInstall(): Promise<UpdateInstalled> {
 /** Event the backend sends to the updating window as an update before the app opens moves on */
 export const UPDATE_STARTUP = "update:startup";
 
-/** How far an update before the app opens has come (ADR-089) */
+/** How far an update before the app opens has come */
 export type StartupProgress =
   | { phase: "checking" }
   /** `total` is `null` when the server did not say how big the download is */
@@ -1109,7 +1108,7 @@ export async function updateStartupSkip(): Promise<void> {
 
 /**
  * Tells the backend the main screen is up. A version just installed is kept
- * once it has stayed up a little while after this (ADR-089).
+ * once it has stayed up a little while after this.
  */
 export async function updateAppReady(): Promise<void> {
   return invoke("update_app_ready");
@@ -1169,9 +1168,9 @@ export interface AppConfig {
   ask_name_on_entry: boolean;
   /** Whether the audio packets are marked as voice so a Wi-Fi sends them first (on until the person turns it off; read when a session starts) */
   voice_priority: boolean;
-  /** Whether the router is asked to open the audio port (UPnP, ADR-113; on until the person turns it off; read when a room is entered) */
+  /** Whether the router is asked to open the audio port (UPnP; on until the person turns it off; read when a room is entered) */
   open_router_port: boolean;
-  /** Audio sample rate in Hz. Valid values: 44100, 48000, 96000 (ADR-013) */
+  /** Audio sample rate in Hz. Valid values: 44100, 48000, 96000 */
   sample_rate: number;
   /** UI language (null = not chosen yet; use configGetLanguage/configSetLanguage) */
   language: string | null;
@@ -1179,7 +1178,7 @@ export interface AppConfig {
   usage_reporting: boolean;
   /** Whether the app installs a new release by itself (on unless the user turns it off in config.toml) */
   auto_update: boolean;
-  /** Whether other participants' asks to lengthen the buffer are put to the user ("ask") or turned down ("never") (ADR-097) */
+  /** Whether other participants' asks to lengthen the buffer are put to the user ("ask") or turned down ("never") */
   buffer_asks: BufferAskPolicy;
   /** The terms version the user agreed to on this device (null = not yet) */
   terms_version: number | null;
@@ -1217,7 +1216,7 @@ export async function configLoad(): Promise<AppConfig> {
 }
 
 /**
- * Turn usage reporting on or off (ADR-037)
+ * Turn usage reporting on or off
  */
 export async function configSetUsageReporting(enabled: boolean): Promise<void> {
   return invoke("config_set_usage_reporting", { enabled });
@@ -1225,13 +1224,13 @@ export async function configSetUsageReporting(enabled: boolean): Promise<void> {
 
 /**
  * Set the buffer the audio of `peerId` is played from, in tenths of a
- * millisecond (at most MAX_BUFFER_MS10), or null for the preset's own (ADR-097)
+ * millisecond (at most MAX_BUFFER_MS10), or null for the preset's own
  */
 export async function streamingSetPeerBuffer(peerId: string, ms10: number | null): Promise<void> {
   return invoke("streaming_set_peer_buffer", { peerId, ms10 });
 }
 
-// Asking a participant to buffer your audio for longer (ADR-097)
+// Asking a participant to buffer your audio for longer
 
 /** Event carrying something about those asks that the screen shows */
 export const BUFFER_REQUEST_EVENT = "buffer-request";
@@ -1402,7 +1401,7 @@ export async function configSetPeerName(name: string): Promise<void> {
 }
 
 // ============================================================================
-// Sample Rate API (ADR-013)
+// Sample Rate API
 // ============================================================================
 
 /**
@@ -1949,7 +1948,7 @@ export async function windowResizeMain(
 }
 
 // =============================================================================
-// Log file (ADR-036)
+// Log file
 // =============================================================================
 
 /**
@@ -1997,7 +1996,7 @@ export async function usagePreviousHang(): Promise<Hang | null> {
 
 /**
  * Whether answering "send" to `usagePreviousHang` also attaches the current
- * `jamuru.log` (ADR-059): true before the app's 1.0.0 release, so the
+ * `jamuru.log`: true before the app's 1.0.0 release, so the
  * confirmation can say so accurately.
  */
 export async function usagePreviousHangAttachesLog(): Promise<boolean> {
@@ -2016,7 +2015,7 @@ export async function usageSendPreviousHang(send: boolean): Promise<void> {
 }
 
 // =============================================================================
-// Report a problem (ADR-057, REQ-RPT)
+// Report a problem (REQ-RPT)
 // =============================================================================
 
 /**

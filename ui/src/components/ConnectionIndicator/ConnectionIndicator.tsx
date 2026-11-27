@@ -22,7 +22,7 @@ export type ConnectionStatus =
   | 'error';
 
 /**
- * Connection quality band, classified by the core library (REQ-LAT-121)
+ * Connection quality band, classified by the core library
  *
  * Passed in rather than computed here: the RTT and loss thresholds live in
  * `src/network/quality.rs` so that the UI and the specification cannot drift.
@@ -40,10 +40,10 @@ export interface ConnectionIndicatorProps {
    */
   quality?: ConnectionQuality;
 
-  /** Audio device input latency in milliseconds (REQ-LAT-122) */
+  /** Audio device input latency in milliseconds */
   inputLatencyMs?: number;
 
-  /** Audio device output latency in milliseconds (REQ-LAT-122) */
+  /** Audio device output latency in milliseconds */
   outputLatencyMs?: number;
 
   /** RTT (round-trip time) in milliseconds (deprecated, use upstreamLatencyMs/downstreamLatencyMs) */
@@ -117,7 +117,7 @@ export function ConnectionIndicator({
   }
 
   // Device input/output latency, shown separately from network latency so the
-  // user can tell which half to act on (REQ-LAT-122).
+  // user can tell which half to act on.
   let deviceLatencyText: string | null = null;
   if (showLatency && inputLatencyMs !== undefined && outputLatencyMs !== undefined) {
     deviceLatencyText = t('status.deviceLatency', {

@@ -1,7 +1,7 @@
 //! Opening the devices of an audio session: playback and capture on the channels chosen, and the
 //! record of the devices that would not open.
 //!
-//! Shared by the app and the CLI, which open their devices the same way (ADR-077). Everything
+//! Shared by the app and the CLI, which open their devices the same way. Everything
 //! that runs on an audio callback allocates nothing and never waits.
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -33,7 +33,7 @@ pub enum DeviceSide {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceTrouble {
-    /// The driver did not answer in time (REQ-AUD-123)
+    /// The driver did not answer in time
     Unresponsive,
     /// The device refused to open
     Failed,
@@ -41,7 +41,7 @@ pub enum DeviceTrouble {
     /// offers helped. Its format can be changed in the system's sound settings.
     UnsupportedFormat,
     /// The stream is open but its callback is no longer called, and opening it
-    /// again did not bring it back (REQ-AUD-128)
+    /// again did not bring it back
     Stalled,
     /// The system is asking whether the app may use the microphone, and the
     /// answer has not come. The input is not opened until it does: opening it
@@ -191,7 +191,7 @@ pub fn clear_device_problem(problems: &RwLock<Vec<DeviceProblem>>, side: DeviceS
 /// The mixer gains are applied here rather than on the way in, so a volume or
 /// pan change is heard on the very next frame.
 ///
-/// `limiter` holds what is played at 0 dBFS (ADR-094): last, after the monitor
+/// `limiter` holds what is played at 0 dBFS: last, after the monitor
 /// is mixed in, so that what the recording output `C` carries is what is heard.
 pub fn playout_source(
     mix: PeerMix,
@@ -225,7 +225,7 @@ pub fn playout_source(
             probe.note_played(&out[..samples]);
         }
         // Added after the peers, whatever they did this frame: hearing yourself
-        // must not wait for, or depend on, anyone being connected (ADR-033).
+        // must not wait for, or depend on, anyone being connected.
         monitor.mix_into(&mut out[..samples]);
         limiter.process(&mut out[..samples], 2);
         // C is what is actually heard: post-fader, self included.
@@ -575,7 +575,6 @@ mod tests {
             .map(|p| p.trouble)
     }
 
-    /// Verifies: REQ-AUD-129
     #[test]
     fn when_the_system_already_allows_the_microphone_the_input_opens_without_asking() {
         let mic = FakeMic::new(MicAccess::Granted, MicAccess::Granted);
@@ -588,7 +587,6 @@ mod tests {
         assert_eq!(input_trouble(&problems), None);
     }
 
-    /// Verifies: REQ-AUD-129
     #[test]
     fn when_the_person_has_not_been_asked_yet_the_input_opens_after_they_allow_it() {
         let mic = FakeMic::new(MicAccess::Undecided, MicAccess::Granted);
@@ -601,7 +599,6 @@ mod tests {
         assert_eq!(input_trouble(&problems), None);
     }
 
-    /// Verifies: REQ-AUD-129
     #[test]
     fn when_the_person_declines_the_question_the_input_stays_closed_and_the_screen_says_so() {
         let mic = FakeMic::new(MicAccess::Undecided, MicAccess::Refused);
@@ -616,7 +613,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-129
     #[test]
     fn when_the_microphone_is_switched_off_for_the_app_the_input_is_not_opened_or_asked_about() {
         let mic = FakeMic::new(MicAccess::Refused, MicAccess::Refused);
@@ -632,7 +628,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-129
     #[test]
     fn when_nobody_answers_in_time_the_input_stays_closed_and_the_screen_says_it_is_waiting() {
         let mic = FakeMic::new(MicAccess::Undecided, MicAccess::Undecided);
@@ -647,7 +642,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-129
     #[test]
     fn when_the_answer_comes_after_the_screen_said_it_was_waiting_the_notice_goes_away() {
         let mic = FakeMic::new(MicAccess::Undecided, MicAccess::Granted);
@@ -660,7 +654,6 @@ mod tests {
         assert_eq!(input_trouble(&problems), None);
     }
 
-    /// Verifies: REQ-AUD-125
     #[test]
     fn when_the_input_does_not_open_at_the_session_rate_the_session_goes_on_and_says_which_rate() {
         let problems = RwLock::new(Vec::new());
@@ -681,7 +674,6 @@ mod tests {
         assert_eq!(problems[0].sample_rate, 48000);
     }
 
-    /// Verifies: REQ-AUD-125
     #[test]
     fn when_the_input_refuses_for_any_other_reason_the_session_goes_on_too() {
         let problems = RwLock::new(Vec::new());
@@ -693,7 +685,6 @@ mod tests {
         assert_eq!(problems.read().unwrap()[0].trouble, DeviceTrouble::Failed);
     }
 
-    /// Verifies: REQ-AUD-125
     #[test]
     fn when_the_input_opens_nothing_is_reported() {
         let problems = RwLock::new(Vec::new());
@@ -714,7 +705,6 @@ mod tests {
         assert!(problems.read().unwrap().is_empty());
     }
 
-    /// Verifies: REQ-AUD-035
     #[test]
     fn audio_captured_before_the_connection_is_not_sent_once_it_is_up() {
         let (mut producer, mut consumer) = RingBuffer::<f32>::new(8);
@@ -774,7 +764,6 @@ mod tests {
         out
     }
 
-    /// Verifies: REQ-AUD-048
     #[test]
     fn playout_source_holds_a_mix_that_is_too_loud_at_the_ceiling_when_the_limiter_is_on() {
         let out = played_too_loud(limiter_on(true));
@@ -784,7 +773,6 @@ mod tests {
         assert!(out.iter().any(|s| *s > 0.99), "not silenced: {out:?}");
     }
 
-    /// Verifies: REQ-AUD-048
     #[test]
     fn playout_source_leaves_a_mix_that_is_too_loud_as_it_is_when_the_limiter_is_off() {
         let out = played_too_loud(limiter_on(false));
@@ -896,7 +884,6 @@ mod tests {
         out
     }
 
-    /// Verifies: REQ-AUD-111
     #[test]
     fn test_monitored_input_is_played_before_any_peer_has_sent_audio() {
         let out = monitored_output(true);
@@ -907,7 +894,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-112
     #[test]
     fn test_output_is_silent_with_monitoring_off_and_no_peer_audio() {
         let out = monitored_output(false);

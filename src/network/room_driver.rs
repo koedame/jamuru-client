@@ -1,7 +1,7 @@
 //! The steps that carry a participant through the room procedure: connecting to the signaling
 //! server, listing its rooms, creating, joining and leaving one, opening an audio link to
-//! everyone who publishes an address, and connecting again when the connection is lost
-//! (ADR-044 §6). The app and the CLI run the same [`Driver`]; they differ in the [`Backend`]
+//! everyone who publishes an address, and connecting again when the connection is lost.
+//! The app and the CLI run the same [`Driver`]; they differ in the [`Backend`]
 //! they give it.
 //!
 //! Deciding about the session is [`State`]'s and about the peers [`Roster`](super::Roster)'s, both
@@ -117,7 +117,7 @@ pub trait Backend: Send + Sync + 'static {
     /// Tells the room where to send audio
     fn advertise(&self, conn: u32) -> impl Future<Output = Result<(), String>> + Send;
     /// Whether the router gives the audio socket an address that the room was not told: STUN,
-    /// asked again while a link heard nothing, saw one (ADR-129). The next `advertise` tells it,
+    /// asked again while a link heard nothing, saw one. The next `advertise` tells it,
     /// and this is false after.
     fn address_moved(&self) -> bool {
         false
@@ -128,7 +128,7 @@ pub trait Backend: Send + Sync + 'static {
     /// Opens an audio link to `peer`, racing `candidates` (best first), starting the audio
     /// session if none runs. `link_key` is the key the server gave for `peer`.
     /// `advertised_just_now` says this app told the room its address just before, so `peer`
-    /// learns of it only now (ADR-131).
+    /// learns of it only now.
     fn link(
         &self,
         conn: u32,
@@ -982,8 +982,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-140
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn a_room_is_created_after_connecting_lists_the_rooms_first_and_puts_the_participant_in_it(
     ) {
@@ -1010,7 +1008,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_connection_is_lost_in_a_room_enters_the_same_room_again_over_a_new_connection() {
         let driver = driver_over(FakeBackend::default());
@@ -1039,7 +1036,6 @@ mod tests {
         assert_eq!(driver.backend().asked("disconnect"), 1);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_server_does_not_answer_the_first_attempts_to_get_the_connection_back_tries_again()
     {
@@ -1064,7 +1060,6 @@ mod tests {
         assert_eq!(driver.backend().asked("connect"), 4);
     }
 
-    /// Verifies: REQ-RMT-028
     #[tokio::test]
     async fn the_participant_is_done_leaves_the_room_and_lets_go_of_the_connection_for_good() {
         let driver = driver_over(FakeBackend::default());
@@ -1115,7 +1110,6 @@ mod tests {
         driver
     }
 
-    /// Verifies: REQ-CON-181
     #[tokio::test]
     async fn the_link_to_someone_in_the_room_on_entering_it_is_started_after_advertising_and_one_to_someone_who_tells_their_address_later_is_not(
     ) {
@@ -1155,7 +1149,6 @@ mod tests {
         .await;
     }
 
-    /// Verifies: REQ-CON-150
     #[tokio::test]
     async fn the_connection_is_lost_while_the_audio_is_heard_enters_the_room_again_without_stopping_the_audio(
     ) {
@@ -1169,7 +1162,6 @@ mod tests {
         assert_eq!(driver.snapshot().streaming_peer_ids, [id_text(2)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[tokio::test]
     async fn the_connection_is_lost_and_ben_is_listed_under_a_new_id_and_the_link_says_it_is_him_goes_on_with_the_audio_link_as_his_new_id(
     ) {
@@ -1205,7 +1197,6 @@ mod tests {
         assert_eq!(driver.snapshot().streaming_peer_ids, [id_text(3)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[tokio::test]
     async fn the_connection_is_lost_and_someone_is_listed_with_ben_s_name_and_addresses_and_the_link_does_not_say_it_is_them_opens_a_link_to_them_and_keeps_bens(
     ) {
@@ -1228,8 +1219,6 @@ mod tests {
 
     /// Someone else on the link names the id of an entry that has Ben's name and addresses, but
     /// cannot sign for it: the key listed for that entry is not theirs.
-    ///
-    /// Verifies: REQ-CON-150
     #[tokio::test]
     async fn the_connection_is_lost_and_the_link_names_the_entry_with_ben_s_name_and_addresses_without_that_entry_s_key_opens_a_link_to_them_and_keeps_bens(
     ) {
@@ -1261,7 +1250,6 @@ mod tests {
         assert_eq!(driver.snapshot().streaming_peer_ids, [id_text(3)]);
     }
 
-    /// Verifies: REQ-CON-150
     #[tokio::test]
     async fn the_connection_is_lost_and_ben_is_listed_at_another_address_opens_a_link_to_him_again()
     {
@@ -1277,8 +1265,6 @@ mod tests {
 
     /// Entering the room again is how a link that gave up and nobody is heard tells the room a
     /// new audio address: the audio starts over with it.
-    ///
-    /// Verifies: REQ-CON-134
     #[tokio::test]
     async fn a_link_gives_up_and_nobody_is_heard_enters_the_room_again_with_the_audio_stopped() {
         let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
@@ -1294,8 +1280,6 @@ mod tests {
 
     /// A router that gives the audio socket another address, and STUN sees it while a link has
     /// heard nothing: the room is told it, and only once.
-    ///
-    /// Verifies: REQ-CON-177
     #[tokio::test]
     async fn the_audio_socket_is_seen_at_an_address_the_room_was_not_told_tells_the_room_once() {
         let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;

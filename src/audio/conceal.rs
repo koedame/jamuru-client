@@ -1,5 +1,5 @@
 //! Waveform concealment: filling the gaps the FEC could not repair with sound that continues
-//! what was heard (ADR-105).
+//! what was heard.
 //!
 //! The play-out buffer meets two kinds of gap, and they are different problems:
 //!

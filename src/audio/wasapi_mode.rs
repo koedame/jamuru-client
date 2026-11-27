@@ -1,6 +1,6 @@
 //! The three ways jamuru opens a device through WASAPI on Windows, what each
 //! would do with the devices chosen, and which of them a person is advised to
-//! use there (ADR-088).
+//! use there.
 //!
 //! - [`WasapiMode::Shared`] goes through `cpal` and the system's mixer, like
 //!   every other app. Its period is the mixer's (10 ms on nearly every
@@ -660,7 +660,6 @@ mod tests {
         advice.modes.iter().find(|m| m.mode == mode).unwrap()
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_the_driver_keeps_the_period_at_10_ms_low_latency_is_not_recommended_and_exclusive_is() {
         let codec = fixed_period_codec();
@@ -681,7 +680,6 @@ mod tests {
         assert_eq!(standard.reason, Reason::FasterAvailable);
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_the_driver_offers_a_smaller_shared_period_low_latency_is_recommended_at_it() {
         let device = small_period_device();
@@ -699,7 +697,6 @@ mod tests {
         assert_eq!(low_latency.input_period_us, Some(2_667));
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_a_frame_is_longer_than_the_standard_period_no_faster_way_is_recommended() {
         let device = small_period_device();
@@ -722,7 +719,6 @@ mod tests {
         assert_eq!(standard.reason, Reason::NothingFaster);
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_no_faster_way_opens_the_devices_the_standard_way_is_recommended() {
         let device = EndpointCaps {
@@ -749,7 +745,6 @@ mod tests {
         assert_eq!(exclusive.reason, Reason::NoExclusiveFormat);
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_one_device_does_not_open_exclusively_exclusive_is_not_offered() {
         let codec = fixed_period_codec();
@@ -774,7 +769,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_windows_does_not_allow_exclusive_control_of_the_output_exclusive_is_unavailable() {
         let microphone = fixed_period_codec();
@@ -800,7 +794,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_a_device_could_not_be_asked_the_faster_ways_are_not_recommended_and_still_offered() {
         let codec = fixed_period_codec();
@@ -818,7 +811,6 @@ mod tests {
         assert_eq!(standard.output_period_us, Some(10_000));
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_both_devices_are_an_asio_driver_the_choice_does_not_apply() {
         let advice = advise(Endpoint::NotWasapi, Endpoint::NotWasapi, 48000, 64);
@@ -827,7 +819,6 @@ mod tests {
         assert!(advice.modes.is_empty());
     }
 
-    /// Verifies: REQ-GUI-031
     #[test]
     fn when_only_one_device_is_wasapi_the_advice_is_for_that_device() {
         let codec = fixed_period_codec();
@@ -840,7 +831,6 @@ mod tests {
         assert_eq!(exclusive.output_period_us, Some(3_000));
     }
 
-    /// Verifies: REQ-AUD-042
     #[test]
     fn when_the_buffer_is_longer_than_the_smallest_period_an_exclusive_stream_runs_at_the_buffer() {
         // 256 frames at 48 kHz is 5.33 ms, longer than the 3 ms the device allows
@@ -848,7 +838,6 @@ mod tests {
         assert_eq!(exclusive_period_us(3_000, 64, 48000), 3_000);
     }
 
-    /// Verifies: REQ-AUD-042
     #[test]
     fn when_the_buffer_falls_between_two_shared_periods_the_larger_one_is_asked_for() {
         let periods = SharedPeriods {
@@ -866,7 +855,6 @@ mod tests {
         assert_eq!(low_latency_period(&periods, 48000, 48000, 1024), 480);
     }
 
-    /// Verifies: REQ-AUD-042
     #[test]
     fn when_a_driver_offers_one_shared_period_that_period_is_asked_for() {
         let fixed = SharedPeriods {
@@ -880,7 +868,6 @@ mod tests {
         assert_eq!(low_latency_period(&fixed, 44100, 48000, 1024), 441);
     }
 
-    /// Verifies: REQ-AUD-042
     #[test]
     fn every_sample_layout_carries_a_signal_through_encode_and_decode() {
         let signal = [0.0f32, 0.5, -0.5, 0.999, -1.0, 0.123_456];
@@ -909,7 +896,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-042
     #[test]
     fn a_sample_beyond_full_scale_is_clipped_rather_than_wrapped_around() {
         for layout in [SampleLayout::I32, SampleLayout::I24, SampleLayout::I16] {
@@ -923,7 +909,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-042
     #[test]
     fn when_a_stream_closes_after_its_replacement_opened_the_replacement_stays_recorded() {
         let way = OpenedWay {
@@ -952,7 +937,6 @@ mod tests {
         assert_eq!(opened_ways().output, None);
     }
 
-    /// Verifies: REQ-AUD-042
     #[test]
     fn when_an_open_asked_for_before_its_replacement_finishes_after_it_the_replacement_stays_recorded(
     ) {

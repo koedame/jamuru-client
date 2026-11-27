@@ -1,4 +1,4 @@
-//! Calling a command through the webview's IPC (ADR-043, ADR-044).
+//! Calling a command through the webview's IPC.
 //!
 //! A portal other than the screen reaches an app command the way the screen
 //! does: by asking the webview to call it. Going through the webview rather
@@ -251,7 +251,6 @@ mod tests {
             .contains(r#"invoke("settings_get", {})"#));
     }
 
-    /// Verifies: REQ-RMT-022
     #[test]
     fn test_a_settled_call_wakes_the_call_waiting_for_it() {
         let (tx, mut rx) = oneshot::channel();

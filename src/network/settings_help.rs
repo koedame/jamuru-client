@@ -1,4 +1,4 @@
-//! Helping another participant with their audio settings (ADR-044 §5)
+//! Helping another participant with their audio settings
 //!
 //! The participant who wants help (the helped) asks another (the helper). The
 //! helper says yes or not now. On yes the helper's app says so, and the helped
@@ -816,8 +816,6 @@ mod tests {
 
     /// A help is not kept anywhere: an app that has just started has none, in
     /// either role, and nothing to stop.
-    ///
-    /// Verifies: REQ-RMT-003
     #[test]
     fn an_app_that_has_just_started_is_helping_no_one_and_helped_by_no_one() {
         let mut help = Help::new();
@@ -828,7 +826,6 @@ mod tests {
         assert!(help.reset().is_empty());
     }
 
-    /// Verifies: REQ-RMT-001
     #[test]
     fn when_the_helper_says_yes_the_helped_side_starts_and_the_helper_is_given_the_number_to_open()
     {
@@ -899,7 +896,6 @@ mod tests {
         assert_eq!(helped.helper(), Some(helper_id));
     }
 
-    /// Verifies: REQ-RMT-001
     #[test]
     fn when_the_helped_side_cannot_open_the_relay_no_help_starts() {
         let helper_id = Uuid::new_v4();
@@ -935,7 +931,6 @@ mod tests {
         assert_eq!(helped.helper(), None);
     }
 
-    /// Verifies: REQ-RMT-001
     #[test]
     fn when_the_helper_says_not_now_the_helped_side_hears_it_and_no_help_starts() {
         let helper_id = Uuid::new_v4();
@@ -974,8 +969,6 @@ mod tests {
     }
 
     /// An ask nobody has taken up can be withdrawn; the helper's question goes.
-    ///
-    /// Verifies: REQ-RMT-003
     #[test]
     fn the_helped_side_can_withdraw_an_ask_before_it_is_answered() {
         let helper_id = Uuid::new_v4();
@@ -1002,8 +995,6 @@ mod tests {
 
     /// A request from a participant this app did not ask is not taken up: an
     /// app that asks no one is never made to start a help.
-    ///
-    /// Verifies: REQ-RMT-001
     #[test]
     fn a_request_from_someone_the_helped_side_did_not_ask_is_dropped() {
         let (asked, stranger) = (Uuid::new_v4(), Uuid::new_v4());
@@ -1026,8 +1017,6 @@ mod tests {
     /// The user answers the request they were shown. If that one was
     /// withdrawn and someone else asked in the meantime, the answer does not
     /// go to the newcomer.
-    ///
-    /// Verifies: REQ-RMT-001
     #[test]
     fn an_answer_to_one_participants_request_does_not_accept_someone_elses() {
         let (first, second) = (Uuid::new_v4(), Uuid::new_v4());
@@ -1056,8 +1045,6 @@ mod tests {
 
     /// Only a participant the helper asked can say yes, and only with a number
     /// the relay would take.
-    ///
-    /// Verifies: REQ-RMT-001
     #[test]
     fn an_acceptance_from_anyone_the_helper_did_not_ask_or_with_a_bad_number_is_dropped() {
         let helped_id = Uuid::new_v4();
@@ -1088,7 +1075,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-003
     #[test]
     fn when_the_helper_stops_the_helped_side_ends_too() {
         let (mut helper, mut helped, helper_id, helped_id) = active();
@@ -1111,7 +1097,6 @@ mod tests {
         assert_eq!(helper.stop(Role::Helper), Err(HelpError::NotActive));
     }
 
-    /// Verifies: REQ-RMT-003
     #[test]
     fn when_the_helped_side_stops_the_helper_ends_and_the_room_hears_it() {
         let (mut helper, mut helped, helper_id, helped_id) = active();
@@ -1138,8 +1123,6 @@ mod tests {
     /// Stopping gives the UI nothing to act on later: it has cleared the help
     /// itself, and an end delivered on its next poll could clear a help it
     /// began with the same person in the meantime.
-    ///
-    /// Verifies: REQ-RMT-003
     #[test]
     fn stopping_gives_the_ui_no_event_that_could_end_a_help_begun_after_it() {
         let (mut helper, mut helped, _, _) = active();
@@ -1155,8 +1138,6 @@ mod tests {
 
     /// Two participants can help each other at the same time; stopping one
     /// direction leaves the other.
-    ///
-    /// Verifies: REQ-RMT-003
     #[test]
     fn stopping_help_one_way_leaves_the_help_the_other_way() {
         let (mut aki, mut bo, aki_id, bo_id) = active();
@@ -1183,7 +1164,6 @@ mod tests {
         assert_eq!(aki.helper(), Some(bo_id));
     }
 
-    /// Verifies: REQ-RMT-003
     #[test]
     fn a_stop_from_someone_not_in_the_help_changes_nothing() {
         let (mut helper, mut helped, helper_id, _) = active();
@@ -1216,8 +1196,6 @@ mod tests {
     /// The helped side sees the relay end and tells the helper the help is over,
     /// and that reaches the helper after the helper has asked again. The stop
     /// names the help it ended, so the new request is not ended by it.
-    ///
-    /// Verifies: REQ-RMT-003
     #[test]
     fn a_stop_that_names_an_earlier_help_does_not_end_the_request_made_since() {
         let (mut helper, mut helped, _, helped_id) = active();
@@ -1241,7 +1219,6 @@ mod tests {
         assert_eq!(helped.helper(), None);
     }
 
-    /// Verifies: REQ-RMT-003
     #[test]
     fn a_stop_that_names_an_earlier_help_does_not_end_the_help_begun_since() {
         let (mut helper, mut helped, helper_id, _) = active();
@@ -1260,8 +1237,6 @@ mod tests {
 
     /// A stop from an app that does not name the help (asked and not answered,
     /// or an older app) ends the help with the sender, as it always did.
-    ///
-    /// Verifies: REQ-RMT-003
     #[test]
     fn a_stop_that_names_no_help_ends_the_help_with_its_sender() {
         let (_, mut helped, helper_id, _) = active();
@@ -1279,7 +1254,6 @@ mod tests {
         assert_eq!(helped.helper(), None);
     }
 
-    /// Verifies: REQ-RMT-003
     #[test]
     fn the_helper_can_withdraw_a_request_before_it_is_answered() {
         let helper_id = Uuid::new_v4();
@@ -1301,7 +1275,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-003
     #[test]
     fn when_the_helper_leaves_the_room_the_help_ends_on_the_helped_side_without_a_notice() {
         let (_, mut helped, helper_id, _) = active();
@@ -1323,7 +1296,6 @@ mod tests {
         assert_eq!(helped.helper(), None);
     }
 
-    /// Verifies: REQ-RMT-003
     #[test]
     fn when_the_relay_connection_ends_the_help_ends_and_the_helped_side_tells_the_room() {
         let (mut helper, mut helped, helper_id, helped_id) = active();
@@ -1377,7 +1349,6 @@ mod tests {
         assert_eq!(helper.stop(Role::Helper), Err(HelpError::NotActive));
     }
 
-    /// Verifies: REQ-RMT-037
     #[test]
     fn when_the_help_sits_idle_too_long_the_helped_side_ends_it_and_says_it_timed_out() {
         let (_, mut helped, helper_id, _) = active();
@@ -1417,8 +1388,6 @@ mod tests {
 
     /// A connection that ends after its help did, and a help begun since, are
     /// different helps: the old connection's end does not stop the new help.
-    ///
-    /// Verifies: REQ-RMT-003
     #[test]
     fn the_end_of_an_earlier_relay_connection_does_not_end_a_later_help() {
         let (mut helper, mut helped, helper_id, helped_id) = active();
@@ -1438,7 +1407,6 @@ mod tests {
         assert!(!helped.link_closed(Role::Helped, &later).is_empty());
     }
 
-    /// Verifies: REQ-RMT-005
     #[test]
     fn while_helping_someone_a_participant_asking_hears_busy_at_most_once_in_the_interval() {
         let (mut helper, _, _, helped_id) = active();
@@ -1473,8 +1441,6 @@ mod tests {
 
     /// While one participant's ask waits for the user, another's gets "busy",
     /// and the same participant asking again is not shown twice.
-    ///
-    /// Verifies: REQ-RMT-005
     #[test]
     fn while_one_ask_waits_another_hears_busy_and_the_same_one_is_not_shown_twice() {
         let (x, y) = (Uuid::new_v4(), Uuid::new_v4());
@@ -1495,8 +1461,6 @@ mod tests {
 
     /// Participants working together cannot earn more answers by one of them
     /// asking and withdrawing again and again.
-    ///
-    /// Verifies: REQ-RMT-005
     #[test]
     fn asking_and_withdrawing_again_and_again_earns_no_more_busy_answers() {
         let (x, y) = (Uuid::new_v4(), Uuid::new_v4());
@@ -1523,7 +1487,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-RMT-005
     #[test]
     fn an_app_already_helped_cannot_ask_another_for_help() {
         let (_, mut helped, _, _) = active();
@@ -1531,7 +1494,6 @@ mod tests {
         assert_eq!(helped.ask(Uuid::new_v4()), Err(HelpError::AlreadyHelped));
     }
 
-    /// Verifies: REQ-RMT-003
     #[test]
     fn leaving_the_room_ends_every_help_without_sending_anything() {
         let (mut aki, mut bo, aki_id, bo_id) = active();
@@ -1559,7 +1521,6 @@ mod tests {
         assert!(aki.reset().is_empty());
     }
 
-    /// Verifies: REQ-RMT-004
     #[test]
     fn a_notice_reaches_the_room_naming_the_helped_participant_as_the_server_stamped_them() {
         let helper_id = Uuid::new_v4();

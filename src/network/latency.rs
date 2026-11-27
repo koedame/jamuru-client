@@ -244,7 +244,6 @@ mod tests {
         assert_eq!(info.decode_ms, 0.0);
     }
 
-    /// Verifies: REQ-AUD-043
     #[test]
     fn when_the_system_period_is_longer_than_the_buffer_the_period_is_the_latency() {
         let mut info = LocalLatencyInfo::from_audio_config(64, 48000, "pcm");
@@ -254,7 +253,6 @@ mod tests {
         assert!((info.playback_buffer_ms - 10.0).abs() < 0.001);
     }
 
-    /// Verifies: REQ-AUD-043
     #[test]
     fn when_the_buffer_is_longer_than_the_system_period_the_buffer_is_the_latency() {
         let mut info = LocalLatencyInfo::from_audio_config(960, 48000, "pcm");
@@ -264,7 +262,6 @@ mod tests {
         assert!((info.playback_buffer_ms - 20.0).abs() < 0.001);
     }
 
-    /// Verifies: REQ-AUD-043
     #[test]
     fn when_a_side_has_no_known_period_it_keeps_its_buffer_and_the_other_side_takes_its_period() {
         let mut info = LocalLatencyInfo::from_audio_config(64, 48000, "pcm");

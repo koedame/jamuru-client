@@ -399,8 +399,6 @@ mod tests {
 
     /// Given jitter of 0.5ms on a stable link
     /// Then zero-latency is the recommended preset
-    ///
-    /// Verifies: REQ-LAT-104
     #[test]
     fn low_jitter_recommends_zero_latency() {
         let network = network_with(0.5, DiagnosticGrade::A);
@@ -419,8 +417,6 @@ mod tests {
 
     /// Given jitter of 15ms on an unstable link
     /// Then a preset with more buffering is recommended instead of zero-latency
-    ///
-    /// Verifies: REQ-LAT-105
     #[test]
     fn high_jitter_recommends_more_buffering() {
         let network = network_with(15.0, DiagnosticGrade::A);

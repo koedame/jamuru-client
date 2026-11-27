@@ -1,5 +1,5 @@
 //! What a person helping sees and does through the help portal, beyond what
-//! the permission table says (ADR-044 §5).
+//! the permission table says.
 //!
 //! The table decides which methods the help portal may call. This is the rest of
 //! what the person being helped is promised, applied to every call and event
@@ -412,7 +412,6 @@ mod tests {
         tauri::test::mock_app().handle().clone()
     }
 
-    /// Verifies: REQ-RMT-006
     #[test]
     fn the_helper_sees_device_names_but_never_device_ids() {
         let (guard, _) = guard();
@@ -436,7 +435,6 @@ mod tests {
         assert_eq!(shown["output_device_id"], "output-2");
     }
 
-    /// Verifies: REQ-RMT-006
     #[test]
     fn a_device_the_helper_picks_by_its_handle_is_the_helped_sides_own_and_a_handle_never_shown_is_refused(
     ) {
@@ -474,7 +472,6 @@ mod tests {
             .is_some());
     }
 
-    /// Verifies: REQ-RMT-006
     #[tokio::test]
     async fn a_change_to_a_device_never_shown_is_refused_before_anything_is_applied() {
         let (guard, announced) = guard();
@@ -494,7 +491,6 @@ mod tests {
         assert!(announced.lock().unwrap().is_empty());
     }
 
-    /// Verifies: REQ-RMT-006
     #[tokio::test]
     async fn a_change_that_is_not_a_change_is_refused() {
         let (guard, _) = guard();
@@ -511,7 +507,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-RMT-006
     #[test]
     fn a_change_that_could_not_be_applied_says_why_in_a_fixed_reason_not_the_errors_text() {
         let gone = SettingsError::DeviceNotOffered("alsa:serial-ABC123".into());
@@ -538,8 +533,6 @@ mod tests {
 
     /// A command that fails in the person's app carries no text of its own to
     /// the helper: it can name a device id or a file path.
-    ///
-    /// Verifies: REQ-RMT-006
     #[test]
     fn a_command_that_fails_answers_without_its_error_text() {
         let error = scrub(RpcError::failed("Device not found: alsa:serial-ABC123"));
@@ -550,7 +543,6 @@ mod tests {
         assert_eq!(scrub(denied.clone()), denied, "our own words are kept");
     }
 
-    /// Verifies: REQ-RMT-025
     #[tokio::test]
     async fn what_the_table_does_not_let_the_help_portal_call_is_denied_before_the_guard_acts() {
         let (guard, announced) = guard();
@@ -581,8 +573,6 @@ mod tests {
 
     /// The room hears of a change to an audio setting, and of nothing else a
     /// helper does: muting and the volumes are not announced.
-    ///
-    /// Verifies: REQ-RMT-004
     #[tokio::test]
     async fn only_a_change_to_an_audio_setting_is_announced_to_the_room() {
         let (guard, announced) = guard();
@@ -600,7 +590,6 @@ mod tests {
         assert!(announced.lock().unwrap().is_empty());
     }
 
-    /// Verifies: REQ-RMT-030
     #[tokio::test(start_paused = true)]
     async fn a_meter_asked_for_again_within_a_tenth_of_a_second_is_answered_with_the_last_reading()
     {
@@ -627,7 +616,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-RMT-030
     #[tokio::test(start_paused = true)]
     async fn ten_readings_a_second_is_all_that_a_meter_is_taken_afresh() {
         let meter = Meter::default();
@@ -649,8 +637,6 @@ mod tests {
 
     /// However slowly the app answers, a reading is never taken twice at once:
     /// the callers who ask meanwhile share it.
-    ///
-    /// Verifies: REQ-RMT-030
     #[tokio::test(start_paused = true)]
     async fn readings_asked_for_while_one_is_being_taken_share_it() {
         let meter = std::sync::Arc::new(Meter::default());
@@ -678,8 +664,6 @@ mod tests {
     }
 
     /// A reading that fails is not remembered: the next caller tries again.
-    ///
-    /// Verifies: REQ-RMT-030
     #[tokio::test(start_paused = true)]
     async fn a_reading_that_fails_is_not_remembered() {
         let meter = Meter::default();
@@ -691,7 +675,6 @@ mod tests {
         assert_eq!(meter.read(|| async { Ok(json!(7)) }).await, Ok(json!(7)));
     }
 
-    /// Verifies: REQ-RMT-006
     #[test]
     fn a_settings_event_reaches_the_helper_with_device_handles_and_other_events_as_they_are() {
         let (guard, _) = guard();

@@ -1,4 +1,4 @@
-//! Per-installation device identity (ADR-024)
+//! Per-installation device identity
 //!
 //! jamuru has no account registration. Instead, each installation generates
 //! an Ed25519 key pair on first launch and derives a globally unique device
@@ -117,7 +117,6 @@ mod tests {
     use super::*;
     use data_encoding::HEXLOWER;
 
-    /// Verifies: REQ-IDT-001
     #[test]
     fn test_identity_restored_from_secret_bytes_keeps_the_same_device_id() {
         let original = DeviceIdentity::generate();
@@ -126,7 +125,6 @@ mod tests {
         assert_eq!(original.public_key_b64(), restored.public_key_b64());
     }
 
-    /// Verifies: REQ-IDT-001
     #[test]
     fn test_identity_restored_from_rfc8032_secret_has_the_rfc_public_key() {
         // RFC 8032 section 7.1, TEST 1. Secret keys persisted by earlier
@@ -145,7 +143,6 @@ mod tests {
         assert_eq!(identity.public_key_b64(), BASE64.encode(&public));
     }
 
-    /// Verifies: REQ-IDT-002
     #[test]
     fn test_device_id_is_26_base32_characters() {
         let device_id = DeviceIdentity::generate().device_id().to_string();
@@ -159,7 +156,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-IDT-002
     #[test]
     fn test_distinct_key_pairs_produce_distinct_device_ids() {
         let ids: std::collections::HashSet<String> = (0..64)
@@ -168,7 +164,6 @@ mod tests {
         assert_eq!(ids.len(), 64);
     }
 
-    /// Verifies: REQ-IDT-002
     #[test]
     fn test_device_id_is_derived_from_the_public_key_alone() {
         let identity = DeviceIdentity::generate();

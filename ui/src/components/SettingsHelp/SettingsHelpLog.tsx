@@ -1,5 +1,5 @@
 /**
- * SettingsHelpLog - what a help did, in the order it happened (ADR-044 §5):
+ * SettingsHelpLog - what a help did, in the order it happened:
  * the window the person being helped keeps beside the app, so the log does not
  * cover what they are working on. Whether the help goes on, how long until it
  * ends by itself, and Stop are here with the lines.

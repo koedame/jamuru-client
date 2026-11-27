@@ -191,13 +191,11 @@ mod tests {
             .expect("the version is a number")
     }
 
-    /// Verifies: REQ-TRM-005
     #[test]
     fn when_the_terms_are_bundled_the_version_they_state_is_the_one_the_app_asks_for() {
         assert_eq!(version_in(TERMS), TERMS_VERSION);
     }
 
-    /// Verifies: REQ-TRM-005
     #[test]
     fn when_the_terms_are_bundled_no_placeholder_is_left_in_the_text() {
         assert!(!TERMS.contains("{{"), "a template placeholder remains");
@@ -215,7 +213,6 @@ mod tests {
         assert!(TermsState::new(true).is_accepted());
     }
 
-    /// Verifies: REQ-TRM-003
     #[tokio::test(start_paused = true)]
     async fn when_the_terms_are_not_agreed_to_waiting_does_not_finish() {
         let state = TermsState::new(false);
@@ -223,7 +220,6 @@ mod tests {
         assert!(waited.is_err(), "the wait ended without an agreement");
     }
 
-    /// Verifies: REQ-TRM-003
     #[tokio::test(start_paused = true)]
     async fn when_the_terms_are_agreed_to_while_waiting_the_wait_ends() {
         let state = std::sync::Arc::new(TermsState::new(false));
@@ -258,7 +254,6 @@ mod tests {
         )
     }
 
-    /// Verifies: REQ-TRM-002
     #[test]
     fn when_the_terms_in_force_are_agreed_to_the_version_is_saved_and_the_state_is_accepted() {
         let dir = tempfile::tempdir().unwrap();
@@ -270,7 +265,6 @@ mod tests {
         assert!(saved.terms_accepted_at.is_some());
     }
 
-    /// Verifies: REQ-TRM-002
     #[test]
     fn when_another_version_than_the_one_in_force_is_agreed_to_nothing_is_saved() {
         let dir = tempfile::tempdir().unwrap();
@@ -281,7 +275,6 @@ mod tests {
         assert!(!dir.path().join("config.toml").exists());
     }
 
-    /// Verifies: REQ-TRM-004
     #[test]
     fn when_a_page_is_named_it_is_one_of_the_two_pages_the_app_opens() {
         for page in [Page::Privacy, Page::Announcements] {

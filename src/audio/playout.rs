@@ -1,7 +1,7 @@
 //! Play-out buffer: the one place received audio waits for its turn.
 //!
-//! The output callback reads from this buffer directly, at the device's clock
-//! (ADR-028). That is what makes the configured delay the *actual* delay:
+//! The output callback reads from this buffer directly, at the device's clock.
+//! That is what makes the configured delay the *actual* delay:
 //!
 //! - frames wait here, in sequence order, until their turn comes, so a late or
 //!   reordered packet can still land in its slot;
@@ -17,7 +17,7 @@
 //!
 //! # Changing the delay while playing
 //!
-//! Moving the target while audio is playing moves what is held (ADR-031):
+//! Moving the target while audio is playing moves what is held:
 //! raising it inserts silence and does not advance the play position, so the
 //! frames that arrive meanwhile become the extra delay; lowering it discards
 //! frames from the play position until the buffer holds no more than the new
@@ -30,8 +30,8 @@
 //! without moving the play position, and a device that reads late lets frames
 //! pile up, and neither gives the frames back. So the shallowest the buffer got
 //! over a stretch of reads is watched, and when even that was deeper than the
-//! target asks for, the extra is discarded from the play position in one skip
-//! (ADR-047). A buffer that dipped to the target in that stretch needed what it
+//! target asks for, the extra is discarded from the play position in one skip.
+//! A buffer that dipped to the target in that stretch needed what it
 //! held, and keeps it.
 //!
 //! # Real-time discipline
@@ -80,8 +80,8 @@ const TRIM_WHEN_EXCESS_AT_LEAST: u32 = 2;
 /// buffer again at the delay it had.
 const SILENT_AFTER_STARVED_READS: u32 = 375;
 /// How many sample frames beyond its target the buffer may hold before the extra
-/// is thrown away in one skip instead of being given back by playing faster
-/// (ADR-122). Ten milliseconds at 48 kHz: what playing at the fastest rate the
+/// is thrown away in one skip instead of being given back by playing faster.
+/// Ten milliseconds at 48 kHz: what playing at the fastest rate the
 /// receive path allows gives back in under ten seconds.
 const GIVE_BACK_BY_RATE_UP_TO_SAMPLE_FRAMES: usize = 480;
 
@@ -94,10 +94,10 @@ const MAX_ADAPTIVE_DELAY_SAMPLES: usize = 5120;
 const MAX_ADAPTIVE_DELAY_FRAMES: usize = 128;
 
 /// Seconds without a missing frame after which an automatic grant gives a tenth
-/// of its delay back (ADR-097).
+/// of its delay back.
 const GRANT_CLEAN_SECS: f32 = 15.0;
 
-/// What a participant asked this buffer to hold, in frames (ADR-097).
+/// What a participant asked this buffer to hold, in frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Grant {
     /// The longest delay the grant asks for
@@ -128,7 +128,7 @@ pub struct PlayoutConfig {
     /// Samples per frame, counting every channel (interleaved).
     pub frame_samples: usize,
     /// How many frames to keep ahead of playback. 0 is passthrough: the first
-    /// frame plays as soon as it arrives (ADR-008 zero-latency).
+    /// frame plays as soon as it arrives (zero-latency).
     pub target_delay_frames: u32,
     /// Lowest delay adaptation may choose.
     pub min_delay_frames: u32,
@@ -140,8 +140,8 @@ impl PlayoutConfig {
     /// Settings for a stream that is asked to hold `target_delay_frames`.
     ///
     /// This is what the receive path uses, so the delay a preset asks for is
-    /// held here and nowhere else (ADR-028). Passthrough is fixed at zero:
-    /// adaptation must not quietly give up the 0ms promise (ADR-031). Buffered
+    /// held here and nowhere else. Passthrough is fixed at zero:
+    /// adaptation must not quietly give up the 0ms promise. Buffered
     /// delays keep at least one frame of protection and may grow to twice the
     /// target plus two, or to [`MAX_ADAPTIVE_DELAY_SAMPLES`] when that is more
     /// (about 107 ms at 48 kHz, so a link that jitters by 25 ms is covered).
@@ -176,7 +176,7 @@ impl PlayoutConfig {
 
 /// Interleaved samples in the longest frame a peer sends: what fits in one
 /// audio packet. A frame that does not fit is cut into packets on frame
-/// boundaries (ADR-070), and each packet is played as a frame of its own.
+/// boundaries, and each packet is played as a frame of its own.
 pub const WIDEST_PACKET_SAMPLES: usize =
     crate::protocol::MAX_PAYLOAD_SIZE / super::codec::PCM_BYTES_PER_SAMPLE;
 
@@ -191,7 +191,7 @@ pub const WIDEST_PACKET_SAMPLES: usize =
 /// is 2.18. Frames are therefore stored at whatever length they are - padding
 /// or truncating them to a fixed size would add or remove samples, which is
 /// what changes pitch. The headroom covers the widest conversion the app
-/// offers (44100 -> 96000, ADR-013) with room to spare.
+/// offers (44100 -> 96000) with room to spare.
 pub fn widest_frame_samples(frame_samples: usize) -> usize {
     frame_samples.max(WIDEST_PACKET_SAMPLES) * 3
 }
@@ -215,11 +215,11 @@ pub enum PlayoutResult {
     Priming,
     /// The delay is being raised: this read is silence and the play position
     /// stays where it is, so the frames that arrive meanwhile add to the
-    /// delay (ADR-031). Not an underrun and not a loss.
+    /// delay. Not an underrun and not a loss.
     Padded,
     /// Playing, but the frame that is due has not arrived and nothing after it
     /// has either - the sender is simply not ahead of us. The output is
-    /// silence and the stream position stays where it is (REQ-LAT-029).
+    /// silence and the stream position stays where it is.
     Starved,
 }
 
@@ -254,7 +254,7 @@ pub struct PlayoutStats {
     /// whole depth window, or because the target was lowered.
     pub frames_trimmed: u64,
     /// Concealed frames, and starved reads, that were filled with sound continuing what was
-    /// heard (ADR-105) instead of a repeat of the last frame or silence.
+    /// heard instead of a repeat of the last frame or silence.
     pub frames_filled: u64,
     /// How far, in frames, the stream jumped at the last resynchronisation.
     pub last_resync_distance: u32,
@@ -278,13 +278,12 @@ pub struct PlayoutBuffer {
     /// Delay in force now: the longer of `own_target_frames` and `floor_frames`.
     target_delay_frames: u32,
     /// The delay this buffer chooses for itself - adaptation moves it between
-    /// min and max - or the one the user pinned it to (ADR-097).
+    /// min and max - or the one the user pinned it to.
     own_target_frames: u32,
-    /// The delay the user pinned this buffer to; adaptation leaves it alone
-    /// (ADR-097).
+    /// The delay the user pinned this buffer to; adaptation leaves it alone.
     pinned_frames: Option<u32>,
     /// What a participant asked this buffer to hold at least, and the delay
-    /// that asks for now (ADR-097).
+    /// that asks for now.
     grant: Option<Grant>,
     floor_frames: u32,
     /// Seconds without a missing frame while an automatic grant is in force
@@ -297,11 +296,11 @@ pub struct PlayoutBuffer {
     /// The ring is sized for more than the longest delay a preset adapts to,
     /// so that a delay the user chose fits. A sequence this far from the one
     /// being played is taken for a restarted stream, and that distance must not
-    /// grow with the room the ring was given (ADR-097): it is what the ring
+    /// grow with the room the ring was given: it is what the ring
     /// would have been for this delay.
     resync_basis_frames: u32,
     /// Frames still to add (positive) or remove (negative) so that what is
-    /// held catches up with `target_delay_frames` (ADR-031). Only meaningful
+    /// held catches up with `target_delay_frames`. Only meaningful
     /// while playing.
     pending_shift: i32,
     /// Played, concealed and starved reads at the last adaptation window.
@@ -362,7 +361,7 @@ impl PlayoutBuffer {
 
     /// Like [`Self::new`], with a ring big enough to hold delays up to
     /// `ring_delay_frames`, so [`Self::set_delay`] can move to any of them
-    /// without allocating (ADR-031).
+    /// without allocating.
     pub fn with_ring_for(config: PlayoutConfig, ring_delay_frames: u32) -> Self {
         Self::with_ring_and_basis(config, ring_delay_frames, ring_delay_frames)
     }
@@ -370,7 +369,7 @@ impl PlayoutBuffer {
     /// Like [`Self::with_ring_for`], with a ring that can hold up to
     /// `ring_delay_frames` of delay while a restarted stream is still told
     /// from a late one by the distance a ring for `resync_basis_frames` would
-    /// have had (ADR-097).
+    /// have had.
     pub fn with_ring_and_basis(
         config: PlayoutConfig,
         ring_delay_frames: u32,
@@ -432,7 +431,7 @@ impl PlayoutBuffer {
         }
     }
 
-    /// Switches on filling gaps with sound that continues what was heard (ADR-105), for
+    /// Switches on filling gaps with sound that continues what was heard, for
     /// interleaved frames of `channels` channels at `sample_rate`. Allocates, so it is done
     /// when the buffer is made, not from the audio callback.
     pub fn enable_waveform_concealment(&mut self, channels: usize, sample_rate: u32) {
@@ -453,8 +452,8 @@ impl PlayoutBuffer {
     }
 
     /// Has the buffer ask, at every read, how much faster or slower than it was
-    /// sent the audio should be played to bring what it holds to its target
-    /// (ADR-122), for interleaved frames of `channels` channels at `sample_rate`.
+    /// sent the audio should be played to bring what it holds to its target,
+    /// for interleaved frames of `channels` channels at `sample_rate`.
     /// The caller plays at that rate ([`Self::rate_ppm`]). Without it, a buffer
     /// that holds too much gives the extra back in a skip, as before.
     /// Allocates nothing.
@@ -513,8 +512,8 @@ impl PlayoutBuffer {
                     // Too far from the current sequence to be a gap in the
                     // same stream - the peer restarted its numbering, or we
                     // ran past what it sent. Waiting for a sequence that will
-                    // never come would be silence forever (a hole ADR-026
-                    // left open).
+                    // never come would be silence forever (a hole the first
+                    // GUI audio path left open).
                     self.resync_to(sequence);
                     self.store(sequence, samples);
                     self.stats.resyncs += 1;
@@ -576,8 +575,7 @@ impl PlayoutBuffer {
 
         if !self.playing {
             // Start once the configured delay is buffered *plus* the frame
-            // about to play, or the delay would come out a frame short
-            // (ADR-020).
+            // about to play, or the delay would come out a frame short.
             if self.ready_frames() as u32 <= self.target_delay_frames {
                 return silence(out, self.last_len);
             }
@@ -615,8 +613,8 @@ impl PlayoutBuffer {
             // Concealing here would step past a frame still in flight. The
             // reader runs on the device clock, so the position would pull a
             // frame further ahead of the sender on every read, every frame
-            // would then arrive late, and the stream would not play again
-            // (ADR-026). Waiting is the honest answer.
+            // would then arrive late, and the stream would not play again.
+            // Waiting is the honest answer.
             let mut read = silence(out, self.last_len);
             read.result = PlayoutResult::Starved;
             self.stats.frames_starved += 1;
@@ -724,7 +722,7 @@ impl PlayoutBuffer {
             let change = frames as i32 - self.target_delay_frames as i32;
             if change < 0 && self.pending_shift == 0 && self.rate_gives_back(-change as usize) {
                 // A small step down is made by playing faster, not by a skip
-                // (ADR-122)
+                //
             } else {
                 self.pending_shift += change;
             }
@@ -744,7 +742,7 @@ impl PlayoutBuffer {
     /// the other way round, has to land on the delay that was asked for. The
     /// delay is also what [`Self::reset`] returns to. It is limited only by
     /// the ring, which was sized up front. A delay the user pinned for this
-    /// participant stays (ADR-097).
+    /// participant stays.
     pub fn set_delay(&mut self, frames: u32) {
         let bounds = PlayoutConfig::for_delay(self.config.frame_samples, frames);
         self.config.min_delay_frames = bounds.min_delay_frames;
@@ -759,7 +757,7 @@ impl PlayoutBuffer {
     }
 
     /// Holds the delay at `frames` and stops adapting it: the user chose
-    /// this participant's delay (ADR-097). Limited by the ring; returns the
+    /// this participant's delay. Limited by the ring; returns the
     /// delay in force.
     pub fn pin_delay(&mut self, frames: u32) -> u32 {
         let frames = frames.min(self.ring_delay_frames);
@@ -785,8 +783,8 @@ impl PlayoutBuffer {
         self.pinned_frames.is_some()
     }
 
-    /// Sets what a participant asked this buffer to keep, or takes it away
-    /// (ADR-097). Asking again with other terms keeps the delay an automatic
+    /// Sets what a participant asked this buffer to keep, or takes it away.
+    /// Asking again with other terms keeps the delay an automatic
     /// grant had come to, within the new cap. Returns the delay it asks for
     /// now, in frames.
     pub fn set_grant(&mut self, grant: Option<Grant>) -> u32 {
@@ -845,11 +843,11 @@ impl PlayoutBuffer {
     ///
     /// Growing takes one bad stretch; shrinking takes `shrink_after_windows`
     /// clean ones in a row, starting at [`CLEAN_WINDOWS_BEFORE_SHRINK`]. Every
-    /// move costs a gap or a skip (ADR-031), so the delay must not flip back
+    /// move costs a gap or a skip, so the delay must not flip back
     /// and forth: a shrink that is followed by a grow within
     /// [`BOUNCE_WITHIN_WINDOWS`] was wrong, and the next one waits twice as long.
     ///
-    /// A delay the user pinned is not moved (ADR-097); the same stretch still
+    /// A delay the user pinned is not moved; the same stretch still
     /// judges an automatic grant.
     pub fn adapt(&mut self) -> Option<u32> {
         self.adapt_over(Duration::from_secs(1))
@@ -919,7 +917,7 @@ impl PlayoutBuffer {
 
     /// Moves the delay an automatic grant asks for: up by a step when the
     /// frames missing in `secs` seconds were more often than the grant allows,
-    /// down by a tenth after [`GRANT_CLEAN_SECS`] without one (ADR-097).
+    /// down by a tenth after [`GRANT_CLEAN_SECS`] without one.
     fn follow_grant(&mut self, missed: u64, secs: f32) {
         let Some(grant) = self.grant.filter(|grant| grant.auto) else {
             return;
@@ -1137,9 +1135,7 @@ mod tests {
 
     /// The delay the caller configures is the delay that is actually held, and
     /// the frames stay in this buffer rather than moving to a second queue -
-    /// which is what lets a late frame still find its slot (ADR-028).
-    ///
-    /// Verifies: REQ-LAT-025
+    /// which is what lets a late frame still find its slot.
     #[test]
     fn playback_starts_once_the_configured_delay_is_buffered() {
         for target in 0..=4u32 {
@@ -1183,8 +1179,6 @@ mod tests {
 
     /// Passthrough keeps its 0ms promise: the first frame plays immediately
     /// and nothing is held back.
-    ///
-    /// Verifies: REQ-LAT-026
     #[test]
     fn passthrough_plays_the_first_frame_immediately() {
         let mut buffer = PlayoutBuffer::new(config(0));
@@ -1388,8 +1382,6 @@ mod tests {
     /// A delay the user chose is the delay held: a stretch of late frames that would
     /// have grown it, and a clean one that would have given it back, leave it
     /// alone, and so does a switch of preset.
-    ///
-    /// Verifies: REQ-LAT-031
     #[test]
     fn a_pinned_delay_is_held_whatever_the_link_does_and_whatever_the_preset() {
         let mut buffer = roomy(2, 1, 6, 40);
@@ -1421,8 +1413,6 @@ mod tests {
     }
 
     /// The ring bounds a pinned delay, and the delay it lands on is returned.
-    ///
-    /// Verifies: REQ-LAT-031
     #[test]
     fn a_pinned_delay_longer_than_the_ring_holds_is_the_longest_the_ring_holds() {
         let mut buffer = roomy(2, 1, 6, 20);
@@ -1434,8 +1424,6 @@ mod tests {
     /// What a participant asks for is a floor under the delay this buffer
     /// chooses: the longer of the two is held, and when the ask is taken away
     /// the buffer is where its own choice put it.
-    ///
-    /// Verifies: REQ-LAT-032
     #[test]
     fn a_fixed_grant_holds_the_delay_at_its_cap_and_the_buffers_own_choice_is_back_without_it() {
         let mut buffer = roomy(2, 1, 6, 40);
@@ -1470,8 +1458,6 @@ mod tests {
 
     /// An automatic grant starts at its lowest delay and goes up a step at a
     /// time while frames go missing more often than it allows, never past its cap.
-    ///
-    /// Verifies: REQ-LAT-032
     #[test]
     fn an_automatic_grant_goes_up_a_step_while_frames_go_missing_more_often_than_it_allows() {
         let mut buffer = roomy(2, 1, 6, 60);
@@ -1502,8 +1488,6 @@ mod tests {
 
     /// Missing frames the grant allows do not raise its delay, and neither do
     /// they count towards the quiet that gives delay back.
-    ///
-    /// Verifies: REQ-LAT-032
     #[test]
     fn an_automatic_grant_stays_where_it_is_while_the_frames_missing_are_within_what_it_allows() {
         let mut buffer = roomy(2, 1, 6, 60);
@@ -1536,8 +1520,6 @@ mod tests {
 
     /// A tenth of the delay is given back after fifteen seconds in which no
     /// frame went missing, and never below the lowest.
-    ///
-    /// Verifies: REQ-LAT-032
     #[test]
     fn an_automatic_grant_gives_a_tenth_back_after_fifteen_quiet_seconds_down_to_its_lowest() {
         let mut buffer = roomy(2, 1, 6, 80);
@@ -1580,8 +1562,6 @@ mod tests {
 
     /// Asking again with other terms keeps the delay an automatic grant had
     /// come to, within the new cap.
-    ///
-    /// Verifies: REQ-LAT-032
     #[test]
     fn a_new_ask_while_one_is_held_keeps_the_delay_it_came_to_within_the_new_cap() {
         let mut buffer = roomy(2, 1, 6, 60);
@@ -1612,8 +1592,6 @@ mod tests {
 
     /// A ring made roomy for a long delay does not make a stream that restarted
     /// its numbering take longer to be noticed.
-    ///
-    /// Verifies: REQ-LAT-031
     #[test]
     fn a_roomy_ring_notices_a_restarted_stream_as_soon_as_a_small_one_does() {
         let mut small = PlayoutBuffer::with_ring_for(
@@ -1636,8 +1614,6 @@ mod tests {
 
     /// A stretch of late frames buys more delay, one frame per decision, and never past
     /// the ceiling.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn a_stretch_of_late_frames_grows_the_delay_up_to_its_ceiling() {
         let mut buffer = adaptive(2, 1, 4);
@@ -1657,8 +1633,6 @@ mod tests {
 
     /// The loss rate is the rate over the stretch since the last decision. A
     /// burst of loss early on must not keep pushing the delay up afterwards.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn adaptation_judges_the_last_stretch_and_not_the_whole_session() {
         let mut buffer = adaptive(2, 1, 8);
@@ -1698,8 +1672,6 @@ mod tests {
 
     /// A frame the line dropped is gone whatever the delay: holding more would
     /// not bring it back, only add latency. The delay stays where it is.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn a_stretch_that_only_loses_frames_does_not_grow_the_delay() {
         let mut buffer = adaptive(2, 1, 8);
@@ -1716,8 +1688,6 @@ mod tests {
 
     /// Reads that found nothing and then got the frame they had waited for were
     /// a delay too short, even though no frame was late enough to be dropped.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn reads_that_waited_for_a_frame_that_then_came_grow_the_delay() {
         let mut buffer = adaptive(1, 1, 8);
@@ -1746,8 +1716,6 @@ mod tests {
 
     /// The most a delay can grow to covers a link that jitters by tens of
     /// milliseconds, whatever the frame size.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn the_ceiling_of_a_buffered_delay_covers_about_a_hundred_milliseconds() {
         // 128 samples a channel at 48 kHz, two channels
@@ -1764,8 +1732,6 @@ mod tests {
 
     /// A long clean run gives a frame back, but never below the floor, and a
     /// single clean stretch is not enough.
-    ///
-    /// Verifies: REQ-LAT-109
     #[test]
     fn a_long_clean_run_gives_the_delay_back_down_to_its_floor() {
         let mut buffer = adaptive(3, 2, 8);
@@ -1788,8 +1754,6 @@ mod tests {
 
     /// A stretch of late frames in the middle of a clean run starts the count again, so
     /// the delay does not flip back and forth.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn a_stretch_of_late_frames_restarts_the_count_towards_shrinking() {
         let mut buffer = adaptive(3, 1, 8);
@@ -1813,8 +1777,6 @@ mod tests {
     /// where it is: it is starved, not concealed. Adaptation has to see it, or a
     /// link that leaves the buffer empty one read in ten never moves the delay
     /// (a Mac on Wi-Fi played 1546 starved reads and never adjusted).
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn reads_that_find_the_buffer_empty_grow_the_delay() {
         let mut buffer = adaptive(1, 1, 4);
@@ -1863,8 +1825,6 @@ mod tests {
     /// says nothing about the link, and no delay would cure it: the delay must
     /// not move however long the peer is quiet, or it sits at its ceiling long
     /// after the peer is back.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn a_peer_that_sends_nothing_for_twenty_seconds_does_not_move_the_delay() {
         for lead_in in [0, 100, 374, 400, 700] {
@@ -1886,8 +1846,6 @@ mod tests {
 
     /// The delay is what it was before the peer went quiet, and what is held
     /// is that delay again - not the nothing a drained buffer holds.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn a_peer_that_sends_again_is_heard_at_the_delay_it_had_before() {
         let mut buffer = adaptive(3, 1, 8);
@@ -1921,8 +1879,6 @@ mod tests {
 
     /// A stall short of the silence threshold is a late frame, not a muted
     /// peer: it keeps buying delay.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn a_stall_that_ends_soon_still_grows_the_delay() {
         let mut buffer = adaptive(3, 1, 8);
@@ -1938,8 +1894,6 @@ mod tests {
     /// One read in a hundred finding its frame missing is a gap every second
     /// and a half: enough to grow the delay, where the old limit of one in
     /// twenty left it alone.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn about_one_missing_frame_in_a_hundred_grows_the_delay() {
         let mut buffer = adaptive(1, 1, 4);
@@ -1965,8 +1919,6 @@ mod tests {
     /// A delay that was given back and had to be taken again was given back
     /// too early. The next attempt waits twice as long, so a link that needs
     /// the frame does not lose and regain it every eleven seconds.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn a_shrink_that_bounces_makes_the_next_one_wait_twice_as_long() {
         let mut buffer = adaptive(3, 1, 8);
@@ -2000,8 +1952,6 @@ mod tests {
     }
 
     /// A shrink that stood for a while was right, and does not slow the next.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn a_shrink_that_holds_does_not_change_how_long_the_next_one_waits() {
         let mut buffer = adaptive(4, 1, 8);
@@ -2034,8 +1984,6 @@ mod tests {
     /// up. The buffer keeps missing at that spot until the delay is deep
     /// enough to have the late frame in its slot when the read comes; the
     /// adaptation is what gets it there.
-    ///
-    /// Verifies: REQ-LAT-108
     #[test]
     fn adaptation_finds_the_delay_a_link_with_late_frames_needs() {
         // One frame is `PERIOD` ticks; the device reads once per period.
@@ -2103,8 +2051,6 @@ mod tests {
     }
 
     /// Fixed bounds and passthrough are not moved by adaptation.
-    ///
-    /// Verifies: REQ-LAT-110
     #[test]
     fn a_fixed_delay_does_not_adapt() {
         for (target, min, max) in [(3, 3, 3), (0, 0, 0)] {
@@ -2124,8 +2070,6 @@ mod tests {
 
     /// Adaptation moves the delay within its bounds, and a caller asking for
     /// less than the floor gets the floor.
-    ///
-    /// Verifies: REQ-LAT-109
     #[test]
     fn the_target_stays_within_the_adaptation_bounds() {
         let mut buffer = adaptive(2, 1, 4);
@@ -2151,8 +2095,6 @@ mod tests {
     /// Raising the delay while playing really holds more: silence goes out
     /// while the position waits, and the frames that arrive meanwhile are the
     /// extra delay. Nothing is lost or reordered.
-    ///
-    /// Verifies: REQ-LAT-025
     #[test]
     fn raising_the_delay_while_playing_holds_more_audio() {
         let mut buffer = PlayoutBuffer::new(config(2));
@@ -2204,8 +2146,6 @@ mod tests {
 
     /// Lowering the delay while playing releases what is held beyond the new
     /// target, from the play position, so the latency drops at once.
-    ///
-    /// Verifies: REQ-LAT-025
     #[test]
     fn lowering_the_delay_while_playing_drops_the_excess() {
         let mut buffer = PlayoutBuffer::new(config(4));
@@ -2292,8 +2232,6 @@ mod tests {
 
     /// Choosing a preset lands on that preset's delay whichever way the switch
     /// goes. The range it started with must not cut the choice short.
-    ///
-    /// Verifies: REQ-LAT-106
     #[test]
     fn choosing_a_delay_is_not_cut_short_by_the_starting_range() {
         let frame_samples = 4;
@@ -2323,8 +2261,6 @@ mod tests {
 
     /// Adaptation after a preset switch works inside the new preset's range,
     /// and `reset` gives back what adaptation took.
-    ///
-    /// Verifies: REQ-LAT-106
     #[test]
     fn a_chosen_delay_sets_the_range_adaptation_moves_in() {
         let ring = PlayoutConfig::for_delay(4, 8).max_delay_frames;
@@ -2358,9 +2294,7 @@ mod tests {
 
     /// A read with nothing buffered must wait, not declare a loss: the frame
     /// has not been sent yet, and stepping past it would leave the buffer
-    /// ahead of the sender for good (ADR-026).
-    ///
-    /// Verifies: REQ-LAT-029
+    /// ahead of the sender for good.
     #[test]
     fn a_read_with_nothing_buffered_waits_instead_of_concealing() {
         let mut buffer = PlayoutBuffer::new(config(0));
@@ -2401,8 +2335,6 @@ mod tests {
 
     /// A gap is only a gap once a later frame proves it. Concealment must still
     /// happen then, or a real loss would stall playback forever.
-    ///
-    /// Verifies: REQ-LAT-029
     #[test]
     fn a_gap_is_concealed_once_a_later_frame_arrives() {
         let mut buffer = PlayoutBuffer::new(config(0));
@@ -2462,8 +2394,7 @@ mod tests {
     /// rate conversion does not yield a whole number of frames - 44.1k to 48k
     /// is 1.088 frames' worth. Padding or truncating to a fixed size would add
     /// or drop samples, and that is what changes pitch. Playing each frame at
-    /// its own length is what keeps the sound at the pitch it was played at
-    /// (ADR-028, ADR-013).
+    /// its own length is what keeps the sound at the pitch it was played at.
     #[test]
     fn frames_keep_the_length_they_arrived_with() {
         let mut buffer = PlayoutBuffer::new(config(0));
@@ -2539,8 +2470,6 @@ mod tests {
     /// average, but now and then the device does not read for a few ticks. The
     /// frames that arrive meanwhile stay, so the buffer holds more than the
     /// target from then on. It must give them back.
-    ///
-    /// Verifies: REQ-LAT-025
     #[test]
     fn frames_that_piled_up_while_the_device_did_not_read_are_given_back() {
         const TARGET: u32 = 2;
@@ -2570,8 +2499,6 @@ mod tests {
     /// Everything the buffer holds beyond the target goes in one skip, from the
     /// play position, so the stream carries on from the frame after the ones
     /// discarded rather than stepping down a frame at a time.
-    ///
-    /// Verifies: REQ-LAT-025
     #[test]
     fn the_excess_is_discarded_in_one_skip_from_the_play_position() {
         let mut buffer = PlayoutBuffer::new(config(1));

@@ -311,7 +311,6 @@ mod armed {
             }
         }
 
-        /// Verifies: REQ-RMT-027
         #[test]
         fn when_the_output_is_cabled_to_the_input_every_burst_is_heard_after_the_loop_delay() {
             let mut run = Run::new(params(10));
@@ -333,7 +332,6 @@ mod armed {
             }
         }
 
-        /// Verifies: REQ-RMT-027
         #[test]
         fn when_the_callbacks_are_smaller_the_delay_is_read_closer_to_the_loop_delay() {
             let mut run = Run::new(params(10));
@@ -345,7 +343,6 @@ mod armed {
             assert!(delay.max_ms <= 7.0 + 1.4, "max {}", delay.max_ms);
         }
 
-        /// Verifies: REQ-RMT-027
         #[test]
         fn when_the_cable_is_not_connected_no_burst_is_heard() {
             let mut run = Run::new(params(10));
@@ -358,7 +355,6 @@ mod armed {
             assert_eq!(report.delay, None);
         }
 
-        /// Verifies: REQ-RMT-027
         #[test]
         fn a_burst_that_comes_back_while_the_output_callback_holds_the_run_is_still_heard() {
             let mut run = Run::new(params(1));
@@ -385,7 +381,6 @@ mod armed {
             assert_eq!(report.other_sounds, 0);
         }
 
-        /// Verifies: REQ-RMT-027
         #[test]
         fn a_sound_that_was_not_a_burst_just_sent_is_counted_apart_from_the_delays() {
             let mut run = Run::new(params(1));
@@ -398,7 +393,6 @@ mod armed {
             assert_eq!(report.other_sounds, 1);
         }
 
-        /// Verifies: REQ-RMT-027
         #[test]
         fn the_output_is_silence_apart_from_the_bursts_and_no_more_are_sent_than_asked() {
             let mut run = Run::new(params(2));
@@ -422,7 +416,6 @@ mod armed {
             assert_eq!(loud_frames, 2 * BURST_FRAMES);
         }
 
-        /// Verifies: REQ-RMT-027
         #[test]
         fn a_burst_that_straddles_two_callbacks_is_stamped_once_in_the_callback_it_starts_in() {
             let mut run = Run::new(params(1));

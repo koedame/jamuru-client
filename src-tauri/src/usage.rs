@@ -130,7 +130,7 @@ impl UsageState {
     /// this is queued at once like a crash and the pending file is cleared;
     /// `jamuru.log` is not attached, because turning reporting on is consent
     /// to the aggregated items only and the log can carry other people's
-    /// identifiers (ADR-065). While it is off, it is kept (in memory and on
+    /// identifiers. While it is off, it is kept (in memory and on
     /// disk, so a further restart before the screen asks still finds it)
     /// until the screen asks and answers (`usage_previous_hang`,
     /// `usage_send_previous_hang`).
@@ -361,7 +361,7 @@ impl UsageState {
         // are polled by the same call, so a flush that never returns from a
         // single poll never lets the timeout be checked either. Running it
         // on a thread of its own instead - the same fix `restart` already
-        // applies to a main thread stuck elsewhere (ADR-055) - means only
+        // applies to a main thread stuck elsewhere - means only
         // that thread is left stuck; this one moves on once the OS-timed
         // wait below elapses regardless.
         thread::spawn(move || {
@@ -416,16 +416,16 @@ pub fn usage_previous_hang(state: tauri::State<'_, UsageState>) -> Option<Hang> 
 
 /// Whether answering "send" to [`usage_previous_hang`] also attaches
 /// `jamuru.log` ([`attaches_log`]), so the confirmation screen can say so
-/// accurately (ADR-059).
+/// accurately.
 #[tauri::command]
 pub fn usage_previous_hang_attaches_log(app: AppHandle) -> bool {
     attaches_log(&app)
 }
 
 /// Before 1.0.0, only verification users run the app, so the confirmed hang
-/// report (ADR-059) also attaches `jamuru.log` through the "Report a problem"
+/// report also attaches `jamuru.log` through the "Report a problem"
 /// send path. The automatic one sent while reporting is already on never
-/// does (ADR-065). From 1.0.0 neither does.
+/// does. From 1.0.0 neither does.
 fn major_attaches_log(major: u64) -> bool {
     major < 1
 }
@@ -453,8 +453,8 @@ fn hang_report_comment(hang: &Hang, launch_id: &str) -> String {
 /// While `send` is true and [`attaches_log`] holds, this also sends
 /// `jamuru.log` through the same path "Report a problem" uses
 /// (`report_problem::send_log_report`), so the two features share one
-/// receiver and one body shape instead of a second one being built here
-/// (ADR-059). That send is best-effort: a failure is logged and does not
+/// receiver and one body shape instead of a second one being built here.
+/// That send is best-effort: a failure is logged and does not
 /// change the `Ok(())` this returns, matching `send_one_off_hang` itself
 /// not surfacing a delivery failure either.
 #[tauri::command]
@@ -463,8 +463,8 @@ pub async fn usage_send_previous_hang(app: AppHandle, send: bool) -> Result<(), 
 }
 
 /// Sending refuses until the user has agreed to the terms, and leaves the
-/// pending report where it is, so it can still be answered after agreeing
-/// (REQ-TRM-003). Discarding reaches nothing, so it needs no agreement.
+/// pending report where it is, so it can still be answered after agreeing.
+/// Discarding reaches nothing, so it needs no agreement.
 async fn send_previous_hang<R: Runtime>(app: &AppHandle<R>, send: bool) -> Result<(), String> {
     if send {
         crate::terms::require_accepted(app)?;
@@ -629,8 +629,6 @@ mod tests {
     /// sampler reads the link on its own timer, a peer joins, and leaving
     /// closes the session and stops the sampler. Runs on a mock app, so the
     /// state lookups and the spawned tasks are the ones the real app uses.
-    ///
-    /// Verifies: REQ-TEL-010
     #[tokio::test]
     async fn when_a_room_is_joined_and_left_the_session_is_recorded_and_the_sampler_stops() {
         let dir = tempfile::tempdir().unwrap();
@@ -671,8 +669,6 @@ mod tests {
 
     /// The kind of route and the times the link facts hold reach the line
     /// that "what is sent" shows, through the same reading the sampler does.
-    ///
-    /// Verifies: REQ-TEL-015
     #[tokio::test]
     async fn when_a_link_came_up_the_session_end_in_the_preview_carries_its_route_and_times() {
         let dir = tempfile::tempdir().unwrap();
@@ -726,7 +722,6 @@ mod tests {
         assert!(end["first_audio_ms"].is_u64(), "{end}");
     }
 
-    /// Verifies: REQ-TEL-017
     #[tokio::test]
     async fn when_an_established_link_was_given_up_for_silence_one_no_packets_error_is_recorded() {
         let dir = tempfile::tempdir().unwrap();
@@ -759,7 +754,6 @@ mod tests {
         assert_eq!(errors[0]["count"], 1);
     }
 
-    /// Verifies: REQ-TEL-001
     #[tokio::test]
     async fn when_reporting_is_off_a_room_records_nothing_and_starts_no_sampler() {
         let dir = tempfile::tempdir().unwrap();
@@ -799,7 +793,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-UPD-018
     #[test]
     fn when_the_flush_never_yields_app_exiting_still_returns_within_the_timeout() {
         let dir = tempfile::tempdir().unwrap();
@@ -937,7 +930,6 @@ mod tests {
         })
     }
 
-    /// Verifies: REQ-CON-032
     #[tokio::test]
     async fn when_reporting_is_off_the_room_entry_info_carries_no_device_name_or_id() {
         let (app, _) = launched(false);
@@ -955,7 +947,6 @@ mod tests {
         assert_eq!(info.app_version, "test");
     }
 
-    /// Verifies: REQ-CON-032
     #[tokio::test]
     async fn when_reporting_is_on_the_room_entry_info_carries_the_device_name_and_id() {
         let (app, _) = launched(true);
@@ -975,7 +966,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_the_settings_change_after_launch_the_new_settings_are_reported() {
         let (app, reporter) = launched(true);
@@ -990,7 +980,6 @@ mod tests {
         assert_eq!(lines[0]["settings"]["buffer_size"], 128);
     }
 
-    /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_the_settings_change_several_times_in_a_row_only_the_last_state_is_reported() {
         let (app, reporter) = launched(true);
@@ -1006,7 +995,6 @@ mod tests {
         assert_eq!(lines[0]["settings"]["buffer_size"], 128);
     }
 
-    /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_the_settings_are_saved_unchanged_nothing_is_reported() {
         let (app, reporter) = launched(true);
@@ -1020,8 +1008,6 @@ mod tests {
 
     /// The device IDs travel in `audio_env`, so choosing a device is one line:
     /// saving the settings for it must not send `app_start` as well.
-    ///
-    /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_only_the_chosen_device_ids_change_in_the_settings_no_app_start_is_reported() {
         let (app, reporter) = launched(true);
@@ -1037,7 +1023,6 @@ mod tests {
         assert_eq!(reporter.preview_ndjson(), "");
     }
 
-    /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_the_settings_change_and_change_back_within_the_wait_nothing_is_reported() {
         let (app, reporter) = launched(true);
@@ -1050,7 +1035,6 @@ mod tests {
         assert_eq!(reporter.preview_ndjson(), "");
     }
 
-    /// Verifies: REQ-TEL-001
     #[tokio::test(start_paused = true)]
     async fn when_reporting_is_off_a_change_of_settings_or_devices_reports_nothing() {
         let (app, reporter) = launched(false);
@@ -1067,7 +1051,6 @@ mod tests {
         assert_eq!(reporter.preview_ndjson(), "");
     }
 
-    /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_another_device_is_chosen_the_devices_in_use_are_reported() {
         let (app, reporter) = launched(true);
@@ -1084,7 +1067,6 @@ mod tests {
         assert_eq!(lines[0]["input"], serde_json::Value::Null);
     }
 
-    /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_devices_are_chosen_several_times_in_a_row_they_are_reported_once() {
         let (app, reporter) = launched(true);
@@ -1098,7 +1080,6 @@ mod tests {
         assert_eq!(reported_lines(&reporter).len(), 1);
     }
 
-    /// Verifies: REQ-TEL-014
     #[tokio::test(start_paused = true)]
     async fn when_the_devices_in_use_are_the_ones_already_reported_nothing_is_reported() {
         let (app, reporter) = launched(true);
@@ -1112,7 +1093,6 @@ mod tests {
         assert_eq!(reporter.preview_ndjson(), "");
     }
 
-    /// Verifies: REQ-AUD-123
     #[tokio::test(start_paused = true)]
     async fn when_the_driver_hangs_while_the_devices_are_read_nothing_is_reported() {
         let (app, reporter) = launched(true);
@@ -1129,8 +1109,6 @@ mod tests {
     /// The point of the limit: a task of the runtime that asks a hung driver
     /// must not be the one that waits, or the runtime stops with it. With a
     /// single worker, a ticker that keeps ticking shows nothing was blocked.
-    ///
-    /// Verifies: REQ-AUD-123
     #[tokio::test(flavor = "current_thread")]
     async fn when_the_driver_hangs_while_the_devices_are_read_the_runtime_keeps_running() {
         let (read, release) = hung_reader();
@@ -1158,7 +1136,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-AUD-123
     #[tokio::test]
     async fn when_the_driver_answers_the_devices_are_read() {
         let read: ReadAudioEnv = Arc::new(|input_id, _| unnamed_devices(input_id));
@@ -1175,7 +1152,6 @@ mod tests {
         assert_eq!(major_of("17").as_deref(), Some("17"));
     }
 
-    /// Verifies: REQ-TEL-021
     #[test]
     fn a_pre_1_0_0_app_version_attaches_the_log_and_a_1_0_0_or_later_one_does_not() {
         assert!(major_attaches_log(0));
@@ -1183,7 +1159,6 @@ mod tests {
         assert!(!major_attaches_log(2));
     }
 
-    /// Verifies: REQ-TEL-021
     #[test]
     fn the_confirmed_hang_reports_comment_names_the_stage_and_launch() {
         let comment = hang_report_comment(
@@ -1229,7 +1204,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-TEL-017
     #[test]
     fn when_the_signaling_server_could_not_be_reached_the_error_names_how() {
         let unreachable = |failure| NetworkError::SignalingUnreachable {
@@ -1260,7 +1234,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-TEL-017
     #[test]
     fn when_the_server_closed_the_signaling_connection_the_error_is_ws_closed() {
         assert_eq!(
@@ -1285,8 +1258,6 @@ mod tests {
     /// plain `RunEvent::Exit`, exactly like the clean exit
     /// `mark_clean_exit` expects, so it must not erase what is still
     /// waiting to be shown.
-    ///
-    /// Verifies: REQ-TEL-022
     #[test]
     fn a_pending_hang_survives_a_clean_restart_before_the_screen_has_asked() {
         let dir = tempfile::tempdir().unwrap();
@@ -1353,11 +1324,7 @@ mod tests {
     /// A device with usage reporting already on never shows the
     /// confirmation screen: the incident is queued into the structured
     /// report at once, like a crash, and nothing is left pending for a
-    /// screen to ask about. `jamuru.log` is not attached on this path
-    /// (ADR-065).
-    ///
-    /// Verifies: REQ-TEL-019
-    /// Verifies: REQ-TEL-023
+    /// screen to ask about. `jamuru.log` is not attached on this path.
     #[tokio::test]
     async fn when_reporting_is_already_on_a_previous_incident_is_recorded_without_asking() {
         let dir = tempfile::tempdir().unwrap();
@@ -1388,7 +1355,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-TRM-003
     #[tokio::test]
     async fn the_terms_are_not_agreed_to_and_the_previous_hang_is_sent_refuses_and_keeps_it_pending(
     ) {

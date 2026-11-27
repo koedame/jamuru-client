@@ -1,5 +1,5 @@
 /**
- * How a setting reads to the user (ADR-044 §5): the chat line after a helper
+ * How a setting reads to the user: the chat line after a helper
  * changed something.
  */
 import type { TFunction } from "i18next";

@@ -33,14 +33,14 @@ toml = "1.1"
 directories = "6"
 chrono = { version = "0.4", features = ["serde"] }
 
-# base64 for the stored device identity secret key (ADR-024)
+# base64 for the stored device identity secret key
 data-encoding = "2"
 
-# GUI E2E control channel (ADR-025, feature = "e2e-control"). Optional so a
+# GUI E2E control channel (feature = "e2e-control"). Optional so a
 # default build links none of axum's dependency tree.
 axum = { version = "0.8", optional = true }
 
-# Diagnostic log file in the OS log directory (ADR-036). `log-always` makes
+# Diagnostic log file in the OS log directory. `log-always` makes
 # every `tracing` event - this crate's and the core library's - also reach the
 # `log` crate, which is what tauri-plugin-log writes to the file.
 tracing = { version = "0.1", features = ["log-always"] }
@@ -49,16 +49,16 @@ tauri-plugin-log = "2"
 tauri-plugin-deep-link = "2.4.9"
 
 # A second copy (started by an invite link) hands over to the one running
-# instead of running beside it (ADR-085). `deep-link` passes the link on.
+# instead of running beside it. `deep-link` passes the link on.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
-# Installs a new release by itself (ADR-041). The default `zip` feature is off:
+# Installs a new release by itself. The default `zip` feature is off:
 # it only unpacks zip-compressed Windows bundles and gzip-compressed AppImages
 # (Tauri v1 style), which this project never ships (the installers are released
 # as they are), and it pulls in the `zip` crate (RUSTSEC-2026-0368, -0369).
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 
-# "Report a problem" (ADR-057): sends jamuru.log and a comment separately
+# "Report a problem": sends jamuru.log and a comment separately
 # from usage reporting's transport.
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 sys-locale = "0.3.2"
@@ -128,12 +128,12 @@ workspace = true
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-# GUI E2E control channel (ADR-025). Deliberately absent from `default`:
+# GUI E2E control channel. Deliberately absent from `default`:
 # enabling it compiles in a loopback HTTP server that can read the app's
 # rendered DOM. tests/e2e/tests/release_build_guard.rs asserts this stays out
 # of the default set.
 e2e-control = ["debug-tools", "dep:axum", "tokio/net", "tokio/rt"]
-# Methods for looking at and driving a running app (`ui.*`, `debug.*`; ADR-044).
+# Methods for looking at and driving a running app (`ui.*`, `debug.*`).
 # Used by the E2E control channel and by remote debugging, and absent from every
 # other build for the same reason: they can read what the app shows.
 debug-tools = [
@@ -149,9 +149,9 @@ debug-tools = [
     "jamjam/device-loop",
 ]
 # Remote debugging: the beta build asks the server whether this installation is
-# enrolled and, if so, keeps a connection to the relay that lets it be operated
-# (ADR-044). Deliberately absent from `default`, like `e2e-control`.
+# enrolled and, if so, keeps a connection to the relay that lets it be operated.
+# Deliberately absent from `default`, like `e2e-control`.
 debug-remote = ["debug-tools"]
-# Lets the update drill (scripts/update-drill.py, ADR-089) break a build on
+# Lets the update drill (scripts/update-drill.py) break a build on
 # purpose. Absent from `default` and from every release build.
 update-drill = []

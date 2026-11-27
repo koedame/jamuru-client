@@ -1,5 +1,5 @@
 /**
- * How the receive buffer is worded on screen (ADR-097). The core counts in
+ * How the receive buffer is worded on screen. The core counts in
  * tenths of a millisecond; the screen says milliseconds with one decimal.
  */
 

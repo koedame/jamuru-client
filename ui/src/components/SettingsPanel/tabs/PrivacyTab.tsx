@@ -1,8 +1,8 @@
 /**
  * PrivacyTab - What jamuru sends from this machine, and the questions about it
  *
- * Holds the usage reporting switch (ADR-037) and the one-off question about a
- * hang found at startup (ADR-056). Both are decisions about sending data, so
+ * Holds the usage reporting switch and the one-off question about a
+ * hang found at startup. Both are decisions about sending data, so
  * they sit apart from the diagnostics that help the user fix their setup.
  * Shares its styling with the diagnostics tab.
  */
@@ -20,7 +20,7 @@ export interface PrivacyTabProps {
   onSendPreviousHang?: (send: boolean) => void;
   /** Set once the pending hang report has been answered, to show a short confirmation instead */
   previousHangAnswered?: boolean;
-  /** Whether "send" also attaches the current jamuru.log (ADR-059: true before the app's 1.0.0 release) */
+  /** Whether "send" also attaches the current jamuru.log (true before the app's 1.0.0 release) */
   previousHangAttachesLog?: boolean;
   /** Whether usage reporting is on (off by default) */
   usageReporting?: boolean;

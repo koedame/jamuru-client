@@ -1,4 +1,4 @@
-//! Asking the router to open the audio port (UPnP IGD, ADR-113)
+//! Asking the router to open the audio port (UPnP IGD)
 //!
 //! STUN tells a peer which public address and port the router gave the audio socket, but a
 //! router that keeps a separate mapping per destination (a symmetric NAT) gives the peer a

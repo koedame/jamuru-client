@@ -1,6 +1,6 @@
 /**
  * DropoutNotice - says a participant's audio stopped without a leave notice, for how long, and
- * whose line is cut (REQ-CON-161, REQ-CON-163). Shown in the roster row and on the mixer strip.
+ * whose line is cut. Shown in the roster row and on the mixer strip.
  */
 
 import { useTranslation } from "react-i18next";

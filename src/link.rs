@@ -1,9 +1,9 @@
-//! Setting up the audio link to one participant, for the app and the CLI alike (ADR-077).
+//! Setting up the audio link to one participant, for the app and the CLI alike.
 //!
 //! A link is a [`Connection`] on the session's one audio socket, the peer's place in the mix,
 //! and the path their audio takes from payload to that mix. What has to be done to a connection
 //! before it is checked - the order of it, and that the play-out buffer is emptied when the
-//! link comes back from an outage (ADR-022) - is done here once; what the app and the CLI each
+//! link comes back from an outage - is done here once; what the app and the CLI each
 //! want to know about the link's state, they hook in.
 
 use std::sync::{Arc, RwLock};
@@ -73,13 +73,13 @@ impl LinkSpec<'_> {
             .ok_or(NetworkError::PeerKeyMissing)
             .and_then(|peer_key| connection.verify_peer(ours, peer_key))
             .map_err(OpenError::Identity)?;
-        // The codec and FEC come from the preset (ADR-021)
+        // The codec and FEC come from the preset
         connection
             .set_audio_encoding(self.encoding.clone())
             .map_err(OpenError::Encoding)?;
 
-        // Jitter buffer keyed by sequence number (ADR-020). Received audio waits in the
-        // play-out buffer, and only there, until the output callback takes it (ADR-028).
+        // Jitter buffer keyed by sequence number. Received audio waits in the
+        // play-out buffer, and only there, until the output callback takes it.
         let receive = ReceivePath::new(
             self.encoding.codec_type,
             self.sample_rate,
@@ -93,7 +93,7 @@ impl LinkSpec<'_> {
             .ok_or(OpenError::NoRoom)?;
 
         // Sequence numbers carry on across an outage, so what was waiting before it must not
-        // play after it (ADR-022).
+        // play after it.
         let for_state = receive.clone();
         connection.set_state_change_callback(move |state| {
             if state == ConnectionState::Connected {

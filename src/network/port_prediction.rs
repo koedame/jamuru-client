@@ -3,7 +3,7 @@
 //! Some NATs give the audio socket a different public port for each address it sends to. The
 //! port STUN saw is the port the STUN server was told, not the one a peer will be told. Such a
 //! peer shows itself by offering several public ports on one public IPv4 address: it asked
-//! STUN more than one server (ADR-115). What those ports are like says how to guess the next:
+//! STUN more than one server. What those ports are like says how to guess the next:
 //!
 //! - ports a little apart (a NAT that hands out the next free port): the port toward the peer
 //!   is the next one, or a few after it, so a few ports around the next one are tried. Ports

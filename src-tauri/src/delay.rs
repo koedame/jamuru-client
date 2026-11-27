@@ -1,4 +1,4 @@
-//! Measuring the delay of the audio devices from the settings (REQ-AUD-050).
+//! Measuring the delay of the audio devices from the settings.
 //!
 //! The measuring itself is `jamjam::audio::delay_meter`. This is the IPC
 //! surface over it: start and cancel a run, read where it is, and keep the
@@ -193,7 +193,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-AUD-050
     #[test]
     fn while_measuring_the_status_says_which_sound_and_which_step() {
         let state = State::Running(Step {
@@ -211,7 +210,6 @@ mod tests {
         assert_eq!(status.failure, None);
     }
 
-    /// Verifies: REQ-AUD-050
     #[test]
     fn when_a_run_found_nothing_the_status_says_why_and_a_cancel_says_nothing() {
         let failed = status(
@@ -232,7 +230,6 @@ mod tests {
         assert_eq!(cancelled.failure, None);
     }
 
-    /// Verifies: REQ-AUD-050
     #[test]
     fn the_figure_carries_how_steady_it_is_and_whether_the_settings_want_a_look() {
         let steady = status(
@@ -256,7 +253,6 @@ mod tests {
         assert!(long.needs_review);
     }
 
-    /// Verifies: REQ-CON-035
     #[test]
     fn the_status_lists_the_delays_the_others_told() {
         let peers = [("p1".to_string(), 23.5_f64)].into_iter().collect();
@@ -266,7 +262,6 @@ mod tests {
         assert_eq!(status.peers.get("p1"), Some(&23.5));
     }
 
-    /// Verifies: REQ-AUD-050
     #[test]
     fn a_figure_is_kept_with_the_devices_it_was_measured_on_and_is_current_only_for_them() {
         let dir = tempfile::tempdir().unwrap();

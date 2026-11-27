@@ -5,13 +5,13 @@
  * Displays connection status and provides room management UI.
  *
  * The session - connecting, the room, who is in it, the audio link, getting
- * the connection back - is the backend's (ADR-044 §6). This draws the
+ * the connection back - is the backend's. This draws the
  * snapshot it reads with `session_get` and hears with `session:changed`, and
  * acts with one command per operation. What stays here is what only the
  * screen has: dialogs, the code being typed, the mixer's faders.
  *
  * A helper's window draws this same screen from the helped app's state, through
- * the relay (`helper`, ADR-044 §5). The screen is the same code; it just does not
+ * the relay (`helper`). The screen is the same code; it just does not
  * offer what the helped app would refuse a helper - speaking for them, leaving
  * the room - and does not ask for what is the helped person's own: their history
  * of rooms, the server they use.
@@ -95,7 +95,7 @@ const DELAY_NOTICE_MS = 5000;
 /** How long the notice that a WASAPI device was opened the standard way stays up. */
 const WASAPI_NOTICE_MS = 10000;
 
-/** A device of the session not opened the WASAPI way the settings ask for (ADR-088) */
+/** A device of the session not opened the WASAPI way the settings ask for */
 interface WasapiFallback {
   side: "input" | "output";
   asked: "low_latency" | "exclusive";
@@ -168,7 +168,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   // than on every 100ms poll.
   const [warnedBandwidth, setWarnedBandwidth] = useState<string | null>(null);
   // The receive buffer (not the audio device's buffer size in the settings) is
-  // adjusted automatically (REQ-LAT-108); the user is told, with the delay it
+  // adjusted automatically; the user is told, with the delay it
   // now holds, for a few seconds each time.
   const [delayAdjustments, setDelayAdjustments] = useState(0);
   const [adjustedDelayMs, setAdjustedDelayMs] = useState(0);
@@ -191,7 +191,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
 
   // While the leave dialog stands the microphone is held muted: the person
   // may have thought the window closed and walked away, and nothing of their
-  // room should go out meanwhile (REQ-CON-138). The mute goes back to what it
+  // room should go out meanwhile. The mute goes back to what it
   // was when the dialog is cancelled or the leave is over. Quitting keeps the
   // hold until the app ends.
   useEffect(() => {
@@ -269,7 +269,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   }, [showMixer]);
 
   // A package that cannot replace itself is only told that a newer release
-  // exists (ADR-076). A helper's window draws the helped app's screen, and the
+  // exists. A helper's window draws the helped app's screen, and the
   // release is not the helper's to act on.
   const [newerVersion, setNewerVersion] = useState<string | null>(null);
   useEffect(() => {
@@ -325,7 +325,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   }, [isConnected, helping]);
 
   // Which step the app is at decides which buttons do anything, so its
-  // transitions are the first thing a bug report needs (ADR-036). The backend
+  // transitions are the first thing a bug report needs. The backend
   // logs them too; this is what the screen saw.
   useEffect(() => {
     if (session === null) return;
@@ -344,10 +344,10 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   }, [session?.revision]);
 
   // Load saved configuration. The connection itself is the backend's: it
-  // starts as the app does (ADR-024 - the device identity is created and
+  // starts as the app does (the device identity is created and
   // presented by the Rust side without any user interaction).
   useEffect(() => {
-    // Load sample rate (ADR-013)
+    // Load sample rate
     configGetSampleRate()
       .then(setLocalSampleRate)
       .catch((e) => console.log("Failed to load sample rate, using default:", e));
@@ -367,7 +367,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
       .catch((e) => console.log("Failed to load the signaling server URL:", e));
   }, [phase, helping]);
 
-  // Every audio setting change is announced with this (settings.rs, ADR-043),
+  // Every audio setting change is announced with this (settings.rs),
   // whether the settings window, a helping peer or a test made it, so the
   // mixer's quality badge reflects the change immediately instead of only
   // after an app restart. Mirrors the i18n:language-changed handling in App.tsx.
@@ -384,7 +384,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
 
   const [reconnectPending, setReconnectPending] = useState(false);
 
-  // The prompt only informs unless retrying does something (REQ-CON-110).
+  // The prompt only informs unless retrying does something.
   const handleReconnect = useCallback(async () => {
     setReconnectPending(true);
     try {
@@ -410,7 +410,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   }, []);
 
   // Every way into a room - create, a code, the test room, a link - asks which
-  // name to use first, unless the person turned that off (REQ-CON-141). When
+  // name to use first, unless the person turned that off. When
   // the settings cannot be read the room is entered with the saved name rather
   // than keeping the person out.
   const [namePrompt, setNamePrompt] = useState<{ entry: Entry; initialName: string } | null>(null);
@@ -468,7 +468,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   );
   // A link from another app opens the room with the microphone muted: nothing
   // the person pressed in this app started it, and they may not be looking at
-  // it. They unmute when they mean to speak (REQ-CON-139).
+  // it. They unmute when they mean to speak.
   const handleJoinRoomFromLink = useCallback(
     (code: string) => requestEntry({ kind: "join", code, muted: true }),
     [requestEntry]
@@ -477,7 +477,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
     sessionReconnect().catch(() => undefined);
   }, []);
 
-  // An invite link from the OS joins the room it names (REQ-CON-103). A link
+  // An invite link from the OS joins the room it names. A link
   // with a malformed code surfaces as a room-level error instead of being
   // dropped silently, whether it arrived at launch or while running.
   //
@@ -524,10 +524,10 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
     };
   }, [hasConnection, helping]);
 
-  // Helping with settings (ADR-043). Its events come from the backend as the
+  // Helping with settings. Its events come from the backend as the
   // room's events are read.
   const settingsHelp = useSettingsHelp(connectionId, participants);
-  // Asking participants to buffer longer, and their asks of this app (ADR-097)
+  // Asking participants to buffer longer, and their asks of this app
   // A helper's window shows the helped app's room and changes none of its buffers.
   const bufferRequests = useBufferRequests(helping ? null : connectionId, participants);
   // A helper's window shows the helped app's room: it does not record it
@@ -550,7 +550,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   });
 
   // Footer indicator inputs: the room as one, which is doing as well as its
-  // worst link. The quality band comes from the core library (REQ-LAT-121);
+  // worst link. The quality band comes from the core library;
   // nothing here re-derives it from RTT and loss.
   const overall = useMemo(() => overallLink(links), [links]);
 
@@ -579,12 +579,12 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
     [participants, t]
   );
 
-  // Bandwidth warning. Bitrate adaptation is out of scope (ADR-022), so a narrow
+  // Bandwidth warning. Bitrate adaptation is out of scope, so a narrow
   // link is reported rather than worked around.
   //
   // "no_signal" (zero bytes in the last interval) is reported separately from
   // "insufficient": no packets arriving at all is a dead connection, not a
-  // narrow link, and must not be worded as a bandwidth problem (REQ-LAT-127).
+  // narrow link, and must not be worded as a bandwidth problem.
   //
   // Each link has its own reading. The worst one is what is said; with several
   // participants, whose packets are not arriving is said too.
@@ -606,7 +606,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   }, [worstBandwidth, links, participants.length, namesOf, t]);
 
   // A peer's app is older than the signed key exchange, so no audio link is made to it. The
-  // user is told why, rather than left with a participant who is never heard (REQ-SEC-006).
+  // user is told why, rather than left with a participant who is never heard.
   const oldApps = useMemo(
     () => links.filter((link) => link.connection_error === PEER_APP_TOO_OLD),
     [links]
@@ -619,7 +619,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
   }, [oldApps, participants.length, namesOf, t]);
 
   // The links automatic recovery gave up on. The person is asked whether to
-  // try again (REQ-CON-110); with several participants, told with whom.
+  // try again; with several participants, told with whom.
   const reconnectPrompt = useMemo(() => {
     // Trying again cannot help with a peer whose app is too old
     const lost = links.filter(
@@ -901,7 +901,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
     if (phase === "connected") {
       participants.forEach((peer) => {
         const peerState = mixer?.peers[peer.id] ?? DEFAULT_PEER_STRIP;
-        // Their own audio settings and their own level (ADR-013), from the
+        // Their own audio settings and their own level, from the
         // link to them
         const link = links.find((l) => l.peer_id === peer.id);
         const level = peerState.muted ? 0 : (link?.level ?? 0);
@@ -1022,10 +1022,10 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
     // The invite code as the server reported it. No fallback derived from the
     // room's UUID: those six characters look exactly like an invite code but
     // no room can be joined with them, so a participant who copied it could
-    // not invite anyone (ADR-026).
+    // not invite anyone.
     const roomCode = room?.invite_code ?? "";
     const participantCount = participants.filter((p) => !p.departed).length + 1;
-    // Whose audio takes longest to go there and back is marked (REQ-LAT-102)
+    // Whose audio takes longest to go there and back is marked
     const slowest = slowestPeerId(links);
 
     return (
@@ -1185,7 +1185,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
               />
             )}
 
-            {/* Leaving is the helped person's own (ADR-044 §3). */}
+            {/* Leaving is the helped person's own. */}
             {!helping && (
               <button
                 type="button"
@@ -1211,7 +1211,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
             />
           </div>
 
-          {/* Chat (docked column). Speaking is the helped person's own (ADR-044 §3). */}
+          {/* Chat (docked column). Speaking is the helped person's own. */}
           {!helping && (
             <div className="main-chat-column">
               <ChatPanelAdapter connId={connectionId} myPeerId={room?.peer_id ?? null} />
@@ -1279,7 +1279,7 @@ export function MainScreen({ onSettingsClick, onCheckConnectionClick, helper }: 
               <Toast
                 type="error"
                 message={t(
-                  // The audio runs between the apps, not through the server (REQ-CON-150)
+                  // The audio runs between the apps, not through the server
                   links.some((link) => link.connection_state === "connected")
                     ? "session.signalingReconnect.failedAudioGoesOn"
                     : "session.signalingReconnect.failed",

@@ -1,4 +1,4 @@
-//! Where a debugger listens to, or feeds, the audio path of a running session (ADR-044).
+//! Where a debugger listens to, or feeds, the audio path of a running session.
 //!
 //! The paths call the taps on every frame, on the audio threads, so a tap never waits. Nothing is
 //! set in a release build and each call is then one load of an empty cell.

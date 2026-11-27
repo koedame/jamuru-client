@@ -120,7 +120,7 @@
 }
 
 /*
- * Quality bands (REQ-LAT-121). Classified by the core library; these rules only
+ * Quality bands. Classified by the core library; these rules only
  * pick the colour. Applied after the status rules so a measured quality wins.
  */
 .connection-indicator--quality-good {

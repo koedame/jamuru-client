@@ -1,6 +1,6 @@
 /**
  * SettingsHelpMirror - the helper's settings panel, on the helped person's own
- * screen (REQ-RMT-034). While the helper has the panel open the helped person
+ * screen. While the helper has the panel open the helped person
  * sees the same panel beside their own screen, so the frames that show where the
  * helper is pointing inside it have something to point at. It shows and changes
  * their own app's settings, and does not take the screen over: they can close it

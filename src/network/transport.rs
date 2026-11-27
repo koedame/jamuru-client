@@ -224,7 +224,7 @@ pub(super) fn destination_for(local: SocketAddr, addr: SocketAddr) -> SocketAddr
 ///
 /// Exposed so a caller can bind early - to learn its port and advertise it -
 /// and hand the socket to whichever runtime will actually poll it
-/// ([`UdpTransport::from_std`]). See ADR-026.
+/// ([`UdpTransport::from_std`]).
 ///
 /// An unspecified IPv6 address (`[::]:port`) gives a dual-stack socket - one that takes IPv4
 /// peers too - on every system (Windows makes it IPv6-only unless told otherwise).
@@ -255,7 +255,7 @@ pub fn bind_std(addr: &str) -> Result<std::net::UdpSocket, NetworkError> {
 }
 
 /// Binds the socket the audio of a whole session goes through: one dual-stack socket, so
-/// that a peer is reached over IPv6 when both ends have it and over IPv4 otherwise (ADR-093).
+/// that a peer is reached over IPv6 when both ends have it and over IPv4 otherwise.
 /// Falls back to an IPv4 socket where the system has no IPv6 or will not make a socket take
 /// both.
 pub fn bind_audio_std(port: u16) -> Result<std::net::UdpSocket, NetworkError> {
@@ -281,7 +281,7 @@ impl UdpTransport {
     /// reactor of whichever runtime created it and stops receiving wakeups if
     /// moved to another, so the conversion has to happen on the runtime that
     /// will poll it - `std::net::UdpSocket` is just a descriptor and moves
-    /// freely. See ADR-026.
+    /// freely.
     ///
     /// Must be called from within the Tokio runtime that will drive this
     /// transport.
@@ -728,7 +728,6 @@ mod tests {
         bind_std("[::1]:0").is_ok()
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_the_system_has_ipv6_the_audio_socket_is_dual_stack() {
         let socket = bind_audio_std(0).unwrap();
@@ -743,7 +742,6 @@ mod tests {
         }
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_the_address_is_ipv6_unspecified_the_socket_takes_ipv4_peers_too() {
         if !ip6_loopback_is_usable() {
@@ -755,7 +753,6 @@ mod tests {
         assert!(IpFamilies::of_std(&socket).v4);
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_a_socket_is_ipv6_only_it_does_not_reach_ipv4_hosts() {
         let families = IpFamilies::of_local("[::1]:5000".parse().unwrap(), true);
@@ -765,7 +762,6 @@ mod tests {
         assert!(families.reach("2001:db8::1".parse().unwrap()));
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_an_address_is_ipv4_mapped_it_is_the_ipv4_address() {
         let mapped: SocketAddr = "[::ffff:192.0.2.1]:5000".parse().unwrap();
@@ -780,7 +776,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-CON-145
     #[test]
     fn when_an_ipv6_socket_sends_to_ipv4_the_destination_is_ipv4_mapped() {
         let v6: SocketAddr = "[::]:5000".parse().unwrap();
@@ -795,7 +790,6 @@ mod tests {
         assert_eq!(destination_for(v6, v6_peer), v6_peer);
     }
 
-    /// Verifies: REQ-CON-145
     #[tokio::test]
     async fn when_a_dual_stack_socket_talks_to_an_ipv4_peer_both_see_ipv4_addresses() {
         if !ip6_loopback_is_usable() {
@@ -819,7 +813,6 @@ mod tests {
         assert_eq!(heard_by_audio, peer.local_addr());
     }
 
-    /// Verifies: REQ-CON-145
     #[tokio::test]
     async fn when_a_dual_stack_socket_talks_to_an_ipv6_peer_the_audio_arrives() {
         if !ip6_loopback_is_usable() {
@@ -864,7 +857,6 @@ mod tests {
         (limited, own)
     }
 
-    /// Verifies: REQ-CON-181
     #[cfg(unix)]
     #[tokio::test]
     async fn when_a_dual_stack_socket_sends_to_an_ipv4_peer_with_a_hop_limit_the_packet_has_it_and_the_next_one_does_not(
@@ -878,7 +870,6 @@ mod tests {
         assert!(own > 3, "the socket's own hop limit came back: {own}");
     }
 
-    /// Verifies: REQ-CON-181
     #[cfg(unix)]
     #[tokio::test]
     async fn when_a_dual_stack_socket_sends_to_an_ipv6_peer_with_a_hop_limit_the_packet_has_it_and_the_next_one_does_not(
@@ -895,7 +886,6 @@ mod tests {
         assert!(own > 3, "the socket's own hop limit came back: {own}");
     }
 
-    /// Verifies: REQ-CON-181
     #[cfg(unix)]
     #[tokio::test]
     async fn when_an_ipv4_socket_sends_with_a_hop_limit_the_packet_has_it_and_the_next_one_does_not(
@@ -911,8 +901,6 @@ mod tests {
 
     /// The other links of a room send their audio through the same socket while one link sends
     /// with a small hop limit; none of their packets may go out with it.
-    ///
-    /// Verifies: REQ-CON-181
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn when_one_link_sends_with_a_hop_limit_while_another_sends_audio_through_the_socket_the_audio_keeps_the_sockets_own(

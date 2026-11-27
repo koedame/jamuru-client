@@ -2,7 +2,7 @@
 //!
 //! Turns the raw RTT and packet loss figures a connection reports into the three
 //! states the UI shows. The thresholds live here rather than in the UI or in a
-//! test, so there is exactly one definition of what "good" means (REQ-LAT-121).
+//! test, so there is exactly one definition of what "good" means.
 
 use serde::{Deserialize, Serialize};
 
@@ -63,7 +63,7 @@ impl ConnectionQuality {
 
     /// Whether this quality is good enough to recommend the zero-latency preset
     ///
-    /// Zero-latency has no jitter protection at all (ADR-008), so anything below
+    /// Zero-latency has no jitter protection at all, so anything below
     /// [`ConnectionQuality::Good`] would turn network variation directly into
     /// audible disruption.
     pub fn suits_zero_latency(&self) -> bool {
@@ -73,7 +73,7 @@ impl ConnectionQuality {
 
 /// Tracks quality over time so a change can be reported once, not every sample
 ///
-/// The UI warns the user when quality degrades (REQ-LAT-107). Without this the
+/// The UI warns the user when quality degrades. Without this the
 /// caller would have to re-warn on every stats poll.
 #[derive(Debug, Default)]
 pub struct QualityMonitor {
@@ -138,8 +138,6 @@ mod tests {
 
     /// The three bands from latency.feature, including the cases where RTT is
     /// fine but loss is not.
-    ///
-    /// Verifies: REQ-LAT-121
     #[test]
     fn classification_matches_the_specified_bands() {
         // (rtt_ms, loss, expected)
@@ -168,8 +166,6 @@ mod tests {
     }
 
     /// An unmeasured link must not be reported as good.
-    ///
-    /// Verifies: REQ-LAT-121
     #[test]
     fn unmeasured_values_classify_as_poor() {
         assert_eq!(
@@ -186,9 +182,7 @@ mod tests {
         );
     }
 
-    /// Only zero-latency's own band may recommend it (ADR-008).
-    ///
-    /// Verifies: REQ-LAT-028
+    /// Only zero-latency's own band may recommend it.
     #[test]
     fn only_good_links_suit_zero_latency() {
         assert!(ConnectionQuality::Good.suits_zero_latency());
@@ -198,8 +192,6 @@ mod tests {
 
     /// A change must be reported once, on the edge, and degradations must be
     /// distinguishable from recoveries.
-    ///
-    /// Verifies: REQ-LAT-107
     #[test]
     fn monitor_reports_each_transition_once() {
         let mut monitor = QualityMonitor::new();

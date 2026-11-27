@@ -154,7 +154,6 @@ mod tests {
         Wrapped(outer, Some(Box::new(Wrapped(inner, None))))
     }
 
-    /// Verifies: REQ-TEL-017
     #[test]
     fn when_the_server_answers_with_a_4xx_or_5xx_status_the_failure_is_named_by_its_class() {
         assert_eq!(SignalingFailure::of_status(404), SignalingFailure::Http4xx);
@@ -164,7 +163,6 @@ mod tests {
         assert_eq!(SignalingFailure::of_status(302), SignalingFailure::Other);
     }
 
-    /// Verifies: REQ-TEL-017
     #[test]
     fn when_the_error_chain_says_the_name_did_not_resolve_the_failure_is_dns() {
         let error = chain(
@@ -174,7 +172,6 @@ mod tests {
         assert_eq!(SignalingFailure::of_error(&error), SignalingFailure::Dns);
     }
 
-    /// Verifies: REQ-TEL-017
     #[test]
     fn when_the_error_chain_says_the_certificate_was_refused_the_failure_is_tls() {
         let error = chain(
@@ -184,7 +181,6 @@ mod tests {
         assert_eq!(SignalingFailure::of_error(&error), SignalingFailure::Tls);
     }
 
-    /// Verifies: REQ-TEL-017
     #[test]
     fn when_an_io_error_in_the_chain_timed_out_the_failure_is_a_timeout() {
         let error = std::io::Error::new(std::io::ErrorKind::TimedOut, "no answer");
@@ -194,7 +190,6 @@ mod tests {
         );
     }
 
-    /// Verifies: REQ-TEL-017
     #[test]
     fn when_nothing_in_the_chain_is_recognised_the_failure_is_other() {
         let error = chain("error sending request", "connection refused");
