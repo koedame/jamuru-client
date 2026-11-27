@@ -24,21 +24,18 @@ function box(el: Element, left: number, top: number, width: number, height: numb
 describe("interactiveOf", () => {
   beforeEach(() => document.body.replaceChildren());
 
-  // Verifies: REQ-RMT-034
   it("ボタンの中の要素を指したとき、そのボタンが部品として返ること", () => {
     mount('<button id="b"><span id="label">Mute</span></button>');
 
     expect(interactiveOf(document.getElementById("label"))).toBe(document.getElementById("b"));
   });
 
-  // Verifies: REQ-RMT-034
   it("押せもフォーカスもできない要素を指したとき、部品は無いこと", () => {
     mount('<div id="plain"><p id="text">hello</p></div>');
 
     expect(interactiveOf(document.getElementById("text"))).toBeNull();
   });
 
-  // Verifies: REQ-RMT-034
   it("使えないボタンや、フォーカスを受けない要素を指したとき、部品は無いこと", () => {
     mount('<button id="off" disabled>x</button><div id="skip" tabindex="-1">y</div><div id="aria" role="button" aria-disabled="true">z</div>');
 
@@ -47,7 +44,6 @@ describe("interactiveOf", () => {
     expect(interactiveOf(document.getElementById("aria"))).toBeNull();
   });
 
-  // Verifies: REQ-RMT-034
   it("リンク・入力欄・role で押せるとされた要素・data-presence-id を付けた要素は、部品になること", () => {
     mount(
       '<a id="a" href="/x">a</a><input id="i" /><div id="r" role="switch"></div><div id="p" data-presence-id="fader"></div><input id="h" type="hidden" />'
@@ -63,7 +59,6 @@ describe("interactiveOf", () => {
 describe("presenceIdOf", () => {
   beforeEach(() => document.body.replaceChildren());
 
-  // Verifies: REQ-RMT-034
   it("data-presence-id と data-testid があるとき、data-presence-id が先に使われること", () => {
     mount('<button id="b" data-presence-id="mute" data-testid="mixer-mute">Mute</button><button id="c" data-testid="leave-room">x</button>');
 
@@ -71,7 +66,6 @@ describe("presenceIdOf", () => {
     expect(presenceIdOf(document.getElementById("c")!)).toBe("leave-room");
   });
 
-  // Verifies: REQ-RMT-034
   it("名前の印が無い部品のとき、文字ではなくタグの並びから名前が決まり、言語が違っても同じになること", () => {
     const html = (label: string) =>
       `<section data-testid="mixer"><button>${label}</button><button>Other</button></section>`;
@@ -84,21 +78,18 @@ describe("presenceIdOf", () => {
     expect(english).toBe(japanese);
   });
 
-  // Verifies: REQ-RMT-034
   it("描くたびに変わる id を持つ部品のとき、その id は名前に使われないこと", () => {
     mount('<div data-testid="panel"><input id=":r3:" /></div>');
 
     expect(presenceIdOf(document.querySelector("input")!)).toBe('div[data-testid="panel"] > input');
   });
 
-  // Verifies: REQ-RMT-034
   it("名前が長すぎるとき、部品は名指しできないものとして扱われること", () => {
     mount(`<button data-presence-id="${"a".repeat(201)}">x</button>`);
 
     expect(presenceIdOf(document.querySelector("button")!)).toBeNull();
   });
 
-  // Verifies: REQ-RMT-034
   it("名前から部品を探すとき、同じ名前の部品が見つかり、無い名前では見つからないこと", () => {
     mount('<button data-testid="a">a</button><button data-testid="b">b</button>');
 
@@ -108,7 +99,6 @@ describe("presenceIdOf", () => {
 });
 
 describe("targetOf", () => {
-  // Verifies: REQ-RMT-034
   it("部品の中のどこを指したかが、0 から 1 の割合で返ること", () => {
     mount('<button data-testid="b">x</button>');
     const button = document.querySelector("button")!;
@@ -147,7 +137,6 @@ describe("watchPresence", () => {
     vi.useRealTimers();
   });
 
-  // Verifies: REQ-RMT-034
   it("ボタンの上でポインタが動いたとき、部品の名前とその中の位置が送られること", () => {
     start();
 
@@ -156,7 +145,6 @@ describe("watchPresence", () => {
     expect(sent.slice(-1)[0]).toEqual({ hover: { id: "mute", x: 0.5, y: 0.25 }, focus: null });
   });
 
-  // Verifies: REQ-RMT-034
   it("部品の外でポインタが動いたとき、何も送られないこと（動きの軌跡は送らない）", () => {
     start();
     refresh();
@@ -170,7 +158,6 @@ describe("watchPresence", () => {
     expect(sent).toEqual([]);
   });
 
-  // Verifies: REQ-RMT-034
   it("部品の上から外へ出たとき、指している部品が無くなったことが 1 度だけ送られること", () => {
     start();
     point(document.querySelector("button")!, 10, 10);
@@ -183,7 +170,6 @@ describe("watchPresence", () => {
     expect(sent).toEqual([{ hover: null, focus: null }]);
   });
 
-  // Verifies: REQ-RMT-034
   it("ポインタが部品の上で動き続けたとき、送信は 1 秒に 10 回までで、最後の位置は落とさないこと", () => {
     start();
     const button = document.querySelector("button")!;
@@ -200,7 +186,6 @@ describe("watchPresence", () => {
     expect(sent.slice(-1)[0]?.hover).toEqual({ id: "mute", x: 0.99, y: 0.1 });
   });
 
-  // Verifies: REQ-RMT-034
   it("入力欄にフォーカスが移ったとき、その部品が focus として送られ、外れたら無くなること", () => {
     start();
     const input = document.querySelector("input")!;
@@ -215,7 +200,6 @@ describe("watchPresence", () => {
     expect(sent.slice(-1)[0]?.focus).toBeNull();
   });
 
-  // Verifies: REQ-RMT-034
   it("手伝う人の設定パネルが開いたとき、動きが無くても panel つきの状態が送られること", () => {
     let panel = false;
     start(() => ({ panel }));
@@ -229,7 +213,6 @@ describe("watchPresence", () => {
     expect(sent.slice(-1)[0]).toEqual({ hover: null, focus: null, panel: true });
   });
 
-  // Verifies: REQ-RMT-034
   it("止めたあとにポインタが動いたとき、何も送られないこと", () => {
     start();
     refresh();

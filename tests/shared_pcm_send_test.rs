@@ -1,5 +1,5 @@
 //! One frame going to several links is encoded once, and each link sends what it would have
-//! sent had it encoded the frame itself (REQ-AUD-135)
+//! sent had it encoded the frame itself
 
 mod common;
 
@@ -56,7 +56,6 @@ fn heard(peer: &common::Peer, count: usize) -> Vec<(u32, u32, Vec<u8>)> {
     audio
 }
 
-/// Verifies: REQ-AUD-135
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn when_a_frame_is_shared_the_peer_gets_the_packets_its_own_encoding_would_send() {
     let (own, own_peer) = link(encoding(CodecType::Pcm, 2)).await;
@@ -86,7 +85,6 @@ async fn when_a_frame_is_shared_the_peer_gets_the_packets_its_own_encoding_would
     );
 }
 
-/// Verifies: REQ-AUD-135
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn when_a_frame_goes_to_many_links_each_gets_the_same_bytes_under_its_own_numbers() {
     let mut links = Vec::new();
@@ -115,7 +113,6 @@ async fn when_a_frame_goes_to_many_links_each_gets_the_same_bytes_under_its_own_
     );
 }
 
-/// Verifies: REQ-AUD-135
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn when_a_frame_is_shared_each_link_counts_the_samples_that_went_past_0_dbfs() {
     let (a, _a_peer) = link(encoding(CodecType::Pcm, 2)).await;
@@ -137,7 +134,6 @@ async fn when_a_frame_is_shared_each_link_counts_the_samples_that_went_past_0_db
     );
 }
 
-/// Verifies: REQ-AUD-135
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn when_a_link_cannot_send_yet_it_takes_no_sequence_number() {
     let peer = common::Peer::bind();
@@ -171,7 +167,6 @@ async fn when_a_link_cannot_send_yet_it_takes_no_sequence_number() {
     );
 }
 
-/// Verifies: REQ-AUD-135
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn when_a_link_does_not_carry_pcm_of_the_shared_channels_it_encodes_its_own() {
     let (mono, mono_peer) = link(encoding(CodecType::Pcm, 1)).await;

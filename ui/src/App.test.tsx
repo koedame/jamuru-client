@@ -99,7 +99,6 @@ describe('App', () => {
     await waitFor(() => expect(mainScreenMounted).toHaveBeenCalledTimes(1));
   });
 
-  // Verifies: REQ-UPD-025
   it('the window is opened with the updating hash, the updating screen shows and the main screen never mounts', () => {
     window.location.hash = '#/updating';
 
@@ -110,9 +109,7 @@ describe('App', () => {
     expect(updateAppReady).not.toHaveBeenCalled();
   });
 
-  // A version just installed is kept only once its screen is up (ADR-089).
-  //
-  // Verifies: REQ-UPD-027
+  // A version just installed is kept only once its screen is up.
   it('the main screen has mounted, the backend is told the app is up, once and after the mount', async () => {
     const order: string[] = [];
     mainScreenMounted.mockImplementation(() => order.push('mounted'));
@@ -127,8 +124,6 @@ describe('App', () => {
 
   // A release whose terms changed opens on the consent screen; reading them
   // must not count as a start that failed.
-  //
-  // Verifies: REQ-UPD-027
   it('the consent screen shows, the backend is told the app is up too', async () => {
     termsGet.mockResolvedValue({ version: 2, accepted: false, text: '# 利用規約' });
 
@@ -138,7 +133,6 @@ describe('App', () => {
     await waitFor(() => expect(updateAppReady).toHaveBeenCalledTimes(1));
   });
 
-  // Verifies: REQ-UPD-027
   it('the terms cannot be read or the settings window opens, the backend is not told the app is up', async () => {
     termsGet.mockRejectedValue('no backend');
     const { unmount } = render(<App />);
@@ -157,8 +151,6 @@ describe('App', () => {
 
   // The backend holds back everything that reaches the network until the
   // agreement is recorded; the screen must not be the one thing that goes on.
-  //
-  // Verifies: REQ-TRM-001
   it('the terms were not agreed to, the consent screen shows first and the main screen does not mount', async () => {
     termsGet.mockResolvedValue({ version: 1, accepted: false, text: '# 利用規約' });
 
@@ -169,7 +161,6 @@ describe('App', () => {
     expect(mainScreenMounted).not.toHaveBeenCalled();
   });
 
-  // Verifies: REQ-TRM-001
   it('the terms are agreed to on the consent screen, the version shown is recorded and the main screen mounts', async () => {
     termsGet.mockResolvedValue({ version: 7, accepted: false, text: '# 利用規約' });
 
@@ -182,7 +173,6 @@ describe('App', () => {
     expect(termsAccept).toHaveBeenCalledWith(7);
   });
 
-  // Verifies: REQ-TRM-002
   it('the agreement cannot be saved, the consent screen stays and says why', async () => {
     termsGet.mockResolvedValue({ version: 1, accepted: false, text: '# 利用規約' });
     termsAccept.mockRejectedValue('disk full');
@@ -211,8 +201,6 @@ describe('App', () => {
   // When a window (re)starts
   // Then it shows the language saved in config, not whatever this webview's
   // own localStorage happens to have
-  //
-  // Verifies: REQ-I18N-104
   it('applies the language saved in config at startup', async () => {
     configGetLanguage.mockResolvedValue('ja');
 
@@ -225,8 +213,6 @@ describe('App', () => {
   // When a window starts
   // Then it does not force a language - it leaves whatever this window
   // detected on its own (browser/localStorage) alone
-  //
-  // Verifies: REQ-I18N-101
   it('does not override the detected language when config has none saved', async () => {
     configGetLanguage.mockResolvedValue(null);
     const changeLanguageSpy = vi.spyOn(i18n, 'changeLanguage');
@@ -247,8 +233,6 @@ describe('App', () => {
   // Then it switches immediately - before this was fixed, only the window
   // the user changed it in updated; every other open window kept showing
   // the old language until restarted.
-  //
-  // Verifies: REQ-I18N-102
   it('switches language immediately when another window broadcasts a change', async () => {
     render(<App />);
 

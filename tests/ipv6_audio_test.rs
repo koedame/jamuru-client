@@ -1,5 +1,5 @@
 //! Audio over IPv6, and over IPv4 and IPv6 at once, through the one dual-stack socket an app
-//! has for the whole room (ADR-093).
+//! has for the whole room.
 //!
 //! The peers are on this machine's loopback: `::1` for IPv6, `127.0.0.1` for IPv4.
 
@@ -111,7 +111,6 @@ async fn audio_reaches(from: &Opened, to: &Side) {
     }
 }
 
-/// Verifies: REQ-CON-145
 #[tokio::test]
 async fn when_the_peer_is_reached_over_ipv6_audio_flows_both_ways_and_the_route_is_ipv6() {
     if !has_ipv6() {
@@ -134,7 +133,6 @@ async fn when_the_peer_is_reached_over_ipv6_audio_flows_both_ways_and_the_route_
     assert!(from_app.connection.remote_addr().is_ipv6());
 }
 
-/// Verifies: REQ-CON-145
 #[tokio::test]
 async fn when_the_peer_is_reached_over_ipv4_audio_flows_and_its_address_is_the_ipv4_one() {
     if !has_ipv6() {
@@ -162,7 +160,6 @@ async fn when_the_peer_is_reached_over_ipv4_audio_flows_and_its_address_is_the_i
     );
 }
 
-/// Verifies: REQ-CON-145
 #[tokio::test]
 async fn when_one_peer_is_ipv4_and_another_ipv6_one_socket_carries_both_links() {
     if !has_ipv6() {
@@ -202,7 +199,6 @@ async fn when_one_peer_is_ipv4_and_another_ipv6_one_socket_carries_both_links() 
     assert!(app_to_v4.connection.remote_addr().is_ipv4());
 }
 
-/// Verifies: REQ-CON-145
 #[tokio::test]
 async fn when_a_peer_has_both_an_ipv4_and_an_ipv6_address_the_one_that_answers_is_chosen() {
     if !has_ipv6() {

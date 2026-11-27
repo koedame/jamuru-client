@@ -53,7 +53,6 @@ describe('the device delay measurement in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-GUI-034
   it('the user opens the Devices tab, the measurement section is there', async () => {
     fakeBackend();
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -61,7 +60,6 @@ describe('the device delay measurement in the settings panel', () => {
     expect(await screen.findByTestId('device-delay')).toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-034
   it('the user is in a room and presses the button, the app is asked to measure', async () => {
     const commands = fakeBackend();
     render(<SettingsPanelAdapter initialTab="devices" />);

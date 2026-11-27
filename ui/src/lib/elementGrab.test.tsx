@@ -58,8 +58,6 @@ describe("element grab", () => {
   // Given Alt+Shift held over a button
   // When it is clicked
   // Then the element's report is on the clipboard and the button's own click did not run
-  //
-  // Verifies: REQ-RMT-033
   it("copies the element and swallows the click, when Alt and Shift are held", async () => {
     const onClick = vi.fn();
     render(<button data-testid="go" onClick={onClick}>Go</button>);
@@ -82,8 +80,6 @@ describe("element grab", () => {
   // Given only Shift held
   // When a button is clicked
   // Then nothing is highlighted or copied and the button works as usual
-  //
-  // Verifies: REQ-RMT-033
   it("does nothing, when only Shift is held", () => {
     const onClick = vi.fn();
     render(<button onClick={onClick}>Go</button>);
@@ -100,8 +96,6 @@ describe("element grab", () => {
   // Given the shortcut was active
   // When a key is released
   // Then the highlight goes and clicks work as usual again
-  //
-  // Verifies: REQ-RMT-033
   it("stops and removes the highlight, when Alt or Shift is released", () => {
     const onClick = vi.fn();
     render(<button onClick={onClick}>Go</button>);
@@ -119,8 +113,6 @@ describe("element grab", () => {
   // Given the shortcut was pressed before the pointer moved
   // When it is pressed
   // Then the element under the last known pointer position is highlighted at once
-  //
-  // Verifies: REQ-RMT-033
   it("highlights the element under the last pointer position, when the keys are pressed without moving", () => {
     render(<button>Go</button>);
     pointAtButton();
@@ -133,8 +125,6 @@ describe("element grab", () => {
   // Given the highlight is on screen
   // When the report is built
   // Then the page itself carries no mark of it, so what is copied is what the person saw
-  //
-  // Verifies: REQ-RMT-033
   it("leaves the element's own style alone, when it highlights", () => {
     render(<button>Go</button>);
     press({ altKey: true, shiftKey: true });

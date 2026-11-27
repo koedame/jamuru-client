@@ -1,5 +1,5 @@
 /**
- * DeviceDelayField: the device delay measurement in the Devices tab (REQ-GUI-034)
+ * DeviceDelayField: the device delay measurement in the Devices tab
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -39,7 +39,6 @@ const figure = (delay_ms: number, over: Partial<NonNullable<DeviceDelayStatus["f
 });
 
 describe("DeviceDelayField", () => {
-  // Verifies: REQ-GUI-034
   it("部屋に入っていて何も測っていないとき、測るボタンが押せて、押すと測りが始まること", () => {
     const props = show(idle);
 
@@ -49,7 +48,6 @@ describe("DeviceDelayField", () => {
     expect(screen.getByText(en.settings.devices.delay.none)).toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-034
   it("部屋に入っていないとき、測るボタンが押せず、部屋に入るよう案内が出ること", () => {
     show({ ...idle, session_running: false });
 
@@ -57,7 +55,6 @@ describe("DeviceDelayField", () => {
     expect(screen.getByText(en.settings.devices.delay.needsRoom)).toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-034
   it("手伝う側の画面のとき、測るボタンが押せず、測るのは手伝われる人だと案内が出ること", () => {
     show(idle, { canStart: false });
 
@@ -65,7 +62,6 @@ describe("DeviceDelayField", () => {
     expect(screen.getByText(en.settings.devices.delay.helperCannotStart)).toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-034
   it("測っている最中は、どの音の何段目かが出て、ボタンは止めるに変わること", () => {
     const props = show({ ...idle, running: true, stimulus: "tone", step: 3, steps: 8 });
 
@@ -76,7 +72,6 @@ describe("DeviceDelayField", () => {
     expect(props.onCancel).toHaveBeenCalledTimes(1);
   });
 
-  // Verifies: REQ-GUI-034
   it("安定して測れたとき、遅延と安定を出し、見直しの案内は出さないこと", () => {
     show({ ...idle, figure: figure(23.04) });
 
@@ -85,7 +80,6 @@ describe("DeviceDelayField", () => {
     expect(screen.queryByTestId("device-delay-review")).toBeNull();
   });
 
-  // Verifies: REQ-GUI-034
   it("100 ms を超える遅延のとき、機器の設定を見直す案内が出ること", () => {
     show({ ...idle, figure: figure(140, { needs_review: true, stability: "slightly_shaky" }) });
 
@@ -93,14 +87,12 @@ describe("DeviceDelayField", () => {
     expect(screen.getByTestId("device-delay-result")).toHaveTextContent("Slightly unsteady");
   });
 
-  // Verifies: REQ-GUI-034
   it("測れなかったとき、理由が出ること", () => {
     show({ ...idle, failure: "no_sound" });
 
     expect(screen.getByTestId("device-delay-failure")).toHaveTextContent("The sound did not come back");
   });
 
-  // Verifies: REQ-GUI-034
   it("使えるすべての失敗の理由と安定の言葉が、日本語にも英語にも用意されていること", () => {
     for (const lang of [ja, en]) {
       const delay = lang.settings.devices.delay;

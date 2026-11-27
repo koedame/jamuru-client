@@ -1,4 +1,4 @@
-//! A bad line to put between two ends of a connection (ADR-124).
+//! A bad line to put between two ends of a connection.
 //!
 //! [`BadLine`] is a UDP relay that carries the datagrams of both ends the way a poor network
 //! would: it delays them, spreads the delays, drops them singly or in runs, reorders and repeats

@@ -5,7 +5,7 @@ name: Room check
 run-name: ${{ inputs.source && format('Room check [{0}]', inputs.source) || 'Room check' }}
 
 # Puts many headless participants into one room on the staging server and
-# checks that everyone hears everyone (ADR-117). The participants run on
+# checks that everyone hears everyone. The participants run on
 # several GitHub-hosted runners of three systems (Linux, Windows, macOS), so one
 # room measures every listening system against every speaking system, and shows
 # whether runners reach each other peer to peer.
@@ -23,13 +23,13 @@ run-name: ${{ inputs.source && format('Room check [{0}]', inputs.source) || 'Roo
 # Before the turns the runners also send UDP packets to each other without the
 # app. A pair of runners that do not reach each other that way is reported as not
 # measured because of the environment; a pair that does and still fails is the
-# app's failure (ADR-118).
+# app's failure.
 #
 # The result also has, per link, the time each way of the round trip takes (up and down), and
-# per runner how well its clock keeps time, which is what a one-way time is given with (ADR-120).
+# per runner how well its clock keeps time, which is what a one-way time is given with.
 #
 # After the room, the runners go one at a time, muted, into a second room of the same server where
-# one fixed participant of the deployment stays, and keep the round trip to it (ADR-130). Together
+# one fixed participant of the deployment stays, and keep the round trip to it. Together
 # with the datacenter each runner is in, that says how far apart the places are, in round trip,
 # from the far end. It is not part of the verdict.
 #

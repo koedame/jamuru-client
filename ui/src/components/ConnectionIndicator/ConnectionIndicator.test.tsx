@@ -1,7 +1,5 @@
 /**
  * ConnectionIndicator component tests
- *
- * Test cases based on docs-spec/ui/components/connection-indicator.md
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -225,12 +223,11 @@ describe('ConnectionIndicator', () => {
     });
   });
 
-  describe('Quality band (REQ-LAT-121)', () => {
+  describe('Quality band', () => {
     // The band is classified in the core library; the component only colours by
     // it. These check the mapping, not the thresholds.
     const bands = ['good', 'fair', 'poor'] as const;
 
-    // Verifies: REQ-LAT-121
     it.each(bands)('applies the %s quality class', (quality) => {
       const { container } = render(
         <ConnectionIndicator status="connected" quality={quality} />
@@ -265,8 +262,7 @@ describe('ConnectionIndicator', () => {
     });
   });
 
-  describe('Device latency (REQ-LAT-122)', () => {
-    // Verifies: REQ-LAT-122
+  describe('Device latency', () => {
     it('shows input and output latency separately from network latency', () => {
       render(
         <ConnectionIndicator

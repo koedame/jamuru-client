@@ -1,6 +1,6 @@
 /**
  * Whether asks to buffer a participant's audio for longer are put to the user
- * or turned down (ADR-097), in the settings panel's General tab, against a
+ * or turned down, in the settings panel's General tab, against a
  * backend that keeps `buffer_asks` in the saved config.
  */
 
@@ -40,7 +40,6 @@ describe('the buffer asks setting in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-GUI-036
   it('the saved setting asks each time, Ask me each time is the choice', async () => {
     fakeBackend({ buffer_asks: 'ask' });
     render(<SettingsPanelAdapter />);
@@ -49,7 +48,6 @@ describe('the buffer asks setting in the settings panel', () => {
     await waitFor(() => expect(select).toHaveValue('ask'));
   });
 
-  // Verifies: REQ-GUI-036
   it('the saved setting takes no asks, Do not take asks is the choice', async () => {
     fakeBackend({ buffer_asks: 'never' });
     render(<SettingsPanelAdapter />);
@@ -58,7 +56,6 @@ describe('the buffer asks setting in the settings panel', () => {
     await waitFor(() => expect(select).toHaveValue('never'));
   });
 
-  // Verifies: REQ-GUI-036
   it('Do not take asks is chosen, the backend is told and keeps it', async () => {
     const saved = { buffer_asks: 'ask' };
     fakeBackend(saved);
@@ -70,7 +67,6 @@ describe('the buffer asks setting in the settings panel', () => {
     await waitFor(() => expect(saved.buffer_asks).toBe('never'));
   });
 
-  // Verifies: REQ-GUI-036
   it('the backend cannot save the choice, the choice goes back to what it was', async () => {
     fakeBackend({ buffer_asks: 'ask' }, true);
     vi.spyOn(console, 'error').mockImplementation(() => {});

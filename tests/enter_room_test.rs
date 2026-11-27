@@ -26,7 +26,6 @@ fn request(entry: RoomEntry, name: &str) -> EnterRequest {
     }
 }
 
-/// Verifies: REQ-CON-135
 #[tokio::test]
 async fn when_a_room_is_made_the_one_who_made_it_is_alone_in_it_and_others_join_by_its_code() {
     let server = FakeSignaling::start();
@@ -61,7 +60,6 @@ async fn when_a_room_is_made_the_one_who_made_it_is_alone_in_it_and_others_join_
     assert_eq!(joined.peers[0].link_key.as_deref(), Some("a-link-key"));
 }
 
-/// Verifies: REQ-CON-135
 #[tokio::test]
 async fn when_the_room_does_not_exist_the_servers_refusal_comes_back_as_it_was_said() {
     let server = FakeSignaling::start();

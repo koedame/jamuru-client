@@ -43,7 +43,6 @@ describe('the terms text', () => {
     expect(container.querySelector('pre')?.textContent).toBe('1. DEFINITIONS\n\n"Software" means');
   });
 
-  // Verifies: REQ-TRM-005
   it('the published terms are drawn, all 15 articles are there and no link can be followed', () => {
     const { container } = render(<TermsText text={terms} />);
 

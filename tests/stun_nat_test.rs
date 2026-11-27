@@ -137,8 +137,6 @@ fn server_reflexive(candidates: &[AddressCandidate]) -> Vec<SocketAddr> {
         .collect()
 }
 
-/// Verifies: REQ-CON-027
-///
 /// Given a NAT that gives the audio socket a public port other than its own,
 /// the address published is the public address and port STUN saw.
 #[tokio::test]
@@ -155,8 +153,6 @@ async fn nat_renumbers_port_then_published_address_is_the_one_stun_saw() {
     assert_eq!(server_reflexive(&candidates), vec![nat.external]);
 }
 
-/// Verifies: REQ-CON-027
-///
 /// A peer that sends to the published address reaches the audio socket. This is
 /// what the port number is for: sending to the socket's own port on the public
 /// address (what was published before) hits nothing.
@@ -179,8 +175,6 @@ async fn peer_sends_to_published_address_then_audio_socket_receives_it() {
     assert_eq!(&buf[..len], b"hello");
 }
 
-/// Verifies: REQ-CON-027
-///
 /// The audio socket may already hold datagrams that are not the STUN reply
 /// (a peer's keep-alive that arrived first); they must not end the query.
 #[tokio::test]
@@ -197,8 +191,6 @@ async fn datagram_arrives_before_stun_reply_then_reply_is_still_found() {
     assert_eq!(server_reflexive(&candidates), vec![nat.external]);
 }
 
-/// Verifies: REQ-CON-027
-///
 /// With no STUN server answering, the host candidates are still offered and no
 /// public address is invented.
 #[tokio::test]

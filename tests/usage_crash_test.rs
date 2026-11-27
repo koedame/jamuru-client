@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use jamjam::telemetry::{EventBody, NoTransport, UsageReporter};
 
-/// Verifies: REQ-TEL-008
 #[test]
 fn when_the_app_panics_only_the_place_is_kept_and_the_next_launch_sends_it() {
     let dir = tempfile::tempdir().unwrap();

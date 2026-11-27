@@ -143,7 +143,7 @@ impl<'a> SettingsScreen<'a> {
     }
 }
 
-/// The About tab's update section (ADR-082).
+/// The About tab's update section.
 pub struct UpdateSection<'a> {
     driver: &'a Driver,
 }
@@ -184,7 +184,7 @@ impl<'a> UpdateSection<'a> {
     }
 }
 
-/// The Diagnostics tab's log file section (ADR-036).
+/// The Diagnostics tab's log file section.
 pub struct DiagnosticsTab<'a> {
     driver: &'a Driver,
 }
@@ -216,7 +216,7 @@ impl<'a> DiagnosticsTab<'a> {
     }
 }
 
-/// The Privacy tab's usage reporting section (ADR-037).
+/// The Privacy tab's usage reporting section.
 pub struct PrivacyTab<'a> {
     driver: &'a Driver,
 }

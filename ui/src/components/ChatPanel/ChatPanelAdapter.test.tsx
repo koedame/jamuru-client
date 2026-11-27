@@ -53,7 +53,6 @@ describe("ChatPanelAdapter", () => {
     vi.useRealTimers();
   });
 
-  // Verifies: REQ-GUI-030
   it("同じ内容が続けて届いたとき、一覧の状態が更新し直されないこと", async () => {
     invokeMock.mockResolvedValue([sample("m1", "hello")]);
     render(<ChatPanelAdapter connId={1} myPeerId="peer-a" />);
@@ -69,7 +68,6 @@ describe("ChatPanelAdapter", () => {
     expect(seenMessages.length).toBe(before);
   });
 
-  // Verifies: REQ-GUI-030
   it("送信に成功したとき、次の定期取得を待たずに自分のメッセージが表示されること", async () => {
     let stored: ReturnType<typeof sample>[] = [];
     invokeMock.mockImplementation(async (cmd: string, args: { content?: string }) => {
@@ -91,7 +89,6 @@ describe("ChatPanelAdapter", () => {
     expect(screen.getByText("hi")).toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-030
   it("送信が失敗したとき、エラーが表示され入力した文章が残ること", async () => {
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "signaling_send_chat") throw new Error("offline");

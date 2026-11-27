@@ -39,7 +39,6 @@ describe('the open router port switch in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-CON-165
   it('the router is asked to open the port, the switch is on', async () => {
     fakeBackend({ open_router_port: true });
     render(<SettingsPanelAdapter />);
@@ -49,7 +48,6 @@ describe('the open router port switch in the settings panel', () => {
     await waitFor(() => expect(toggle).toBeChecked());
   });
 
-  // Verifies: REQ-CON-165
   it('the setting was never saved, the switch is on', async () => {
     fakeBackend({});
     render(<SettingsPanelAdapter />);
@@ -59,7 +57,6 @@ describe('the open router port switch in the settings panel', () => {
     await waitFor(() => expect(toggle).toBeChecked());
   });
 
-  // Verifies: REQ-CON-165
   it('the router is not asked, the switch is off', async () => {
     fakeBackend({ open_router_port: false });
     render(<SettingsPanelAdapter />);
@@ -69,7 +66,6 @@ describe('the open router port switch in the settings panel', () => {
     await waitFor(() => expect(toggle).not.toBeChecked());
   });
 
-  // Verifies: REQ-CON-165
   it('the switch is turned off, the setting is saved as off', async () => {
     const saved = { open_router_port: true };
     fakeBackend(saved);
@@ -85,7 +81,6 @@ describe('the open router port switch in the settings panel', () => {
     ]);
   });
 
-  // Verifies: REQ-CON-165
   it('saving fails, the switch goes back to what is saved', async () => {
     fakeBackend({ open_router_port: true }, true);
     render(<SettingsPanelAdapter />);

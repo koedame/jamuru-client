@@ -62,8 +62,7 @@ impl Default for TestConfig {
 /// `NotImplemented` exists so that a scenario whose infrastructure does not
 /// exist yet reports honestly instead of fabricating a passing measurement.
 /// It is not a failure - the code under test was never exercised - but it is
-/// also not a pass, and `tests/traceability_test.rs` counts the requirement as
-/// unverified (ADR-018).
+/// also not a pass: the requirement it covers stays unverified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TestStatus {

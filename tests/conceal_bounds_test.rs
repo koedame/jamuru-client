@@ -1,5 +1,5 @@
-//! Concealment never plays louder than full scale, however hostile the sound and the loss
-//! (ADR-105). Hostile here means well-formed audio that is as hard on the predictors as audio
+//! Concealment never plays louder than full scale, however hostile the sound and the loss.
+//! Hostile here means well-formed audio that is as hard on the predictors as audio
 //! gets: full-scale square waves, DC, alternating samples and noise, with random gaps,
 //! reordering and length changes.
 
@@ -19,9 +19,6 @@ impl XorShift {
 
 /// Hostile sound with random loss, reordering and length changes, at three rates: whatever is
 /// concealed or played stays finite and within full scale.
-///
-/// Verifies: REQ-AUD-070
-/// Verifies: REQ-AUD-071
 #[test]
 fn hostile_audio_with_random_loss_at_any_rate_plays_within_full_scale() {
     let mut rng = XorShift(0x5EED_1234);

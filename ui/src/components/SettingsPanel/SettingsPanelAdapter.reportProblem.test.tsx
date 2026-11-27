@@ -1,5 +1,5 @@
 /**
- * "Report a problem" in the settings panel (ADR-058): a manual, one-off
+ * "Report a problem" in the settings panel: a manual, one-off
  * send of jamuru.log and a comment, independent of usage reporting.
  */
 

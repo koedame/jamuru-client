@@ -1,4 +1,4 @@
-//! Guards `scripts/make-update-manifest.sh` (ADR-041): the file installed apps
+//! Guards `scripts/make-update-manifest.sh`: the file installed apps
 //! read to learn about a release must never be written for a release that
 //! would not update anyone.
 //!
@@ -91,7 +91,6 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// Verifies: REQ-UPD-009, REQ-UPD-026, REQ-DIST-011
 #[test]
 fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_all() {
     let version = built_version();
@@ -104,7 +103,7 @@ fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_a
     let manifest: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(manifest["version"], version.as_str());
     // What makes the installed version keep itself until this one has
-    // started (REQ-UPD-026).
+    // started.
     assert_eq!(manifest["reports_started"], true);
     let platforms = manifest["platforms"].as_object().unwrap();
     let mut keys: Vec<&String> = platforms.keys().collect();
@@ -145,7 +144,6 @@ fn when_every_platform_is_signed_for_the_built_version_the_manifest_lists_them_a
     );
 }
 
-/// Verifies: REQ-UPD-010
 #[test]
 fn when_the_tag_is_another_version_than_the_one_built_no_manifest_is_written() {
     let version = built_version();
@@ -162,8 +160,6 @@ fn when_the_tag_is_another_version_than_the_one_built_no_manifest_is_written() {
 /// A beta is tagged `v<built version>-beta.<n>` and built as
 /// `<built version>-<n>` (`scripts/build-version.sh`), so that the next beta is
 /// a newer version to the installed one.
-///
-/// Verifies: REQ-UPD-010, REQ-UPD-012
 #[test]
 fn when_the_tag_is_a_beta_of_the_built_version_the_manifest_is_for_the_beta_build() {
     let version = built_version();
@@ -185,8 +181,6 @@ fn when_the_tag_is_a_beta_of_the_built_version_the_manifest_is_for_the_beta_buil
 
 /// A beta built as the release version would be offered as the release, and
 /// never be seen as newer than the next beta.
-///
-/// Verifies: REQ-UPD-012
 #[test]
 fn when_a_beta_is_signed_for_the_release_version_no_manifest_is_written() {
     let version = built_version();
@@ -206,8 +200,6 @@ fn when_a_beta_is_signed_for_the_release_version_no_manifest_is_written() {
 
 /// A release without the 64-bit ARM AppImage would leave every installed
 /// arm64 app failing its update check, so the manifest is not written.
-///
-/// Verifies: REQ-DIST-011
 #[test]
 fn when_the_arm64_appimage_is_missing_no_manifest_is_written() {
     let version = built_version();
@@ -226,7 +218,6 @@ fn when_the_arm64_appimage_is_missing_no_manifest_is_written() {
     );
 }
 
-/// Verifies: REQ-UPD-010
 #[test]
 fn when_the_tag_is_a_beta_of_another_version_no_manifest_is_written() {
     let version = built_version();
@@ -244,7 +235,6 @@ fn when_the_tag_is_a_beta_of_another_version_no_manifest_is_written() {
     );
 }
 
-/// Verifies: REQ-UPD-011
 #[test]
 fn when_a_signature_names_another_version_no_manifest_is_written() {
     let version = built_version();
@@ -262,7 +252,6 @@ fn when_a_signature_names_another_version_no_manifest_is_written() {
     );
 }
 
-/// Verifies: REQ-UPD-011
 #[test]
 fn when_a_signature_names_no_version_no_manifest_is_written() {
     let version = built_version();
@@ -281,7 +270,6 @@ fn when_a_signature_names_no_version_no_manifest_is_written() {
     assert!(output.stdout.is_empty());
 }
 
-/// Verifies: REQ-UPD-011
 #[test]
 fn when_a_platforms_bundle_is_missing_no_manifest_is_written() {
     let version = built_version();

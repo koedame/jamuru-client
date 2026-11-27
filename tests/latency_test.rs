@@ -1,9 +1,5 @@
-//! Latency tests based on docs-spec/behavior/latency.feature
-//!
-//! Verifies the latency budgets from ADR-019 and the jitter buffer / packet
-//! loss behaviour that keeps a session inside them. Requirement IDs are defined
-//! in docs-spec/requirements.md and docs-spec/behavior/latency.feature; see
-//! ADR-018 for how the `Verifies:` annotations are enforced.
+//! Latency tests: the presets' latency budgets and the jitter buffer / packet
+//! loss behaviour that keeps a session inside them.
 
 mod common;
 
@@ -30,7 +26,7 @@ fn playout_frame(value: f32) -> [f32; PLAYOUT_FRAME] {
 }
 
 // ---------------------------------------------------------------------------
-// Latency budgets (ADR-019)
+// Latency budgets
 // ---------------------------------------------------------------------------
 
 /// Given a domestic fiber session on the zero-latency preset
@@ -39,9 +35,6 @@ fn playout_frame(value: f32) -> [f32; PLAYOUT_FRAME] {
 /// This is the top-priority requirement of the project: with a 20ms RTT the
 /// total one-way latency must stay at or under 12ms, which leaves 2ms for the
 /// application.
-///
-/// Verifies: REQ-CORE-001
-/// Verifies: REQ-LAT-115
 #[test]
 fn zero_latency_preset_stays_within_two_milliseconds() {
     let preset = AudioPreset::ZeroLatency;
@@ -49,7 +42,7 @@ fn zero_latency_preset_stays_within_two_milliseconds() {
     assert_eq!(
         preset.max_app_latency_ms(),
         2.0,
-        "the zero-latency budget is an external requirement (ADR-008) and must not be relaxed"
+        "the zero-latency budget is an external requirement and must not be relaxed"
     );
 
     let designed = preset.designed_app_latency_ms(BUDGET_SAMPLE_RATE);
@@ -70,8 +63,6 @@ fn zero_latency_preset_stays_within_two_milliseconds() {
 
 /// Given two machines on the same LAN using the ultra-low-latency preset
 /// Then application-induced one-way latency is at most 5ms
-///
-/// Verifies: REQ-LAT-116
 #[test]
 fn ultra_low_latency_preset_stays_within_lan_budget() {
     let preset = AudioPreset::UltraLowLatency;
@@ -95,9 +86,8 @@ fn ultra_low_latency_preset_stays_within_lan_budget() {
 /// Given an internet session using the balanced preset
 /// Then application-induced one-way latency is at most 18ms
 ///
-/// The budget is 18ms rather than ADR-008's approximate 15ms; see ADR-019.
-///
-/// Verifies: REQ-LAT-117
+/// The budget is 18ms rather than the first approximate 15ms: the measured
+/// budget of the preset replaced the estimate.
 #[test]
 fn balanced_preset_stays_within_internet_budget() {
     let preset = AudioPreset::Balanced;
@@ -125,7 +115,7 @@ fn balanced_preset_stays_within_internet_budget() {
 
 /// Frames a test stream delivers between two `adapt` calls: a second of
 /// 64-sample frames at 48kHz is 750; this is enough for a loss rate to mean
-/// something (ADR-031).
+/// something.
 const ADAPT_WINDOW_FRAMES: u32 = 100;
 
 /// Runs `count` periods: each delivers the next frame (unless `lossy` drops
@@ -165,12 +155,9 @@ fn run_periods_late(buffer: &mut PlayoutBuffer, next: &mut u32, count: u32) {
 /// When packets start arriving after their turn
 /// Then the buffer delay grows automatically
 ///
-/// The jitter buffer is the play-out buffer the output callback reads from
-/// (ADR-028); adaptive means its delay bounds leave room to move. The rate of
-/// late frames is judged over the stretch since the last decision (ADR-031,
-/// ADR-125).
-///
-/// Verifies: REQ-LAT-108
+/// The jitter buffer is the play-out buffer the output callback reads from;
+/// adaptive means its delay bounds leave room to move. The rate of
+/// late frames is judged over the stretch since the last decision.
 #[test]
 fn adaptive_jitter_buffer_grows_when_packets_arrive_late() {
     const INITIAL_FRAMES: u32 = 2;
@@ -198,9 +185,7 @@ fn adaptive_jitter_buffer_grows_when_packets_arrive_late() {
 /// Given the jitter buffer is in adaptive mode
 /// When the line drops every other packet but none arrives late
 /// Then the buffer delay does not grow, because holding more would not bring a
-/// dropped packet back (ADR-125)
-///
-/// Verifies: REQ-LAT-108
+/// dropped packet back
 #[test]
 fn adaptive_jitter_buffer_does_not_grow_when_packets_are_only_lost() {
     const INITIAL_FRAMES: u32 = 2;
@@ -221,8 +206,6 @@ fn adaptive_jitter_buffer_does_not_grow_when_packets_are_only_lost() {
 /// Given a minimum jitter buffer size of 2 frames
 /// When the network is stable
 /// Then the buffer never shrinks below the minimum
-///
-/// Verifies: REQ-LAT-109
 #[test]
 fn adaptive_jitter_buffer_never_drops_below_minimum() {
     const MIN_FRAMES: u32 = 2;
@@ -259,8 +242,6 @@ fn adaptive_jitter_buffer_never_drops_below_minimum() {
 /// Then the delay stays at 3 frames and adaptation is disabled
 ///
 /// Fixed means the delay bounds leave no room: minimum = maximum.
-///
-/// Verifies: REQ-LAT-110
 #[test]
 fn fixed_jitter_buffer_keeps_a_constant_delay() {
     const FIXED_FRAMES: u32 = 3;
@@ -307,8 +288,6 @@ fn fixed_jitter_buffer_keeps_a_constant_delay() {
 /// Given the zero-latency preset
 /// When the jitter buffer is in passthrough mode
 /// Then packets are played back immediately and add 0ms of delay
-///
-/// Verifies: REQ-LAT-111
 #[test]
 fn passthrough_jitter_buffer_delivers_immediately() {
     let preset = AudioPreset::ZeroLatency;
@@ -365,8 +344,6 @@ fn passthrough_jitter_buffer_delivers_immediately() {
 /// Given FEC is enabled
 /// When one packet in a group is lost
 /// Then it is reconstructed from the FEC packet
-///
-/// Verifies: REQ-LAT-112
 #[test]
 fn fec_recovers_a_single_lost_packet() {
     let mut encoder = FecEncoder::with_group_size(4);
@@ -404,8 +381,6 @@ fn fec_recovers_a_single_lost_packet() {
 /// Given FEC is enabled
 /// When two packets in the same group are lost
 /// Then FEC cannot reconstruct them
-///
-/// Verifies: REQ-LAT-113
 #[test]
 fn fec_cannot_recover_two_lost_packets_in_a_group() {
     let mut encoder = FecEncoder::with_group_size(4);
@@ -441,8 +416,6 @@ fn fec_cannot_recover_two_lost_packets_in_a_group() {
 ///
 /// A click is a discontinuity: the concealed frame must keep the shape of the
 /// last good frame at a reduced gain, never jump straight to silence.
-///
-/// Verifies: REQ-LAT-114
 #[test]
 fn plc_fades_out_instead_of_producing_a_click() {
     const FRAME_SIZE: u32 = 64;
@@ -491,7 +464,7 @@ fn plc_fades_out_instead_of_producing_a_click() {
 }
 
 // ---------------------------------------------------------------------------
-// FEC over the real transport (ADR-021)
+// FEC over the real transport
 // ---------------------------------------------------------------------------
 
 /// A preset that enables FEC must send a recoverable FEC packet per group, and
@@ -499,8 +472,6 @@ fn plc_fades_out_instead_of_producing_a_click() {
 /// sequence number that went missing.
 ///
 /// This exercises the wire path: encode, packetise, send over UDP, and recover.
-///
-/// Verifies: REQ-AUD-026
 #[tokio::test]
 async fn fec_recovers_a_dropped_frame_over_the_transport() {
     use jamjam::network::{AudioEncodingConfig, Connection};
@@ -509,7 +480,7 @@ async fn fec_recovers_a_dropped_frame_over_the_transport() {
     let preset = AudioPreset::Balanced;
     let group_size = preset
         .fec_group_size()
-        .expect("balanced must enable FEC (ADR-021)");
+        .expect("balanced must enable FEC");
     let frame_size = preset.frame_size() as usize;
 
     // Receiver: collect every sequence the callback is handed.
@@ -661,8 +632,6 @@ impl ReorderingRelay {
 /// but the last two, the FEC packet, the second-to-last data packet; the last
 /// data packet is lost. Two are missing when the FEC packet arrives, so only
 /// the data packet that follows it can complete the group.
-///
-/// Verifies: REQ-AUD-026
 #[tokio::test]
 async fn fec_recovers_a_dropped_frame_when_the_fec_packet_arrives_before_the_last_data_packet() {
     use jamjam::network::{AudioEncodingConfig, Connection};
@@ -672,7 +641,7 @@ async fn fec_recovers_a_dropped_frame_when_the_fec_packet_arrives_before_the_las
     let preset = AudioPreset::Balanced;
     let group_size = preset
         .fec_group_size()
-        .expect("balanced must enable FEC (ADR-021)");
+        .expect("balanced must enable FEC");
     assert!(
         group_size >= 2,
         "a group needs a packet to arrive after FEC"

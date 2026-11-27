@@ -162,7 +162,6 @@ impl Drop for Audios {
     }
 }
 
-/// Verifies: REQ-CON-179
 #[tokio::test(flavor = "multi_thread")]
 async fn the_link_to_a_participant_not_heard_is_started_over_a_few_times_at_most_when_they_publish_other_addresses(
 ) {

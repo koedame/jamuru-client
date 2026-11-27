@@ -1,4 +1,4 @@
-//! Measures what packing the audio without loss (ADR-111) saves and what it costs: the size of a packet
+//! Measures what packing the audio without loss saves and what it costs: the size of a packet
 //! next to the 24-bit samples it holds, for a plucked string, a voice, a recorded voice, the noise floor
 //! of an audio interface and full-scale noise, and the time one packet takes to pack and to unpack. Run by
 //! hand:

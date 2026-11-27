@@ -1,4 +1,4 @@
-//! Guards that the GUI E2E control channel cannot ship (ADR-025).
+//! Guards that the GUI E2E control channel cannot ship.
 //!
 //! The channel can read whatever the app is displaying and can click and
 //! type on the user's behalf. It is confined by a cargo feature that must
@@ -41,7 +41,6 @@ fn default_features(manifest: &str) -> Vec<String> {
         .collect()
 }
 
-/// Verifies: REQ-GUI-003
 #[test]
 fn e2e_control_is_not_a_default_feature() {
     let defaults = default_features(&tauri_manifest());
@@ -55,10 +54,8 @@ fn e2e_control_is_not_a_default_feature() {
 }
 
 /// Remote debugging and the methods that read and drive the screen exist only
-/// in beta and E2E builds (ADR-044). A release build must carry none of them,
+/// in beta and E2E builds. A release build must carry none of them,
 /// so none may be in the default set.
-///
-/// Verifies: REQ-RMT-020
 #[test]
 fn the_debug_features_are_not_default_features() {
     let defaults = default_features(&tauri_manifest());
@@ -76,8 +73,6 @@ fn the_debug_features_are_not_default_features() {
 
 /// The guard above is only meaningful if it is reading the real list; a
 /// parser that silently returned nothing would let anything through.
-///
-/// Verifies: REQ-GUI-003
 #[test]
 fn the_guard_actually_reads_the_default_feature_list() {
     let defaults = default_features(&tauri_manifest());

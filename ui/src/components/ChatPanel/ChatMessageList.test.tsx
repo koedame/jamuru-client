@@ -21,7 +21,6 @@ function setGeometry(el: HTMLElement, scrollHeight: number, clientHeight: number
 const render1 = (m: ChatMessageData) => <span>{m.content}</span>;
 
 describe("ChatMessageList follow", () => {
-  // Verifies: REQ-GUI-030
   it("読み返しているとき、更新で再描画されても位置が下へ戻されないこと", () => {
     const now = Date.now();
     const messages = [msg("a", now - 3 * HOUR), msg("b", now - 2 * HOUR)];
@@ -44,7 +43,6 @@ describe("ChatMessageList follow", () => {
     expect(list.scrollTop).toBe(100);
   });
 
-  // Verifies: REQ-GUI-030
   it("末尾にいるとき、新しいメッセージが来たら末尾まで追従すること", () => {
     const now = Date.now();
     const messages = [msg("a", now - 3 * HOUR)];
@@ -62,7 +60,6 @@ describe("ChatMessageList follow", () => {
     expect(list.scrollTop).toBe(1000);
   });
 
-  // Verifies: REQ-GUI-030
   it("読み返している途中で自分が送ったとき、末尾へ移ること", () => {
     const now = Date.now();
     const messages = [msg("a", now - 3 * HOUR)];
@@ -85,7 +82,6 @@ describe("ChatMessageList follow", () => {
 });
 
 describe("ChatMessageList date dividers", () => {
-  // Verifies: REQ-GUI-030
   it("日をまたぐメッセージの間に、日付の区切りが入ること", () => {
     const day1 = new Date(2020, 0, 5, 23, 50).getTime();
     const day2 = new Date(2020, 0, 6, 0, 10).getTime();
@@ -104,7 +100,6 @@ describe("ChatMessageList date dividers", () => {
     expect(dividers[1]).toHaveTextContent("January 6, 2020");
   });
 
-  // Verifies: REQ-GUI-030
   it("すべてのメッセージが今日のとき、日付の区切りが出ないこと", () => {
     const now = new Date();
     const noon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 1).getTime();

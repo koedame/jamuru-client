@@ -1,5 +1,5 @@
 /**
- * MainScreen: draws the session the backend owns (ADR-044 §6).
+ * MainScreen: draws the session the backend owns.
  *
  * Which step the app is at, the room and who is in it, and the audio link are
  * the backend's - its own tests cover the rules (`src-tauri/src/session`).
@@ -278,7 +278,6 @@ describe('MainScreen の接続の表示', () => {
     await waitFor(() => expect(callsTo('session_create')).toHaveLength(1));
   });
 
-  // Verifies: REQ-CON-139
   it('招待コードを入れて参加するとき、ミュートの指定を付けずに session_join を呼ぶこと', async () => {
     render(<MainScreen />);
 
@@ -342,7 +341,6 @@ describe('MainScreen のルームの表示', () => {
     expect(screen.getByTestId('participant-list')).toHaveTextContent('Me');
   });
 
-  // Verifies: REQ-GUI-023
   it('相手の名前が HTML を含むとき、要素にならず文字として表示されること', async () => {
     const payload = '<img src=x onerror=alert(1)>';
     current = inRoom();
@@ -377,7 +375,6 @@ describe('MainScreen のルームの表示', () => {
     await waitFor(() => expect(screen.getByTestId('participant-list')).toHaveTextContent('Bo'));
   });
 
-  // Verifies: REQ-CON-150
   it('退室した相手の音がまだ届いているとき、一覧に「退室済み・音声は継続中」と出し、参加者の数には数えないこと', async () => {
     current = inRoom({ revision: 2 });
     current.room!.participants.push({ id: 'c', name: 'Bo', features: [], departed: true });
@@ -428,7 +425,6 @@ describe('MainScreen のルームの表示', () => {
     expect(screen.getByText(/no route to host/)).toBeInTheDocument();
   });
 
-  /** Verifies: REQ-CON-150 */
   it('繋ぎ直しに失敗しても相手との音声がつながっているとき、音声は止まっていないと添えること', async () => {
     current = inRoom({
       connection_id: null,
@@ -462,7 +458,6 @@ describe('MainScreen のルームの表示', () => {
 });
 
 describe('MainScreen の受信バッファ調整の知らせ', () => {
-  /** Verifies: REQ-LAT-108 */
   it('受信バッファが自動で調整されたとき、設定のバッファサイズと取り違えない言い方で、調整後の ms を知らせること', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
@@ -483,7 +478,6 @@ describe('MainScreen の受信バッファ調整の知らせ', () => {
 describe('MainScreen の古い版の相手の表示', () => {
   const tooOld = (peerId: string) => link(peerId, 'failed', undefined, PEER_APP_TOO_OLD);
 
-  /** Verifies: REQ-SEC-006 */
   it('相手のアプリが古くて鍵を渡さないとき、この相手とは繋げないと知らせること', async () => {
     current = inRoom();
     statusLinks = [tooOld('b')];
@@ -539,7 +533,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
   const row = (name: string) =>
     screen.getByText(name, { selector: '.participant__name' }).closest('li')!;
 
-  // Verifies: REQ-LAT-102
   it('3 人のルームで相手ごとに遅延が違うとき、それぞれの行にその人との遅延を出し、いちばん大きい人に印を付けること', async () => {
     current = roomOfThree();
     statusLinks = [
@@ -559,7 +552,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(marked[0]).toHaveAttribute('title', 'Highest latency');
   });
 
-  // Verifies: REQ-CON-161, REQ-CON-163
   it('3 人のルームで 1 人だけ音が止まっているとき、その人の名簿の行とミキサーのストリップにだけ、止まった秒数と切れた側を出すこと', async () => {
     current = roomOfThree();
     statusLinks = [
@@ -582,7 +574,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(noticed[0]).toHaveAttribute('data-channel-id', 'c');
   });
 
-  // Verifies: REQ-LAT-102
   it('相手が 1 人のとき、遅延に印を付けないこと', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 4, down: 6 })];
@@ -621,7 +612,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     };
   }
 
-  // Verifies: REQ-LAT-102
   it('3 人のルームで一方の行を押したとき、その人との内訳だけをダイアログに出し、もう一方の人の値は出さないこと', async () => {
     current = roomOfThree();
     statusLinks = [
@@ -727,7 +717,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(screen.getAllByTestId('participant-toggle')).toHaveLength(1);
   });
 
-  // Verifies: REQ-LAT-102
   it('3 人のルームで遅延が違うとき、足もとの接続表示には誰のものか分からない遅延を出さないこと', async () => {
     current = roomOfThree();
     statusLinks = [
@@ -747,7 +736,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(footer).not.toHaveTextContent(/\d+ms/);
   });
 
-  // Verifies: REQ-CON-134
   it('3 人のルームで 1 人との接続が諦められたとき、その人の行に切断と出し、誰との接続かを添えて再接続を尋ねること', async () => {
     current = roomOfThree();
     statusLinks = [
@@ -767,7 +755,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     await waitFor(() => expect(callsTo('streaming_reconnect')).toHaveLength(1));
   });
 
-  // Verifies: REQ-CON-110
   it('相手が 1 人で接続が諦められたとき、名前を添えずに再接続を尋ねること', async () => {
     current = inRoom();
     statusLinks = [link('b', 'failed', { up: 4, down: 6 })];
@@ -777,7 +764,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(await screen.findByText('Connection lost. Reconnect?')).toBeInTheDocument();
   });
 
-  // Verifies: REQ-CON-133
   it('入ったばかりでまだ音声を繋いでいない参加者の行には、接続中と出すこと', async () => {
     current = roomOfThree();
     statusLinks = [link('b', 'connected', { up: 4, down: 6 }), link('c', 'checkingconnectivity')];
@@ -803,7 +789,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(row('Ben')).toHaveTextContent('↑21ms↓23ms');
   });
 
-  // Verifies: REQ-GUI-009
   it('3 人のルームのとき、参加者ごとのメーターがその人の音のレベルを示すこと', async () => {
     current = roomOfThree();
     mixerNow = faders({
@@ -827,7 +812,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
     expect(peak('b')).toBe('30');
   });
 
-  /** Verifies: REQ-SEC-006 */
   it('3 人のルームで 1 人のアプリが古いとき、誰とは繋げないかを知らせること', async () => {
     current = roomOfThree();
     statusLinks = [
@@ -842,7 +826,6 @@ describe('MainScreen の参加者ごとの接続の表示', () => {
 });
 
 describe('MainScreen の新しい版の知らせ', () => {
-  /** Verifies: REQ-UPD-021 */
   it('自分で入れ替えられない配布形態が新しい版を見つけているとき、その版を入れ直すよう知らせること', async () => {
     newerRelease = '1.2.3';
 
@@ -851,7 +834,6 @@ describe('MainScreen の新しい版の知らせ', () => {
     expect(await screen.findByText(/A new version, 1\.2\.3, is out/)).toBeInTheDocument();
   });
 
-  /** Verifies: REQ-UPD-021 */
   it('起動のあとで新しい版が見つかったとき、知らせが出ること', async () => {
     render(<MainScreen />);
     await waitFor(() => expect(callsTo('update_notice_get')).toHaveLength(1));
@@ -861,7 +843,6 @@ describe('MainScreen の新しい版の知らせ', () => {
     expect(await screen.findByText(/A new version, 1\.2\.3, is out/)).toBeInTheDocument();
   });
 
-  /** Verifies: REQ-UPD-021 */
   it('新しい版が見つかっていないとき、知らせは出さないこと', async () => {
     render(<MainScreen />);
 
@@ -869,7 +850,6 @@ describe('MainScreen の新しい版の知らせ', () => {
     expect(screen.queryByText(/is out/)).not.toBeInTheDocument();
   });
 
-  /** Verifies: REQ-UPD-021 */
   it('手伝っている画面のとき、新しい版を尋ねないこと', async () => {
     newerRelease = '1.2.3';
 
@@ -882,7 +862,6 @@ describe('MainScreen の新しい版の知らせ', () => {
 });
 
 describe('MainScreen のデバイスの問題の表示', () => {
-  /** Verifies: REQ-AUD-123 */
   it('入力デバイスが応答しないとき、セッションが始まっていなくても、その名前を添えて知らせること', async () => {
     current = inRoom();
     statusDeviceProblems = [{ side: 'input', trouble: 'unresponsive', device: 'AG06/AG03', sample_rate: 48000 }];
@@ -893,7 +872,6 @@ describe('MainScreen のデバイスの問題の表示', () => {
     expect(message).toHaveTextContent('(AG06/AG03)');
   });
 
-  /** Verifies: REQ-AUD-123 */
   it('出力デバイスを開けなかったとき、名前が分からなくても、出力の問題として知らせること', async () => {
     current = inRoom();
     statusDeviceProblems = [{ side: 'output', trouble: 'failed', device: null, sample_rate: 48000 }];
@@ -903,7 +881,6 @@ describe('MainScreen のデバイスの問題の表示', () => {
     expect(await screen.findByText(/Couldn't open the output device/)).toBeInTheDocument();
   });
 
-  /** Verifies: REQ-AUD-125 */
   it('入力デバイスが 48000Hz で開けないとき、デバイスの名前とレートを添えて、形式を合わせるよう知らせること', async () => {
     current = inRoom();
     statusDeviceProblems = [
@@ -918,7 +895,6 @@ describe('MainScreen のデバイスの問題の表示', () => {
     );
   });
 
-  /** Verifies: REQ-AUD-128 */
   it('入力の音が止まって開き直しても戻らないとき、デバイスの名前を添えて、入り直すよう知らせること', async () => {
     current = inRoom();
     statusDeviceProblems = [{ side: 'input', trouble: 'stalled', device: 'null sink', sample_rate: 48000 }];
@@ -931,7 +907,6 @@ describe('MainScreen のデバイスの問題の表示', () => {
     );
   });
 
-  /** Verifies: REQ-AUD-128 */
   it('出力の音が止まって開き直しても戻らないとき、出力の問題として知らせること', async () => {
     current = inRoom();
     statusDeviceProblems = [{ side: 'output', trouble: 'stalled', device: null, sample_rate: 48000 }];
@@ -941,7 +916,6 @@ describe('MainScreen のデバイスの問題の表示', () => {
     expect(await screen.findByText(/The output device stopped playing audio/)).toBeInTheDocument();
   });
 
-  /** Verifies: REQ-AUD-129 */
   it('マイクの許可の答えを待っているとき、許可のダイアログを押すよう知らせること', async () => {
     current = inRoom();
     statusDeviceProblems = [{ side: 'input', trouble: 'permission_pending', device: null, sample_rate: 48000 }];
@@ -952,8 +926,6 @@ describe('MainScreen のデバイスの問題の表示', () => {
   });
 
   /**
-   * Verifies: REQ-AUD-129
-   * Verifies: REQ-CON-176
    */
   it('マイクが許可されていないとき、システム設定でオンにしてから jamuru を開き直すよう知らせること', async () => {
     current = inRoom();
@@ -967,7 +939,6 @@ describe('MainScreen のデバイスの問題の表示', () => {
     expect(message).not.toHaveTextContent(/join again/);
   });
 
-  /** Verifies: REQ-AUD-123 */
   it('デバイスの問題が解けたとき、知らせが消えること', async () => {
     current = inRoom();
     statusDeviceProblems = [{ side: 'input', trouble: 'unresponsive', device: null, sample_rate: 48000 }];
@@ -983,7 +954,6 @@ describe('MainScreen のデバイスの問題の表示', () => {
 });
 
 describe('MainScreen の WASAPI のモードの知らせ', () => {
-  /** Verifies: REQ-GUI-031 */
   it('排他モードを選んだが、ほかのアプリが入力デバイスを使っていて標準の共有モードで開いたとき、その理由を添えて知らせること', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
@@ -998,7 +968,6 @@ describe('MainScreen の WASAPI のモードの知らせ', () => {
     ).toBeInTheDocument();
   });
 
-  /** Verifies: REQ-GUI-031 */
   it('サウンドの設定が排他的な制御を許していないとき、出力の問題として、オンにする場所を添えて知らせること', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
@@ -1010,7 +979,6 @@ describe('MainScreen の WASAPI のモードの知らせ', () => {
     expect(message).toHaveTextContent(/Allow applications to take exclusive control of this device/);
   });
 
-  /** Verifies: REQ-GUI-031 */
   it('選んだモードで開けたとき、知らせを出さないこと', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
@@ -1025,7 +993,6 @@ describe('MainScreen の WASAPI のモードの知らせ', () => {
     expect(screen.queryByText(/so it was opened in the standard shared mode/)).not.toBeInTheDocument();
   });
 
-  /** Verifies: REQ-GUI-031 */
   it('相手のアプリが古くて開き方を返さないとき、知らせを出さず、ほかの表示も止めないこと', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
@@ -1042,7 +1009,6 @@ describe('MainScreen の WASAPI のモードの知らせ', () => {
 describe('MainScreen のミキサー', () => {
   const peerFader = () => screen.findByLabelText(i18n.t('mixer.channel.volumeLabel', { name: 'Aki' }));
 
-  // Verifies: REQ-RMT-031
   it('バックエンドのフェーダーの位置が相手の音量 30 のとき、その相手のフェーダーが 30 を示すこと', async () => {
     current = inRoom();
     mixerNow = faders({ peers: { b: { volume: 30, pan: 0, muted: false } } });
@@ -1052,7 +1018,6 @@ describe('MainScreen のミキサー', () => {
     expect(await peerFader()).toHaveValue('30');
   });
 
-  // Verifies: REQ-CON-150
   it('退室した相手の音がまだ届いているとき、その相手のフェーダーも使えること', async () => {
     current = inRoom();
     current.room!.participants.push({ id: 'c', name: 'Bo', features: [], departed: true });
@@ -1065,7 +1030,6 @@ describe('MainScreen のミキサー', () => {
     expect(await screen.findByLabelText(i18n.t('mixer.channel.volumeLabel', { name: 'Bo' }))).toHaveValue('55');
   });
 
-  // Verifies: REQ-RMT-031
   it('バックエンドが相手の音量が変わったと伝えたとき、フェーダーがその位置に動くこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1081,7 +1045,6 @@ describe('MainScreen のミキサー', () => {
     await waitFor(async () => expect(await peerFader()).toHaveValue('45'));
   });
 
-  // Verifies: REQ-RMT-031
   it('古いフェーダーの通知があとから届いたとき、新しい位置のままであること', async () => {
     current = inRoom();
     mixerNow = faders({ revision: 5, peers: { b: { volume: 45, pan: 0, muted: false } } });
@@ -1097,7 +1060,6 @@ describe('MainScreen のミキサー', () => {
     expect(await peerFader()).toHaveValue('45');
   });
 
-  // Verifies: REQ-RMT-031
   it('相手のフェーダーを動かしたとき、その参加者の ID と値で mixer_set_peer_volume を呼ぶこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1111,7 +1073,6 @@ describe('MainScreen のミキサー', () => {
     );
   });
 
-  // Verifies: REQ-RMT-031
   it('自分のフェーダーを動かしたとき、mixer_set_local_volume を呼ぶこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1127,7 +1088,6 @@ describe('MainScreen のミキサー', () => {
     );
   });
 
-  // Verifies: REQ-RMT-031
   it('相手のミュートを押したとき、mixer_set_peer_muted をミュートにして呼び、戻すと外すこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1152,8 +1112,6 @@ describe('MainScreen の招待リンク', () => {
     await waitFor(() => expect(openUrl.handler).not.toBeNull());
   }
 
-  // Verifies: REQ-CON-103
-  // Verifies: REQ-CON-139
   it('招待リンクが届いたとき、そのコードをミュートで入る指定を付けて session_join を呼ぶこと', async () => {
     await withConnection();
 
@@ -1192,7 +1150,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     return screen.findByRole('dialog', { name: 'Enter your name' });
   }
 
-  // Verifies: REQ-CON-141
   it('名前を確認する設定のとき、ルームを作る前に名前を聞き、答えるまで session_create を呼ばないこと', async () => {
     savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
     render(<MainScreen />);
@@ -1203,7 +1160,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     expect(callsTo('session_create')).toHaveLength(0);
   });
 
-  // Verifies: REQ-CON-141
   it('名前をまだ決めていないとき、初期値は「ゲスト」であること', async () => {
     savedConfig = { peer_name: 'User', ask_name_on_entry: true };
     render(<MainScreen />);
@@ -1213,7 +1169,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     expect(screen.getByLabelText('Display name')).toHaveValue('Guest');
   });
 
-  // Verifies: REQ-CON-141
   it('名前を入れて決めたとき、その名前を保存してから session_create を呼ぶこと', async () => {
     savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
     render(<MainScreen />);
@@ -1232,7 +1187,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-CON-142
   it('「次からこの名前を使用する」を選んで決めたとき、確認を止める設定も保存すること', async () => {
     savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
     render(<MainScreen />);
@@ -1245,7 +1199,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     expect(callsTo('config_set_ask_name_on_entry').map((c) => c.args)).toEqual([{ enabled: false }]);
   });
 
-  // Verifies: REQ-CON-142
   it('名前を確認しない設定のとき、聞かずにそのまま session_create を呼ぶこと', async () => {
     savedConfig = { peer_name: 'Aki', ask_name_on_entry: false };
     render(<MainScreen />);
@@ -1256,7 +1209,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-CON-141
   it('キャンセルしたとき、ルームを作らず名前も変えないこと', async () => {
     savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
     render(<MainScreen />);
@@ -1270,7 +1222,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     expect(callsTo('config_set_peer_name')).toHaveLength(0);
   });
 
-  // Verifies: REQ-CON-141
   it('招待コードで参加するとき、名前を聞いてから、ミュートの指定を付けずに session_join を呼ぶこと', async () => {
     savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
     render(<MainScreen />);
@@ -1286,8 +1237,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     await waitFor(() => expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'ABC234XYZ' }]));
   });
 
-  // Verifies: REQ-CON-141
-  // Verifies: REQ-CON-139
   it('招待リンクが届いたとき、名前を聞いてから、ミュートの指定を付けて session_join を呼ぶこと', async () => {
     savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
     render(<MainScreen />);
@@ -1304,7 +1253,6 @@ describe('MainScreen の入室前の名前の確認', () => {
     );
   });
 
-  // Verifies: REQ-CON-141
   it('名前を保存できなかったとき、ルームを作らず、理由を出して聞き直せること', async () => {
     savedConfig = { peer_name: 'Aki', ask_name_on_entry: true };
     const answer = invoke.getMockImplementation()!;
@@ -1342,7 +1290,6 @@ describe('MainScreen の手伝われているあいだの動きの表示', () =>
       ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
   }
 
-  // Verifies: REQ-RMT-034
   it('手伝われていないとき、画面の動きは送られず、聞きにも行かないこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1356,7 +1303,6 @@ describe('MainScreen の手伝われているあいだの動きの表示', () =>
     expect(listeners.has('help:presence-in')).toBe(false);
   });
 
-  // Verifies: REQ-RMT-034
   it('手伝われているあいだ、ボタンの上にポインタを置くと、部品の名前と位置が手伝う人の窓へ向けて出されること', async () => {
     await helped();
     calls = [];
@@ -1372,7 +1318,6 @@ describe('MainScreen の手伝われているあいだの動きの表示', () =>
     );
   });
 
-  // Verifies: REQ-RMT-034
   it('手伝う人が部品を指しているとき、その部品に名前つきの枠が出て、手伝いが終わると消えること', async () => {
     await helped();
     const leave = screen.getByTestId('leave-room');
@@ -1389,7 +1334,6 @@ describe('MainScreen の手伝われているあいだの動きの表示', () =>
     expect(listeners.has('help:presence-in')).toBe(false);
   });
 
-  // Verifies: REQ-RMT-034
   it('手伝う人が設定パネルを開いたとき、同じパネルが手伝われる人の画面にも出て、閉じると消え、手伝われる人が閉じても次に開かれるまで出ないこと', async () => {
     await helped();
     const panelOf = () => screen.getByRole('dialog', { hidden: true });
@@ -1421,7 +1365,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     act(() => listeners.get('menu:action')!({ payload: action }));
   }
 
-  // Verifies: REQ-MNU-005
   it('メニューで「ルームを作成」を選んだとき、session_create を呼ぶこと', async () => {
     render(<MainScreen />);
     await screen.findByTestId('connection-panel-create-room');
@@ -1432,7 +1375,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     await waitFor(() => expect(callsTo('session_create')).toHaveLength(1));
   });
 
-  // Verifies: REQ-MNU-005
   it('メニューで「招待コードで参加」を選んだとき、招待コードの入力欄にカーソルが移ること', async () => {
     render(<MainScreen />);
     const input = await screen.findByTestId('connection-panel-invite-code');
@@ -1443,7 +1385,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(input).toHaveFocus();
   });
 
-  // Verifies: REQ-MNU-005
   it('メニューで「テストルームに入る」を選んだとき、サーバーが示したコードで session_join を呼ぶこと', async () => {
     current = snapshot({ test_room_invite_code: 'HJK567MNP' });
     render(<MainScreen />);
@@ -1455,7 +1396,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     await waitFor(() => expect(callsTo('session_join').map((c) => c.args)).toEqual([{ code: 'HJK567MNP' }]));
   });
 
-  // Verifies: REQ-MNU-005
   it('ルームの中でメニューの「退室」を選んだとき、退室の確認を出し、まだ退室しないこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1468,7 +1408,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(callsTo('session_leave')).toHaveLength(0);
   });
 
-  // Verifies: REQ-CON-137
   it('ルームの中でウィンドウを閉じようとしたとき、退室の確認を出し、まだ退室も終了もしないこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1482,7 +1421,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(callsTo('window_quit_app')).toHaveLength(0);
   });
 
-  // Verifies: REQ-CON-137
   it('ウィンドウを閉じようとして出た確認で退室を選んだとき、session_leave のあとで window_quit_app を呼ぶこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1500,7 +1438,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     ]);
   });
 
-  // Verifies: REQ-CON-137
   it('ウィンドウを閉じようとして出た確認をキャンセルしたとき、退室も終了もしないこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1516,7 +1453,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(callsTo('window_quit_app')).toHaveLength(0);
   });
 
-  // Verifies: REQ-CON-137
   it('キャンセルしたあとに退室ボタンから退室したとき、アプリを終了しないこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1537,7 +1473,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(callsTo('window_quit_app')).toHaveLength(0);
   });
 
-  // Verifies: REQ-CON-137
   it('終了のための退室に失敗したとき、それでもアプリを終了すること', async () => {
     current = inRoom();
     const base = invoke.getMockImplementation()!;
@@ -1565,7 +1500,6 @@ describe('MainScreen のメニューバーからの操作', () => {
   /** The `hold` arguments `streaming_hold_mute` was called with, in order. */
   const holds = () => callsTo('streaming_hold_mute').map((c) => c.args?.hold);
 
-  // Verifies: REQ-CON-138
   it('退室の確認を出している間、マイクのミュートを保つこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1577,7 +1511,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     await waitFor(() => expect(holds()).toEqual([true]));
   });
 
-  // Verifies: REQ-CON-138
   it('退室の確認をキャンセルしたとき、ミュートの保持をやめて元に戻すこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1589,7 +1522,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     await waitFor(() => expect(holds()).toEqual([true, false]));
   });
 
-  // Verifies: REQ-CON-138
   it('退室したとき、ミュートの保持をやめて元に戻すこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1601,7 +1533,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     await waitFor(() => expect(holds()).toEqual([true, false]));
   });
 
-  // Verifies: REQ-CON-138
   it('ウィンドウを閉じようとして出た確認から終了するとき、終了までミュートの保持をやめないこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1617,7 +1548,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(holds()).toEqual([true]);
   });
 
-  // Verifies: REQ-CON-137
   it('ルームの外で終了の確認が届いたとき(すでに退室していたとき)、確認なしで window_quit_app を呼ぶこと', async () => {
     render(<MainScreen />);
     await screen.findByTestId('connection-panel-create-room');
@@ -1629,7 +1559,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-MNU-005
   it('ルームの中でメニューの「招待コードをコピー」を選んだとき、そのルームの招待コードをクリップボードに入れること', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     Object.assign(navigator, { clipboard: { writeText } });
@@ -1643,7 +1572,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(writeText).toHaveBeenCalledWith('ABC234XYZ');
   });
 
-  // Verifies: REQ-MNU-005
   it('ルームの中でメニューの「設定依頼をする」を選んだとき、依頼の画面を開くこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1655,7 +1583,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(await screen.findByTestId('settings-help-ask')).toBeInTheDocument();
   });
 
-  // Verifies: REQ-MNU-005
   it('ルームの中にいないのにメニューから退室が届いたとき、何もしないこと', async () => {
     render(<MainScreen />);
     await screen.findByTestId('connection-panel-create-room');
@@ -1666,7 +1593,6 @@ describe('MainScreen のメニューバーからの操作', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-MNU-005
   it('ルームの中にいるのにメニューからルームの作成が届いたとき、作らないこと', async () => {
     current = inRoom();
     render(<MainScreen />);
@@ -1699,7 +1625,6 @@ describe('MainScreen のチャット欄の描き直し', () => {
     reactions: [],
   });
 
-  // Verifies: REQ-GUI-030
   it('音声の状態の取得が毎回新しい配列を返すとき、チャット欄が描き直されないこと', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 5, down: 5 })];
@@ -1718,7 +1643,6 @@ describe('MainScreen のチャット欄の描き直し', () => {
     expect(chatPanelDraws.count).toBe(drawn);
   });
 
-  // Verifies: REQ-GUI-030
   it('新しいメッセージが届いたとき、チャット欄が描き直されて表示されること', async () => {
     current = inRoom();
     statusLinks = [link('b', 'connected', { up: 5, down: 5 })];

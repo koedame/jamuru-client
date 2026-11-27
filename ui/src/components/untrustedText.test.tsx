@@ -14,7 +14,6 @@ import { ChatMessage } from './ChatPanel/ChatMessage';
 const PAYLOAD = '<img src=x onerror=alert(1)>';
 
 describe('ChatMessage', () => {
-  // Verifies: REQ-GUI-023
   it('本文が HTML を含むとき、要素にならず文字として表示されること', () => {
     const { container } = render(
       <ChatMessage type="other" senderName="Bob" content={PAYLOAD} timestamp={0} />
@@ -24,7 +23,6 @@ describe('ChatMessage', () => {
     expect(container.querySelector('.chat-message__content')).toHaveTextContent(PAYLOAD);
   });
 
-  // Verifies: REQ-GUI-023
   it('送り主の名前が HTML を含むとき、要素にならず文字として表示されること', () => {
     const { container } = render(
       <ChatMessage type="other" senderName={PAYLOAD} content="hello" timestamp={0} />
@@ -34,7 +32,6 @@ describe('ChatMessage', () => {
     expect(container.querySelector('.chat-message__sender')).toHaveTextContent(PAYLOAD);
   });
 
-  // Verifies: REQ-GUI-023
   it('入退室の通知に載る相手の名前が HTML を含むとき、要素にならず文字として表示されること', () => {
     for (const systemKind of ['join', 'leave'] as const) {
       const { container, unmount } = render(

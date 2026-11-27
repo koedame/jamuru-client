@@ -1,6 +1,6 @@
 /**
  * The participant's dialog: the receive buffer of that participant can be
- * held at a length from it (ADR-097), the first-use explanation is shown once,
+ * held at a length from it, the first-use explanation is shown once,
  * and Tab stays among the dialog's controls.
  */
 
@@ -68,7 +68,6 @@ beforeEach(async () => {
 });
 
 describe("the buffer of the participant in their dialog", () => {
-  // Verifies: REQ-GUI-035
   it("a length is set for the participant, only that participant's buffer is set", () => {
     open();
 
@@ -78,7 +77,6 @@ describe("the buffer of the participant in their dialog", () => {
     expect(invoke).toHaveBeenCalledWith("streaming_set_peer_buffer", { peerId: "aki-id", ms10: 80 }, undefined);
   });
 
-  // Verifies: REQ-GUI-035
   it("the user asks, the ask goes out for that participant", () => {
     const r = open();
 
@@ -87,21 +85,18 @@ describe("the buffer of the participant in their dialog", () => {
     expect(r!.ask).toHaveBeenCalledWith("aki-id", { max_ms10: 200, tolerance_tenths: 0, auto: true });
   });
 
-  // Verifies: REQ-GUI-035
   it("their app does not take asks, the dialog offers no ask", () => {
     open({ askable: false });
 
     expect(screen.queryByTestId("peer-buffer-ask")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-035
   it("the dialog belongs to a helper's window, the buffer is not offered", () => {
     open({ requests: undefined });
 
     expect(screen.queryByTestId("peer-buffer")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-036
   it("the user took up an ask of the participant, Put it back puts it back for that participant", () => {
     const r = open({
       requests: requests({ heldFor: () => ({ terms: { max_ms10: 300, tolerance_tenths: 5, auto: true }, applied: null }) }),
@@ -114,7 +109,6 @@ describe("the buffer of the participant in their dialog", () => {
 });
 
 describe("the first-use explanation", () => {
-  // Verifies: REQ-GUI-035
   it("the dialog is opened for the first time, the explanation is shown and goes by itself after twenty seconds", () => {
     vi.useFakeTimers();
     try {
@@ -131,7 +125,6 @@ describe("the first-use explanation", () => {
     }
   });
 
-  // Verifies: REQ-GUI-035
   it("the explanation was shown before, a dialog opened later does not show it again", () => {
     const { unmount } = render(
       <PeerLinkDialog peerId="aki-id" peerName="Aki" link={LINK} localSampleRate={48000} askable requests={requests()} onClose={() => {}} />
@@ -144,7 +137,6 @@ describe("the first-use explanation", () => {
     expect(screen.queryByTestId("peer-buffer-hint")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-035
   it("the explanation is dismissed, it goes", () => {
     open();
 
@@ -155,7 +147,6 @@ describe("the first-use explanation", () => {
 });
 
 describe("keyboard use of the dialog", () => {
-  // Verifies: REQ-GUI-035
   it("Tab is pressed on the last control, focus goes to the first and not out of the dialog", () => {
     open();
     const dialog = screen.getByTestId("peer-link-dialog");
@@ -168,7 +159,6 @@ describe("keyboard use of the dialog", () => {
     expect(controls[0]).toHaveFocus();
   });
 
-  // Verifies: REQ-GUI-035
   it("Shift+Tab is pressed on the first control, focus goes to the last", () => {
     open();
     const dialog = screen.getByTestId("peer-link-dialog");

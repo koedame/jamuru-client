@@ -1,5 +1,5 @@
-//! Every relative link in `docs/` and `docs-spec/` must point at a file that
-//! exists.
+//! Every relative link in `docs/` and in the Markdown files at the top of the
+//! repository must point at a file that exists.
 //!
 //! A renamed ADR or a moved guide leaves the links to it dangling, and nothing
 //! else notices: the documents are plain Markdown that no build reads.
@@ -47,7 +47,12 @@ fn relative_links_in_docs_point_at_existing_files() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
     markdown_files(&root.join("docs"), &mut files);
-    markdown_files(&root.join("docs-spec"), &mut files);
+    for entry in std::fs::read_dir(&root).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() && path.extension().is_some_and(|e| e == "md") {
+            files.push(path);
+        }
+    }
     assert!(!files.is_empty(), "no Markdown files found");
 
     let mut broken = Vec::new();

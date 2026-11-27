@@ -132,9 +132,6 @@ async fn everyone_sends(room: &[Participant]) {
 
 /// The bug this guards: with three in a room, the third was heard by no one and heard no
 /// one, because an app kept a link to one participant only.
-///
-/// Verifies: REQ-CON-133
-/// Verifies: REQ-CON-033
 #[tokio::test]
 async fn three_in_a_room_each_hears_both_others_on_the_link_to_each() {
     let room = room_of(3).await;
@@ -156,8 +153,6 @@ async fn three_in_a_room_each_hears_both_others_on_the_link_to_each() {
     }
 }
 
-/// Verifies: REQ-CON-020
-/// Verifies: REQ-CON-133
 #[tokio::test]
 async fn a_full_room_of_sixteen_has_fifteen_links_per_participant_and_all_of_them_carry_audio() {
     let room = room_of(MAX_PEERS_PER_ROOM).await;
@@ -181,8 +176,6 @@ async fn a_full_room_of_sixteen_has_fifteen_links_per_participant_and_all_of_the
 
 /// Each link has keys of its own, so what one participant is sent cannot be opened by the
 /// link to another, even though both arrive on the same socket.
-///
-/// Verifies: REQ-CON-133
 #[tokio::test]
 async fn audio_sealed_for_one_participant_is_not_played_by_another_it_is_sent_to() {
     let mut room = room_of(3).await;
@@ -211,9 +204,7 @@ async fn audio_sealed_for_one_participant_is_not_played_by_another_it_is_sent_to
 /// Anyone who learns the audio port can send to it. What comes from an address no
 /// participant published is offered to every link, so every link has to turn it away:
 /// none plays it, and none stops carrying the audio of its own peer. Only a limited number of
-/// them are offered to the links at all (ADR-113).
-///
-/// Verifies: REQ-CON-033, REQ-CON-165
+/// them are offered to the links at all.
 #[tokio::test]
 async fn datagrams_from_a_stranger_are_played_by_no_link_and_leave_every_link_working() {
     let room = room_of(3).await;
@@ -257,7 +248,6 @@ async fn datagrams_from_a_stranger_are_played_by_no_link_and_leave_every_link_wo
     }
 }
 
-/// Verifies: REQ-CON-133
 #[tokio::test]
 async fn when_one_participant_leaves_the_links_between_the_others_keep_carrying_audio() {
     let mut room = room_of(3).await;
@@ -284,8 +274,6 @@ async fn when_one_participant_leaves_the_links_between_the_others_keep_carrying_
 /// The connectivity check of one link reads the socket while the others carry audio: the
 /// probes and their answers have to reach the link they belong to, and the audio must not be
 /// taken by the check.
-///
-/// Verifies: REQ-CON-133
 #[tokio::test]
 async fn a_third_participant_checks_its_candidates_while_the_first_two_go_on_talking() {
     const FRAMES_MEANWHILE: usize = 200;

@@ -17,7 +17,7 @@
 //!
 //! Because the device buffers cannot exist without hardware, the pipeline
 //! reports the delay it actually introduces, and callers add the two device
-//! frame stages analytically to get the full application latency (ADR-019).
+//! frame stages analytically to get the full application latency.
 
 use jamjam::audio::{
     AudioCodec, AudioPreset, CodecConfig, CodecType, PcmCodec, PlayoutBuffer, PlayoutConfig,
@@ -57,7 +57,7 @@ impl SoftwarePipeline {
             ..Default::default()
         };
 
-        // The settings the receive path builds for this preset (ADR-028).
+        // The settings the receive path builds for this preset.
         // Nothing here calls `adapt`, so the delay stays at what the preset
         // specifies - which is what the loopback layer measures.
         let playout_config = PlayoutConfig::for_delay(
@@ -106,8 +106,8 @@ impl SoftwarePipeline {
                 let wire = packet.to_bytes();
                 let received =
                     Packet::from_bytes(&wire).expect("a packet we just built must parse");
-                // The receive path decodes on arrival and stores the samples
-                // (ADR-028), so decoding happens here rather than on playback.
+                // The receive path decodes on arrival and stores the samples,
+                // so decoding happens here rather than on playback.
                 let decoded = self
                     .decoder
                     .decode(&received.payload)
@@ -156,7 +156,7 @@ impl SoftwarePipeline {
         frame
     }
 
-    /// Jitter buffer delay this preset is specified to cost (ADR-019)
+    /// Jitter buffer delay this preset is specified to cost
     ///
     /// Everything else in the software path (codec, packetisation) is
     /// sample-synchronous for PCM, so this is the whole specified pipeline delay.
@@ -194,7 +194,7 @@ impl SoftwarePipeline {
     /// Latency contributed by the capture and playback device buffers
     ///
     /// Not measurable without hardware, so it is derived from the frame length
-    /// exactly as ADR-019 specifies.
+    /// exactly as the preset latency budget specifies.
     pub fn device_buffer_latency_ms(&self) -> f32 {
         self.preset.frame_duration_ms(self.sample_rate) * DEVICE_FRAME_STAGES as f32
     }
@@ -279,7 +279,8 @@ mod tests {
         let mut output = pipeline.process(&input, &[]);
         output.extend(pipeline.drain());
 
-        // Since ADR-020 the observed delay equals the configured depth: the
+        // With the jitter buffer on the receive path, the observed delay equals
+        // the configured depth: the
         // buffer accumulates one frame more than the target before it starts,
         // so it still holds `jitter_frames` afterwards.
         let observed_delay_frames = pipeline.effective_jitter_delay_frames() as usize;
@@ -292,7 +293,7 @@ mod tests {
         assert_eq!(
             pipeline.effective_jitter_delay_ms(),
             pipeline.specified_jitter_delay_ms(),
-            "measured and specified jitter delay must now agree (ADR-020)"
+            "measured and specified jitter delay must now agree"
         );
         assert!(
             output[..expected_delay_samples].iter().all(|&s| s == 0.0),

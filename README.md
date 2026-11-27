@@ -36,16 +36,16 @@ See [docs/getting-started/installation.md](./docs/getting-started/installation.m
 
 ## Documentation
 
-- [docs/](./docs/README.md) - Installation, quick start, troubleshooting, privacy, and development guides
-- [docs-spec/](./docs-spec/README.md) - Specifications (single source of truth for the implementation; ADRs are append-only)
-- [AGENTS.md](./AGENTS.md) - Development guide: workflow, commands, and the development rules index (commit conventions, secrets policy, etc.)
-- [Plans.md](./Plans.md) - Task tracking
+- [Installation](./docs/getting-started/installation.md)
+- [Quick start](./docs/getting-started/quick-start.md)
+- [Troubleshooting](./docs/getting-started/troubleshooting.md)
+- [Privacy](./docs/getting-started/privacy.md)
+- [Terms of use](./docs/terms.md)
+- [Announcements](./docs/announcements.md)
 
 ## Development
 
 This section is for the copyright holder's development work. The [LICENSE](./LICENSE) does not permit anyone else to build or run the software from source; use the official binaries from [GitHub Releases](https://github.com/koedame/jamuru-client/releases) (see [Install](#install)).
-
-See [docs/development/](./docs/development/building.md) for detailed development guides.
 
 ### Quick Start
 
@@ -71,7 +71,7 @@ cargo test
 
 # Development mode (frontend server starts automatically).
 # Needs the Tauri CLI (`cargo install tauri-cli --version "^2"`) and, on Linux, system
-# libraries such as libasound2-dev and libwebkit2gtk-4.1-dev; see docs/development/building.md
+# libraries such as libasound2-dev and libwebkit2gtk-4.1-dev
 cargo tauri dev
 
 # Production build (pass the server the app asks for its signaling server)

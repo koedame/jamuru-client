@@ -1,5 +1,5 @@
-//! Guards the ARM Linux builds: the command-line tool for 32-bit (ADR-126,
-//! REQ-DIST-010) and, with the app, for 64-bit (ADR-127, REQ-DIST-011). That
+//! Guards the ARM Linux builds: the command-line tool for 32-bit and, with the
+//! app, for 64-bit. That
 //! every release carries them, that nothing is published without them, and that
 //! the scripts behind them stop on a wrong call.
 //!
@@ -34,7 +34,6 @@ fn job(workflow: &str, name: &str) -> String {
         .join("\n")
 }
 
-/// Verifies: REQ-DIST-010
 #[test]
 fn when_a_release_is_made_the_armhf_cli_is_built_and_published_with_its_checksum() {
     let workflow = read(".github/workflows/release.yml");
@@ -77,8 +76,6 @@ fn when_a_release_is_made_the_armhf_cli_is_built_and_published_with_its_checksum
 /// The download is neither signed nor updated by the app, so the job has no
 /// reason to read a signing key, the server's address or any other secret, and
 /// an unsigned build must not be able to take one.
-///
-/// Verifies: REQ-DIST-010
 #[test]
 fn when_the_armhf_cli_is_built_the_job_reads_no_secret_and_holds_no_write_access() {
     for file in [".github/workflows/release.yml", ".github/workflows/ci.yml"] {
@@ -103,7 +100,6 @@ fn when_the_armhf_cli_is_built_the_job_reads_no_secret_and_holds_no_write_access
     );
 }
 
-/// Verifies: REQ-DIST-010
 #[test]
 fn when_a_change_is_pushed_the_armhf_cli_is_built_so_a_dependency_that_stops_building_is_caught_early(
 ) {
@@ -114,7 +110,6 @@ fn when_a_change_is_pushed_the_armhf_cli_is_built_so_a_dependency_that_stops_bui
     assert!(build.contains("scripts/check-cli-runs.sh"));
 }
 
-/// Verifies: REQ-DIST-010
 #[test]
 fn when_the_target_is_not_armv7_the_build_script_refuses_before_building_anything() {
     let out = Command::new("bash")
@@ -127,7 +122,6 @@ fn when_the_target_is_not_armv7_the_build_script_refuses_before_building_anythin
     assert!(String::from_utf8_lossy(&out.stderr).contains("unsupported target"));
 }
 
-/// Verifies: REQ-DIST-010
 #[test]
 fn when_the_binary_does_not_exist_the_run_check_fails_instead_of_passing() {
     let out = Command::new("bash")
@@ -140,7 +134,6 @@ fn when_the_binary_does_not_exist_the_run_check_fails_instead_of_passing() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("does not exist"));
 }
 
-/// Verifies: REQ-DIST-011
 #[test]
 fn when_a_release_is_made_the_arm64_cli_is_built_natively_started_and_published_with_its_checksum()
 {
@@ -174,7 +167,6 @@ fn when_a_release_is_made_the_arm64_cli_is_built_natively_started_and_published_
     );
 }
 
-/// Verifies: REQ-DIST-011
 #[test]
 fn when_a_release_is_made_the_arm64_app_is_built_on_an_arm64_runner_and_published() {
     let workflow = read(".github/workflows/release.yml");
@@ -215,8 +207,6 @@ fn when_a_release_is_made_the_arm64_app_is_built_on_an_arm64_runner_and_publishe
 }
 
 /// Two AppImages with one notice name would collide in the release.
-///
-/// Verifies: REQ-DIST-011
 #[test]
 fn when_the_app_is_built_for_two_architectures_each_has_its_own_notice_file_name() {
     let build = job(&read(".github/workflows/release.yml"), "build");
@@ -225,7 +215,6 @@ fn when_the_app_is_built_for_two_architectures_each_has_its_own_notice_file_name
     assert!(build.contains("bundled_libraries: jamuru-linux-arm64-bundled-libraries.txt"));
 }
 
-/// Verifies: REQ-DIST-011
 #[test]
 fn when_a_change_is_pushed_the_arm64_cli_is_built_so_a_dependency_that_stops_building_is_caught_early(
 ) {
@@ -237,8 +226,6 @@ fn when_a_change_is_pushed_the_arm64_cli_is_built_so_a_dependency_that_stops_bui
 
 /// The arm64 build is native: asked on another machine it refuses instead of
 /// quietly building for that machine.
-///
-/// Verifies: REQ-DIST-011
 #[test]
 fn when_the_arm64_cli_is_asked_for_on_a_machine_that_is_not_arm64_the_build_script_refuses() {
     let machine = Command::new("uname").arg("-m").output().unwrap();

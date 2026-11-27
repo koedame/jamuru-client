@@ -1,4 +1,4 @@
-//! Guards how a beta learns about the next beta (ADR-045): the version a beta is
+//! Guards how a beta learns about the next beta: the version a beta is
 //! built as (`scripts/build-version.sh`) and the file it reads
 //! (`scripts/publish-beta-channel.sh`).
 //!
@@ -29,7 +29,6 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// Verifies: REQ-UPD-012
 #[test]
 fn when_the_tag_is_a_beta_the_app_is_built_as_the_version_with_the_beta_number() {
     let output = build_version("v0.1.0-beta.17");
@@ -38,7 +37,6 @@ fn when_the_tag_is_a_beta_the_app_is_built_as_the_version_with_the_beta_number()
     assert_eq!(stdout(&output), "0.1.0-17");
 }
 
-/// Verifies: REQ-UPD-012
 #[test]
 fn when_the_tag_is_a_release_the_app_is_built_as_the_tag_version() {
     let output = build_version("v0.1.0");
@@ -49,8 +47,6 @@ fn when_the_tag_is_a_release_the_app_is_built_as_the_tag_version() {
 
 /// Only a number is allowed after the dash: the Windows installer takes
 /// nothing else, and anything else has no order against the betas.
-///
-/// Verifies: REQ-UPD-012
 #[test]
 fn when_the_tag_is_another_pre_release_no_version_is_given() {
     for tag in [
@@ -66,7 +62,6 @@ fn when_the_tag_is_another_pre_release_no_version_is_given() {
     }
 }
 
-/// Verifies: REQ-UPD-012
 #[test]
 fn a_beta_is_older_than_the_next_beta_and_than_its_own_release() {
     let older = |a: &str, b: &str| {
@@ -144,7 +139,6 @@ fn publish(manifest: &Path, state: &Path) -> Output {
         .expect("bash is needed to run scripts/publish-beta-channel.sh")
 }
 
-/// Verifies: REQ-UPD-014
 #[test]
 fn when_the_channel_has_never_been_published_it_is_created_with_the_manifest() {
     let channel = Channel::new();
@@ -156,7 +150,6 @@ fn when_the_channel_has_never_been_published_it_is_created_with_the_manifest() {
     assert_eq!(channel.created(), 1);
 }
 
-/// Verifies: REQ-UPD-014
 #[test]
 fn when_a_newer_beta_is_published_it_replaces_the_manifest() {
     let channel = Channel::new();
@@ -169,7 +162,6 @@ fn when_a_newer_beta_is_published_it_replaces_the_manifest() {
     assert_eq!(channel.created(), 1);
 }
 
-/// Verifies: REQ-UPD-014
 #[test]
 fn when_the_release_of_the_version_is_published_it_replaces_the_beta() {
     let channel = Channel::new();
@@ -182,8 +174,6 @@ fn when_the_release_of_the_version_is_published_it_replaces_the_beta() {
 }
 
 /// A run that finishes late must not pull the betas back.
-///
-/// Verifies: REQ-UPD-014
 #[test]
 fn when_an_older_version_is_published_the_manifest_is_kept() {
     let channel = Channel::new();
@@ -195,7 +185,6 @@ fn when_an_older_version_is_published_the_manifest_is_kept() {
     assert_eq!(channel.published().as_deref(), Some("0.1.0"));
 }
 
-/// Verifies: REQ-UPD-014
 #[test]
 fn when_the_beta_of_the_next_version_is_published_it_replaces_the_release() {
     let channel = Channel::new();

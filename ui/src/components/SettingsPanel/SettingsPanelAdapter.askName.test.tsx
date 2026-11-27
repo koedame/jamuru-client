@@ -40,7 +40,6 @@ describe('the name check switch in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-CON-142
   it('the name is asked before entering, the switch is on', async () => {
     fakeBackend({ ask_name_on_entry: true });
     render(<SettingsPanelAdapter />);
@@ -50,7 +49,6 @@ describe('the name check switch in the settings panel', () => {
     expect(toggle).toBeChecked();
   });
 
-  // Verifies: REQ-CON-142
   it('the name check was stopped from the dialog, the switch is off', async () => {
     fakeBackend({ ask_name_on_entry: false });
     render(<SettingsPanelAdapter />);
@@ -60,7 +58,6 @@ describe('the name check switch in the settings panel', () => {
     await waitFor(() => expect(toggle).not.toBeChecked());
   });
 
-  // Verifies: REQ-CON-142
   it('the switch is turned back on, the setting is saved as on', async () => {
     const saved = { ask_name_on_entry: false };
     fakeBackend(saved);
@@ -76,7 +73,6 @@ describe('the name check switch in the settings panel', () => {
     ]);
   });
 
-  // Verifies: REQ-CON-142
   it('saving fails, the switch goes back to what is saved', async () => {
     fakeBackend({ ask_name_on_entry: true }, true);
     render(<SettingsPanelAdapter />);

@@ -48,7 +48,6 @@ describe('the limiter switches in the settings panel', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-GUI-032
   it('the limiters are on, the switches show both on', async () => {
     fakeBackend(audioSettings({ input_limiter: true, output_limiter: true }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -57,7 +56,6 @@ describe('the limiter switches in the settings panel', () => {
     expect(screen.getByTestId('devices-output-limiter-toggle')).toBeChecked();
   });
 
-  // Verifies: REQ-GUI-032
   it('the user switches the input limiter off, the app is asked for that one change and the panel shows it off', async () => {
     const calls = fakeBackend(audioSettings({ input_limiter: true, output_limiter: true }));
     render(<SettingsPanelAdapter initialTab="devices" />);
@@ -74,7 +72,6 @@ describe('the limiter switches in the settings panel', () => {
     expect(screen.getByTestId('devices-output-limiter-toggle')).toBeChecked();
   });
 
-  // Verifies: REQ-GUI-032
   it('the user switches the output limiter off, the app is asked for that one change and the panel shows it off', async () => {
     const calls = fakeBackend(audioSettings({ input_limiter: true, output_limiter: true }));
     render(<SettingsPanelAdapter initialTab="devices" />);

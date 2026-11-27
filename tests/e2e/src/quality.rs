@@ -59,7 +59,7 @@ impl PesqEvaluator {
     ///
     /// The latency side of the threshold is not duplicated here: it comes from
     /// `AudioPreset::max_app_latency_ms` so that the E2E suite and the product
-    /// cannot disagree about a preset's budget (ADR-019).
+    /// cannot disagree about a preset's budget.
     pub const MIN_MOS: &'static [(&'static str, f32)] = &[
         ("zero-latency", 4.0),
         ("ultra-low-latency", 3.8),
@@ -257,7 +257,7 @@ impl LatencyMeasurer {
         Ok(latency_ms)
     }
 
-    /// Verify latency against ADR-008 specifications
+    /// Verify latency against the presets' latency budgets
     pub fn verify_against_spec(&self, latency_ms: f32, preset: &str) -> QualityResult {
         let threshold = PesqEvaluator::max_app_latency_ms_for(preset);
 

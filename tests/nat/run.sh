@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Two copies of the app, each behind its own NAT router (the kernel's iptables, in containers),
-# trying to reach each other through a STUN server on a third network (ADR-115). Which kinds of
+# trying to reach each other through a STUN server on a third network. Which kinds of
 # NAT the two sit behind is what changes from case to case; the table at the end says which
 # cases the peers heard each other in.
 #
@@ -89,7 +89,7 @@ start_client() { # start_client <a|b> <peer args...>; connect_at_a / connect_at_
 # sending first. The default is 30 s and 100 s, which takes minutes more per case.
 # moved: the router a|b gives the app another port after it was told the first one (before the
 # peers connect). no-restun: the peers do not ask STUN again, as the app did before. joined: that
-# side entered the room, so the other learns of it later (its first probe waits longer, ADR-131).
+# side entered the room, so the other learns of it later (its first probe waits longer).
 run_case() {
   local name=$1 mode_a=$2 mode_b=$3 gap=$4 expected=$5 skew=${6:--} record=${7:--} patient=${8:--} moved=${9:--} norestun=${10:--} joined=${11:--}
   local settle=$settle saved_timeout=${NAT_LAB_UDP_TIMEOUT:-} saved_args=${NAT_LAB_PEER_ARGS:-}

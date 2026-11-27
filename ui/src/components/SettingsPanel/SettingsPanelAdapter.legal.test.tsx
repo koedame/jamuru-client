@@ -44,7 +44,6 @@ describe('the terms rows in the settings screen', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-TRM-004
   it('the about tab is shown, rows for the terms, the license, the privacy page and the announcements are there', async () => {
     fakeBackend();
     render(<SettingsPanelAdapter initialTab="about" />);
@@ -55,7 +54,6 @@ describe('the terms rows in the settings screen', () => {
     expect(screen.getByTestId('settings-legal-announcements')).toHaveTextContent('Announcements');
   });
 
-  // Verifies: REQ-TRM-004
   it('the terms row is pressed, the bundled text is read from the app and shown in a dialog that closes', async () => {
     fakeBackend();
     render(<SettingsPanelAdapter initialTab="about" />);
@@ -68,7 +66,6 @@ describe('the terms rows in the settings screen', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-TRM-004
   it('the license row is pressed, the license is shown as it is written', async () => {
     fakeBackend();
     render(<SettingsPanelAdapter initialTab="about" />);
@@ -79,7 +76,6 @@ describe('the terms rows in the settings screen', () => {
     expect(dialog).toHaveTextContent('jamuru Source Available License');
   });
 
-  // Verifies: REQ-TRM-004
   it('the privacy and announcements rows are pressed, the app is asked to open each named page and nothing else', async () => {
     const calls = fakeBackend();
     render(<SettingsPanelAdapter initialTab="about" />);

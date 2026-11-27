@@ -1,4 +1,4 @@
-//! Guards the 32-bit ARM Linux build of the app (ADR-128, REQ-DIST-012): that
+//! Guards the 32-bit ARM Linux build of the app: that
 //! every release carries its AppImage and deb, that nothing is published
 //! without them, and that the release checks cover it the way they cover the
 //! x64 app.
@@ -32,7 +32,6 @@ fn job(workflow: &str, name: &str) -> String {
         .join("\n")
 }
 
-/// Verifies: REQ-DIST-012
 #[test]
 fn when_a_release_is_made_the_armv7_app_goes_through_the_same_build_job_as_the_x64_app() {
     let release = read(".github/workflows/release.yml");
@@ -74,7 +73,6 @@ fn when_a_release_is_made_the_armv7_app_goes_through_the_same_build_job_as_the_x
     );
 }
 
-/// Verifies: REQ-DIST-012
 #[test]
 fn when_a_release_is_made_nothing_is_published_without_the_armv7_app() {
     let release = job(&read(".github/workflows/release.yml"), "release");
@@ -103,8 +101,6 @@ fn when_a_release_is_made_nothing_is_published_without_the_armv7_app() {
 
 /// Without its entry in the manifest an installed armv7 app would never be
 /// offered an update.
-///
-/// Verifies: REQ-DIST-012
 #[test]
 fn when_the_update_manifest_is_made_it_names_the_armv7_appimage() {
     let script = read("scripts/make-update-manifest.sh");
@@ -116,8 +112,6 @@ fn when_the_update_manifest_is_made_it_names_the_armv7_appimage() {
 
 /// The two libraries notices (x64 and armv7) are both named in the notice that
 /// goes into the installers, or the armv7 one would be published unannounced.
-///
-/// Verifies: REQ-DIST-012
 #[test]
 fn when_the_installers_name_the_bundled_libraries_notice_both_architectures_are_named() {
     let notice = read("src-tauri/resources/LICENSES.txt");
@@ -126,7 +120,6 @@ fn when_the_installers_name_the_bundled_libraries_notice_both_architectures_are_
     assert!(notice.contains("jamuru-linux-armv7-bundled-libraries.txt"));
 }
 
-/// Verifies: REQ-DIST-012
 #[test]
 fn when_the_install_script_is_given_an_unknown_argument_it_refuses_before_changing_the_system() {
     let out = std::process::Command::new("bash")
@@ -139,7 +132,6 @@ fn when_the_install_script_is_given_an_unknown_argument_it_refuses_before_changi
     assert!(String::from_utf8_lossy(&out.stderr).contains("usage"));
 }
 
-/// Verifies: REQ-DIST-012
 #[test]
 fn when_ldd_is_given_a_native_program_it_lists_the_libraries_as_the_real_ldd_does() {
     let out = std::process::Command::new("bash")

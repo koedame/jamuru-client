@@ -1,4 +1,4 @@
-//! The window someone helping works in (ADR-044 §5): the helped app's own
+//! The window someone helping works in: the helped app's own
 //! screen, drawn in the helper's app from the helped app's state.
 //!
 //! What it shows is the helped app's: its own channel strip is the helped

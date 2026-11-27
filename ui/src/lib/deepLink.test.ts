@@ -19,7 +19,6 @@ import { parseInviteUrl, registerInviteLinkHandler } from './deepLink';
 import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link';
 
 describe('parseInviteUrl', () => {
-  // Verifies: REQ-CON-103
   it('extracts the code from a well-formed link', () => {
     expect(parseInviteUrl('jamuru://join/ABC234XYZ')).toBe('ABC234XYZ');
   });
@@ -34,7 +33,6 @@ describe('parseInviteUrl', () => {
     expect(parseInviteUrl('  jamuru://join/ABC234XYZ  ')).toBe('ABC234XYZ');
   });
 
-  // Verifies: REQ-CON-103
   it.each([
     ['wrong scheme', 'https://example.com/join/ABC234XYZ'],
     ['wrong action', 'jamuru://leave/ABC234XYZ'],

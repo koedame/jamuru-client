@@ -33,7 +33,6 @@ describe('the consent gate', () => {
     await i18n.changeLanguage('en');
   });
 
-  // Verifies: REQ-UPD-027
   it('what it shows is drawn, it says so once', async () => {
     const onShown = vi.fn();
 
@@ -44,9 +43,7 @@ describe('the consent gate', () => {
     await waitFor(() => expect(onShown).toHaveBeenCalledTimes(1));
   });
 
-  // A version whose screen fails to draw has not started (ADR-089).
-  //
-  // Verifies: REQ-UPD-027
+  // A version whose screen fails to draw has not started.
   it('what it shows fails to draw, it does not say it is shown', async () => {
     const onShown = vi.fn();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -67,7 +64,6 @@ describe('the consent gate', () => {
     error.mockRestore();
   });
 
-  // Verifies: REQ-UPD-027
   it('the terms are still being read, it does not say it is shown yet', async () => {
     const onShown = vi.fn();
     termsGet.mockReturnValue(new Promise(() => {}));

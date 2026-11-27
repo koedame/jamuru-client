@@ -98,8 +98,6 @@ async fn settle() {
 
 /// The audio a connection sends is not on the wire as it was given, and every packet that
 /// carries anything but a keep-alive is marked encrypted
-///
-/// Verifies: REQ-SEC-001
 #[tokio::test]
 async fn when_audio_is_sent_the_datagrams_on_the_wire_carry_no_readable_audio() {
     let pair = connected_pair(None, Some(4)).await;
@@ -159,8 +157,6 @@ async fn when_audio_is_sent_the_datagrams_on_the_wire_carry_no_readable_audio() 
 }
 
 /// What the sender sent comes out the other end unchanged
-///
-/// Verifies: REQ-SEC-001
 #[tokio::test]
 async fn when_audio_is_sent_the_peer_receives_it_exactly() {
     let pair = connected_pair(None, None).await;
@@ -182,8 +178,6 @@ async fn when_audio_is_sent_the_peer_receives_it_exactly() {
 }
 
 /// The same holds in the other direction, where the peer's audio reaches us
-///
-/// Verifies: REQ-SEC-001
 #[tokio::test]
 async fn when_the_peer_sends_audio_back_it_is_encrypted_too() {
     let pair = connected_pair(None, None).await;
@@ -204,8 +198,6 @@ async fn when_the_peer_sends_audio_back_it_is_encrypted_too() {
 }
 
 /// A packet changed on its way is not played, and the ones around it are
-///
-/// Verifies: REQ-SEC-002
 #[tokio::test]
 async fn when_a_packet_is_altered_on_the_wire_it_is_not_played() {
     let altered = Arc::new(Mutex::new(false));
@@ -248,8 +240,6 @@ async fn when_a_packet_is_altered_on_the_wire_it_is_not_played() {
 }
 
 /// A header changed on its way (the timestamp, which the payload does not carry) is refused too
-///
-/// Verifies: REQ-SEC-002
 #[tokio::test]
 async fn when_the_header_of_a_packet_is_altered_on_the_wire_it_is_not_played() {
     let sender_addr: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
@@ -281,8 +271,6 @@ async fn when_the_header_of_a_packet_is_altered_on_the_wire_it_is_not_played() {
 }
 
 /// A packet sent twice is played once
-///
-/// Verifies: REQ-SEC-002
 #[tokio::test]
 async fn when_a_packet_is_repeated_on_the_wire_it_is_played_once() {
     let pair = connected_pair(
@@ -303,8 +291,6 @@ async fn when_a_packet_is_repeated_on_the_wire_it_is_played_once() {
 
 /// Audio someone puts on the wire without the keys is not played, and does not turn the link
 /// off encryption
-///
-/// Verifies: REQ-SEC-002
 #[tokio::test]
 async fn when_plain_audio_is_put_on_the_wire_after_the_keys_are_agreed_it_is_not_played() {
     let pair = connected_pair(None, None).await;
@@ -327,8 +313,6 @@ async fn when_plain_audio_is_put_on_the_wire_after_the_keys_are_agreed_it_is_not
 }
 
 /// Nothing goes until the two have agreed keys: what is held back is not sent plain
-///
-/// Verifies: REQ-SEC-005
 #[tokio::test]
 async fn when_the_peer_has_not_answered_the_keys_no_audio_is_sent() {
     let mut sender = Connection::new("127.0.0.1:0").await.unwrap();
@@ -366,8 +350,6 @@ async fn when_the_peer_has_not_answered_the_keys_no_audio_is_sent() {
 /// A peer on an older version, which sends audio and pings plain and takes no key, is not
 /// talked to: nothing it sends is played, nothing plain is sent to it, and the connection stays
 /// without keys
-///
-/// Verifies: REQ-SEC-004
 #[tokio::test]
 async fn when_the_peer_cannot_encrypt_nothing_is_played_and_nothing_plain_is_sent() {
     let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
@@ -431,8 +413,6 @@ async fn when_the_peer_cannot_encrypt_nothing_is_played_and_nothing_plain_is_sen
 
 /// Someone who has learned our port cannot make the link play, or give up on, anything by sending
 /// plain audio to it
-///
-/// Verifies: REQ-SEC-004
 #[tokio::test]
 async fn when_a_stranger_sends_plain_audio_the_link_keeps_negotiating() {
     let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
@@ -461,8 +441,6 @@ async fn when_a_stranger_sends_plain_audio_the_link_keeps_negotiating() {
 }
 
 /// A key from someone other than the peer is not taken
-///
-/// Verifies: REQ-SEC-004
 #[tokio::test]
 async fn when_a_stranger_sends_a_key_it_is_not_taken() {
     let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
@@ -493,8 +471,6 @@ async fn when_a_stranger_sends_a_key_it_is_not_taken() {
 
 /// A connection that was not told who its peer is does not connect, and neither does one told a
 /// key that is not a key: a peer that gave the server none is an app too old to talk to
-///
-/// Verifies: REQ-SEC-008
 #[tokio::test]
 async fn when_the_peer_gave_no_usable_key_the_connection_does_not_connect() {
     let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -577,8 +553,6 @@ fn pass_on(_: SocketAddr) -> Rewrite {
 
 /// Two ends that know each other by their keys agree keys over a relay that changes nothing,
 /// and the audio arrives
-///
-/// Verifies: REQ-SEC-007
 #[tokio::test]
 async fn when_both_ends_check_the_peer_and_nothing_interferes_audio_arrives_encrypted() {
     let (sender_key, receiver_key) = (LinkIdentity::generate(), LinkIdentity::generate());
@@ -604,8 +578,6 @@ async fn when_both_ends_check_the_peer_and_nothing_interferes_audio_arrives_encr
 /// would, and signs the exchange with a key of its own - not the one the server gave for the
 /// other end - does not get between them: neither end takes the relay's key, no audio is sent,
 /// and so the relay hears nothing
-///
-/// Verifies: REQ-SEC-007
 #[tokio::test]
 async fn when_a_relay_signs_the_exchange_with_a_key_the_server_did_not_give_it_is_not_taken() {
     let (sender_key, receiver_key) = (LinkIdentity::generate(), LinkIdentity::generate());

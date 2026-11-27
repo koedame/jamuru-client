@@ -1,4 +1,4 @@
-//! Guards the third-party license notices the installers carry (REQ-DIST-007).
+//! Guards the third-party license notices the installers carry.
 //!
 //! MIT, Apache-2.0, BSD and MPL-2.0 code may be shipped only with its
 //! copyright notice and license text (MPL-2.0 also with where its source is).
@@ -24,7 +24,6 @@ fn read(file: &str) -> String {
         .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e))
 }
 
-/// Verifies: REQ-DIST-007
 #[test]
 fn the_notices_are_the_ones_the_current_lock_files_produce() {
     let output = Command::new("python3")
@@ -41,7 +40,6 @@ fn the_notices_are_the_ones_the_current_lock_files_produce() {
     );
 }
 
-/// Verifies: REQ-DIST-007
 #[test]
 fn the_installers_bundle_the_generated_notices() {
     let conf: serde_json::Value = serde_json::from_str(&read("src-tauri/tauri.conf.json")).unwrap();
@@ -61,8 +59,6 @@ fn the_installers_bundle_the_generated_notices() {
 
 /// MPL-2.0 asks that anyone who gets the binary can find the source of the
 /// covered files.
-///
-/// Verifies: REQ-DIST-007
 #[test]
 fn every_mpl_licensed_crate_comes_with_where_its_source_is() {
     let lock = read("src-tauri/Cargo.lock");

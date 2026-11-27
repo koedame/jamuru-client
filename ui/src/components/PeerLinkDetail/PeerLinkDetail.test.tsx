@@ -73,7 +73,6 @@ function upLink(changes: Partial<PeerLinkStatus> = {}): PeerLinkStatus {
 const text = (testId: string) => screen.getByTestId(testId).textContent;
 
 describe('PeerLinkDetail', () => {
-  // Verifies: REQ-LAT-122
   it('リンクが上がっているとき、自分の入力・出力・ジッターバッファの遅延を層ごとに出すこと', () => {
     render(<PeerLinkDetail peerName="Aki" link={upLink()} localSampleRate={48000} />);
 
@@ -128,7 +127,6 @@ describe('PeerLinkDetail', () => {
     }
   });
 
-  // Verifies: REQ-LAT-130
   it('往復をまだ測っていないとき、往復を測定中と出すこと', () => {
     const link = upLink();
     link.network!.rtt_ms = null;

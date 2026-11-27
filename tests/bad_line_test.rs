@@ -1,4 +1,4 @@
-//! The bad line that tests put between two ends does what it is set to (ADR-124)
+//! The bad line that tests put between two ends does what it is set to
 //!
 //! A measurement taken through a simulated line is only worth what the simulation is. These tests
 //! check the line itself: that the share of datagrams it loses, the delays it gives, the rate it

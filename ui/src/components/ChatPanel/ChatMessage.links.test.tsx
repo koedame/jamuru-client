@@ -8,7 +8,6 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ChatMessage } from "./ChatMessage";
 
 describe("ChatMessage links", () => {
-  // Verifies: REQ-GUI-029
   it("本文にアドレスがあるとき、リンクとして表示され本文の文字は変わらないこと", () => {
     const { container } = render(
       <ChatMessage type="other" senderName="Bob" content="見て https://example.com/a です" timestamp={0} />
@@ -21,7 +20,6 @@ describe("ChatMessage links", () => {
     );
   });
 
-  // Verifies: REQ-GUI-029
   it("リンクをクリックしたとき、ウィンドウは遷移せずアドレスが onOpenLink に渡ること", () => {
     const onOpenLink = vi.fn();
     render(
@@ -34,7 +32,6 @@ describe("ChatMessage links", () => {
     expect(onOpenLink).toHaveBeenCalledWith("https://example.com/a");
   });
 
-  // Verifies: REQ-GUI-029
   it("onOpenLink があるとき、リンクに target が付かないこと（シェルのプラグインが重ねて開かないように）", () => {
     render(
       <ChatMessage type="other" senderName="Bob" content="https://example.com/a" timestamp={0} onOpenLink={vi.fn()} />
@@ -43,14 +40,12 @@ describe("ChatMessage links", () => {
     expect(screen.getByRole("link")).not.toHaveAttribute("target");
   });
 
-  // Verifies: REQ-GUI-029
   it("本文が http と https 以外のとき、リンクにならないこと", () => {
     render(<ChatMessage type="other" senderName="Bob" content="file:///etc/passwd javascript:alert(1)" timestamp={0} />);
 
     expect(screen.queryByRole("link")).toBeNull();
   });
 
-  // Verifies: REQ-GUI-029
   it("自分のメッセージにアドレスがあるとき、同じようにリンクになること", () => {
     render(<ChatMessage type="own" content="https://example.com" timestamp={0} />);
 

@@ -2,7 +2,7 @@ name: Update drill
 
 # Installs real packages over each other on each system and checks that an
 # update that cannot start is taken out again, and the version before it put
-# back and started (ADR-089, scripts/update-drill.py). The release workflow
+# back and started (scripts/update-drill.py). The release workflow
 # runs this and publishes nothing until it passes on every system.
 #
 # Each system is run twice: with the first version made from this source, and
@@ -46,8 +46,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
             program: jamuru-app
             python: python3
-          # 64-bit ARM Linux: the AppImage the release offers to arm64 apps
-          # (ADR-127), built natively on the release's runner image.
+          # 64-bit ARM Linux: the AppImage the release offers to arm64 apps,
+          # built natively on the release's runner image.
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             program: jamuru-app

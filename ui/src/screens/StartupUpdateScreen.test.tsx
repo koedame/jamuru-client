@@ -1,6 +1,6 @@
 /**
- * The small window a start shows while it updates the app before opening it
- * (ADR-089): it follows how far the update is and passes on the wish to open
+ * The small window a start shows while it updates the app before opening it:
+ * it follows how far the update is and passes on the wish to open
  * the app without waiting.
  */
 
@@ -46,7 +46,6 @@ beforeEach(async () => {
 });
 
 describe("StartupUpdateScreen", () => {
-  // Verifies: REQ-UPD-025
   it("the window opens in the middle of a download, it shows the download as far as it is", async () => {
     progress = { phase: "downloading", received: 50, total: 100 };
 
@@ -56,7 +55,6 @@ describe("StartupUpdateScreen", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Downloading the new version");
   });
 
-  // Verifies: REQ-UPD-025
   it("the backend reports the update moving on, the window follows it", async () => {
     render(<StartupUpdateScreen />);
     await waitFor(() => expect(calls).toContain("update_startup_progress"));
@@ -69,7 +67,6 @@ describe("StartupUpdateScreen", () => {
     expect(screen.queryByTestId("startup-update-skip")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-UPD-025
   it("a report heard before the read is answered is not undone by the older answer", async () => {
     let answer: (now: StartupProgress | null) => void = () => {};
     invoke.mockImplementation((command: string) => {
@@ -86,7 +83,6 @@ describe("StartupUpdateScreen", () => {
     expect(screen.getByText("60%")).toBeInTheDocument();
   });
 
-  // Verifies: REQ-UPD-025
   it("the person presses Open without waiting, the backend is asked once and the button is held", async () => {
     render(<StartupUpdateScreen />);
     const button = await screen.findByTestId("startup-update-skip");
@@ -97,7 +93,6 @@ describe("StartupUpdateScreen", () => {
     expect(button).toBeDisabled();
   });
 
-  // Verifies: REQ-UPD-025
   it("asking the backend fails, the button can be pressed again", async () => {
     invoke.mockImplementation(async (command: string) => {
       calls.push(command);

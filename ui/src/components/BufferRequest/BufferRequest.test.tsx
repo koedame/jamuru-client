@@ -1,6 +1,6 @@
 /**
  * Asks to buffer a participant's audio for longer, as the user who is asked
- * sees them (ADR-097): the question, taking up or turning down, putting the
+ * sees them: the question, taking up or turning down, putting the
  * buffer back, and the notices about the asks the user made. What the backend
  * decides is `src/network/buffer_request.rs`.
  */
@@ -78,7 +78,6 @@ beforeEach(async () => {
 afterEach(() => vi.useRealTimers());
 
 describe("an ask arrives", () => {
-  // Verifies: REQ-GUI-036
   it("a participant asks for a longer buffer, the user is asked in words that name them, the length and what changes", async () => {
     await mount();
 
@@ -90,7 +89,6 @@ describe("an ask arrives", () => {
     expect(calls.filter((c) => c.command === "buffer_request_answer")).toEqual([]);
   });
 
-  // Verifies: REQ-GUI-036
   it("the user accepts, the answer names what was shown and the question goes once the app has taken it", async () => {
     await mount();
     send({ type: "asked", peer: "aki-id", peer_name: "Aki", terms: TERMS });
@@ -106,7 +104,6 @@ describe("an ask arrives", () => {
     expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-036
   it("the ask changes as the user accepts, the app refuses and the question stays for the new ask", async () => {
     await mount();
     const longer = { ...TERMS, max_ms10: 500 };
@@ -128,7 +125,6 @@ describe("an ask arrives", () => {
     expect(screen.getByTestId("settings-help-question")).toHaveTextContent("50ms");
   });
 
-  // Verifies: REQ-GUI-036
   it("the user turns it down, the refusal is sent and the question goes", async () => {
     await mount();
     send({ type: "asked", peer: "aki-id", peer_name: "Aki", terms: TERMS });
@@ -143,7 +139,6 @@ describe("an ask arrives", () => {
     expect(screen.queryByTestId("settings-help-question")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-036
   it("the asker withdraws before the user answers, the question goes without an answer sent", async () => {
     await mount();
     send({ type: "asked", peer: "aki-id", peer_name: "Aki", terms: TERMS });
@@ -154,7 +149,6 @@ describe("an ask arrives", () => {
     expect(calls.filter((c) => c.command === "buffer_request_answer")).toEqual([]);
   });
 
-  // Verifies: REQ-GUI-036
   it("the window opened after the ask came, the question is there from the snapshot", async () => {
     snapshot.prompts = [{ peer_id: "aki-id", peer_name: "Aki", terms: TERMS }];
 
@@ -163,7 +157,6 @@ describe("an ask arrives", () => {
     expect(await screen.findByTestId("settings-help-question")).toHaveTextContent("Aki asks");
   });
 
-  // Verifies: REQ-GUI-036
   it("two participants ask, they are asked about one after the other", async () => {
     await mount();
     send({ type: "asked", peer: "aki-id", peer_name: "Aki", terms: TERMS });
@@ -178,7 +171,6 @@ describe("an ask arrives", () => {
 });
 
 describe("a buffer held because a participant asked", () => {
-  // Verifies: REQ-GUI-036
   it("the ask is taken up, the buffer is shown as held for them until it is put back", async () => {
     await mount();
     send({ type: "held", peer: "aki-id", terms: TERMS, applied: APPLIED });
@@ -191,7 +183,6 @@ describe("a buffer held because a participant asked", () => {
     expect(screen.getByTestId("held")).toHaveTextContent("not held");
   });
 
-  // Verifies: REQ-GUI-036
   it("the asker leaves, the buffer is no longer shown as held and nothing is said", async () => {
     await mount();
     send({ type: "held", peer: "aki-id", terms: TERMS, applied: APPLIED });
@@ -202,7 +193,6 @@ describe("a buffer held because a participant asked", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-036
   it("the asker takes the ask back, the buffer is released and the user is told", async () => {
     await mount();
     send({ type: "held", peer: "aki-id", terms: TERMS, applied: APPLIED });
@@ -213,7 +203,6 @@ describe("a buffer held because a participant asked", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Aki took the buffer ask back");
   });
 
-  // Verifies: REQ-GUI-036
   it("the window opened after the ask was taken up, the buffer is shown as held from the snapshot", async () => {
     snapshot.held = [{ peer_id: "aki-id", terms: TERMS, applied: APPLIED }];
 
@@ -224,7 +213,6 @@ describe("a buffer held because a participant asked", () => {
 });
 
 describe("the asks the user made", () => {
-  // Verifies: REQ-GUI-035
   it("the user asks, the ask is sent with the terms and shows as being sent", async () => {
     await mount();
 
@@ -237,7 +225,6 @@ describe("the asks the user made", () => {
     expect(screen.getByTestId("asked")).toHaveTextContent("sending");
   });
 
-  // Verifies: REQ-GUI-035
   it("the participant accepts, the user is told the length their audio is buffered at", async () => {
     await mount();
     await act(() => requests.ask("aki-id", TERMS));
@@ -248,7 +235,6 @@ describe("the asks the user made", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Aki is buffering your audio at 12ms");
   });
 
-  // Verifies: REQ-GUI-035
   it.each([
     ["declined", "Aki said no to your buffer ask"],
     ["declined_by_setting", "Aki's settings do not take buffer asks"],
@@ -263,7 +249,6 @@ describe("the asks the user made", () => {
     expect(screen.getByRole("status")).toHaveTextContent(text);
   });
 
-  // Verifies: REQ-GUI-035
   it("the notice has gone and the same standing is told again, the user is not told twice", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await mount();
@@ -278,7 +263,6 @@ describe("the asks the user made", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  // Verifies: REQ-GUI-035
   it("the user takes the ask back, it is sent and nothing is shown of it", async () => {
     await mount();
     await act(() => requests.ask("aki-id", TERMS));
@@ -289,7 +273,6 @@ describe("the asks the user made", () => {
     expect(screen.getByTestId("asked")).toHaveTextContent("none");
   });
 
-  // Verifies: REQ-GUI-035
   it("the window opened after the ask was made, how it stands is there from the snapshot", async () => {
     snapshot.asked = [{ peer_id: "aki-id", terms: TERMS, standing: { state: "pending" } }];
 
@@ -300,7 +283,6 @@ describe("the asks the user made", () => {
 });
 
 describe("there is no room connection", () => {
-  // Verifies: REQ-GUI-035
   it("the connection is not there, nothing can be asked and nothing is sent", async () => {
     await mount(null);
 
