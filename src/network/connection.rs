@@ -4235,9 +4235,10 @@ mod tests {
     }
 
     /// A NAT in front of `inside` that gives each address `inside` sends to a port of its own on
-    /// `127.0.0.2`, and lets in from an address only what came from the address that port was
+    /// `127.0.0.1`, and lets in from an address only what came from the address that port was
     /// made for (a symmetric NAT that hands out the next free port, or the free port of
-    /// `port_after` when `inside` sends to more addresses than are named).
+    /// `port_after` when `inside` sends to more addresses than are named). It is on 127.0.0.1
+    /// because that is the one IPv4 loopback address every OS has: macOS has no 127.0.0.2.
     ///
     /// `inside` sends to `fronts[i]` to send to `destinations[i]`; a destination that is `None`
     /// is one nobody answers at (a private address the peer offered), but it still takes a port.
@@ -4249,18 +4250,37 @@ mod tests {
         mapped: Arc<Mutex<Vec<Option<SocketAddr>>>>,
     }
 
+    /// An address on 127.0.0.2 that nobody answers at: one a peer behind [`symmetric_nat`]
+    /// offered that is not on the address its NAT is seen at, as a private address is not.
+    /// Where the loopback interface has every 127/8 address (Linux, Windows) it is a socket
+    /// bound there that never reads; macOS has 127.0.0.1 alone and drops what is sent to
+    /// 127.0.0.2, so there it is the address with no socket.
+    fn silent_elsewhere() -> (Option<std::net::UdpSocket>, SocketAddr) {
+        match std::net::UdpSocket::bind("127.0.0.2:0") {
+            Ok(socket) => {
+                let at = socket.local_addr().unwrap();
+                (Some(socket), at)
+            }
+            Err(_) => (None, SocketAddr::from(([127, 0, 0, 2], 40000))),
+        }
+    }
+
     async fn symmetric_nat(
         inside: SocketAddr,
         destinations: Vec<Option<SocketAddr>>,
         first_ports: usize,
     ) -> SymmetricNat {
+        // Ports the NAT holds below the ones it gives. The guess sends to a few ports on each
+        // side of the one it expects (ADR-115), so the ones below land on the NAT too and not on
+        // the socket of another test that 127.0.0.1 is shared with.
+        const BELOW: usize = 4;
         // Ports in a row, so that "the next free one" is the next number
         let mut pool: Vec<Arc<tokio::net::UdpSocket>> = Vec::new();
         'search: loop {
             pool.clear();
             let base: u16 = 20000 + (rand::random::<u16>() % 30000);
-            for i in 0..24u16 {
-                match tokio::net::UdpSocket::bind(("127.0.0.2", base + i)).await {
+            for i in 0..(BELOW as u16 + 24) {
+                match tokio::net::UdpSocket::bind(("127.0.0.1", base + i)).await {
                     Ok(socket) => pool.push(Arc::new(socket)),
                     Err(_) => continue 'search,
                 }
@@ -4269,7 +4289,7 @@ mod tests {
         }
         let ports: Vec<SocketAddr> = pool.iter().map(|s| s.local_addr().unwrap()).collect();
         let mut fronts = Vec::new();
-        let next = Arc::new(std::sync::atomic::AtomicUsize::new(first_ports));
+        let next = Arc::new(std::sync::atomic::AtomicUsize::new(BELOW + first_ports));
         // Which front each port was made for
         let owner: Arc<Mutex<Vec<Option<usize>>>> = Arc::new(Mutex::new(vec![None; pool.len()]));
         let mapped: Arc<Mutex<Vec<Option<SocketAddr>>>> =
@@ -4336,7 +4356,7 @@ mod tests {
         }
         SymmetricNat {
             fronts,
-            taken_by_stun: ports[..first_ports].to_vec(),
+            taken_by_stun: ports[BELOW..BELOW + first_ports].to_vec(),
             mapped,
         }
     }
@@ -4361,10 +4381,11 @@ mod tests {
         )
         .await;
         let (_silent, nowhere) = silent();
+        let (_also_silent, private) = silent_elsewhere();
         let offered_by_nat = nat.taken_by_stun.clone();
         let mut behind_nat_candidates = nat.fronts.clone();
         behind_nat_candidates.insert(0, nowhere);
-        let guessing_candidates = [nowhere, offered_by_nat[0], offered_by_nat[1]];
+        let guessing_candidates = [private, offered_by_nat[0], offered_by_nat[1]];
         let (from_nat, from_guessing) = tokio::join!(
             behind_nat.connect_with_candidates(&behind_nat_candidates),
             guessing.connect_with_candidates(&guessing_candidates)
@@ -4417,10 +4438,11 @@ mod tests {
         )
         .await;
         let (_silent, nowhere) = silent();
+        let (_also_silent, private) = silent_elsewhere();
         let offered_by_nat = nat.taken_by_stun.clone();
         let mut behind_nat_candidates = nat.fronts.clone();
         behind_nat_candidates.insert(0, nowhere);
-        let guessing_candidates = [nowhere, offered_by_nat[0], offered_by_nat[1]];
+        let guessing_candidates = [private, offered_by_nat[0], offered_by_nat[1]];
         let (from_nat, from_guessing) = tokio::join!(
             behind_nat.connect_with_candidates(&behind_nat_candidates),
             guessing.connect_with_candidates(&guessing_candidates)
