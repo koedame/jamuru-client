@@ -1468,6 +1468,7 @@ impl Backend for CliBackend {
         peer: Uuid,
         candidates: Vec<SocketAddr>,
         link_key: Option<String>,
+        advertised_just_now: bool,
     ) -> Result<(), String> {
         let name = named(&self.names(), peer);
         let mut audio = self.audio();
@@ -1480,7 +1481,7 @@ impl Backend for CliBackend {
             candidates.len()
         );
         session
-            .link(peer, &name, candidates, link_key)
+            .link(peer, &name, candidates, link_key, advertised_just_now)
             .map_err(|e| e.to_string())
     }
 
@@ -1708,6 +1709,7 @@ impl AudioSession {
         name: &str,
         candidates: Vec<SocketAddr>,
         link_key: Option<String>,
+        advertised_just_now: bool,
     ) -> Result<()> {
         self.names.insert(peer, name.to_string());
         self.told_up.remove(&peer);
@@ -1717,6 +1719,7 @@ impl AudioSession {
                 peer,
                 candidates,
                 link: (self.identity.clone(), link_key),
+                advertised_just_now,
             })))
             .map_err(|_| anyhow::anyhow!("the audio session has ended"))
     }

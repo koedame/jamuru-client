@@ -49,6 +49,9 @@ pub struct LinkTarget {
     /// the link is checked to be theirs (`Connection::verify_peer`). A peer
     /// the server gave no key for is not linked to.
     pub link: (LinkIdentity, Option<String>),
+    /// This app told the room its address just before (it entered the room): they learn of it
+    /// only now, so the first probe waits for them longer (`Connection::advertised_just_now`)
+    pub advertised_just_now: bool,
 }
 
 impl PartialEq for LinkTarget {

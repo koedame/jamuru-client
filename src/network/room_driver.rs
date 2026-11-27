@@ -127,12 +127,15 @@ pub trait Backend: Send + Sync + 'static {
     fn open_audio(&self) -> impl Future<Output = Result<(), String>> + Send;
     /// Opens an audio link to `peer`, racing `candidates` (best first), starting the audio
     /// session if none runs. `link_key` is the key the server gave for `peer`.
+    /// `advertised_just_now` says this app told the room its address just before, so `peer`
+    /// learns of it only now (ADR-131).
     fn link(
         &self,
         conn: u32,
         peer: Uuid,
         candidates: Vec<std::net::SocketAddr>,
         link_key: Option<String>,
+        advertised_just_now: bool,
     ) -> impl Future<Output = Result<(), String>> + Send;
     fn unlink(&self, peer: Uuid) -> impl Future<Output = Result<(), String>> + Send;
     /// The audio link to `from` goes on as the link to `to`, with whatever is kept of the
@@ -711,9 +714,15 @@ impl<B: Backend> Driver<B> {
 
     /// Carries out what the roster decided about the audio.
     async fn run_audio(&self, conn: u32, audio: Vec<Audio>) {
+        // The links started after this app told the room its address are to peers who learn of it
+        // only now
+        let mut advertised = false;
         for step in audio {
             match step {
-                Audio::Advertise => self.advertise(conn).await,
+                Audio::Advertise => {
+                    self.advertise(conn).await;
+                    advertised = true;
+                }
                 Audio::Open => {
                     if let Err(e) = self.backend().open_audio().await {
                         tracing::error!("Failed to start the audio session: {}", e);
@@ -745,7 +754,11 @@ impl<B: Backend> Driver<B> {
                     link_key,
                 } => {
                     let candidate_count = candidates.len();
-                    match self.backend().link(conn, peer, candidates, link_key).await {
+                    match self
+                        .backend()
+                        .link(conn, peer, candidates, link_key, advertised)
+                        .await
+                    {
                         Ok(()) => tracing::info!(
                             "Audio link started ({} address candidate(s))",
                             candidate_count
@@ -924,8 +937,12 @@ mod tests {
             _peer: Uuid,
             _candidates: Vec<std::net::SocketAddr>,
             _link_key: Option<String>,
+            advertised_just_now: bool,
         ) -> Result<(), String> {
             self.ask("link");
+            if advertised_just_now {
+                self.ask("link after advertising");
+            }
             Ok(())
         }
 
@@ -1096,6 +1113,32 @@ mod tests {
         driver.create().await.unwrap();
         assert_eq!(driver.backend().asked("link"), 1);
         driver
+    }
+
+    /// Verifies: REQ-CON-181
+    #[tokio::test]
+    async fn the_link_to_someone_in_the_room_on_entering_it_is_started_after_advertising_and_one_to_someone_who_tells_their_address_later_is_not(
+    ) {
+        let driver = room_with_ben_heard(at(2, "Ben", "192.0.2.2:5000")).await;
+        assert_eq!(driver.backend().asked("link after advertising"), 1);
+
+        let cleo = at(3, "Cleo", "192.0.2.3:6000");
+        driver
+            .backend()
+            .polls
+            .lock()
+            .unwrap()
+            .push_back(vec![
+                Polled::Room(RoomEvent::PeerJoined(PeerInfo {
+                    public_addr: None,
+                    candidates: vec![],
+                    ..cleo.clone()
+                })),
+                Polled::Room(RoomEvent::PeerUpdated(cleo)),
+            ]);
+        until(&driver, |_| driver.backend().asked("link") == 2).await;
+
+        assert_eq!(driver.backend().asked("link after advertising"), 1);
     }
 
     async fn lose_the_connection_and_get_it_back(driver: &Driver<FakeBackend>) {
