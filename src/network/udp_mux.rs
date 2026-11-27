@@ -20,7 +20,7 @@ use super::stun::{
     build_binding_request, parse_binding_response, resolve, StunResult, OTHER_FAMILY_GRACE,
 };
 use super::transport::{
-    bind_std, canonical_addr, destination_for, send_datagram, IpFamilies, UdpTransport,
+    bind_std, canonical_addr, destination_for, recv_whole, send_datagram, IpFamilies, UdpTransport,
     RECV_BUFFER_SIZE,
 };
 
@@ -308,12 +308,9 @@ impl UdpMux {
             let mut buf = vec![0u8; RECV_BUFFER_SIZE];
             let mut unknown = UnknownSources::new(Instant::now());
             loop {
-                match reading.recv_from(&mut buf).await {
-                    // A datagram that fills the buffer may have been cut short
-                    Ok((len, from)) if len == RECV_BUFFER_SIZE => {
-                        debug!("Dropping a datagram from {from} that fills the receive buffer");
-                    }
-                    Ok((len, from)) => {
+                match recv_whole(&reading, &mut buf).await {
+                    Ok(None) => {}
+                    Ok(Some((len, from))) => {
                         let from = canonical_addr(from);
                         if take_stun_answer(&asking, &buf[..len], from) {
                             continue;
@@ -655,6 +652,26 @@ mod tests {
             read.await.unwrap(),
             Err(NetworkError::NotConnected)
         ));
+    }
+
+    #[tokio::test]
+    async fn when_datagrams_that_may_have_been_cut_short_reach_the_shared_socket_then_the_link_gets_only_the_whole_one_after(
+    ) {
+        let mux = UdpMux::bind("127.0.0.1:0").await.unwrap();
+        let sender = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let transport = mux.transport();
+        transport.expect_peer_at(&[sender.local_addr().unwrap()]);
+
+        for size in [RECV_BUFFER_SIZE, RECV_BUFFER_SIZE * 2] {
+            sender.send_to(&vec![7u8; size], mux.local_addr()).unwrap();
+        }
+        sender.send_to(b"whole", mux.local_addr()).unwrap();
+
+        let (bytes, _) = tokio::time::timeout(Duration::from_secs(2), transport.recv_raw())
+            .await
+            .expect("the whole datagram reaches the link")
+            .unwrap();
+        assert_eq!(bytes, b"whole");
     }
 
     #[tokio::test]
