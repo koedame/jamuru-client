@@ -23,7 +23,7 @@ const MAGIC_COOKIE: u32 = 0x2112A442;
 /// Answers STUN binding requests with the address they came from, as a real
 /// server does.
 async fn spawn_stun_server() -> SocketAddr {
-    let socket = UdpSocket::bind("127.0.0.3:0").await.expect("bind STUN");
+    let socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind STUN");
     let addr = socket.local_addr().unwrap();
     tokio::spawn(async move {
         let mut buf = [0u8; 576];
@@ -49,7 +49,14 @@ async fn spawn_stun_server() -> SocketAddr {
 }
 
 /// A NAT in front of one client that gives it a public port different from its
-/// own, on a public address (`127.0.0.2`) different from the client's.
+/// own, on a public address (`127.0.0.2`) different from the client's where the
+/// loopback interface has one.
+///
+/// The address apart is what lets a peer that sends to the socket's own port on
+/// the public address (what was published before) hit nothing. macOS has
+/// 127.0.0.1 alone, so there the public side is on 127.0.0.1 too: the published
+/// address is still checked to be the NAT's port, but sending to the socket's
+/// own port there would reach it.
 ///
 /// Inbound traffic is forwarded to the client only after the client has sent
 /// something out, as with a real mapping.
@@ -64,9 +71,9 @@ impl RenumberingNat {
     /// `client`.
     async fn start(client: SocketAddr, forward_to: SocketAddr) -> Self {
         let inside = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let mut external = UdpSocket::bind("127.0.0.2:0").await.unwrap();
+        let mut external = public_side().await;
         while external.local_addr().unwrap().port() == client.port() {
-            external = UdpSocket::bind("127.0.0.2:0").await.unwrap();
+            external = public_side().await;
         }
         let external = Arc::new(external);
         let mapped = Arc::new(AtomicBool::new(false));
@@ -99,6 +106,14 @@ impl RenumberingNat {
             inside: inside.local_addr().unwrap(),
             external: external.local_addr().unwrap(),
         }
+    }
+}
+
+/// A socket on 127.0.0.2, or on 127.0.0.1 where there is no such address (macOS)
+async fn public_side() -> UdpSocket {
+    match UdpSocket::bind("127.0.0.2:0").await {
+        Ok(socket) => socket,
+        Err(_) => UdpSocket::bind("127.0.0.1:0").await.unwrap(),
     }
 }
 

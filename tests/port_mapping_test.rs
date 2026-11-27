@@ -249,7 +249,7 @@ const SERVICE_DESCRIPTION: &str = r#"<?xml version="1.0"?>
 
 /// Answers STUN binding requests with a fixed public address, whatever the sender
 async fn spawn_stun_server(answer: SocketAddr) -> SocketAddr {
-    let socket = UdpSocket::bind("127.0.0.3:0").await.unwrap();
+    let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let addr = socket.local_addr().unwrap();
     tokio::spawn(async move {
         let mut buf = [0u8; 576];
@@ -617,7 +617,7 @@ async fn several_servers_are_asked_then_each_says_where_it_saw_the_socket() {
 /// Verifies: REQ-CON-166
 #[tokio::test]
 async fn no_server_answers_then_nothing_is_seen() {
-    let silent = UdpSocket::bind("127.0.0.3:0").await.unwrap();
+    let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let audio = audio_socket().await;
 
     let seen = StunClient::new(audio)

@@ -492,25 +492,6 @@ impl Route {
     }
 }
 
-/// Whether `bytes`, received from `from`, answer a probe sent to `candidates`
-///
-/// `sendable[i]` says whether the probe to `candidates[i]` went out. A packet
-/// that reaches us from an address we cannot send to shows a one-way path, and
-/// choosing it leaves the peer hearing nothing from us (REQ-CON-114).
-fn is_probe_answer(
-    candidates: &[SocketAddr],
-    sendable: &[bool],
-    from: SocketAddr,
-    bytes: &[u8],
-) -> bool {
-    let Some(index) = candidates.iter().position(|&addr| addr == from) else {
-        return false;
-    };
-    sendable[index]
-        && Packet::from_bytes(bytes)
-            .is_some_and(|packet| matches!(packet.packet_type, PacketType::KeepAlive))
-}
-
 /// How much faster a route must be to beat one that is nearer by kind: round trips
 /// closer than this are noise.
 const NEAR_ENOUGH: Duration = Duration::from_millis(2);
@@ -527,6 +508,9 @@ fn probe_token(round: usize, index: usize) -> u32 {
 /// can time the round trip on every address, [`PROBE_ROUNDS`] times each.
 struct Probing<'a> {
     candidates: &'a [SocketAddr],
+    /// The link to the peer, which tells the peer's probes and replies from anyone else's: only
+    /// what the peer signed is taken in ([`SecureLink::read_route_probe`])
+    link: &'a SecureLink,
     /// When the probe of each round went out to the candidate. A probe that did not go out
     /// is not a route, however its packets reach us (REQ-CON-114). The rounds after the
     /// scheduled ones are the probes sent in answer to the peer's ([`TRIGGERED_PROBES`])
@@ -563,10 +547,11 @@ enum Verdict {
 }
 
 impl<'a> Probing<'a> {
-    fn new(candidates: &'a [SocketAddr]) -> Self {
+    fn new(candidates: &'a [SocketAddr], link: &'a SecureLink) -> Self {
         let n = candidates.len();
         Self {
             candidates,
+            link,
             sent_at: vec![vec![None; PROBE_ROUNDS + TRIGGERED_PROBES]; n],
             rtt: vec![vec![None; PROBE_ROUNDS + TRIGGERED_PROBES]; n],
             triggered: vec![0; n],
@@ -598,30 +583,45 @@ impl<'a> Probing<'a> {
         replies.get(replies.len().checked_sub(1)? / 2).copied()
     }
 
-    /// Whether `bytes`, from `from`, are a probe the peer sent to one of our candidates: whether or
-    /// not it is answered, the peer had opened its own NAT when it sent it
-    fn is_peer_probe(&self, from: SocketAddr, bytes: &[u8]) -> bool {
-        self.candidates.contains(&from)
-            && Packet::from_bytes(bytes)
-                .and_then(|packet| packet.route_probe_token())
-                .is_some_and(|(reply, _)| !reply)
+    /// The route probe (`false`) or reply (`true`) in `bytes`, and its token, when it came from
+    /// one of the candidates and the peer signed it. Anything else, a probe sent from the peer's
+    /// address by someone else among it, is not looked at.
+    fn read(&self, from: SocketAddr, bytes: &[u8]) -> Option<(bool, u32)> {
+        if !self.candidates.contains(&from) {
+            return None;
+        }
+        self.link.read_route_probe(&Packet::from_bytes(bytes)?)
     }
 
     /// Take in a datagram that reached the socket. Returns what to send back to `from` when
     /// the peer asked for a reply.
+    #[cfg(test)]
+    fn hear(&mut self, from: SocketAddr, bytes: &[u8], now: Instant) -> Option<ProbeAnswer> {
+        let probe = self.read(from, bytes);
+        self.take(from, probe, now)
+    }
+
+    /// Take in `probe`, what [`Probing::read`] made of a datagram from `from`. Returns what to
+    /// send back to `from` when the peer asked for a reply.
+    ///
+    /// Nothing is taken from a candidate no probe of ours went to: a packet that reaches us
+    /// from an address we cannot send to shows a one-way path, and choosing it leaves the peer
+    /// hearing nothing from us (REQ-CON-114).
     ///
     /// A probe that reaches us shows that the path works from the peer to us, and that the
     /// peer's NAT, if any, now lets us in: our own probe sent back at once is the first to
     /// get through when the scheduled ones were all dropped.
-    fn hear(&mut self, from: SocketAddr, bytes: &[u8], now: Instant) -> Option<ProbeAnswer> {
-        let sendable: Vec<bool> = (0..self.candidates.len())
-            .map(|i| self.sendable(i))
-            .collect();
-        if !is_probe_answer(self.candidates, &sendable, from, bytes) {
+    fn take(
+        &mut self,
+        from: SocketAddr,
+        probe: Option<(bool, u32)>,
+        now: Instant,
+    ) -> Option<ProbeAnswer> {
+        let (reply, token) = probe?;
+        let index = self.candidates.iter().position(|&addr| addr == from)?;
+        if !self.sendable(index) {
             return None;
         }
-        let index = self.candidates.iter().position(|&addr| addr == from)?;
-        let (reply, token) = Packet::from_bytes(bytes)?.route_probe_token()?;
         if !reply {
             let probe_back = (self.reply_count(index) == 0
                 && self.triggered[index] < TRIGGERED_PROBES)
@@ -1570,7 +1570,8 @@ impl Connection {
         // If only one candidate, use simple connect
         if candidates.len() == 1 {
             self.transport.expect_peer_at(candidates);
-            self.open_own_nat_and_wait(candidates, &mut Probing::new(candidates))
+            let link = self.secure_link.clone();
+            self.open_own_nat_and_wait(candidates, &mut Probing::new(candidates, &link))
                 .await?;
             return self.connect(candidates[0]).await;
         }
@@ -1584,7 +1585,8 @@ impl Connection {
         // little apart, hearing the peer's probes in between so that its requests are answered
         // at once: a request left in the socket until the loop ends would be timed by the peer
         // as a long round trip.
-        let mut probing = Probing::new(candidates);
+        let link = self.secure_link.clone();
+        let mut probing = Probing::new(candidates, &link);
         let started = self.open_own_nat_and_wait(candidates, &mut probing).await?;
         let mut due: Vec<(Duration, usize, usize)> = (0..PROBE_ROUNDS)
             .flat_map(|round| {
@@ -1604,7 +1606,9 @@ impl Connection {
                 self.hear_probe(&mut probing, at - Instant::now()).await?;
             }
             let addr = candidates[i];
-            let packet = Packet::route_probe(self.next_sequence(), probe_token(round, i));
+            let Some(packet) = link.route_probe(self.next_sequence(), probe_token(round, i)) else {
+                continue;
+            };
             if let Err(e) = send_sealed(&self.transport, &self.secure_link, packet, addr).await {
                 debug!("Failed to send probe to candidate {}: {}", addr, e);
                 continue;
@@ -2251,16 +2255,27 @@ impl Connection {
             }
         };
         let (bytes, from) = heard;
-        let probe_of_peer = probing.is_peer_probe(from, &bytes);
-        let Some(answer) = probing.hear(from, &bytes, Instant::now()) else {
+        // Whether or not it is answered, the peer had opened its own NAT when it sent a probe.
+        // Only one it signed counts: a probe sent from its address by someone else would end
+        // the wait before the peer's NAT is open (REQ-CON-181, REQ-SEC-010).
+        let probe = probing.read(from, &bytes);
+        let probe_of_peer = matches!(probe, Some((false, _)));
+        let Some(answer) = probing.take(from, probe, Instant::now()) else {
             return Ok(probe_of_peer);
         };
-        let reply = Packet::route_probe_reply(self.next_sequence(), answer.reply_token);
-        if let Err(e) = send_sealed(&self.transport, &self.secure_link, reply, from).await {
-            debug!("Failed to answer the probe from {}: {}", from, e);
+        if let Some(reply) = self
+            .secure_link
+            .route_probe_reply(self.next_sequence(), answer.reply_token)
+        {
+            if let Err(e) = send_sealed(&self.transport, &self.secure_link, reply, from).await {
+                debug!("Failed to answer the probe from {}: {}", from, e);
+            }
         }
-        if let Some(token) = answer.probe_back {
-            let probe = Packet::route_probe(self.next_sequence(), token);
+        let back = answer.probe_back.and_then(|token| {
+            let probe = self.secure_link.route_probe(self.next_sequence(), token)?;
+            Some((token, probe))
+        });
+        if let Some((token, probe)) = back {
             match send_sealed(&self.transport, &self.secure_link, probe, from).await {
                 Ok(_) => {
                     let (round, index) = ((token >> 16) as usize, (token & 0xFFFF) as usize);
@@ -2359,7 +2374,7 @@ impl Connection {
                 // moves the route to an address that was not offered.
                 let mut proven = false;
                 if let Opened::Packet(packet) = &opened {
-                    if let Some((true, token)) = packet.route_probe_token() {
+                    if let Some((true, token)) = secure_link.read_route_probe(packet) {
                         if route.lock().is_answer_from_guessed(token, addr) {
                             follow_after = Duration::ZERO;
                             proven = true;
@@ -2372,10 +2387,11 @@ impl Connection {
                 // was offered. Ask there, sealed, before sending anything else there.
                 if encrypted && !proven {
                     let check = route.lock().start_check(addr, follow_after);
-                    if let Some(token) = check {
+                    let probe = check.and_then(|token| {
+                        secure_link.route_probe(sequence.fetch_add(1, Ordering::Relaxed), token)
+                    });
+                    if let Some(probe) = probe {
                         transport.also_expect_peer_at(addr);
-                        let probe =
-                            Packet::route_probe(sequence.fetch_add(1, Ordering::Relaxed), token);
                         debug!("Checking the address {} the peer was heard from", addr);
                         if let Err(e) = send_sealed(&transport, &secure_link, probe, addr).await {
                             debug!("Failed to check {}: {}", addr, e);
@@ -2500,13 +2516,12 @@ impl Connection {
                     PacketType::KeepAlive => {
                         debug!("Received keep-alive");
                         // A peer that is still probing times the route to us
-                        if let (true, Some((false, token))) =
-                            (from_a_peer_address, packet.route_probe_token())
-                        {
-                            let reply = Packet::route_probe_reply(
-                                sequence.fetch_add(1, Ordering::Relaxed),
-                                token,
-                            );
+                        let reply = match secure_link.read_route_probe(&packet) {
+                            Some((false, token)) if from_a_peer_address => secure_link
+                                .route_probe_reply(sequence.fetch_add(1, Ordering::Relaxed), token),
+                            _ => None,
+                        };
+                        if let Some(reply) = reply {
                             if let Err(e) = send_sealed(&transport, &secure_link, reply, addr).await
                             {
                                 warn!("Failed to answer a route probe: {}", e);
@@ -2845,10 +2860,12 @@ impl Connection {
                 route.lock().reprobe_until = Some(Instant::now() + window);
                 for round in 0..PROBE_ROUNDS {
                     for &addr in &candidates {
-                        let packet = Packet::route_probe(
+                        let Some(packet) = secure_link.route_probe(
                             sequence.fetch_add(1, Ordering::Relaxed),
                             0xF000_0000 | (round as u32) << 8 | attempt.min(255),
-                        );
+                        ) else {
+                            continue;
+                        };
                         if send_sealed(&transport, &secure_link, packet, addr)
                             .await
                             .is_ok()
@@ -2943,10 +2960,12 @@ impl Connection {
                             break 'try_;
                         }
                         for attempt in 0..=SEND_RETRIES {
-                            let packet = Packet::route_probe(
+                            let Some(packet) = secure_link.route_probe(
                                 sequence.fetch_add(1, Ordering::Relaxed),
                                 prediction.token(addr.port()),
-                            );
+                            ) else {
+                                break;
+                            };
                             match send_sealed(&transport, &secure_link, packet, addr).await {
                                 Ok(_) => break,
                                 Err(e) if attempt == SEND_RETRIES => {
@@ -3108,14 +3127,53 @@ mod tests {
     /// A connection that has been told whose key to check its peer by, as every connection is
     /// before it connects. Nobody holds that key, so it agrees keys with nobody unless
     /// [`trust_each_other`] is called on it.
+    /// A connection that takes the participant [`peer_identity`] for its peer. A stand-in for
+    /// the peer signs its probes with [`peer_link`].
     async fn conn() -> Connection {
         let mut conn = Connection::new("127.0.0.1:0").await.unwrap();
-        conn.verify_peer(
-            &LinkIdentity::generate(),
-            &LinkIdentity::generate().public_key(),
-        )
-        .unwrap();
+        conn.verify_peer(&our_identity(), &peer_identity().public_key())
+            .unwrap();
         conn
+    }
+
+    fn our_identity() -> LinkIdentity {
+        LinkIdentity::from_seed(1)
+    }
+
+    fn peer_identity() -> LinkIdentity {
+        LinkIdentity::from_seed(2)
+    }
+
+    /// The links of the two ends of the probing tests: ours, and the peer's to us
+    fn links() -> &'static (SecureLink, SecureLink) {
+        static LINKS: std::sync::OnceLock<(SecureLink, SecureLink)> = std::sync::OnceLock::new();
+        LINKS.get_or_init(|| {
+            let (ours, theirs) = (our_identity(), peer_identity());
+            (
+                SecureLink::for_peer(&ours, &theirs.public_key()).expect("a link key"),
+                SecureLink::for_peer(&theirs, &ours.public_key()).expect("a link key"),
+            )
+        })
+    }
+
+    /// Our link to the peer, as a [`conn`] has it
+    fn our_link() -> &'static SecureLink {
+        &links().0
+    }
+
+    /// The peer's link to us: what it signs its probes and replies with
+    fn peer_link() -> &'static SecureLink {
+        &links().1
+    }
+
+    /// The peer's probe carrying `token`, as it goes on the wire
+    fn peer_probe(token: u32) -> Vec<u8> {
+        peer_link().route_probe(0, token).unwrap().to_bytes()
+    }
+
+    /// The peer's reply carrying `token`, as it goes on the wire
+    fn peer_reply(token: u32) -> Vec<u8> {
+        peer_link().route_probe_reply(0, token).unwrap().to_bytes()
     }
 
     /// Has two connections check each other by the keys they would have told the server
@@ -3182,7 +3240,11 @@ mod tests {
                 let (bytes, hops) = receiver.recv().expect("a datagram comes");
                 let at = *first.get_or_insert_with(Instant::now);
                 let packet = Packet::from_bytes(&bytes).unwrap();
-                (packet.route_probe_token().is_some(), hops, at.elapsed())
+                (
+                    packet.unverified_route_probe().is_some(),
+                    hops,
+                    at.elapsed(),
+                )
             })
             .collect()
     }
@@ -3266,6 +3328,51 @@ mod tests {
         );
     }
 
+    /// Someone who sends probes from the address of the peer, which has not yet opened its NAT,
+    /// does not end the wait for the peer's first probe: only the peer's own probe does.
+    ///
+    /// Verifies: REQ-SEC-010, REQ-CON-181
+    #[tokio::test]
+    async fn when_probes_from_the_peers_address_are_not_signed_by_the_peer_the_wait_for_its_first_probe_goes_on(
+    ) {
+        let lead = OPENING_LEAD_AFTER_ADVERTISING;
+        let mut senders: Vec<(&str, Vec<u8>)> = forged_probes(7)
+            .into_iter()
+            .map(|forged| ("forged", forged))
+            .collect();
+        senders.push(("the peer's", peer_probe(7)));
+
+        for (whose, probe) in senders {
+            let mut conn = conn().await;
+            conn.advertised_just_now();
+            let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let (to, peer_at) = (conn.local_addr(), peer.local_addr().unwrap());
+            let sending = tokio::spawn(async move {
+                loop {
+                    let _ = peer.send_to(&probe, to).await;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            });
+
+            let started = Instant::now();
+            conn.connect_with_candidates(&[peer_at]).await.unwrap();
+            let waited = started.elapsed();
+            sending.abort();
+
+            if whose == "forged" {
+                assert!(
+                    waited >= lead - Duration::from_millis(20),
+                    "{whose}: {waited:?}"
+                );
+            } else {
+                assert!(
+                    waited < lead - Duration::from_millis(500),
+                    "{whose}: {waited:?}"
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_connect_with_single_candidate() {
         // Single candidate should fall back to regular connect
@@ -3302,6 +3409,7 @@ mod tests {
     async fn when_a_candidate_answers_the_link_facts_say_the_route_was_confirmed() {
         let mut conn1 = conn().await;
         let mut conn2 = conn().await;
+        trust_each_other(&mut conn1, &mut conn2);
         // conn2 opens with a keep-alive, which conn1's probe wait takes as the answer.
         conn2.connect(conn1.local_addr()).await.unwrap();
         let (_silent, nowhere) = silent();
@@ -3378,6 +3486,7 @@ mod tests {
     async fn when_every_probe_is_answered_the_connection_is_up_as_soon_as_the_probes_are_out() {
         let mut conn1 = conn().await;
         let mut conn2 = conn().await;
+        trust_each_other(&mut conn1, &mut conn2);
         conn2.connect(conn1.local_addr()).await.unwrap();
         let (_silent, nowhere) = silent();
         let candidates = vec![nowhere, conn2.local_addr()];
@@ -3428,54 +3537,46 @@ mod tests {
     #[test]
     fn when_a_candidate_we_could_not_send_to_answers_the_answer_is_not_taken() {
         let candidates = [addr("192.168.1.10:5000"), addr("100.64.0.2:5000")];
-        let keep_alive = Packet::keep_alive(0).to_bytes();
+        let t0 = Instant::now();
+        let mut probing = Probing::new(&candidates, our_link());
+        probing.sent(1, 0, t0);
 
-        assert!(!is_probe_answer(
-            &candidates,
-            &[false, true],
-            candidates[0],
-            &keep_alive
-        ));
-        assert!(is_probe_answer(
-            &candidates,
-            &[false, true],
-            candidates[1],
-            &keep_alive
-        ));
+        probing.hear(candidates[0], &peer_reply(probe_token(0, 0)), t0);
+        probing.hear(candidates[1], &peer_reply(probe_token(0, 1)), t0);
+
+        assert_eq!(probing.reply_count(0), 0);
+        assert_eq!(probing.reply_count(1), 1);
     }
 
     /// Verifies: REQ-CON-114
     #[test]
     fn when_the_answer_comes_from_no_candidate_it_is_not_taken() {
         let candidates = [addr("192.168.1.10:5000")];
-        let keep_alive = Packet::keep_alive(0).to_bytes();
+        let mut probing = probed(&candidates, Instant::now());
 
-        assert!(!is_probe_answer(
-            &candidates,
-            &[true],
+        let asked = probing.hear(addr("192.168.1.10:5001"), &peer_probe(42), Instant::now());
+        probing.hear(
             addr("192.168.1.10:5001"),
-            &keep_alive
-        ));
+            &peer_reply(probe_token(0, 0)),
+            Instant::now(),
+        );
+
+        assert_eq!(asked, None);
+        assert_eq!(probing.reply_count(0), 0);
     }
 
     /// Verifies: REQ-CON-114
     #[test]
     fn when_the_packet_from_a_candidate_is_not_a_keep_alive_it_is_not_an_answer() {
         let candidates = [addr("192.168.1.10:5000")];
-        let audio = Packet::audio(0, 0, vec![0; 4]).to_bytes();
+        let mut probing = probed(&candidates, Instant::now());
+        let mut audio = Packet::from_bytes(&peer_reply(probe_token(0, 0))).unwrap();
+        audio.packet_type = PacketType::Audio;
 
-        assert!(!is_probe_answer(
-            &candidates,
-            &[true],
-            candidates[0],
-            &audio
-        ));
-        assert!(!is_probe_answer(
-            &candidates,
-            &[true],
-            candidates[0],
-            &[0xff; 3]
-        ));
+        probing.hear(candidates[0], &audio.to_bytes(), Instant::now());
+        probing.hear(candidates[0], &[0xff; 3], Instant::now());
+
+        assert_eq!(probing.reply_count(0), 0);
     }
 
     /// Verifies: REQ-CON-114
@@ -3789,7 +3890,7 @@ mod tests {
         round: usize,
         now: Instant,
     ) {
-        let bytes = Packet::route_probe_reply(0, probe_token(round, index)).to_bytes();
+        let bytes = peer_reply(probe_token(round, index));
         probing.hear(probing.candidates[from], &bytes, now);
     }
 
@@ -3799,7 +3900,7 @@ mod tests {
     }
 
     fn probed(candidates: &[SocketAddr], at: Instant) -> Probing<'_> {
-        let mut probing = Probing::new(candidates);
+        let mut probing = Probing::new(candidates, our_link());
         for round in 0..PROBE_ROUNDS {
             for i in 0..candidates.len() {
                 probing.sent(i, round, at + probe_time(round, i));
@@ -4029,11 +4130,55 @@ mod tests {
         let mut probing = probed(&candidates, Instant::now());
         let now = Instant::now();
 
-        let asked = probing.hear(candidates[0], &Packet::route_probe(0, 42).to_bytes(), now);
+        let asked = probing.hear(candidates[0], &peer_probe(42), now);
         let plain = probing.hear(candidates[0], &Packet::keep_alive(1).to_bytes(), now);
 
         assert_eq!(asked.map(|answer| answer.reply_token), Some(42));
         assert_eq!(plain, None);
+    }
+
+    /// What someone sends from the peer's address in the peer's stead: a probe and a reply signed
+    /// by a participant who is not the peer, and the unsigned ones of an app before probes were
+    /// signed
+    fn forged_probes(token: u32) -> Vec<Vec<u8>> {
+        let stranger =
+            SecureLink::for_peer(&LinkIdentity::from_seed(3), &our_identity().public_key())
+                .unwrap();
+        let unsigned = |kind: u8| {
+            let mut packet = Packet::keep_alive(0);
+            packet.payload = vec![kind];
+            packet.payload.extend_from_slice(&token.to_be_bytes());
+            packet.to_bytes()
+        };
+        vec![
+            stranger.route_probe(0, token).unwrap().to_bytes(),
+            stranger.route_probe_reply(0, token).unwrap().to_bytes(),
+            unsigned(1),
+            unsigned(2),
+        ]
+    }
+
+    /// Verifies: REQ-SEC-010
+    #[test]
+    fn when_a_probe_or_a_reply_from_a_candidate_is_not_signed_by_the_peer_it_is_neither_answered_nor_timed(
+    ) {
+        let candidates = [addr("203.0.113.7:5000")];
+        let t0 = Instant::now();
+        let mut probing = probed(&candidates, t0);
+
+        for forged in forged_probes(probe_token(0, 0)) {
+            assert_eq!(probing.read(candidates[0], &forged), None);
+            assert_eq!(
+                probing.hear(candidates[0], &forged, t0 + Duration::from_millis(5)),
+                None
+            );
+        }
+
+        assert!(probing.rtt.iter().flatten().all(Option::is_none));
+        assert_eq!(
+            probing.read(candidates[0], &peer_probe(42)),
+            Some((false, 42))
+        );
     }
 
     /// Verifies: REQ-CON-132
@@ -4041,7 +4186,7 @@ mod tests {
     fn when_the_peer_probes_an_address_none_of_ours_was_answered_by_a_probe_goes_back_to_it() {
         let candidates = [addr("203.0.113.7:5000")];
         let mut probing = probed(&candidates, Instant::now());
-        let asked = Packet::route_probe(0, 42).to_bytes();
+        let asked = peer_probe(42);
 
         let answer = probing.hear(candidates[0], &asked, Instant::now()).unwrap();
 
@@ -4054,7 +4199,7 @@ mod tests {
     fn when_the_peer_keeps_probing_an_address_no_more_than_the_limit_of_probes_go_back() {
         let candidates = [addr("203.0.113.7:5000")];
         let mut probing = probed(&candidates, Instant::now());
-        let asked = Packet::route_probe(0, 42).to_bytes();
+        let asked = peer_probe(42);
 
         let sent_back = (0..TRIGGERED_PROBES + 4)
             .filter_map(|_| probing.hear(candidates[0], &asked, Instant::now()))
@@ -4071,7 +4216,7 @@ mod tests {
         let t0 = Instant::now();
         let mut probing = probed(&candidates, t0);
         reply_from(&mut probing, 0, 0, 0, t0 + Duration::from_millis(30));
-        let asked = Packet::route_probe(0, 42).to_bytes();
+        let asked = peer_probe(42);
 
         let answer = probing.hear(candidates[0], &asked, Instant::now()).unwrap();
 
@@ -4084,7 +4229,7 @@ mod tests {
         let candidates = [addr("100.68.50.7:5000"), addr("203.0.113.7:5000")];
         let t0 = Instant::now();
         let mut probing = probed(&candidates, t0);
-        let asked = Packet::route_probe(0, 42).to_bytes();
+        let asked = peer_probe(42);
         let back = probing
             .hear(candidates[1], &asked, t0 + Duration::from_millis(400))
             .and_then(|answer| answer.probe_back)
@@ -4129,15 +4274,13 @@ mod tests {
             let mut asked = 0;
             while let Ok((len, from)) = socket.recv_from(&mut buf).await {
                 let token = Packet::from_bytes(&buf[..len])
-                    .and_then(|packet| packet.route_probe_token())
+                    .and_then(|packet| peer_link().read_route_probe(&packet))
                     .filter(|(reply, _)| !reply)
                     .map(|(_, token)| token);
                 if let Some(token) = token {
                     tokio::time::sleep(delays[asked % delays.len()]).await;
                     asked += 1;
-                    let _ = socket
-                        .send_to(&Packet::route_probe_reply(0, token).to_bytes(), from)
-                        .await;
+                    let _ = socket.send_to(&peer_reply(token), from).await;
                 }
             }
         });
@@ -4182,6 +4325,7 @@ mod tests {
     async fn when_both_peers_probe_each_other_each_answers_the_others_probes_and_both_connect() {
         let mut a = conn().await;
         let mut b = conn().await;
+        trust_each_other(&mut a, &mut b);
         let (a_addr, b_addr) = (a.local_addr(), b.local_addr());
         let (_silent, nowhere) = silent();
 
@@ -4251,6 +4395,7 @@ mod tests {
         for (outside_late, inside_late) in [(0, 0), (0, 150), (0, 400), (0, 900), (400, 0)] {
             let mut outside = conn().await;
             let mut inside = conn().await;
+            trust_each_other(&mut outside, &mut inside);
             let (seen_from_outside, seen_from_inside) =
                 address_restricted_nat(inside.local_addr(), outside.local_addr()).await;
             let (_silent_outside, nowhere_outside) = silent();
@@ -4687,7 +4832,7 @@ mod tests {
         let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         conn.connect(peer.local_addr().unwrap()).await.unwrap();
 
-        peer.send_to(&Packet::route_probe(0, 9).to_bytes(), conn.local_addr())
+        peer.send_to(&peer_probe(9), conn.local_addr())
             .await
             .unwrap();
 
@@ -4696,7 +4841,7 @@ mod tests {
             loop {
                 let (len, _) = peer.recv_from(&mut buf).await.unwrap();
                 let packet = Packet::from_bytes(&buf[..len]).unwrap();
-                if let Some((true, token)) = packet.route_probe_token() {
+                if let Some((true, token)) = peer_link().read_route_probe(&packet) {
                     return token;
                 }
             }
@@ -4704,6 +4849,40 @@ mod tests {
         .await
         .expect("the reply should come");
         assert_eq!(reply, 9);
+    }
+
+    /// Verifies: REQ-SEC-010
+    #[tokio::test]
+    async fn when_a_peer_that_is_already_connected_gets_a_route_probe_the_peer_did_not_sign_it_does_not_reply(
+    ) {
+        let mut conn = conn().await;
+        let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        conn.connect(peer.local_addr().unwrap()).await.unwrap();
+
+        for forged in forged_probes(9) {
+            peer.send_to(&forged, conn.local_addr()).await.unwrap();
+        }
+        peer.send_to(&peer_probe(10), conn.local_addr())
+            .await
+            .unwrap();
+
+        let replies = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut buf = [0u8; 256];
+            let mut replies = Vec::new();
+            loop {
+                let (len, _) = peer.recv_from(&mut buf).await.unwrap();
+                let packet = Packet::from_bytes(&buf[..len]).unwrap();
+                if let Some((true, token)) = peer_link().read_route_probe(&packet) {
+                    replies.push(token);
+                    if token == 10 {
+                        return replies;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("the reply to the peer's probe should come");
+        assert_eq!(replies, vec![10]);
     }
 
     /// The silence is counted from the moment the link is up, not from the moment the
